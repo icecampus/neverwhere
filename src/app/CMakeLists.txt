@@ -26,7 +26,7 @@ qt_generate_deploy_qml_app_script(
 qt6_add_qml_module( ${AppName} 
     URI ${AppName}
     VERSION 1.0
-    QML_FILES qml/main.qml
+    QML_FILES main.qml
     RESOURCE_PREFIX "/"
 )
 
