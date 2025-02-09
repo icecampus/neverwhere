@@ -9,13 +9,9 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     
     QQmlApplicationEngine engine;
-    
 
-
-
-    engine.addImportPath("D:/campus/neverwhere/_intermediate_64/Debug/qml");
+    engine.addImportPath(engine.importPathList()[0] + "/qml");
     qDebug() << engine.importPathList();
-
 
     const QUrl url(u"qrc:/App/main.qml"_qs);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
