@@ -1,17 +1,23 @@
 #include <iostream>
-#include <QGuiApplication>
+#include <QApplication>
 #include <QQmlApplicationEngine>
 
 
 int main(int argc, char* argv[])
 {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
     
     QQmlApplicationEngine engine;
-    engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
-    
-    if (engine.rootObjects().isEmpty())
-        return -1;
 
+    const QUrl url(u"qrc:/App/qml/main.qml"_qs);
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
+        &app, [url](QObject* obj, const QUrl& objUrl) {
+            if (!obj && url == objUrl)
+                QCoreApplication::exit(-1);
+        }, Qt::QueuedConnection);
+
+    engine.addImportPath(":/");
+    engine.load(url);
+    
     return app.exec();
 }
