@@ -12,6 +12,7 @@ Window {
     property int tileHeight: 64
     property int cameraX: 400  // Начальное смещение камеры
     property int cameraY: 100  // для центрирования карты
+    property real cameraZoom: 1.0
 
     Component 
     {
@@ -56,7 +57,11 @@ Window {
 
         // Контейнер карты с трансформацией камеры
         Item {
-            transform: Translate { x: -cameraX; y: -cameraY }
+            transform: [
+                Scale { xScale: cameraZoom; yScale: cameraZoom },
+                Translate { x: -cameraX; y: -cameraY }
+            ]
+
             
             Repeater {
                 model: [
@@ -99,6 +104,24 @@ Window {
                     cameraX = startCamX - dx
                     cameraY = startCamY - dy
                 }
+            }
+onWheel: {
+                var delta = wheel.angleDelta.y
+                if (delta === 0) return
+
+                // Рассчет нового зума
+                var zoomFactor = delta > 0 ? 1.1 : 0.9
+                var oldZoom = cameraZoom
+                var newZoom = Math.max(0.5, Math.min(3.0, oldZoom * zoomFactor))
+
+                // Координаты мыши относительно карты
+                var mapX = (wheel.x + cameraX) / oldZoom
+                var mapY = (wheel.y + cameraY) / oldZoom
+
+                // Корректировка позиции камеры
+                cameraX = mapX * newZoom - wheel.x
+                cameraY = mapY * newZoom - wheel.y
+                cameraZoom = newZoom
             }
         }
     }
