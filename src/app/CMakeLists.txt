@@ -19,8 +19,8 @@ target_link_libraries( ${AppName}  PRIVATE
 qt6_add_qml_module( ${AppName} 
     URI ${AppName}
     VERSION 1.0
-    QML_FILES main.qml
+    QML_FILES qml/main.qml
     RESOURCE_PREFIX "/"
 )
 
-add_custom_command(TARGET ${AppName} POST_BUILD COMMAND Qt6::windeployqt --qmldir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:${AppName}>" ) 
+add_custom_command(TARGET ${AppName} POST_BUILD COMMAND Qt6::windeployqt --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE:${AppName}>" ) 
