@@ -10,8 +10,8 @@ Window {
 
     property int tileWidth: 128
     property int tileHeight: 64
-    property int cameraX: 400  // Ќачальное смещение камеры
-    property int cameraY: 100  // дл€ центрировани€ карты
+    property int cameraX: -300  // Ќачальное смещение камеры
+    property int cameraY: -200  // дл€ центрировани€ карты
     property real cameraZoom: 1.0
 
     Component 
@@ -89,14 +89,16 @@ Window {
             property int startCamX: 0
             property int startCamY: 0
 
-            onPressed: {
+            onPressed: 
+            {
                 startX = mouseX
                 startY = mouseY
                 startCamX = cameraX
                 startCamY = cameraY
             }
 
-            onPositionChanged: {
+            onPositionChanged: 
+            {
                 if (pressed) {
                     // ¬ычисл€ем смещение и обновл€ем позицию камеры
                     var dx = mouseX - startX
@@ -105,7 +107,8 @@ Window {
                     cameraY = startCamY - dy
                 }
             }
-onWheel: {
+            onWheel: 
+            {
                 var delta = wheel.angleDelta.y
                 if (delta === 0) return
 
