@@ -1,4 +1,4 @@
-import QtQuick
+п»їimport QtQuick
 import QtQuick.Window
 import QtQuick.Shapes 1.15
 
@@ -10,40 +10,33 @@ Window {
 
     property int tileWidth: 128
     property int tileHeight: 64
-    property int cameraX: -300  // Начальное смещение камеры
-    property int cameraY: -200  // для центрирования карты
+    property int cameraX: -300
+    property int cameraY: -200
     property real cameraZoom: 1.0
 
-    Component 
-    {
+    Component {
         id: tileComponent
-        
-        Item 
-        {
+        Item {
+            property bool selected: false
             x: (gridX - gridY) * tileWidth / 2
             y: (gridX + gridY) * tileHeight / 2
 
-            width: tileWidth  // Общая ширина ромба
-            height: tileHeight // Высота в 2 раза меньше ширины
+            width: tileWidth
+            height: tileHeight
 
-            Shape 
-            {
+            Shape {
                 anchors.fill: parent
-                ShapePath 
-                {
-                    fillColor: "lightblue"
+                ShapePath {
+                    fillColor: selected ? "darkblue" : "lightblue"
                     strokeColor: "darkblue"
                     strokeWidth: 2
-            
-                    // Вершины ромба с соотношением 2:1
-                    PathPolyline 
-                    {
+                    PathPolyline {
                         path: [
-                            Qt.point(width/2, 0),          // Верхняя точка
-                            Qt.point(width, height/2),     // Правая
-                            Qt.point(width/2, height),     // Низ
-                            Qt.point(0, height/2),         // Левая
-                            Qt.point(width/2, 0)           // Замыкаем путь
+                            Qt.point(width/2, 0),
+                            Qt.point(width, height/2),
+                            Qt.point(width/2, height),
+                            Qt.point(0, height/2),
+                            Qt.point(width/2, 0)
                         ]
                     }
                 }
@@ -53,17 +46,16 @@ Window {
 
     Item {
         anchors.fill: parent
-        clip: true  // Обрезаем тайлы за пределами окна
+        clip: true
 
-        // Контейнер карты с трансформацией камеры
         Item {
             transform: [
                 Scale { xScale: cameraZoom; yScale: cameraZoom },
                 Translate { x: -cameraX; y: -cameraY }
             ]
 
-            
             Repeater {
+                id: mapRepeater
                 model: [
                     {x:0,y:0}, {x:1,y:0}, {x:2,y:0}, {x:3,y:0}, {x:4,y:0},
                     {x:0,y:1}, {x:1,y:1}, {x:2,y:1}, {x:3,y:1}, {x:4,y:1},
@@ -76,12 +68,11 @@ Window {
                     sourceComponent: tileComponent
                     property int gridX: modelData.x
                     property int gridY: modelData.y
-                    z: gridX + gridY  // Порядок отрисовки
+                    z: gridX + gridY
                 }
             }
         }
 
-        // Область управления камерой
         MouseArea {
             anchors.fill: parent
             property int startX: 0
@@ -89,42 +80,71 @@ Window {
             property int startCamX: 0
             property int startCamY: 0
 
-            onPressed: 
-            {
+            onPressed: {
                 startX = mouseX
                 startY = mouseY
                 startCamX = cameraX
                 startCamY = cameraY
             }
 
-            onPositionChanged: 
-            {
+            onPositionChanged: {
                 if (pressed) {
-                    // Вычисляем смещение и обновляем позицию камеры
                     var dx = mouseX - startX
                     var dy = mouseY - startY
                     cameraX = startCamX - dx
                     cameraY = startCamY - dy
                 }
             }
-            onWheel: 
-            {
+
+            onWheel: {
                 var delta = wheel.angleDelta.y
                 if (delta === 0) return
 
-                // Рассчет нового зума
                 var zoomFactor = delta > 0 ? 1.1 : 0.9
                 var oldZoom = cameraZoom
                 var newZoom = Math.max(0.5, Math.min(3.0, oldZoom * zoomFactor))
 
-                // Координаты мыши относительно карты
                 var mapX = (wheel.x + cameraX) / oldZoom
                 var mapY = (wheel.y + cameraY) / oldZoom
 
-                // Корректировка позиции камеры
                 cameraX = mapX * newZoom - wheel.x
                 cameraY = mapY * newZoom - wheel.y
                 cameraZoom = newZoom
+            }
+
+            onClicked: (mouse) => {
+                // Convert mouse coordinates to map space
+                var mapX = (mouse.x + cameraX) / cameraZoom
+                var mapY = (mouse.y + cameraY) / cameraZoom
+
+                // Check all tiles for hit
+                for (var i = 0; i < mapRepeater.count; ++i) {
+                    var loader = mapRepeater.itemAt(i)
+                    if (!loader || !loader.item) continue
+
+                    var tile = loader.item
+                    var gridX = loader.gridX
+                    var gridY = loader.gridY
+
+                    // Calculate tile position
+                    var tileX = (gridX - gridY) * tileWidth / 2
+                    var tileY = (gridX + gridY) * tileHeight / 2
+
+                    // Convert to local tile coordinates
+                    var localX = mapX - tileX
+                    var localY = mapY - tileY
+
+                    // Check if point is inside rhombus
+                    var halfWidth = tileWidth / 2
+                    var halfHeight = tileHeight / 2
+                    var dx = Math.abs(localX - halfWidth)
+                    var dy = Math.abs(localY - halfHeight)
+                    
+                    if ((dx / halfWidth) + (dy / halfHeight) <= 1) {
+                        tile.selected = !tile.selected
+                        break
+                    }
+                }
             }
         }
     }
