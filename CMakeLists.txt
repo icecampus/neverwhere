@@ -1,17 +1,28 @@
 cmake_minimum_required(VERSION 3.20.0 FATAL_ERROR)
+include(cmake/utils.cmake)
 
 project(Neverwhere VERSION 0.1.0 LANGUAGES CXX C)
+print_header("Neverwhere")
+
+#use grouping
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-set(CMAKE_CXX_STANDARD 17)
+
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets)
+find_package(magic_enum CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 qt_policy(SET QTP0001 OLD )
 qt_policy(SET QTP0004 NEW )
 qt_standard_project_setup()
 
-add_subdirectory(src/app)
+add_subdirectory(src/apps/Editor)
+add_subdirectory(src/libs/core)
 
 qt_finalize_project()

@@ -3,6 +3,8 @@
     "qtbase",
     "qtdeclarative",
     "qtquickcontrols2",
-    "qtlottie"
+    "qtlottie",
+    "magic-enum",
+    "glm"
   ]
 }

@@ -1,0 +1,10 @@
+nw_add_qml_app(
+    GROUP 
+        _apps 
+    LIBS 
+        core
+        Qt6::Core 
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::Widgets
+    )

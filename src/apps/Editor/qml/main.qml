@@ -1,79 +1,34 @@
-﻿import QtQuick
-import QtQuick.Window
-import QtQuick.Shapes 1.15
+﻿import QtQuick 2.15
+import QtQuick.Controls 2.15
 
-Window {
+ApplicationWindow 
+{
+    id: window
+    visible: true
     width: 800
     height: 600
-    visible: true
-    title: "Isometric Map with Camera Control"
+    title: "Isometric Grid"
 
-    property int tileWidth: 128
-    property int tileHeight: 64
+    readonly property int tileWidth: 128
+    readonly property int tileHeight: 64
     property int cameraX: -300
     property int cameraY: -200
     property real cameraZoom: 1.0
 
-    Component {
-        id: tileComponent
-        Item {
-            property bool selected: false
-            x: (gridX - gridY) * tileWidth / 2
-            y: (gridX + gridY) * tileHeight / 2
-
-            width: tileWidth
-            height: tileHeight
-
-            Shape {
-                anchors.fill: parent
-                ShapePath {
-                    fillColor: selected ? "darkblue" : "lightblue"
-                    strokeColor: "darkblue"
-                    strokeWidth: 2
-                    PathPolyline {
-                        path: [
-                            Qt.point(width/2, 0),
-                            Qt.point(width, height/2),
-                            Qt.point(width/2, height),
-                            Qt.point(0, height/2),
-                            Qt.point(width/2, 0)
-                        ]
-                    }
-                }
-            }
-        }
-    }
-
-    Item {
+    StaggeredGrid 
+    {
+        id: gridView
+    
         anchors.fill: parent
         clip: true
 
-        Item {
-            transform: [
-                Scale { xScale: cameraZoom; yScale: cameraZoom },
-                Translate { x: -cameraX; y: -cameraY }
-            ]
+        cameraX: -window.cameraX
+        cameraY: -window.cameraY
+        cameraZoom: window.cameraZoom 
+    }
 
-            Repeater {
-                id: mapRepeater
-                model: [
-                    {x:0,y:0}, {x:1,y:0}, {x:2,y:0}, {x:3,y:0}, {x:4,y:0},
-                    {x:0,y:1}, {x:1,y:1}, {x:2,y:1}, {x:3,y:1}, {x:4,y:1},
-                    {x:0,y:2}, {x:1,y:2}, {x:2,y:2}, {x:3,y:2}, {x:4,y:2},
-                    {x:0,y:3}, {x:1,y:3}, {x:2,y:3}, {x:3,y:3}, {x:4,y:3},
-                    {x:0,y:4}, {x:1,y:4}, {x:2,y:4}, {x:3,y:4}, {x:4,y:4},
-                ]
-
-                delegate: Loader {
-                    sourceComponent: tileComponent
-                    property int gridX: modelData.x
-                    property int gridY: modelData.y
-                    z: gridX + gridY
-                }
-            }
-        }
-
-        MouseArea {
+    MouseArea 
+    {
             anchors.fill: parent
             property int startX: 0
             property int startY: 0
@@ -147,5 +102,4 @@ Window {
                 }
             }
         }
-    }
 }
