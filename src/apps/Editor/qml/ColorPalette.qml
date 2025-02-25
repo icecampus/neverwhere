@@ -1,8 +1,7 @@
 ﻿import QtQuick
-import Game 1.0
 
-
-Item {
+Item 
+{
     id: palette
 
     // Яркие оранжевые акценты
