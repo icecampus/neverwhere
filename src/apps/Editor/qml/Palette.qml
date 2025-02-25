@@ -5,34 +5,35 @@ import Game 1.0
 Item {
     id: palette
 
-    // Основные цвета
-    property color primaryOrange: "#FF8A65"    // Мягкий оранжевый
-    property color darkOrange:   "#BF360C"     // Акцентный темный
-    property color lightOrange: "#FFCCBC"      // Светлый акцент
+    // Яркие оранжевые акценты
+    property color primaryOrange: "#FF6D00"    // Основной акцент (чистый оранжевый)
+    property color darkOrange:   "#FF3D00"     // Глубокий оранжево-красный
+    property color lightOrange: "#FF9E00"     // Светящийся оранжевый
+    property color neonOrange:  "#FF9100"     // Неоновое свечение
 
-    // Серые тона
-    property color background:  "#121212"     // Основной фон
-    property color surface:     "#1E1E1E"     // Поверхности
-    property color surface2:    "#2D2D2D"     // Вторичные поверхности
+    // Темная базовая палитра
+    property color background:  "#0A0A0A"     // Глубокий черный фон
+    property color surface:     "#1A1A1A"     // Основные поверхности
+    property color surface2:    "#2E2E2E"     // Вторичные элементы
     property color border:      "#404040"     // Границы
-    property color textPrimary: "#E0E0E0"     // Основной текст
-    property color textSecondary:"#9E9E9E"    // Вторичный текст
+    property color textPrimary: "#F0F0F0"     // Основной текст
+    property color textSecondary:"#A0A0A0"    // Вторичный текст
 
     // Дополнительные цвета
-    property color error:       "#CF6679"     // Ошибки
-    property color success:     "#81C784"     // Успех
-    property color warning:     "#FFD54F"     // Предупреждения
+    property color error:       "#FF5252"     // Ярко-красный
+    property color success:     "#76FF03"     // Лаймово-зеленый
+    property color warning:     "#FFEA00"     // Ярко-желтый
+
+    // Эффекты свечения
+    property var orangeGlow: Gradient {
+        GradientStop { position: 0.0; color: Qt.rgba(1, 0.4, 0, 0.2) }
+        GradientStop { position: 1.0; color: "transparent" }
+    }
 
     // Тени
     property var shadowSmall: [
-        Qt.rgba(255, 255, 255, 0.05),
-        Qt.rgba(255, 255, 255, 0.07),
-        Qt.rgba(255, 255, 255, 0.10)
-    ]
-
-    property var shadowMedium: [
-        Qt.rgba(255, 255, 255, 0.10),
-        Qt.rgba(255, 255, 255, 0.12),
-        Qt.rgba(255, 255, 255, 0.15)
+        Qt.rgba(255, 165, 0, 0.15),
+        Qt.rgba(255, 165, 0, 0.10),
+        Qt.rgba(255, 165, 0, 0.05)
     ]
 }

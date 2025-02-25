@@ -7,4 +7,5 @@ nw_add_qml_app(
         Qt6::Qml
         Qt6::Quick
         Qt6::Widgets
+        Qt6::Core5Compat
     )

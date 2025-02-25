@@ -4,6 +4,7 @@
     "qtdeclarative",
     "qtquickcontrols2",
     "qtlottie",
+    "qt5compat",
     "magic-enum",
     "glm"
   ]
