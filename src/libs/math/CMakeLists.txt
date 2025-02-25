@@ -5,5 +5,4 @@ nw_add_lib(
 		magic_enum::magic_enum 
 		Qt6::Core
 		glm::glm-header-only
-		math
 		)

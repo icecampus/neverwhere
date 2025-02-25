@@ -66,6 +66,7 @@ Item {
     }
 
     MouseArea {
+        id:mouseArea
         anchors.fill: parent
         hoverEnabled: true
         
@@ -83,8 +84,8 @@ Item {
     
     Rectangle {
         visible: showCoordinates
-        x: mouseArea.mouseX + 15
-        y: mouseArea.mouseY + 15
+        anchors.right: parent.right
+        anchors.top: parent.top
         width: coordText.width + 10
         height: coordText.height + 10
         color: "#aa000000"

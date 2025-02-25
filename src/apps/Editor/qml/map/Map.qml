@@ -88,6 +88,7 @@ import Game 1.0
                     var mapY = (mouse.y + cameraY) / cameraZoom
 
                     // Check all tiles for hit
+                    /*
                     for (var i = 0; i < mapRepeater.count; ++i) {
                         var loader = mapRepeater.itemAt(i)
                         if (!loader || !loader.item) continue
@@ -115,6 +116,7 @@ import Game 1.0
                             break
                         }
                     }
+                    */
                 }
         }
     }

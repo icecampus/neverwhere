@@ -24,6 +24,6 @@ qt_policy(SET QTP0004 NEW )
 qt_standard_project_setup()
 
 add_subdirectory(src/apps/Editor)
-add_subdirectory(src/libs/core)
+add_subdirectory(src/libs)
 
 qt_finalize_project()

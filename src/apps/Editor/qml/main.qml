@@ -19,16 +19,18 @@ ApplicationWindow
     property real cameraZoom: 1.0
 
 
-    /*
+    
     Map
     {
         id: map
         anchors.fill: parent
     }
-    */
+    
 
+    /*
     PaletteSample
     {
         anchors.fill: parent
     }
+    //*/
 }

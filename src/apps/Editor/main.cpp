@@ -5,22 +5,38 @@
 #include "core/lib.h"
 
 
-int main(int argc, char* argv[])
+void registreTypes()
 {
-    QApplication app(argc, argv);
-    
+    qRegisterMetaType<math::ivec2>("math::ivec2");
 
     qmlRegisterType<MapModel>("Game", 1, 0, "MapModel");
     qmlRegisterType<LandTile>("Game", 1, 0, "LandTile");
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
     qmlRegisterType<Building>("Game", 1, 0, "Building");
 
-    MapLoader* loader = new MapLoader();
+    qmlRegisterType<StaggeredIsometryView>("Game", 1, 0, "StaggeredIsometryView");
+}
+
+void registerGlobalObject(QQmlApplicationEngine& engine)
+{
+    static StaggeredIsometryView isometry(StaggeredDimensions{ 128, 2.0f });
+
+    static MapLoader* loader = new MapLoader();
     loader->loadMap();
 
-    QQmlApplicationEngine engine;
-
     engine.rootContext()->setContextProperty("mapModel", loader->model());
+    engine.rootContext()->setContextProperty("isometry", &isometry);
+}
+
+
+int main(int argc, char* argv[])
+{
+    QApplication app(argc, argv);
+    
+    registreTypes();
+
+    QQmlApplicationEngine engine;
+    registerGlobalObject(engine);
 
     engine.addImportPath(engine.importPathList()[0] + "/qml");
     qDebug() << engine.importPathList();

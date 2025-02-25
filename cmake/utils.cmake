@@ -262,8 +262,6 @@ function(nw_add_app_sources)
     target_include_directories(${ARG_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_include_directories(${ARG_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/src/libs")
     target_precompile_headers(${ARG_NAME} PRIVATE pch.h)
-    set_property(TARGET ${ARG_NAME} PROPERTY CXX_STANDARD ${PROJECT_CXX_STANDARD})
-    set_property(TARGET ${ARG_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 
     target_link_libraries(${ARG_NAME} PUBLIC ${ARG_LIBS})
 

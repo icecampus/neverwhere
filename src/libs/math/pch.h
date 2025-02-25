@@ -13,6 +13,5 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <QObject>
-
-#include "math/lib.h"
+#include <QMetaType>
 
