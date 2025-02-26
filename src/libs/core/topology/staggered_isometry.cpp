@@ -24,31 +24,31 @@ StaggeredIsometry::StaggeredIsometry(const staggered_dimensions& dimensions_, QO
 
 math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) const
 {
-    const math::vec2 cellSz = dimensions.cellSize();
+    const math::vec2 cellSize = dimensions.cellSize();
+    math::vec2 normPos = screenPosition / cellSize; // Normalize screen position
 
-    const math::vec2 normalizedPos = screenPosition / cellSz;
-
-    int baseX = static_cast<int>(std::floor(normalizedPos.x));
-    int baseY = static_cast<int>(std::floor(normalizedPos.y)) * 2;
-
-    const math::vec2 remainder = normalizedPos - math::vec2(baseX, baseY * 0.5f);
-
-    math::ivec2 cellPos(baseX, baseY);
-    const float manhattanDist = std::abs(remainder.x - 0.5f) + std::abs(remainder.y - 0.5f);
-
-    if (manhattanDist > 0.5f) {
-        int offsetX = static_cast<int>(std::floor(normalizedPos.x - 0.5f));
-        int offsetY = (static_cast<int>(std::floor(normalizedPos.y - 0.5f)) * 2) + 1;
-
-        const math::vec2 offsetRemainder = normalizedPos - math::vec2(offsetX + 0.5f, (offsetY * 0.5f) + 0.5f);
-        const float offsetDist = std::abs(offsetRemainder.x) + std::abs(offsetRemainder.y);
-
-        if (offsetDist <= 0.5f) {
-            cellPos = glm::ivec2(offsetX, offsetY);
-        }
+    // First candidate (even rows)
+    math::vec2 floorNorm = glm::floor(normPos);
+    math::ivec2 cellFloor(static_cast<int>(floorNorm.x), static_cast<int>(floorNorm.y));
+    math::vec2 center1 = floorNorm + math::vec2(0.5f, 0.5f); // Center in normalized space
+    math::vec2 diff1 = normPos - center1;
+    if (std::abs(diff1.x) + std::abs(diff1.y) <= 0.5f)
+    {
+        return math::ivec2(cellFloor.x, cellFloor.y * 2); 
     }
 
-    return (cellPos.x >= 0 && cellPos.y >= 0) ? cellPos : glm::ivec2(-1, -1);
+    // Second candidate (odd rows)
+    math::vec2 shiftedNorm = normPos - math::vec2(0.5f, 0.5f);
+    math::vec2 floorShifted = glm::floor(shiftedNorm);
+    math::ivec2 cellShifted(static_cast<int>(floorShifted.x), static_cast<int>(floorShifted.y));
+    math::vec2 center2 = floorShifted + math::vec2(1.0f, 1.0f); // Center in normalized space
+    math::vec2 diff2 = normPos - center2;
+    if (std::abs(diff2.x) + std::abs(diff2.y) <= 0.5f)
+    {
+        return math::ivec2(cellShifted.x, cellShifted.y * 2 + 1); 
+    }
+
+    return math::ivec2(-1, -1); // No cell found
 }
 
 math::vec2 StaggeredIsometry::mapToScreen(const math::ivec2& cellPosition) const

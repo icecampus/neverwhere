@@ -7,13 +7,8 @@
 void registreTypes()
 {
     
-    qmlRegisterType<Vec2Factory>("Game", 1, 0, "Vec2Factory");
-    qmlRegisterUncreatableType<math::vec2>("Game", 1, 0, "math::vec2", "Use Vec2Factory to create");
-
-    qmlRegisterType<IVec2Factory>("Game", 1, 0, "IVec2Factory");
-    qmlRegisterUncreatableType<math::ivec2>("Game", 1, 0, "math::ivec2", "Use IVec2Factory to create");
-
-
+    qmlRegisterType<MathFactory>("Game", 1, 0, "math");
+    qmlRegisterUncreatableType<math::vec2>("Game", 1, 0, "vec2", "Use Vec2Factory to create");
 
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
 
@@ -38,12 +33,8 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
     engine.rootContext()->setContextProperty("isoView", &isometry);
 
 
-    Vec2Factory* vec2Factory = new Vec2Factory();
-    engine.rootContext()->setContextProperty("vec2Factory", vec2Factory);
-
-    IVec2Factory* ivec2Factory = new IVec2Factory();
-    engine.rootContext()->setContextProperty("ivec2Factory", ivec2Factory);
-
+    MathFactory* mathFactory = new MathFactory(&engine);
+    engine.rootContext()->setContextProperty("math", mathFactory);
 }
 
 

@@ -14,7 +14,7 @@ Item {
     
     Component.onCompleted: 
     {
-        var cellPos = ivec2Factory.create(1, 1)
+        var cellPos = math.ivec2(1, 1)
         var screenPos = isoView.mapToScreen(cellPos)
 
     }
@@ -47,8 +47,8 @@ Item {
             var cellWidth = isoView.dimensions.cellWidth * isoView.cameraZoom
             var cellHeight = cellWidth / isoView.dimensions.aspectRatio
             
-            var viewSize = vec2Factory.create(width, height) // Используем Vec2Factory
-            var cameraOffset = vec2Factory.create(isoView.cameraX, isoView.cameraY)
+            var viewSize = math.vec2(width, height) // Используем Vec2Factory
+            var cameraOffset = math.vec2(isoView.cameraX, isoView.cameraY)
             var visibleRegion = isoView.getVisibleCellBounds(viewSize, cameraOffset)
             
             ctx.strokeStyle = "#666666"
@@ -58,15 +58,15 @@ Item {
             {
                 for (var x = visibleRegion.min.x; x <= visibleRegion.max.x; x++) 
                 {
-                    var cellPos = ivec2Factory.create(x, y)
+                    var cellPos = math.ivec2(x, y)
                     var screenPos = isoView.mapToScreen(cellPos)
                     
                     
                     ctx.beginPath()
-                    var top = vec2Factory.create(screenPos.x, screenPos.y - cellHeight/2)
-                    var right = vec2Factory.create(screenPos.x + cellWidth/2, screenPos.y)
-                    var bottom = vec2Factory.create(screenPos.x, screenPos.y + cellHeight/2)
-                    var left = vec2Factory.create(screenPos.x - cellWidth/2, screenPos.y)
+                    var top = math.vec2(screenPos.x, screenPos.y - cellHeight/2)
+                    var right = math.vec2(screenPos.x + cellWidth/2, screenPos.y)
+                    var bottom = math.vec2(screenPos.x, screenPos.y + cellHeight/2)
+                    var left = math.vec2(screenPos.x - cellWidth/2, screenPos.y)
                     
                     ctx.moveTo(top.x, top.y)
                     ctx.lineTo(right.x, right.y)
@@ -87,7 +87,7 @@ Item {
         hoverEnabled: true // Включаем отслеживание движения курсора
         
         onPositionChanged: {
-            var screenPos = vec2Factory.create(mouseArea.mouseX, mouseArea.mouseY)
+            var screenPos = math.vec2(mouseArea.mouseX, mouseArea.mouseY)
             var cellPos = isoView.screenToMap(screenPos)
             hoveredCell = Qt.point(cellPos.x, cellPos.y) // Обновляем координаты ячейки
         }

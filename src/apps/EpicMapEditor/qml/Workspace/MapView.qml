@@ -33,7 +33,8 @@ Rectangle
                 startCamY = isoView.cameraY
             }
 
-            onPositionChanged: {
+            onPositionChanged: 
+            {
                 if (pressed) {
                     var dx = mouseX - startX
                     var dy = mouseY - startY
@@ -50,11 +51,11 @@ Rectangle
                 var oldZoom = isoView.cameraZoom
                 var newZoom = Math.max(0.5, Math.min(3.0, oldZoom * zoomFactor))
 
-                var mapX = (wheel.x + cameraX) / oldZoom
-                var mapY = (wheel.y + cameraY) / oldZoom
+                var mapX = (wheel.x + isoView.cameraX) / oldZoom
+                var mapY = (wheel.y + isoView.cameraY) / oldZoom
 
-                cameraX = mapX * newZoom - wheel.x
-                cameraY = mapY * newZoom - wheel.y
+                isoView.cameraX = mapX * newZoom - wheel.x
+                isoView.cameraY = mapY * newZoom - wheel.y
                 isoView.cameraZoom = newZoom
             }
 

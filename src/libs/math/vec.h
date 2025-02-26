@@ -72,13 +72,4 @@ inline vec2 operator/(float scalar, const vec2& v) { return vec2(scalar / v.getX
 
 }
 
-//Vec2Factory
-class Vec2Factory : public QObject 
-{
-    Q_OBJECT
-public:
-    explicit Vec2Factory(QObject* parent = nullptr) : QObject(parent) {}
-    Q_INVOKABLE math::vec2 create(float x, float y) { return math::vec2(x, y); }
-};
-
 Q_DECLARE_METATYPE(math::vec2)
