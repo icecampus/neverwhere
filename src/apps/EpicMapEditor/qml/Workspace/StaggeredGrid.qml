@@ -3,12 +3,9 @@ import QtQuick.Controls 2.15
 import Game 1.0
 
 
-Item {
+Item 
+{
     id: gridView
-    
-    
-    property point hoveredCell: Qt.point(-1, -1)
-    property bool showCoordinates: true
 
     clip: true
     
@@ -18,9 +15,6 @@ Item {
         var screenPos = isoView.mapToScreen(cellPos)
 
     }
-    
-
-
 
     Canvas 
     {
@@ -79,30 +73,4 @@ Item {
             }
         }
     }
-    
-    MouseArea 
-    {
-        id: mouseArea
-        anchors.fill: parent
-        hoverEnabled: true // Включаем отслеживание движения курсора
-        
-        onPositionChanged: {
-            var screenPos = math.vec2(mouseArea.mouseX, mouseArea.mouseY)
-            var cellPos = isoView.screenToMap(screenPos)
-            hoveredCell = Qt.point(cellPos.x, cellPos.y) // Обновляем координаты ячейки
-        }
-    }
-    
-    // Text для отображения координат
-    Text {
-        id: coordinateText
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 10
-        color: "white"
-        font.pixelSize: 16
-        text: showCoordinates ? "(" + hoveredCell.x + ", " + hoveredCell.y + ")" : ""
-    }
-    
-
 }

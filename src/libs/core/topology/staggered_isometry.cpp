@@ -21,7 +21,6 @@ StaggeredIsometry::StaggeredIsometry(const staggered_dimensions& dimensions_, QO
 
 }
 
-
 math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) const
 {
     const math::vec2 cellSize = dimensions.cellSize();
