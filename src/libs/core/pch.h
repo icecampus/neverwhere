@@ -14,6 +14,7 @@
 
 #include <QObject>
 #include <QtQml/qqml.h>
+#include <QRandomGenerator>
 
 #include "math/lib.h"
 

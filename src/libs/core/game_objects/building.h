@@ -3,8 +3,8 @@
 
 class Building : public GameObject
 {
-    Q_OBJECT
-        Q_PROPERTY(int level READ level WRITE setLevel NOTIFY levelChanged)
+    Q_OBJECT;
+    Q_PROPERTY(int level READ level WRITE setLevel NOTIFY levelChanged);
 
 public:
     explicit Building(QObject* parent = nullptr) : GameObject(parent), m_level(1) {}

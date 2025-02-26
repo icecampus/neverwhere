@@ -4,7 +4,7 @@
 class LandTile : public GameObject
 {
     Q_OBJECT
-        Q_PROPERTY(bool isPassable READ isPassable WRITE setPassable NOTIFY passableChanged)
+    Q_PROPERTY(bool isPassable READ isPassable WRITE setPassable NOTIFY passableChanged)
 
 public:
     explicit LandTile(QObject* parent = nullptr) : GameObject(parent), m_isPassable(true) {}

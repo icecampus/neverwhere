@@ -55,6 +55,9 @@ public:
         endResetModel();
     }
 
+
+    Q_INVOKABLE void populateMapModel();
 private:
     std::vector<std::unique_ptr<GameObject>> m_gameObjects;
 };
+

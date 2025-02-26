@@ -9,9 +9,56 @@ Rectangle
     SplitView.fillWidth: true
     color: "#ffffff"
     border.color: "#cccccc"
+    clip: true
 
     property point hoveredCell: Qt.point(-1, -1)
     property bool showCoordinates: true
+
+    Component.onCompleted: 
+    {
+        mapModel.populateMapModel();
+    }
+
+    MapModel
+    {
+        id: mapModel
+    }
+
+    Item 
+    {
+        id: mapContainer
+                
+        x: isoView.cameraX
+        y: isoView.cameraY
+        scale: isoView.cameraZoom
+
+        width: 20000
+        height: 20000
+
+        Repeater {
+            model: mapModel
+            delegate: Item 
+            {
+                property GameObject gameObject: model.element
+                property real radius: isoView.dimensions.cellSize.x / 4
+
+                // Позиция относительно контейнера, без учета камеры
+                x: isoView.mapToScreen(gameObject.position).x - radius
+                y: isoView.mapToScreen(gameObject.position).y - radius
+                width: 2 * radius
+                height: 2 * radius
+
+                Rectangle 
+                {
+                    anchors.fill: parent
+                    radius: width / 2 // Делаем круглым
+                    color: "red" // Цвет можно изменить
+                    border.color: "black"
+                    border.width: 1
+                }
+            }
+        }
+    }
 
     StaggeredGrid 
     {
@@ -20,7 +67,6 @@ Rectangle
         anchors.fill: parent
         clip: true
     }
-    
     
     MouseArea 
     {

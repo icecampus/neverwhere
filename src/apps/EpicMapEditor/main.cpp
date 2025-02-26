@@ -6,13 +6,12 @@
 
 void registreTypes()
 {
-    
-    qmlRegisterType<MathFactory>("Game", 1, 0, "math");
     qmlRegisterUncreatableType<math::vec2>("Game", 1, 0, "vec2", "Use Vec2Factory to create");
 
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
 
     qmlRegisterType<MapModel>("Game", 1, 0, "MapModel");
+    qmlRegisterType<GameObject>("Game", 1, 0, "GameObject");
     qmlRegisterType<LandTile>("Game", 1, 0, "LandTile");
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
     qmlRegisterType<Building>("Game", 1, 0, "Building");
@@ -48,7 +47,7 @@ int main(int argc, char* argv[])
     registerGlobalObject(engine);
 
     engine.addImportPath(engine.importPathList()[0] + "/qml");
-    qDebug() << engine.importPathList();
+    //qDebug() << engine.importPathList();
 
     const QUrl url(u"qrc:/EpicMapEditor/qml/main.qml"_qs);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,

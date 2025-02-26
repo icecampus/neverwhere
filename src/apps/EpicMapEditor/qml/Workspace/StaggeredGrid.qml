@@ -9,13 +9,6 @@ Item
 
     clip: true
     
-    Component.onCompleted: 
-    {
-        var cellPos = math.ivec2(1, 1)
-        var screenPos = isoView.mapToScreen(cellPos)
-
-    }
-
     Canvas 
     {
         id: canvas
