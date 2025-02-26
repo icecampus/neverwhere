@@ -1,43 +1,72 @@
 #pragma once
+#include <QObject>
+#include <QtQml/qqml.h>
 #include <glm/glm.hpp>
 #include "math/lib.h"
 
+
 //StaggeredDimensions
-struct StaggeredDimensions
+struct staggered_dimensions
 {
-    StaggeredDimensions(const float& cellWidth, float aspectRatio);
+    Q_GADGET;
+    QML_NAMED_ELEMENT(staggered_dimensions)
+    Q_PROPERTY(float cellWidth READ getCellWidth CONSTANT);
+    Q_PROPERTY(float aspectRatio READ getAspectRatio CONSTANT);
+    Q_PROPERTY(math::vec2 cellSize READ cellSize CONSTANT);
+
+public:
+    staggered_dimensions(const float& cellWidth, float aspectRatio);
 
     math::vec2 cellSize() const;
+    float getCellWidth() const { return cellWidth; }
+    float getAspectRatio() const { return aspectRatio; }
 
-    bool operator==(const StaggeredDimensions&) const = default;
+    bool operator==(const staggered_dimensions&) const = default;
 
     float cellWidth;
     float aspectRatio{ 2.0 }; 
 };
 
-//StaggeredIsometry
-class StaggeredIsometry 
+//VisibleRegion
+struct VisibleRegion
 {
-    
+    Q_GADGET;
+    Q_PROPERTY(math::ivec2 min READ getMin CONSTANT);
+    Q_PROPERTY(math::ivec2 max READ getMax CONSTANT);
 public:
-    struct VisibleRegion
-    {
-        math::ivec2 min;
-        math::ivec2 max;
-    };
+    VisibleRegion() : min(0), max(0) {}
+    VisibleRegion(const math::ivec2& minPos, const math::ivec2& maxPos)
+        : min(minPos), max(maxPos) {
+    }
 
-    StaggeredIsometry(const StaggeredDimensions& dimensions);
+    math::ivec2 getMin() const { return min; }
+    math::ivec2 getMax() const { return max; }
+    math::ivec2 min;
+    math::ivec2 max;
+};
+
+
+//StaggeredIsometry
+class StaggeredIsometry: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(staggered_dimensions dimensions READ getDimensions CONSTANT)
+public:
+
+    StaggeredIsometry(const staggered_dimensions& dimensions, QObject* parent = nullptr);
+
+    staggered_dimensions getDimensions() const { return dimensions; }
 
     virtual math::ivec2 screenToMap(const math::vec2& screenPosition) const;
     virtual math::vec2  mapToScreen(const math::ivec2& cellPosition) const;
 
     virtual VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const;
 
-    StaggeredDimensions dimensions;
+    staggered_dimensions dimensions;
 };
 
 //StaggeredIsometryView
-class StaggeredIsometryView: public QObject, public StaggeredIsometry
+class StaggeredIsometryView:  public StaggeredIsometry
 {
     Q_OBJECT
 
@@ -46,9 +75,8 @@ class StaggeredIsometryView: public QObject, public StaggeredIsometry
     Q_PROPERTY(float cameraZoom READ getCameraZoom WRITE setCameraZoom NOTIFY cameraZoomChanged)
 
 public:
-    StaggeredIsometryView(const StaggeredDimensions& dimensions, QObject* parent = nullptr): 
-        QObject(parent),
-        StaggeredIsometry(dimensions), m_cameraX(0.0f), m_cameraY(0.0f), m_cameraZoom(1.0f) 
+    StaggeredIsometryView(const staggered_dimensions& dimensions, QObject* parent = nullptr): 
+        StaggeredIsometry(dimensions, parent), m_cameraX(0.0f), m_cameraY(0.0f), m_cameraZoom(1.0f)
     {
     }
 
@@ -64,7 +92,7 @@ public:
     
     Q_INVOKABLE math::ivec2 screenToMap(const math::vec2& screenPosition) const override;
     Q_INVOKABLE math::vec2 mapToScreen(const math::ivec2& cellPosition) const override;
-    VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const override;
+    Q_INVOKABLE VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const override;
 
 
 signals:

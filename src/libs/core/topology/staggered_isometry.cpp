@@ -1,20 +1,21 @@
 #include "staggered_isometry.h"
 
-StaggeredDimensions::StaggeredDimensions(const float& cellWidth_, float aspectRatio_) :
+staggered_dimensions::staggered_dimensions(const float& cellWidth_, float aspectRatio_) :
     cellWidth(cellWidth_), 
     aspectRatio(aspectRatio_)
 {
 }
 
 
-math::vec2 StaggeredDimensions::cellSize() const
+math::vec2 staggered_dimensions::cellSize() const
 { 
     return math::vec2{ cellWidth, cellWidth / aspectRatio };
 }
 
 
 //StaggeredIsometry
-StaggeredIsometry::StaggeredIsometry(const StaggeredDimensions& dimensions_):
+StaggeredIsometry::StaggeredIsometry(const staggered_dimensions& dimensions_, QObject* parent):
+    QObject(parent),
     dimensions(dimensions_) 
 {
 
@@ -67,7 +68,7 @@ math::vec2 StaggeredIsometry::mapToScreen(const math::ivec2& cellPosition) const
 }
 
 
-StaggeredIsometry::VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const
+VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const
 {
     std::vector<math::vec2> screenPoints;
     
@@ -98,7 +99,7 @@ StaggeredIsometry::VisibleRegion StaggeredIsometry::getVisibleCellBounds(const m
     minCell -= math::ivec2(1, 1);
     maxCell += math::ivec2(1, 1);
 
-    return { minCell, maxCell };
+    return VisibleRegion( minCell, maxCell );
 }
 
 
@@ -116,9 +117,11 @@ math::vec2 StaggeredIsometryView::mapToScreen(const math::ivec2& cellPosition) c
     return screenPos * m_cameraZoom + math::vec2(m_cameraX, m_cameraY);
 }
 
-StaggeredIsometry::VisibleRegion StaggeredIsometryView::getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const
+VisibleRegion StaggeredIsometryView::getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const
 {
-    return VisibleRegion{};
+    math::vec2 adjustedCameraOffset = (cameraOffset - math::vec2(m_cameraX, m_cameraY)) / m_cameraZoom;
+    math::vec2 adjustedViewSize = viewSize / m_cameraZoom;
+    return StaggeredIsometry::getVisibleCellBounds(adjustedViewSize, adjustedCameraOffset);
 }
 
 float StaggeredIsometryView::getCameraX() const 

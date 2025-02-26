@@ -86,4 +86,14 @@ inline ivec2 operator/(int scalar, const ivec2& v) { return ivec2(scalar / v.get
 
 }//
 
+
+//Vec2Factory
+class IVec2Factory : public QObject
+{
+    Q_OBJECT
+public:
+    explicit IVec2Factory(QObject* parent = nullptr) : QObject(parent) {}
+    Q_INVOKABLE math::ivec2 create(float x, float y) { return math::ivec2(x, y); }
+};
+
 Q_DECLARE_METATYPE(math::ivec2)

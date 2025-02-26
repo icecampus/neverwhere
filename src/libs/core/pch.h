@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <QObject>
+#include <QtQml/qqml.h>
 
 #include "math/lib.h"
 

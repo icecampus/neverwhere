@@ -4,5 +4,6 @@ nw_add_lib(
 	LIBS 
 		magic_enum::magic_enum 
 		Qt6::Core
+		Qt6::Gui
 		glm::glm-header-only
 		)

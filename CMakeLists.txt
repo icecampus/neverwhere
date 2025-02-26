@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets Gui)
 find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -23,7 +23,7 @@ qt_policy(SET QTP0001 OLD )
 qt_policy(SET QTP0004 NEW )
 qt_standard_project_setup()
 
-add_subdirectory(src/apps/Editor)
 add_subdirectory(src/libs)
+add_subdirectory(src/apps)
 
 qt_finalize_project()

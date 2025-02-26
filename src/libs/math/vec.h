@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 #include <QObject>
 #include <QMetaType>
+#include <QVector2D>
 
 namespace math
 {
@@ -14,12 +15,11 @@ class vec2 : public glm::vec2
     Q_PROPERTY(float y READ getY WRITE setY)
 
 public:
-    // Конструкторы
     vec2() : glm::vec2(0, 0) {}
     vec2(float value) : glm::vec2(value) {}
     vec2(float x, float y) : glm::vec2(x, y) {}
     vec2(const glm::vec2& other) : glm::vec2(other) {}
-
+    vec2(const QVector2D& other) : glm::vec2(other.x(), other.y()) {}
 
     // Геттеры
     float getX() const { return this->glm::vec2::x; }
@@ -70,6 +70,15 @@ inline vec2 operator-(float scalar, const vec2& v) { return vec2(scalar - v.getX
 inline vec2 operator*(float scalar, const vec2& v) { return vec2(scalar * v.getX(), scalar * v.getY()); }
 inline vec2 operator/(float scalar, const vec2& v) { return vec2(scalar / v.getX(), scalar / v.getY()); }
 
-}//
+}
+
+//Vec2Factory
+class Vec2Factory : public QObject 
+{
+    Q_OBJECT
+public:
+    explicit Vec2Factory(QObject* parent = nullptr) : QObject(parent) {}
+    Q_INVOKABLE math::vec2 create(float x, float y) { return math::vec2(x, y); }
+};
 
 Q_DECLARE_METATYPE(math::vec2)
