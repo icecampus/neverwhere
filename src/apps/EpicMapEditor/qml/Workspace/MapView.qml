@@ -32,8 +32,8 @@ Rectangle
         y: isoView.cameraY
         scale: isoView.cameraZoom
 
-        width: 20000
-        height: 20000
+        width: 2000
+        height: 2000
 
         Repeater {
             model: mapModel
@@ -42,7 +42,7 @@ Rectangle
                 property GameObject gameObject: model.element
                 property real radius: isoView.dimensions.cellSize.x / 4
 
-                // Позиция относительно контейнера, без учета камеры
+                // Позиция относительно контейнера, без учета камерыc
                 x: isoView.mapToScreen(gameObject.position).x - radius
                 y: isoView.mapToScreen(gameObject.position).y - radius
                 width: 2 * radius

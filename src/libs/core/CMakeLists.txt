@@ -4,6 +4,8 @@ nw_add_lib(
 	LIBS 
 		magic_enum::magic_enum 
 		Qt6::Core
+		Qt6::Quick
 		glm::glm-header-only
 		math
+		nlohmann_json::nlohmann_json
 		)

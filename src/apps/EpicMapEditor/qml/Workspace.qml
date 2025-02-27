@@ -10,9 +10,9 @@ import "Workspace"
     LeftPanel 
     {
         id: leftPanel
-        SplitView.preferredWidth: 200
+        SplitView.preferredWidth: 300
         SplitView.minimumWidth: 100
-        SplitView.maximumWidth: 300
+        SplitView.maximumWidth: 500
     }
 
     MapView 

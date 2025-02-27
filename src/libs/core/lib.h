@@ -6,3 +6,7 @@
 #include "game_objects/resource.h"
 #include "game_objects/building.h"
 #include "topology/staggered_isometry.h"
+#include "assets/asset.h"
+#include "assets/asset_model.h"
+#include "assets/asset_manager.h"
+#include "assets/asset_image_provider.h"

@@ -1,8 +1,34 @@
-#include <iostream>
+﻿#include <iostream>
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <memory>
 #include "core/lib.h"
+
+
+class EditorCore
+{
+public:
+    EditorCore(QQmlApplicationEngine& engine)
+    {
+        fs::path rootPath = "d:/campus/neverwhere/resources/assets";
+        assetManager.reset(new AssetManager(rootPath));
+        assetModel.reset(new AssetModel(&engine));
+        assetManager->loadGroup("buildings", assetModel.get());
+
+        imageProvider = new AssetImageProvider(assetModel.get());
+
+        //register in engine
+        engine.rootContext()->setContextProperty("assetModel", assetModel.get());
+        engine.addImageProvider("assetImages", imageProvider);
+    }
+
+private:
+    std::unique_ptr<AssetManager> assetManager;
+    std::unique_ptr<AssetModel> assetModel;
+    AssetImageProvider* imageProvider = nullptr;
+};
+
 
 void registreTypes()
 {
@@ -45,6 +71,7 @@ int main(int argc, char* argv[])
 
     QQmlApplicationEngine engine;
     registerGlobalObject(engine);
+    EditorCore core(engine);
 
     engine.addImportPath(engine.importPathList()[0] + "/qml");
     //qDebug() << engine.importPathList();
