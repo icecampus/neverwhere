@@ -2,6 +2,7 @@
 import QtQuick.Controls 2.15
 import Qt5Compat.GraphicalEffects 
 import Game 1.0
+import "GameObjects"
 
 Rectangle 
 {
@@ -35,27 +36,12 @@ Rectangle
         width: 2000
         height: 2000
 
-        Repeater {
+        Repeater 
+        {
             model: mapModel
-            delegate: Item 
+            delegate: GameObject 
             {
-                property GameObject gameObject: model.element
-                property real radius: isoView.dimensions.cellSize.x / 4
-
-                // Позиция относительно контейнера, без учета камерыc
-                x: isoView.mapToScreen(gameObject.position).x - radius
-                y: isoView.mapToScreen(gameObject.position).y - radius
-                width: 2 * radius
-                height: 2 * radius
-
-                Rectangle 
-                {
-                    anchors.fill: parent
-                    radius: width / 2 // Делаем круглым
-                    color: "red" // Цвет можно изменить
-                    border.color: "black"
-                    border.width: 1
-                }
+                gameObject: model.element
             }
         }
     }
@@ -126,7 +112,8 @@ Rectangle
 
 
     // Стилизованное отображение координат
-    Item {
+    Item 
+    {
         id: coordinateDisplay
         anchors.top: parent.top
         anchors.right: parent.right
