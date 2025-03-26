@@ -55,16 +55,6 @@ Rectangle
             }
         }
     }
-    /*
-    StaggeredGrid 
-    {
-        id: gridView
-    
-        anchors.fill: parent
-        clip: true
-    }
-    */
-
 
     StaggeredGrid 
     {
@@ -121,21 +111,23 @@ Rectangle
             hoveredCell = Qt.point(cellPos.x, cellPos.y) // Обновляем координаты ячейки
         }
 
-        onWheel: (wheel) => {
-            var delta = wheel.angleDelta.y
-            if (delta === 0) return
+onWheel: (wheel) => {
+    var delta = wheel.angleDelta.y
+    if (delta === 0) return
 
-            var zoomFactor = delta > 0 ? 1.1 : 0.9
-            var oldZoom = isoView.cameraZoom
-            var newZoom = Math.max(0.1, Math.min(3.0, oldZoom * zoomFactor))
+    var zoomFactor = delta > 0 ? 1.1 : 0.9
+    var oldZoom = isoView.cameraZoom
+    var newZoom = Math.max(0.1, Math.min(3.0, oldZoom * zoomFactor))
 
-            var mapX = (wheel.x + isoView.cameraX) / oldZoom
-            var mapY = (wheel.y + isoView.cameraY) / oldZoom
+    // Корректно вычисляем позицию на карте до изменения масштаба
+    var mapX = (wheel.x - isoView.cameraX) / oldZoom
+    var mapY = (wheel.y - isoView.cameraY) / oldZoom
 
-            isoView.cameraX = mapX * newZoom - wheel.x
-            isoView.cameraY = mapY * newZoom - wheel.y
-            isoView.cameraZoom = newZoom
-        }
+    // Корректируем положение камеры для сохранения позиции под курсором
+    isoView.cameraX = wheel.x - mapX * newZoom
+    isoView.cameraY = wheel.y - mapY * newZoom
+    isoView.cameraZoom = newZoom
+}
 
         onClicked: (mouse) => {
             // Convert mouse coordinates to map space
