@@ -104,7 +104,6 @@ QSGNode* StaggeredGrid::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
                 float y = pos.y;
 
                 int baseIndex = (i * _size.height() + j) * pointInCell;
-                assert(bufferSize >= baseIndex + pointInCell);
 
                 v[baseIndex + 0].set(x - halfCellWidthInPixel, y);
                 v[baseIndex + 1].set(x, y - halfCellHeightInPixel);

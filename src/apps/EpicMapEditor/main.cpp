@@ -46,6 +46,7 @@ void registreTypes()
     qmlRegisterType<staggered_dimensions>("Game", 1, 0, "staggered_dimensions");
 
     qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
+    qmlRegisterType<StaggeredCursor>("Game", 1, 0, "StaggeredCursor");
     
 }
 

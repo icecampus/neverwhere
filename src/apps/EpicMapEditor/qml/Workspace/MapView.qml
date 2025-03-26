@@ -15,7 +15,7 @@ Rectangle
     layer.enabled: true
     layer.smooth: true
 */    
-    property point hoveredCell: Qt.point(-1, -1)
+    property var hoveredCell: math.ivec2(1, 1)
     property bool showCoordinates: true
 
     Component.onCompleted: 
@@ -26,6 +26,28 @@ Rectangle
     MapModel
     {
         id: mapModel
+    }
+
+    StaggeredGrid 
+    {
+        id: customItem
+        topology: isoView
+        size: Qt.size(200, 200)
+        
+        color: "green"
+
+        transform: [
+            Scale 
+            {
+                xScale: isoView.cameraZoom
+                yScale: isoView.cameraZoom
+            },
+            Translate 
+            {
+                x: isoView.cameraX
+                y: isoView.cameraY
+            }
+        ]
     }
 
     Item 
@@ -56,22 +78,18 @@ Rectangle
         }
     }
 
-    StaggeredGrid 
+    StaggeredCursor
     {
-        id: customItem
         topology: isoView
-        size: Qt.size(200, 200)
-        
-        color: "green"
+        color: "red"
+        mapPosition: hoveredCell
 
         transform: [
-            Scale 
-            {
+            Scale {
                 xScale: isoView.cameraZoom
                 yScale: isoView.cameraZoom
             },
-            Translate 
-            {
+            Translate {
                 x: isoView.cameraX
                 y: isoView.cameraY
             }
@@ -82,14 +100,15 @@ Rectangle
     {
         id: mouseArea
         anchors.fill: parent
-        hoverEnabled: true // Включаем отслеживание движения курсора
+        hoverEnabled: true 
 
         property int startX: 0
         property int startY: 0
         property int startCamX: 0
         property int startCamY: 0
 
-        onPressed: {
+        onPressed: 
+        {
             startX = mouseX
             startY = mouseY
             startCamX = isoView.cameraX
@@ -108,28 +127,31 @@ Rectangle
 
             var screenPos = math.vec2(mouseArea.mouseX, mouseArea.mouseY)
             var cellPos = isoView.screenToMap(screenPos)
-            hoveredCell = Qt.point(cellPos.x, cellPos.y) // Обновляем координаты ячейки
+
+            hoveredCell = math.ivec2(cellPos.x, cellPos.y) // Обновляем координаты ячейки
         }
 
-onWheel: (wheel) => {
-    var delta = wheel.angleDelta.y
-    if (delta === 0) return
+        onWheel: (wheel) => 
+        {
+            var delta = wheel.angleDelta.y
+            if (delta === 0) return
+        
+            var zoomFactor = delta > 0 ? 1.1 : 0.9
+            var oldZoom = isoView.cameraZoom
+            var newZoom = Math.max(0.1, Math.min(3.0, oldZoom * zoomFactor))
+        
+            // вычисляем позицию на карте до изменения масштаба
+            var mapX = (wheel.x - isoView.cameraX) / oldZoom
+            var mapY = (wheel.y - isoView.cameraY) / oldZoom
+        
+            // Корректируем положение камеры для сохранения позиции под курсором
+            isoView.cameraX = wheel.x - mapX * newZoom
+            isoView.cameraY = wheel.y - mapY * newZoom
+            isoView.cameraZoom = newZoom
+        }
 
-    var zoomFactor = delta > 0 ? 1.1 : 0.9
-    var oldZoom = isoView.cameraZoom
-    var newZoom = Math.max(0.1, Math.min(3.0, oldZoom * zoomFactor))
-
-    // Корректно вычисляем позицию на карте до изменения масштаба
-    var mapX = (wheel.x - isoView.cameraX) / oldZoom
-    var mapY = (wheel.y - isoView.cameraY) / oldZoom
-
-    // Корректируем положение камеры для сохранения позиции под курсором
-    isoView.cameraX = wheel.x - mapX * newZoom
-    isoView.cameraY = wheel.y - mapY * newZoom
-    isoView.cameraZoom = newZoom
-}
-
-        onClicked: (mouse) => {
+        onClicked: (mouse) => 
+        {
             // Convert mouse coordinates to map space
             var mapX = (mouse.x + isoView.cameraX) / isoView.cameraZoom
             var mapY = (mouse.y + isoView.cameraY) / isoView.cameraZoom
