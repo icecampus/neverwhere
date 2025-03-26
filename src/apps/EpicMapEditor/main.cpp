@@ -44,6 +44,8 @@ void registreTypes()
 
     qmlRegisterType<StaggeredIsometryView>("Game", 1, 0, "StaggeredIsometryView");
     qmlRegisterType<staggered_dimensions>("Game", 1, 0, "staggered_dimensions");
+
+    qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
     
 }
 

@@ -57,6 +57,9 @@ public:
 
     staggered_dimensions getDimensions() const { return dimensions; }
 
+    math::ivec2 fieldToMap(const math::vec2& screenPosition) const;
+    math::vec2  mapToField(const math::ivec2& cellPosition) const;
+
     virtual math::ivec2 screenToMap(const math::vec2& screenPosition) const;
     virtual math::vec2  mapToScreen(const math::ivec2& cellPosition) const;
 

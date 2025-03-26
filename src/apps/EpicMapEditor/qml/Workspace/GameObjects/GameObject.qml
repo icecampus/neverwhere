@@ -15,10 +15,6 @@ Item
     Image 
     {
         anchors.fill: parent
-        source: "image://assetImages/9813e80b-c6f7-43f9-9f11-f074009bb8f1"
-        
-        
-        
-        
+        source: "image://assetImages/a476f78f-c329-4a78-be82-b7c5dbe49c6c"
     }
 }

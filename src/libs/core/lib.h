@@ -10,3 +10,4 @@
 #include "assets/asset_model.h"
 #include "assets/asset_manager.h"
 #include "assets/asset_image_provider.h"
+#include "render/staggered_grid/staggered_grid.h"

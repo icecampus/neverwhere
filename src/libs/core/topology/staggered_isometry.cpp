@@ -21,7 +21,7 @@ StaggeredIsometry::StaggeredIsometry(const staggered_dimensions& dimensions_, QO
 
 }
 
-math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) const
+math::ivec2 StaggeredIsometry::fieldToMap(const math::vec2& screenPosition) const
 {
     const math::vec2 cellSize = dimensions.cellSize();
     math::vec2 normPos = screenPosition / cellSize; // Normalize screen position
@@ -33,7 +33,7 @@ math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) con
     math::vec2 diff1 = normPos - center1;
     if (std::abs(diff1.x) + std::abs(diff1.y) <= 0.5f)
     {
-        return math::ivec2(cellFloor.x, cellFloor.y * 2); 
+        return math::ivec2(cellFloor.x, cellFloor.y * 2);
     }
 
     // Second candidate (odd rows)
@@ -44,26 +44,36 @@ math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) con
     math::vec2 diff2 = normPos - center2;
     if (std::abs(diff2.x) + std::abs(diff2.y) <= 0.5f)
     {
-        return math::ivec2(cellShifted.x, cellShifted.y * 2 + 1); 
+        return math::ivec2(cellShifted.x, cellShifted.y * 2 + 1);
     }
 
     return math::ivec2(-1, -1); // No cell found
 }
 
-math::vec2 StaggeredIsometry::mapToScreen(const math::ivec2& cellPosition) const
+math::vec2 StaggeredIsometry::mapToField(const math::ivec2& cellPosition) const
 {
     const math::vec2 cellSz = dimensions.cellSize();
     const math::vec2 halfCellSz = cellSz * 0.5f;
 
     float x = static_cast<float>(cellPosition.x) * cellSz.x + halfCellSz.x;
     float y = static_cast<float>(cellPosition.y) * halfCellSz.y + halfCellSz.y;
-    
-    if (cellPosition.y & 1) 
-    {  
+
+    if (cellPosition.y & 1)
+    {
         x += halfCellSz.x;
     }
 
     return math::vec2(x, y);
+}
+
+math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) const
+{
+    return fieldToMap(screenPosition);
+}
+
+math::vec2 StaggeredIsometry::mapToScreen(const math::ivec2& cellPosition) const
+{
+    return mapToField(cellPosition);
 }
 
 

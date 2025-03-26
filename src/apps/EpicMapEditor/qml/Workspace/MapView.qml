@@ -11,7 +11,10 @@ Rectangle
     color: "#ffffff"
     border.color: "#cccccc"
     clip: true
-
+/*
+    layer.enabled: true
+    layer.smooth: true
+*/    
     property point hoveredCell: Qt.point(-1, -1)
     property bool showCoordinates: true
 
@@ -29,12 +32,19 @@ Rectangle
     {
         id: mapContainer
                 
-        x: isoView.cameraX
-        y: isoView.cameraY
-        scale: isoView.cameraZoom
+        transform: [
+            Scale {
+                xScale: isoView.cameraZoom
+                yScale: isoView.cameraZoom
+            },
+            Translate {
+                x: isoView.cameraX
+                y: isoView.cameraY
+            }
+        ]
 
-        width: 2000
-        height: 2000
+        width: 20
+        height: 20
 
         Repeater 
         {
@@ -45,13 +55,37 @@ Rectangle
             }
         }
     }
-
+    /*
     StaggeredGrid 
     {
         id: gridView
     
         anchors.fill: parent
         clip: true
+    }
+    */
+
+
+    StaggeredGrid 
+    {
+        id: customItem
+        topology: isoView
+        size: Qt.size(200, 200)
+        
+        color: "green"
+
+        transform: [
+            Scale 
+            {
+                xScale: isoView.cameraZoom
+                yScale: isoView.cameraZoom
+            },
+            Translate 
+            {
+                x: isoView.cameraX
+                y: isoView.cameraY
+            }
+        ]
     }
     
     MouseArea 
@@ -93,7 +127,7 @@ Rectangle
 
             var zoomFactor = delta > 0 ? 1.1 : 0.9
             var oldZoom = isoView.cameraZoom
-            var newZoom = Math.max(0.5, Math.min(3.0, oldZoom * zoomFactor))
+            var newZoom = Math.max(0.1, Math.min(3.0, oldZoom * zoomFactor))
 
             var mapX = (wheel.x + isoView.cameraX) / oldZoom
             var mapY = (wheel.y + isoView.cameraY) / oldZoom
