@@ -31,6 +31,11 @@ EpicEditorWindow
 		}
 	}
 
+    Component.onCompleted: 
+    {
+        core.load();
+    }
+
     Header
     {
         id: header
@@ -54,21 +59,19 @@ EpicEditorWindow
 
 		currentIndex: header.currentIndex
 		
-        Workspace
+        
+        Home
         {
-            id: map
-        }
+            id: home
+        }  
+
     }
-    
+
     /*
-    Rectangle 
+    Workspace
     {
-        id: captionItem
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 30  
-        color: "red"
+        id: map
     }
     */
+    
 }

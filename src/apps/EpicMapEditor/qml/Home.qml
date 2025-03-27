@@ -1,0 +1,124 @@
+﻿
+import QtQuick
+import QtQuick.Controls 2.15
+import Qt5Compat.GraphicalEffects 
+
+Rectangle 
+{
+    color: colorPalette.background 
+    property int selectedIndex: -1
+    property real baseSize: 80
+    property real spacing: 10
+
+    Item
+    { 
+        anchors
+        {       
+            fill: parent
+            
+            topMargin: 5
+            bottomMargin: 10
+            leftMargin: 20
+            rightMargin: 20
+        }   
+
+        Item
+        {
+            id: header
+            anchors
+            {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+
+            height: 40
+            Text
+            {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Chapters"
+                font.pixelSize: 20
+                color: colorPalette.textPrimary
+            }
+
+        }
+
+        Flow  
+        {
+            id: chaptersView
+            
+            anchors
+            {
+                top: header.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+
+            
+
+            property int minCellWidth: 300    
+            property int cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    
+            property int cellHeight: 150    
+            property int selectedIndex: -1
+            
+            Repeater 
+            {
+                model: core.chapters
+                delegate: Item 
+                {
+
+                    property bool selected: index === chaptersView.selectedIndex
+                    width: (selected)? chaptersView.cellWidth * 2 : chaptersView.cellWidth 
+                    height: (selected)? chaptersView.cellHeight * 2: chaptersView.cellHeight
+                    
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 2
+                        radius: 12
+                        color: colorPalette.surface    
+                        border.color: colorPalette.primaryOrange 
+                
+                        Rectangle {
+                            id: textBackground
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 5
+                            width: textItem.width + 20
+                            height: textItem.height + 10
+                            color: "#80000000" // Полупрозрачный черный (50% непрозрачности)
+                            radius: 4
+
+                            Text {
+                                id: textItem
+                                anchors.centerIn: parent
+                                text: element.name 
+                                color: colorPalette.textPrimary
+                                font.pixelSize: 18
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: parent.children[0].color = colorPalette.primaryOrange
+                        onExited: parent.children[0].color = colorPalette.surface2
+                        onClicked: 
+                        {
+                            if(chaptersView.selectedIndex === index)
+                            {
+                                chaptersView.selectedIndex = -1
+                            }
+                            else
+                            {
+                                chaptersView.selectedIndex = index
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

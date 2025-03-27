@@ -13,7 +13,7 @@ QString Layer::name() const
 }
 
 //LayersModel
-LayersLibrary::LayersLibrary(QObject* parent /*= nullptr*/)
+LayersLibrary::LayersLibrary(QObject* parent)
 {
 
 }
