@@ -1,3 +1,4 @@
+include(CheckCXXSymbolExists)
 # check_preprocessor
 function(check_preprocessor output_variable symbol)
     set(CMAKE_REQUIRED_QUIET OFF)
@@ -244,10 +245,11 @@ function(nw_add_app_sources)
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
         )
     elseif(USE_WINDOWS)
-        qt6_add_executable(${ARG_NAME} ${ARG_SOURCES})
-        target_compile_options(${AppName} PRIVATE "/MP")
+        set(RC_FILE "${CMAKE_CURRENT_SOURCE_DIR}/app.rc")
+        qt6_add_executable(${ARG_NAME} ${ARG_SOURCES} ${RC_FILE})
+        # target_compile_options(${AppName} PRIVATE "/MP")
     else()
-        qt6_add_executable(${ARG_NAME} ${ARG_SOURCES})
+        qt6_add_executable(${ARG_NAME} ${ARG_SOURCES} )
     endif()
 
     #add qml

@@ -35,7 +35,8 @@ Rectangle
 	}
 		
 	//
-    TabBar {
+    TabBar 
+	{
         id: bar
         anchors.top: parent.top
         anchors.left: menuButton.right

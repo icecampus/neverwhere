@@ -3,7 +3,7 @@ include(cmake/utils.cmake)
 
 project(Neverwhere VERSION 0.1.0 LANGUAGES CXX C)
 print_header("Neverwhere")
-
+check_preprocessor_configuration()
 #use grouping
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
