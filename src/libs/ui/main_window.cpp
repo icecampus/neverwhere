@@ -14,8 +14,6 @@
 
 namespace
 {
-    const int TITLE_SIZE = 30;
-    const int BORDER_SIZE_SYSTEM = ::GetSystemMetrics(SM_CXSIZEFRAME);
     const int BORDER_MARGIN = 8; // Увеличьте отступ для лучшего захвата
 
     LRESULT bordersHitTest(const QQuickWindow& mainWindow, const QPoint& ptMouse) 
@@ -52,12 +50,11 @@ EpicEditorWindow::EpicEditorWindow(QWindow* parent)
         HWND hwnd = (HWND)winId();
 
         // Включаем стандартную тень
-        MARGINS margins = { -1, -1, -1, -1 };
+        MARGINS margins = {-1, -1, -1, -1 };
         DwmExtendFrameIntoClientArea(hwnd, &margins);
 
         // Добавляем стандартный оконный стиль
-        SetWindowLongPtr(hwnd, GWL_STYLE,
-            WS_OVERLAPPEDWINDOW | WS_THICKFRAME | WS_CAPTION);
+        SetWindowLongPtr(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_THICKFRAME | WS_CAPTION);
     }
 
 	setMinimumHeight(600);
@@ -79,8 +76,7 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
 	        {
 		        m_maximized = maximized;
 		        HWND hWnd = (HWND)winId();
-		        SetWindowPos(
-			        hWnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+		        SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
                 return true;
 	        }
 	        break;
@@ -106,9 +102,11 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
 
             LRESULT hit = bordersHitTest(*this, qtMouse);
 
-            if (hit == HTCLIENT) {
+            if (hit == HTCLIENT) 
+            {
                 // Проверка на область заголовка
-                if (captionHitTest(qtMouse)) {
+                if (captionHitTest(qtMouse)) 
+                {
                     hit = HTCAPTION;
                 }
             }
