@@ -47,9 +47,8 @@ namespace
 EpicEditorWindow::EpicEditorWindow(QWindow* parent)
 	: QQuickWindow(parent)
 {
-    setFlags(Qt::FramelessWindowHint);
-
-    if (QSysInfo::productType() == "windows") {
+    if (QSysInfo::productType() == "windows") 
+    {
         HWND hwnd = (HWND)winId();
 
         // Включаем стандартную тень
