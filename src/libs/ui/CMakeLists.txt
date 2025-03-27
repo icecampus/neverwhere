@@ -1,0 +1,10 @@
+nw_add_lib(
+	GROUP 
+		libs 
+	LIBS 
+		Qt6::Core
+		Qt6::Gui
+		Qt6::Quick
+		Qt6::Widgets
+		Shcore.lib
+		)

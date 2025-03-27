@@ -3,6 +3,7 @@ nw_add_qml_app(
         _apps 
     LIBS 
         core
+        ui
         Qt6::Core 
         Qt6::Qml
         Qt6::Quick

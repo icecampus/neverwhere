@@ -4,7 +4,7 @@
 #include <QQmlContext>
 #include <memory>
 #include "core/lib.h"
-
+#include "ui/main_window.h"
 
 class EditorCore
 {
@@ -32,6 +32,8 @@ private:
 
 void registreTypes()
 {
+    qmlRegisterType<EpicEditorWindow>("UI", 1, 0, "EpicEditorWindow");
+
     qmlRegisterUncreatableType<math::vec2>("Game", 1, 0, "vec2", "Use Vec2Factory to create");
 
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
@@ -72,6 +74,8 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
 
 int main(int argc, char* argv[])
 {
+    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+
     QApplication app(argc, argv);
     
     registreTypes();
