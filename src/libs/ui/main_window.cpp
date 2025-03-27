@@ -120,23 +120,31 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
         case WM_GETMINMAXINFO:
         {
             MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(msg->lParam);
+            HWND hwnd = msg->hwnd;
+
+            // Получаем информацию о мониторе
+            HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO monitorInfo;
+            monitorInfo.cbSize = sizeof(MONITORINFO);
+            GetMonitorInfo(hMonitor, &monitorInfo);
+
+            // Рабочая область (без панели задач)
+            RECT workArea = monitorInfo.rcWork;
+
+            // Преобразование абсолютных координат в относительные для текущего монитора
+            mmi->ptMaxPosition.x = workArea.left - monitorInfo.rcMonitor.left;
+            mmi->ptMaxPosition.y = workArea.top - monitorInfo.rcMonitor.top;
+
+            // Максимальный размер окна = размер рабочей области
+            mmi->ptMaxSize.x = workArea.right - workArea.left;
+            mmi->ptMaxSize.y = workArea.bottom - workArea.top;
 
             // Минимальный размер окна
             const QSize minSize = minimumSize();
             mmi->ptMinTrackSize.x = minSize.width();
             mmi->ptMinTrackSize.y = minSize.height();
 
-            // Получаем рабочую область экрана (без панели задач)
-            RECT workArea;
-            SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
-
-            // Устанавливаем максимальные размеры и позицию
-            mmi->ptMaxPosition.x = workArea.left;
-            mmi->ptMaxPosition.y = workArea.top;
-            mmi->ptMaxSize.x = workArea.right - workArea.left;
-            mmi->ptMaxSize.y = workArea.bottom - workArea.top;
-
-            // Учитываем пользовательские ограничения максимального размера
+            // Учет пользовательских ограничений максимального размера
             const QSize maxSize = maximumSize();
             if (maxSize.isValid()) {
                 mmi->ptMaxTrackSize.x = std::min(maxSize.width(), static_cast<int>(mmi->ptMaxSize.x));
