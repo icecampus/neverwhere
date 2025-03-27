@@ -1,5 +1,6 @@
-import QtQuick 2.7
-import QtQuick.Controls 2.3
+import QtQuick 
+import QtQuick.Controls 
+import Qt5Compat.GraphicalEffects
 
 
 Rectangle
@@ -8,17 +9,11 @@ Rectangle
 	property alias dragElement: dragPanel
 
 	id: header
-	height: 30
-	color: "blue"
+	height: 32
+	color: colorPalette.background
+    border.color: colorPalette.border
+    border.width: 1
 		
-	Component.onCompleted:
-	{
-		window.loadSetting();
-		if(window.isNeedMaximized())
-		{
-			showMaximized();
-		}
-	}
 
 	MainFramelessButton
 	{
@@ -40,27 +35,25 @@ Rectangle
 	}
 		
 	//
-	TabBar 
-	{
-		id: bar
-		anchors.top: parent.top
-		anchors.left: menuButton.right
-		height: header.height
-		width: firstTab.width //Todo: fix me
+    TabBar {
+        id: bar
+        anchors.top: parent.top
+        anchors.left: menuButton.right
+        height: header.height
+        spacing: 1
 
-		background: Rectangle
+        background: Rectangle 
 		{
-			color: "red"
-		}
+            color: "red"
+        }
 
-		MainFramelessTab
+        MainFramelessTab 
 		{
-			id: firstTab
-			text: qsTr("Home")
-			width: 100
-			height: bar.height
-			//verticalCenter: parent.verticalCenter
-		}
+            id: firstTab
+            text: qsTr("Home")
+            width: 100
+			height: 50
+        }
 
 		Component
 		{
@@ -96,15 +89,15 @@ Rectangle
 		}
     }
 
-	Rectangle
+    Rectangle 
 	{
-		id: dragPanel
-		anchors.top: parent.top
-		anchors.left:  bar.right
-		anchors.right: windowButton.left
-		anchors.bottom: parent.bottom
-		color: "yellow"
-	}
+        id: dragPanel
+        anchors.top: parent.top
+        anchors.left:  bar.right
+        anchors.right: windowButton.left
+        anchors.bottom: parent.bottom
+        color: "transparent"
+    }
 
 	//header buttons
 	Row
@@ -124,7 +117,7 @@ Rectangle
 			{
 				window.showMinimized();
 			}
-			//iconSource:"qrc:/icons/images/window-minimize.png"
+			iconSource:"qrc:/resources/icons/minimize.png"
 		}
 			
 		MainFramelessButton
@@ -136,20 +129,33 @@ Rectangle
 			{
 				maximaze();
 			}
-			//iconSource:(window.visibility == Window.Windowed)?"qrc:/icons/images/window-windowed-mode.png":"qrc:/icons/images/window-fullscreen.png"
+			iconSource:"qrc:/resources/icons/maximaze.png"
 		}
 
 		MainFramelessButton
 		{
 			id: closeButton
 			height: parent.height
-			hoveredColor: "fuchsia"
+			hoveredColor: colorPalette.error
 
 			onClicked:
 			{
 				window.close();
 			}
-			//iconSource:"qrc:/icons/images/window-close.png"
+			iconSource:"qrc:/resources/icons/close.png"
 		}
 	}
+
+    // Горизонтальный разделитель
+    Rectangle {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: 1
+        color: colorPalette.border
+    }
+
+    // Анимация переключения вкладок
+    Behavior on color {
+        ColorAnimation { duration: 150 }
+    }
 }

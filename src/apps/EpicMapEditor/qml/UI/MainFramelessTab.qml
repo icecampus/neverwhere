@@ -1,5 +1,5 @@
-import QtQuick 2.7
-import QtQuick.Controls 2.3
+import QtQuick 
+import QtQuick.Controls
 
 TabButton
 {
@@ -8,18 +8,22 @@ TabButton
 	signal pinnedClicked()
 	signal closeClicked()
 
+	font.pixelSize: 16
+
     background: Rectangle
     {
+		//height: control.height
 		color: control.down
 			   ? (control.checked ? "#000000" : "transparent")
-               : (control.checked ? "#000000" : "transparent")
+               : (control.checked ? colorPalette.lightOrange : "transparent")
     }
 
 
-    contentItem: Text {
+    contentItem: Text 
+	{
         text: control.text
         font: control.font
-        color: (control.checked)?"white": "grey"
+        color: (control.checked)? colorPalette.textPrimary: "grey"
 		elide: Text.ElideRight
         verticalAlignment: Text.AlignVCenter
     }
@@ -42,7 +46,7 @@ TabButton
 			{
 				pinnedClicked();
 			}
-			// iconSource:"qrc:/icons/images/icon-pinned-16-x-16.svg"
+			//iconSource:"qrc:/icons/images/icon-pinned-16-x-16.svg"
 		}
 		
 		MainFramelessButton
@@ -54,7 +58,7 @@ TabButton
 			{
 				closeClicked();
 			}
-			// iconSource: "qrc:/icons/images/window-close.png"
+			iconSource: "qrc:/resources/icons/close.png"
 		}
 	}
 }

@@ -72,9 +72,9 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
 	{
         case WM_SIZE:
         {
-	        if (const auto maximized = msg->wParam == SIZE_MAXIMIZED; maximized != m_maximized)
+	        if (const auto maximized = msg->wParam == SIZE_MAXIMIZED; maximized != _maximized)
 	        {
-		        m_maximized = maximized;
+		        _maximized = maximized;
 		        HWND hWnd = (HWND)winId();
 		        SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
                 return true;
@@ -130,7 +130,7 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
 
             // Преобразование абсолютных координат в относительные для текущего монитора
             mmi->ptMaxPosition.x = workArea.left - monitorInfo.rcMonitor.left;
-            mmi->ptMaxPosition.y = workArea.top - monitorInfo.rcMonitor.top;
+            mmi->ptMaxPosition.y = workArea.top - monitorInfo.rcMonitor.top +1;
 
             // Максимальный размер окна = размер рабочей области
             mmi->ptMaxSize.x = workArea.right - workArea.left;
@@ -179,11 +179,6 @@ QString EpicEditorWindow::screenName()
 {
 	return screen()->name();
 }
-
-//void EpicEditorWindow::setScreenIndex(int i)
-//{
-//	//setScreen(qApp->screens()[i]);
-//}
 
 void EpicEditorWindow::onClosing()
 {

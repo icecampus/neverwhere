@@ -19,7 +19,7 @@ Item
     property color textSecondary:"#A0A0A0"    // Вторичный текст
 
     // Дополнительные цвета
-    property color error:       "#FF5252"     // Ярко-красный
+    property color error:       "#ff1c1c"     // Ярко-красный
     property color success:     "#76FF03"     // Лаймово-зеленый
     property color warning:     "#FFEA00"     // Ярко-желтый
 

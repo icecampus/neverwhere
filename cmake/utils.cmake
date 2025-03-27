@@ -232,6 +232,8 @@ function(nw_add_app_sources)
         MACOSX_BUNDLE TRUE
     )
 
+    qt_add_resources(ARG_SOURCES resources.qrc)
+    
     if(USE_APPLE)
         qt6_add_executable(${ARG_NAME} ${ARG_SOURCES})
 
@@ -267,6 +269,11 @@ function(nw_add_app_sources)
 
     # grouping in source tree
     set_property(TARGET ${ARG_NAME} PROPERTY FOLDER ${ARG_GROUP}) 
+
+
+
+    # return AppName
+    set(AppName ${AppName} PARENT_SCOPE)
 endfunction()
 
 # nw_add_app
@@ -296,6 +303,5 @@ function(nw_add_qml_app)
             ${ARG_LIBS}
     )
 
-    set(LibName ${LibName} PARENT_SCOPE)
-
+    set(AppName ${AppName} PARENT_SCOPE)
 endfunction()

@@ -11,19 +11,13 @@ EpicEditorWindow
     property int previousY
 
     visible: true
+    x: 400
+    y: 200
     width: 1920
     height: 1080
     title: "EpicMapEditor"
     
     caption: header.dragElement
-
-    Header
-    {
-        id: header
-	    anchors.left: parent.left
-	    anchors.right: parent.right
-	    anchors.top: parent.top
-    }
 
     function maximaze()
 	{
@@ -36,7 +30,15 @@ EpicEditorWindow
 			window.showNormal()
 		}
 	}
-	
+
+    Header
+    {
+        id: header
+	    anchors.left: parent.left
+	    anchors.right: parent.right
+	    anchors.top: parent.top
+    }
+    
     ColorPalette
     {
         id: colorPalette

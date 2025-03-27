@@ -22,9 +22,8 @@ public:
 	}
 
 	Q_INVOKABLE QString screenName();
-	//Q_INVOKABLE void setScreenIndex(int i);
 	Q_INVOKABLE void loadSetting();
-	Q_INVOKABLE bool isNeedMaximized() { return m_loadMaximazed; }
+	Q_INVOKABLE bool isNeedMaximized() { return _loadMaximazed; }
 
 public slots:
 	void onClosing();
@@ -39,7 +38,7 @@ private:
 
 
 	QQuickItem* _caption = nullptr;
-	bool m_loadMaximazed = false;
-	bool m_maximized = false;
+	bool _loadMaximazed = false;
+	bool _maximized = false;
 };
 

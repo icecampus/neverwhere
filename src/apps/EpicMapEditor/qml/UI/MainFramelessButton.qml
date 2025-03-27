@@ -1,11 +1,11 @@
-import QtQuick 
+import QtQuick 2.7
 import Qt5Compat.GraphicalEffects
 
 Rectangle
 {
 	property var iconSource: null
-	property var iconColorOverlay: "red"
-	property var hoveredColor: "pink"
+	property var iconColorOverlay: "white"
+	property var hoveredColor: colorPalette.primaryOrange
 
 	signal clicked()
 
@@ -18,8 +18,8 @@ Rectangle
 	{
 		id: buttonIcon
 		anchors.centerIn: parent
-		width: 10
-		height: 10
+		width: 20
+		height: 20
 		visible: false
 		source: iconSource ? iconSource : ""
 	}

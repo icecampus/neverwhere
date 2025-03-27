@@ -11,3 +11,7 @@ nw_add_qml_app(
         Qt6::Gui
         Qt6::Core5Compat
     )
+
+accumulate_files_relative(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} png_resources png)
+# message(FATAL_ERROR "png_resources: ${png_resources}")
+
