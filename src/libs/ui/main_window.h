@@ -22,7 +22,7 @@ public:
 	}
 
 	Q_INVOKABLE QString screenName();
-	Q_INVOKABLE void setScreenIndex(int i);
+	//Q_INVOKABLE void setScreenIndex(int i);
 	Q_INVOKABLE void loadSetting();
 	Q_INVOKABLE bool isNeedMaximized() { return m_loadMaximazed; }
 
