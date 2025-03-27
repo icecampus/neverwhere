@@ -12,3 +12,4 @@
 #include "assets/asset_image_provider.h"
 #include "render/staggered_grid/staggered_grid.h"
 #include "render/staggered_grid/staggered_cursor.h"
+#include "global_context.h"

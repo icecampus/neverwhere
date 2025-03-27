@@ -13,11 +13,11 @@ namespace fs = std::filesystem;
 class Asset : public QObject
 {
     Q_OBJECT
-        Q_PROPERTY(QUuid uuid READ uuid CONSTANT)
-        Q_PROPERTY(QString name READ name CONSTANT)
-        Q_PROPERTY(int width READ width CONSTANT)
-        Q_PROPERTY(QString imageFilename READ imageFilename CONSTANT)
-        Q_PROPERTY(QString url READ getUrl CONSTANT)
+    Q_PROPERTY(QUuid uuid READ uuid CONSTANT)
+    Q_PROPERTY(QString name READ name CONSTANT)
+    Q_PROPERTY(int width READ width CONSTANT)
+    Q_PROPERTY(QString imageFilename READ imageFilename CONSTANT)
+    Q_PROPERTY(QString url READ getUrl CONSTANT)
 
 public:
     explicit Asset(const std::filesystem::path& indexPath, const json& j, const std::string& assetPath, QObject* parent = nullptr);

@@ -9,6 +9,11 @@ ApplicationWindow
     height: 1080
     title: "EpicMapEditor"
 
+    Component.onCompleted: 
+    {
+        core.load();
+    }
+
     ColorPalette
     {
         id: colorPalette

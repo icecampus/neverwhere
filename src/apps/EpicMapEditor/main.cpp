@@ -63,6 +63,10 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
 
     MathFactory* mathFactory = new MathFactory(&engine);
     engine.rootContext()->setContextProperty("math", mathFactory);
+
+    GlobalContext* globalContext = new GlobalContext(&engine);
+    engine.rootContext()->setContextProperty("core", globalContext);
+
 }
 
 

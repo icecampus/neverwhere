@@ -66,6 +66,11 @@ math::vec2 StaggeredIsometry::mapToField(const math::ivec2& cellPosition) const
     return math::vec2(x, y);
 }
 
+uint64_t StaggeredIsometry::zOffset(const math::ivec2& cellPosition)
+{
+     return (static_cast<uint64_t>(cellPosition.y) << 32) | cellPosition.x;
+}
+
 math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) const
 {
     return fieldToMap(screenPosition);

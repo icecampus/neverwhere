@@ -59,6 +59,7 @@ public:
 
     math::ivec2 fieldToMap(const math::vec2& screenPosition) const;
     math::vec2  mapToField(const math::ivec2& cellPosition) const;
+    Q_INVOKABLE uint64_t zOffset(const math::ivec2& cellPosition);
 
     virtual math::ivec2 screenToMap(const math::vec2& screenPosition) const;
     virtual math::vec2  mapToScreen(const math::ivec2& cellPosition) const;
