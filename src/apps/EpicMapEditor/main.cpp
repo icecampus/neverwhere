@@ -21,12 +21,19 @@ public:
         //register in engine
         engine.rootContext()->setContextProperty("assetModel", assetModel.get());
         engine.addImageProvider("assetImages", imageProvider);
+
+        chapterProvider = new ChaptersImageProvider();
+        engine.addImageProvider("chaptersImage", chapterProvider);
     }
 
 private:
     std::unique_ptr<AssetManager> assetManager;
     std::unique_ptr<AssetModel> assetModel;
-    AssetImageProvider* imageProvider = nullptr;
+    AssetImageProvider* imageProvider;
+    ChaptersImageProvider* chapterProvider;
+
+
+
 };
 
 

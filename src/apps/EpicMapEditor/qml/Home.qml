@@ -72,13 +72,22 @@ Rectangle
                     width: (selected)? chaptersView.cellWidth * 2 : chaptersView.cellWidth 
                     height: (selected)? chaptersView.cellHeight * 2: chaptersView.cellHeight
                     
-                    Rectangle {
+                    Rectangle 
+                    {
                         anchors.fill: parent
                         anchors.margins: 2
                         radius: 12
                         color: colorPalette.surface    
                         border.color: colorPalette.primaryOrange 
                 
+                        Image 
+                        {
+                            anchors.centerIn: parent
+                            width: 128
+                            height: 128
+                            source: "image://chaptersImage/" + element.name
+                        }
+
                         Rectangle {
                             id: textBackground
                             anchors.horizontalCenter: parent.horizontalCenter
