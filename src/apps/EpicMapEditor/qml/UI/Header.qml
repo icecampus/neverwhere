@@ -7,6 +7,7 @@ Rectangle
 {
 	property alias currentIndex: bar.currentIndex
 	property alias dragElement: dragPanel
+	property alias tabsModel: tabRepeater.model
 
 	id: header
 	height: 32
@@ -47,14 +48,17 @@ Rectangle
 		{
             color: "red"
         }
-
-        MainFramelessTab 
+		Repeater
 		{
-            id: firstTab
-            text: qsTr("Home")
-            width: 100
-			height: 50
-        }
+			id: tabRepeater
+			MainFramelessTab 
+			{
+				id: firstTab
+				text: element.name
+				width: 100
+				height: 50
+			}
+		}
 
 		Component
 		{

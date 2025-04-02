@@ -12,7 +12,7 @@ namespace TabType
     // TabType
     enum Type
     {
-        Main,
+        Home,
         Workspace,
     };
     Q_ENUM_NS(Type);

@@ -4,7 +4,7 @@
 #include <QQmlContext>
 #include <memory>
 #include "core/lib.h"
-#include "ui/main_window.h"
+#include "ui/lib.h"
 
 class EditorCore
 {
@@ -31,15 +31,13 @@ private:
     std::unique_ptr<AssetModel> assetModel;
     AssetImageProvider* imageProvider;
     ChaptersImageProvider* chapterProvider;
-
-
-
 };
 
 
 void registreTypes()
 {
     qmlRegisterType<EpicEditorWindow>("UI", 1, 0, "EpicEditorWindow");
+    qmlRegisterType<TabsModel>("UI", 1, 0, "TabsModel");
 
     qmlRegisterUncreatableType<math::vec2>("Game", 1, 0, "vec2", "Use Vec2Factory to create");
 

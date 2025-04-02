@@ -137,8 +137,8 @@ void TabElement::activate()
 TabsModel::TabsModel(QObject* parent) : QAbstractListModel(parent)
 {
     elements.emplace_back(new TabElement(
-        TabType::Main,
-        "Main",
+        TabType::Home,
+        "Home",
         true,
         QVariantMap(),
         QVariantMap(),

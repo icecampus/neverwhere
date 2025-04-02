@@ -36,12 +36,19 @@ EpicEditorWindow
         core.load();
     }
 
+    TabsModel
+    {
+        id: tabsModel
+    }
+
     Header
     {
         id: header
 	    anchors.left: parent.left
 	    anchors.right: parent.right
 	    anchors.top: parent.top
+
+        tabsModel: tabsModel
     }
     
     ColorPalette
@@ -63,6 +70,9 @@ EpicEditorWindow
         Home
         {
             id: home
+            onOpenTabRequest:
+            {
+            }
         }  
 
     }

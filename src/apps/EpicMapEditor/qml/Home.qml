@@ -5,6 +5,8 @@ import Qt5Compat.GraphicalEffects
 
 Rectangle 
 {
+    signal openTabRequest()
+    
     color: colorPalette.background 
     property int selectedIndex: -1
     property real baseSize: 80
@@ -111,17 +113,10 @@ Rectangle
                     anchors.fill: parent
                     hoverEnabled: true
                     onEntered: parent.children[0].color = colorPalette.primaryOrange
-                    onExited: parent.children[0].color = colorPalette.surface2
+                    onExited: parent.children[0].color =  colorPalette.surface 
                     onClicked: 
                     {
-                        if(chaptersView.selectedIndex === index)
-                        {
-                            chaptersView.selectedIndex = -1
-                        }
-                        else
-                        {
-                            chaptersView.selectedIndex = index
-                        }
+                        openTabRequest()
                     }
                 }
             }
