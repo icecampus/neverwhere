@@ -14,8 +14,8 @@ TabButton
     {
 		//height: control.height
 		color: control.down
-			   ? (control.checked ? "#000000" : "transparent")
-               : (control.checked ? colorPalette.lightOrange : "transparent")
+			   ? (control.checked ? colorPalette.neonOrange : colorPalette.background)
+               : (control.checked ? colorPalette.lightOrange : colorPalette.background )
     }
 
 

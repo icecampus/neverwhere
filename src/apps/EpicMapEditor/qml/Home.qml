@@ -5,7 +5,7 @@ import Qt5Compat.GraphicalEffects
 
 Rectangle 
 {
-    signal openTabRequest()
+    signal openTabRequest(string chapterName)
     
     color: colorPalette.background 
     property int selectedIndex: -1
@@ -57,8 +57,6 @@ Rectangle
                 bottom: parent.bottom
             }
 
-            
-
             property int minCellWidth: 300    
             cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    
             cellHeight: 150    
@@ -89,7 +87,8 @@ Rectangle
                         source: "image://chaptersImage/" + element.name
                     }
 
-                    Rectangle {
+                    Rectangle 
+                    {
                         id: textBackground
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.bottom: parent.bottom
@@ -99,7 +98,8 @@ Rectangle
                         color: "#80000000" // Полупрозрачный черный (50% непрозрачности)
                         radius: 4
 
-                        Text {
+                        Text 
+                        {
                             id: textItem
                             anchors.centerIn: parent
                             text: element.name 
@@ -116,7 +116,7 @@ Rectangle
                     onExited: parent.children[0].color =  colorPalette.surface 
                     onClicked: 
                     {
-                        openTabRequest()
+                        openTabRequest(element.name)
                     }
                 }
             }

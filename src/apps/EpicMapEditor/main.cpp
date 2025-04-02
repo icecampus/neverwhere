@@ -38,6 +38,15 @@ void registreTypes()
 {
     qmlRegisterType<EpicEditorWindow>("UI", 1, 0, "EpicEditorWindow");
     qmlRegisterType<TabsModel>("UI", 1, 0, "TabsModel");
+    qmlRegisterUncreatableMetaObject(
+        TabType::staticMetaObject, // static meta object
+        "UI", // import statement (can be any string)
+        1,
+        0, // major and minor version of the import
+        "TabType", // name in QML (does not have to match C++ name)
+        "Error: only enums" // error in case someone tries to create a MyNamespace object
+    );
+
 
     qmlRegisterUncreatableType<math::vec2>("Game", 1, 0, "vec2", "Use Vec2Factory to create");
 

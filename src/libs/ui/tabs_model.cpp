@@ -136,16 +136,16 @@ void TabElement::activate()
 // TabsModel
 TabsModel::TabsModel(QObject* parent) : QAbstractListModel(parent)
 {
-    elements.emplace_back(new TabElement(
-        TabType::Home,
-        "Home",
-        true,
-        QVariantMap(),
-        QVariantMap(),
-        "#4287f5",
-        "qrc:/tab_home.png",
-        nullptr,
-        this));
+    //elements.emplace_back(new TabElement(
+    //    TabType::Home,
+    //    "Home",
+    //    true,
+    //    QVariantMap(),
+    //    QVariantMap(),
+    //    "#4287f5",
+    //    "qrc:/tab_home.png",
+    //    nullptr,
+    //    this));
 }
 
 int TabsModel::getCount()

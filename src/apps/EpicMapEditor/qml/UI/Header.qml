@@ -8,6 +8,7 @@ Rectangle
 	property alias currentIndex: bar.currentIndex
 	property alias dragElement: dragPanel
 	property alias tabsModel: tabRepeater.model
+	property alias bar: bar
 
 	id: header
 	height: 32
@@ -46,7 +47,7 @@ Rectangle
 
         background: Rectangle 
 		{
-            color: "red"
+            color: colorPalette.darkOrange
         }
 		Repeater
 		{

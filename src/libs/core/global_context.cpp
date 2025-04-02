@@ -18,11 +18,11 @@ void GlobalContext::load()
     layerLibrary.addElement<AssetLayer>("Environment", &layerLibrary);
     layerLibrary.addElement<AssetLayer>("Buildings", &layerLibrary);
 
-    chaptersModel.addElement<Chapter>("Base", this);
-    for (int i=1; i< 100; ++i )
-    {
-        chaptersModel.addElement<Chapter>( std::format("Chapter {}", i).c_str(), this);
-    }
+    //chaptersModel.addElement<Chapter>("Base", this);
+    //for (int i=1; i< 100; ++i )
+    //{
+    //    chaptersModel.addElement<Chapter>( std::format("Chapter {}", i).c_str(), this);
+    //}
     
     
     chaptersModel.addElement<Chapter>("Chapter 2", this);
