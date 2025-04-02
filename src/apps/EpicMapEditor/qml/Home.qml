@@ -91,7 +91,7 @@ Rectangle
                         id: textBackground
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 5
+                        anchors.bottomMargin: 15
                         width: textItem.width + 20
                         height: textItem.height + 10
                         color: "#80000000" // Полупрозрачный черный (50% непрозрачности)
