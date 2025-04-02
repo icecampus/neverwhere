@@ -29,6 +29,9 @@
 #include <QQuickImageProvider>
 #include <QImage>
 #include <QUuid>
+#include <QQmlEngine>
+#include <QQuickItem>
+
 
 
 #include <nlohmann/json.hpp>

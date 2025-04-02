@@ -1,6 +1,6 @@
 #pragma once
 #include <QAbstractListModel>
-#include <vector>
+#include <deque>
 #include <memory>
 
 template<typename Element>
@@ -67,6 +67,6 @@ public:
     }
 
 private:
-    std::vector<std::unique_ptr<Element>> _elements;
+    std::deque<std::unique_ptr<Element>> _elements;
 };
 

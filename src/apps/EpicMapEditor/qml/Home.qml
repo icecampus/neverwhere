@@ -43,7 +43,7 @@ Rectangle
 
         }
 
-        Flow  
+        GridView
         {
             id: chaptersView
             
@@ -58,71 +58,69 @@ Rectangle
             
 
             property int minCellWidth: 300    
-            property int cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    
-            property int cellHeight: 150    
+            cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    
+            cellHeight: 150    
             property int selectedIndex: -1
             
-            Repeater 
+            model: core.chapters
+            clip: true
+            delegate: Item 
             {
-                model: core.chapters
-                delegate: Item 
-                {
 
-                    property bool selected: index === chaptersView.selectedIndex
-                    width: (selected)? chaptersView.cellWidth * 2 : chaptersView.cellWidth 
-                    height: (selected)? chaptersView.cellHeight * 2: chaptersView.cellHeight
+                property bool selected: index === chaptersView.selectedIndex
+                width:  chaptersView.cellWidth 
+                height: chaptersView.cellHeight
                     
-                    Rectangle 
-                    {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        radius: 12
-                        color: colorPalette.surface    
-                        border.color: colorPalette.primaryOrange 
+                Rectangle 
+                {
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    radius: 12
+                    color: colorPalette.surface    
+                    border.color: colorPalette.border 
                 
-                        Image 
-                        {
-                            anchors.centerIn: parent
-                            width: 128
-                            height: 128
-                            source: "image://chaptersImage/" + element.name
-                        }
-
-                        Rectangle {
-                            id: textBackground
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 5
-                            width: textItem.width + 20
-                            height: textItem.height + 10
-                            color: "#80000000" // Полупрозрачный черный (50% непрозрачности)
-                            radius: 4
-
-                            Text {
-                                id: textItem
-                                anchors.centerIn: parent
-                                text: element.name 
-                                color: colorPalette.textPrimary
-                                font.pixelSize: 18
-                            }
-                        }
+                    Image 
+                    {
+                        anchors.centerIn: parent
+                        width:  chaptersView.cellWidth - 20
+                        height: chaptersView.cellHeight - 20
+                        source: "image://chaptersImage/" + element.name
                     }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onEntered: parent.children[0].color = colorPalette.primaryOrange
-                        onExited: parent.children[0].color = colorPalette.surface2
-                        onClicked: 
+                    Rectangle {
+                        id: textBackground
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 5
+                        width: textItem.width + 20
+                        height: textItem.height + 10
+                        color: "#80000000" // Полупрозрачный черный (50% непрозрачности)
+                        radius: 4
+
+                        Text {
+                            id: textItem
+                            anchors.centerIn: parent
+                            text: element.name 
+                            color: colorPalette.textPrimary
+                            font.pixelSize: 18
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onEntered: parent.children[0].color = colorPalette.primaryOrange
+                    onExited: parent.children[0].color = colorPalette.surface2
+                    onClicked: 
+                    {
+                        if(chaptersView.selectedIndex === index)
                         {
-                            if(chaptersView.selectedIndex === index)
-                            {
-                                chaptersView.selectedIndex = -1
-                            }
-                            else
-                            {
-                                chaptersView.selectedIndex = index
-                            }
+                            chaptersView.selectedIndex = -1
+                        }
+                        else
+                        {
+                            chaptersView.selectedIndex = index
                         }
                     }
                 }
