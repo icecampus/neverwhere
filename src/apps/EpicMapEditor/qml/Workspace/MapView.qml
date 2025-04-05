@@ -164,40 +164,12 @@ Rectangle
     }
 
 
-    // Стилизованное отображение координат
-    Item 
+    CoordinateIndicator
     {
-        id: coordinateDisplay
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.margins: 10
         width: 100
         height: 30
-        
-        Rectangle {
-            id: background
-            anchors.fill: parent
-            color: colorPalette.surface2 // Используем цвет фона из палитры
-            opacity: 0.7 // Полупрозрачность
-            radius: 5 // Скругленные углы
-        }
-        
-        Text {
-            id: coordinateText
-            anchors.centerIn: parent
-            color: colorPalette.textPrimary // Цвет текста из палитры
-            font.pixelSize: 16
-            text: showCoordinates ? "(" + hoveredCell.x + ", " + hoveredCell.y + ")" : ""
-        }
-        
-        Glow {
-            anchors.fill: coordinateText
-            radius: 3
-            samples: 17
-            color: colorPalette.neonOrange // Свечение из палитры
-            source: coordinateText
-            visible: showCoordinates
-        }
     }
-    
 }

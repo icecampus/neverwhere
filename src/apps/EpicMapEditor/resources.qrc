@@ -4,5 +4,6 @@
         <file>resources/icons/close.png</file>
         <file>resources/icons/maximaze.png</file>
         <file>resources/icons/minimize.png</file>
+        <file>resources/icons/coordinate_system.png</file>
     </qresource>
 </RCC>
