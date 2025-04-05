@@ -53,16 +53,13 @@ class StaggeredIsometry: public QObject
     Q_PROPERTY(staggered_dimensions dimensions READ getDimensions CONSTANT)
 public:
 
-    StaggeredIsometry(const staggered_dimensions& dimensions, QObject* parent = nullptr);
+    StaggeredIsometry(QObject* parent = nullptr);
 
     staggered_dimensions getDimensions() const { return dimensions; }
 
-    math::ivec2 fieldToMap(const math::vec2& screenPosition) const;
-    math::vec2  mapToField(const math::ivec2& cellPosition) const;
+    Q_INVOKABLE math::ivec2 fieldToMap(const math::vec2& screenPosition) const;
+    Q_INVOKABLE math::vec2  mapToField(const math::ivec2& cellPosition) const;
     Q_INVOKABLE uint64_t zOffset(const math::ivec2& cellPosition);
-
-    virtual math::ivec2 screenToMap(const math::vec2& screenPosition) const;
-    virtual math::vec2  mapToScreen(const math::ivec2& cellPosition) const;
 
     virtual VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const;
 
@@ -79,11 +76,7 @@ class StaggeredIsometryView:  public StaggeredIsometry
     Q_PROPERTY(float cameraZoom READ getCameraZoom WRITE setCameraZoom NOTIFY cameraZoomChanged)
 
 public:
-    StaggeredIsometryView(const staggered_dimensions& dimensions, QObject* parent = nullptr): 
-        StaggeredIsometry(dimensions, parent), m_cameraX(0.0f), m_cameraY(0.0f), m_cameraZoom(1.0f)
-    {
-    }
-
+    StaggeredIsometryView(QObject* parent = nullptr);
 
     float getCameraX() const;
     void setCameraX(float x);
@@ -94,8 +87,8 @@ public:
     float getCameraZoom() const;
     void setCameraZoom(float zoom);
     
-    Q_INVOKABLE math::ivec2 screenToMap(const math::vec2& screenPosition) const override;
-    Q_INVOKABLE math::vec2 mapToScreen(const math::ivec2& cellPosition) const override;
+    Q_INVOKABLE math::ivec2 screenToMap(const math::vec2& screenPosition) const;
+    Q_INVOKABLE math::vec2 mapToScreen(const math::ivec2& cellPosition) const;
     Q_INVOKABLE VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const override;
 
 

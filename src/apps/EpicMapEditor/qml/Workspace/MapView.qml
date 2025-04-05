@@ -28,6 +28,11 @@ Rectangle
         id: mapModel
     }
 
+    StaggeredIsometryView
+    {
+        id: isoView
+    }
+
     StaggeredGrid 
     {
         id: customItem
@@ -172,7 +177,7 @@ Rectangle
         Rectangle {
             id: background
             anchors.fill: parent
-            color: colorPalette.surface // Используем цвет фона из палитры
+            color: colorPalette.surface2 // Используем цвет фона из палитры
             opacity: 0.7 // Полупрозрачность
             radius: 5 // Скругленные углы
         }

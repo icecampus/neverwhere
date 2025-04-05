@@ -7,8 +7,8 @@ Item
     property real radius: isoView.dimensions.cellSize.x / 4
 
     // Позиция относительно контейнера, без учета камерыc
-    x: isoView.mapToScreen(gameObject.position).x - radius
-    y: isoView.mapToScreen(gameObject.position).y - radius
+    x: isoView.mapToField(gameObject.position).x - radius
+    y: isoView.mapToField(gameObject.position).y - radius
     width: isoView.dimensions.cellSize.x * 2
     height: isoView.dimensions.cellSize.y * 4
     z: isoView.zOffset(gameObject.position)

@@ -68,21 +68,11 @@ void registreTypes()
 
 void registerGlobalObject(QQmlApplicationEngine& engine)
 {
-    static StaggeredIsometryView isometry(staggered_dimensions{ 128, 2.0f });
-
-    static MapLoader* loader = new MapLoader();
-    loader->loadMap();
-
-    engine.rootContext()->setContextProperty("mapModel", loader->model());
-    engine.rootContext()->setContextProperty("isoView", &isometry);
-
-
     MathFactory* mathFactory = new MathFactory(&engine);
     engine.rootContext()->setContextProperty("math", mathFactory);
 
     GlobalContext* globalContext = new GlobalContext(&engine);
     engine.rootContext()->setContextProperty("core", globalContext);
-
 }
 
 

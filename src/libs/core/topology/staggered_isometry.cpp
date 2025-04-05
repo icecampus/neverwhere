@@ -14,9 +14,9 @@ math::vec2 staggered_dimensions::cellSize() const
 
 
 //StaggeredIsometry
-StaggeredIsometry::StaggeredIsometry(const staggered_dimensions& dimensions_, QObject* parent):
+StaggeredIsometry::StaggeredIsometry(QObject* parent):
     QObject(parent),
-    dimensions(dimensions_) 
+    dimensions({ 128, 2.0f })
 {
 
 }
@@ -71,19 +71,11 @@ uint64_t StaggeredIsometry::zOffset(const math::ivec2& cellPosition)
      return (static_cast<uint64_t>(cellPosition.y) << 32) | cellPosition.x;
 }
 
-math::ivec2 StaggeredIsometry::screenToMap(const math::vec2& screenPosition) const
-{
-    return fieldToMap(screenPosition);
-}
-
-math::vec2 StaggeredIsometry::mapToScreen(const math::ivec2& cellPosition) const
-{
-    return mapToField(cellPosition);
-}
-
 
 VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const
 {
+    throw std::exception("function incomplete");
+
     std::vector<math::vec2> screenPoints;
     
     screenPoints.push_back(cameraOffset);
@@ -103,7 +95,7 @@ VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize
 
     for (const auto& point : screenPoints)
     {
-        math::ivec2 cell = screenToMap(point);
+        math::ivec2 cell = fieldToMap(point);
         minCell.x = std::min(minCell.x, cell.x);
         minCell.y = std::min(minCell.y, cell.y);
         maxCell.x = std::max(maxCell.x, cell.x);
@@ -117,17 +109,26 @@ VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize
 }
 
 
-//
+//StaggeredIsometryView
+StaggeredIsometryView::StaggeredIsometryView(QObject* parent) :
+    StaggeredIsometry(parent),
+    m_cameraX(0.0f),
+    m_cameraY(0.0f),
+    m_cameraZoom(1.0f)
+{
+}
+
+
 math::ivec2 StaggeredIsometryView::screenToMap(const math::vec2& screenPosition) const
 {
 
     math::vec2 adjustedPos = (screenPosition - math::vec2(m_cameraX, m_cameraY)) / m_cameraZoom;
-    return StaggeredIsometry::screenToMap(adjustedPos);
+    return fieldToMap(adjustedPos);
 }
 
 math::vec2 StaggeredIsometryView::mapToScreen(const math::ivec2& cellPosition) const
 {
-    math::vec2 screenPos = StaggeredIsometry::mapToScreen(cellPosition);
+    math::vec2 screenPos = mapToField(cellPosition);
     return screenPos * m_cameraZoom + math::vec2(m_cameraX, m_cameraY);
 }
 
