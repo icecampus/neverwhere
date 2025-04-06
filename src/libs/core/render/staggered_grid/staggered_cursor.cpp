@@ -61,7 +61,7 @@ QSGNode* StaggeredCursor::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
         geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 0, 0, QSGGeometry::UnsignedIntType);
 
         geometry->setDrawingMode(QSGGeometry::DrawLines);
-        geometry->setLineWidth(2);
+        geometry->setLineWidth(1);
 
         node->setGeometry(geometry);
         node->setFlag(QSGNode::OwnsGeometry);

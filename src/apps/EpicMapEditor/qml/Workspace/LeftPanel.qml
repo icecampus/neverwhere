@@ -5,10 +5,13 @@ Rectangle {
     color: colorPalette.surface      
     border.color: colorPalette.border 
 
-    GridView {
+    GridView 
+    {
         id: paletteView
         anchors.fill: parent
         model: assetModel 
+        clip: true
+
         property int minCellWidth: 150    // Минимальная ширина ячейки
         cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    // Динамическая ширина ячейки
         cellHeight: 150    // Фиксированная высота ячейки
@@ -16,12 +19,14 @@ Rectangle {
         delegate: Item {
             width: paletteView.cellWidth
             height: paletteView.cellHeight
+            
 
             Rectangle {
                 anchors.fill: parent
                 radius: 12
                 color: colorPalette.surface    
                 border.color: colorPalette.primaryOrange 
+                anchors.margins: 2
                 
                 Image {
                     anchors.centerIn: parent

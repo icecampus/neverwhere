@@ -109,7 +109,6 @@ EpicEditorWindow
                         color: "green"
                         Component.onCompleted: 
                         {
-                            console.log(element.item)                              
                             element.item.parent = worspaceWrapper
                             element.item.anchors.fill = worspaceWrapper
                         }

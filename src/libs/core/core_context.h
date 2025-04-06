@@ -1,0 +1,32 @@
+#pragma once
+#include <QQmlApplicationEngine>
+#include "assets_library/assets_library.h"
+#include "models/chapters_model.h"
+#include "assets_library/asset_manager.h"
+#include "assets_library/asset_image_provider.h"
+#include "models/chapters_image_provider.h"
+
+class CoreContext: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(AssetsLibrary* assetsLibrary READ getAssetsLibraty CONSTANT);
+    Q_PROPERTY(ChaptersModel* chapters READ getChaptersModel CONSTANT);
+
+public:
+    explicit CoreContext(QQmlApplicationEngine& engine);
+
+    Q_INVOKABLE void load();
+
+    AssetsLibrary* getAssetsLibraty();
+    ChaptersModel* getChaptersModel();
+
+private:
+    ChaptersModel chaptersModel;
+
+    QQmlApplicationEngine& engine;
+    std::unique_ptr<AssetManager> assetManager;
+    std::unique_ptr<AssetsLibrary> assetsLibrary;
+    AssetImageProvider* imageProvider;
+    ChaptersImageProvider* chapterProvider;
+
+};
