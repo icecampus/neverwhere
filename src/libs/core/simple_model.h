@@ -66,7 +66,16 @@ public:
         endResetModel();
     }
 
+    size_t size();
+
+
 private:
     std::deque<std::unique_ptr<Element>> _elements;
 };
+
+template<typename Element>
+size_t SimpleModel<Element>::size()
+{
+    return _elements.size();
+}
 

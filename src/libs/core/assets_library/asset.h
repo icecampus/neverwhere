@@ -10,6 +10,12 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+enum class AssetTypes: uint8_t
+{
+    image,
+    slice
+};
+
 class Asset : public QObject
 {
     Q_OBJECT
@@ -21,6 +27,9 @@ public:
 
     QUuid uuid() const;
     QString name() const;
+
+    virtual void load(const std::filesystem::path& indexPath,  const nlohmann::json& j);
+    virtual QImage thumbnail() = 0;
 
 protected:
     std::filesystem::path indexPath;

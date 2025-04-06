@@ -1,7 +1,9 @@
 #include "core_context.h"
+#include <format>
 #include <QQmlContext>
 #include "assets_library/asset_pack.h"
-#include <format>
+#include "assets_library/assets_loader.h"
+
 
 CoreContext::CoreContext(QQmlApplicationEngine& engine_):
     QObject(&engine_),
@@ -11,14 +13,26 @@ CoreContext::CoreContext(QQmlApplicationEngine& engine_):
 
 }
 
+AssetsLibrary* CoreContext::getAssetsLibraty()
+{
+    return assetsLibrary.get();
+}
+
+ChaptersModel* CoreContext::getChaptersModel()
+{
+    return &chaptersModel;
+}
+
 void CoreContext::load()
 {
-    fs::path rootPath = "d:/campus/neverwhere/resources/assets";
-    assetManager.reset(new AssetManager(rootPath));
+    
     assetsLibrary.reset(new AssetsLibrary(&engine));
+    loadAssets();
 
     imageProvider = new AssetImageProvider(assetsLibrary.get());
+    imageProvider->loadAllImages();
     engine.addImageProvider("assetImages", imageProvider);
+
 
     chapterProvider = new ChaptersImageProvider();
     engine.addImageProvider("chaptersImage", chapterProvider);
@@ -34,13 +48,11 @@ void CoreContext::load()
 
 }
 
-AssetsLibrary* CoreContext::getAssetsLibraty() 
+void CoreContext::loadAssets()
 {
-    return assetsLibrary.get();
+    fs::path rootPath = "d:/campus/neverwhere/resources/assets";
+
+    AssetsLoader::load(rootPath, *assetsLibrary.get());
 }
 
-ChaptersModel* CoreContext::getChaptersModel()
-{
-    return &chaptersModel;
-}
 

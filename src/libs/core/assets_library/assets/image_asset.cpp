@@ -27,14 +27,24 @@ QString ImageAsset::getUrl() const
 
 void ImageAsset::load(const std::filesystem::path& indexPath,  const nlohmann::json& j)
 {
-    m_uuid = QUuid::fromString(QString::fromStdString(j["uuid"].get<std::string>()));
-    m_name = QString::fromStdString(indexPath.parent_path().stem().string());
-    m_width = j["graphics"]["width"].get<int>();
-    m_imageFilename = QString::fromStdString(j["graphics"]["imageFilename"].get<std::string>());
+    Asset::load(indexPath, j);
 
-    fs::path imagePath = indexPath.parent_path() / j["graphics"]["imageFilename"].get<std::string>();
+    m_width = j["image"]["width"].get<int>();
+    m_imageFilename = QString::fromStdString(j["image"]["imageFilename"].get<std::string>());
 
-    
+    imagePath = indexPath.parent_path() / m_imageFilename.toStdString();
+}
+
+QImage ImageAsset::thumbnail()
+{
+    if (fs::exists(imagePath))
+    {
+        QImage result;
+        result.load(QString(imagePath.c_str()));
+        return result;
+    }
+
+    return QImage();
 }
 
 nlohmann::json ImageAsset::save()

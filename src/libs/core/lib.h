@@ -8,7 +8,6 @@
 #include "topology/staggered_isometry.h"
 #include "assets_library/asset.h"
 #include "assets_library/assets_library.h"
-#include "assets_library/asset_manager.h"
 #include "assets_library/asset_image_provider.h"
 #include "render/staggered_grid/staggered_grid.h"
 #include "render/staggered_grid/staggered_cursor.h"

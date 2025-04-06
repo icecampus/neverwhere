@@ -8,11 +8,12 @@ class AssetImageProvider : public QQuickImageProvider
 {
 public:
     AssetImageProvider(AssetsLibrary* library);
+    void loadAllImages();
 
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override;
 
 private:
-    void loadAllImages();
+    
 
     AssetsLibrary* _library = nullptr; 
     QMap<QUuid, QImage> _imageCache; 

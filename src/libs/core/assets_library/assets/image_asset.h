@@ -17,11 +17,14 @@ public:
     QString imageFilename() const;
     QString getUrl() const;
 
-    void load(const std::filesystem::path& indexPath,  const nlohmann::json& j);
+    void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
+    QImage thumbnail() override;
+
     nlohmann::json save();
 
 private:
     int m_width;
     QString m_imageFilename;
+    fs::path imagePath;
 };
 

@@ -5,3 +5,13 @@ SliceAsset::SliceAsset(QObject* parent):
 {
 
 }
+
+void SliceAsset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
+{
+
+}
+
+QImage SliceAsset::thumbnail()
+{
+    return QImage();
+}

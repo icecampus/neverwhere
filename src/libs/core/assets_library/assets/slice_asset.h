@@ -9,4 +9,6 @@ public:
     explicit SliceAsset(QObject* parent);
 
 
+    void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
+    QImage thumbnail() override;
 };
