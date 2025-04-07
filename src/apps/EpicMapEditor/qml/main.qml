@@ -116,23 +116,6 @@ EpicEditorWindow
                 }
             }
         }
-        /*
-        Home
-        {
-            id: home
-            onOpenTabRequest:(chapterName) =>
-            {
-                tabsContentCreator.openChapterByName(chapterName)
-            }
-        } */ 
-
     }
-
-    /*
-    Workspace
-    {
-        id: map
-    }
-    */
-    
+  
 }

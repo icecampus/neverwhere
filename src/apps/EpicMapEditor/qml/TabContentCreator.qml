@@ -35,7 +35,7 @@ Item
             var result = tabsModel.add(type, name, false, data, extraData)
             if (result) 
             {
-                bar.setCurrentIndex(bar.count - 1)
+                bar.currentIndex = bar.count - 1
             }
         }
     }
@@ -79,5 +79,11 @@ Item
         id: workspaceComponent
         Workspace {}
     }
+
+    /*
+    component MyTabButton: TabButton 
+    {
+    }
+    */
 
 }

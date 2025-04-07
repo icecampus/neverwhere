@@ -24,7 +24,8 @@ TextField
         }
     }
 
-    Keys.onPressed: (event) => {
+    Keys.onPressed: (event) => 
+    {
         if (event.key === Qt.Key_Escape) 
         {
             filter.text = ""
@@ -45,7 +46,6 @@ TextField
         color: "transparent" // Прозрачный фон кнопки
         visible: filter.length > 0 // Кнопка видна только при наличии текста
 
-        // Символ "×" для кнопки
         Image 
         {
             anchors.centerIn: parent

@@ -7,7 +7,7 @@ Rectangle
 {
 	property alias currentIndex: bar.currentIndex
 	property alias dragElement: dragPanel
-	property alias tabsModel: tabRepeater.model
+	property alias tabsModel: bar.model
 	property alias bar: bar
 
 	id: header
@@ -15,9 +15,8 @@ Rectangle
 	color: colorPalette.background
     border.color: colorPalette.border
     border.width: 1
-		
 
-	MainFramelessButton
+	HeaderButton
 	{
 		id: menuButton
 		anchors.left: parent.left
@@ -35,66 +34,31 @@ Rectangle
 			Rectangle{ width: 15; height:1;}
 		}
 	}
-		
-	//
-    TabBar 
-	{
+
+	ListView {
         id: bar
         anchors.top: parent.top
         anchors.left: menuButton.right
         height: header.height
-        spacing: 1
+		width: Math.min(contentWidth, header.width - 50)
 
-        background: Rectangle 
+		property int currentIndex: 0
+
+		orientation: ListView.Horizontal
+		
+		clip: true
+		interactive: false
+
+		delegate: HeaderTab 
 		{
-            color: colorPalette.darkOrange
+			height: header.height
+            text: element.name
+			checked: currentIndex === index
+			onClicked: currentIndex = index
+			closable: true
         }
-		Repeater
-		{
-			id: tabRepeater
-			MainFramelessTab 
-			{
-				id: firstTab
-				text: element.name
-				width: 100
-				height: 50
-			}
-		}
-
-		Component
-		{
-			id: newTabComponent
-			MainFramelessTab
-			{
-				width: 220
-				height: bar.height
-				closable: true
-
-				Component.onCompleted:
-				{
-					bar.width+= width + 1
-				}
-			
-				onCloseClicked:
-				{
-					//window.removeTab(TabBar.index);
-				}
-
-				onPinnedClicked:
-				{
-					//createNewWindow(TabBar.index);
-				}
-			}
-		}
-
-		function createNewTab(name)
-		{
-			var newTab = newTabComponent.createObject(bar); 
-			newTab.text = name;
-			bar.addItem(newTab);
-		}
     }
-
+		
     Rectangle 
 	{
         id: dragPanel
@@ -115,7 +79,7 @@ Rectangle
 
 		spacing: 2
 
-		MainFramelessButton
+		HeaderButton
 		{
 			id: minButton
 			height: parent.height
@@ -126,7 +90,7 @@ Rectangle
 			iconSource:"qrc:/resources/icons/minimize.png"
 		}
 			
-		MainFramelessButton
+		HeaderButton
 		{
 			id: maxButton
 			height: parent.height
@@ -138,7 +102,7 @@ Rectangle
 			iconSource:"qrc:/resources/icons/maximaze.png"
 		}
 
-		MainFramelessButton
+		HeaderButton
 		{
 			id: closeButton
 			height: parent.height
