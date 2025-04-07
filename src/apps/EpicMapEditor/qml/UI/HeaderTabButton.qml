@@ -5,7 +5,6 @@ Rectangle
 {
 	property var iconSource: null
 	property var iconColorOverlay: "white"
-	property var hoveredColor: colorPalette.primaryOrange
 	property alias containsMouse: mouseArea.containsMouse
 
 	signal clicked()
@@ -13,7 +12,8 @@ Rectangle
 	id: tabButton
 	radius: 4
 
-	color:  ( mouseArea.pressed ) ?  colorPalette.darkOrange : hoveredColor 
+	color:  ( mouseArea.pressed ) ?   "red" : 
+			( mouseArea.containsMouse ) ? colorPalette.darkOrange : "transparent"
 
 	Image
 	{

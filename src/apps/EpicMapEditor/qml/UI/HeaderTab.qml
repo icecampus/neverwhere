@@ -18,7 +18,7 @@ Rectangle
 
     color: (control.checked) ? colorPalette.neonOrange : 
 		   (mouseArea.pressed) ? colorPalette.lightOrange : 		
-		   (mouseArea.containsMouse) ? colorPalette.primaryOrange : colorPalette.background
+		   (mouseArea.containsMouse || closeButton.containsMouse) ? colorPalette.primaryOrange : colorPalette.background
 
 	Behavior on color {
         ColorAnimation { duration: 100 }
@@ -34,7 +34,7 @@ Rectangle
 			id: label
 			anchors.centerIn: parent
 			text: parent.text           
-			color: (control.checked || mouseArea.containsMouse)? colorPalette.textPrimary: "grey"          
+			color: (control.checked || mouseArea.containsMouse || closeButton.containsMouse)? colorPalette.textPrimary: "grey"          
 			font.pixelSize: 18          
 			horizontalAlignment: Text.AlignHCenter  
 			verticalAlignment: Text.AlignVCenter    
