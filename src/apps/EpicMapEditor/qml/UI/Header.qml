@@ -55,7 +55,7 @@ Rectangle
             text: element.name
 			checked: currentIndex === index
 			onClicked: currentIndex = index
-			closable: true
+			closable: !element.fixed
         }
     }
 		

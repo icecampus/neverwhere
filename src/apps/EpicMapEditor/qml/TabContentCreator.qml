@@ -32,7 +32,8 @@ Item
         } 
         else 
         {
-            var result = tabsModel.add(type, name, false, data, extraData)
+            var fixed = type==TabType.Home
+            var result = tabsModel.add(type, name, fixed, data, extraData)
             if (result) 
             {
                 bar.currentIndex = bar.count - 1
