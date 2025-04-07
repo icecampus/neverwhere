@@ -4,6 +4,10 @@ include(cmake/utils.cmake)
 project(Neverwhere VERSION 0.1.0 LANGUAGES CXX C)
 print_header("Neverwhere")
 check_preprocessor_configuration()
+if(MSVC)
+    add_compile_options(/MP)
+endif()
+
 #use grouping
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -14,7 +18,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets Gui)
+find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets Gui QuickControls2)
 find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)

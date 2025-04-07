@@ -1,60 +1,64 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
+import Qt5Compat.GraphicalEffects 
 
-TextField {
-    id: customField
-    width: 300
-    height: 40
-    
-    // Основные настройки
-    placeholderText: "Введите текст..."
-    maximumLength: 50
-    selectByMouse: true  // разрешаем выделение мышью
-    
-    // Стиль текста
-    color: "#333333"
-    font {
-        pixelSize: 16
-        family: "Arial"
-    }
-    
-    // Стиль плейсхолдера
-    placeholderTextColor: "#999999"
-    
-    // Кастомный фон
-    background: Rectangle {
-        implicitWidth: 300
-        implicitHeight: 40
-        radius: 5
-        color: customField.enabled ? "#FFFFFF" : "#F5F5F5"
-        border {
-            width: customField.activeFocus ? 2 : 1
-            color: customField.activeFocus ? "#4285F4" : "#CCCCCC"
-        }
-        
-        // Анимация изменения границы
-        Behavior on border.color {
-            ColorAnimation { duration: 200 }
+TextField 
+{
+    id: filter
+    placeholderText: (activeFocus)? "" : "Filter..."
+    placeholderTextColor: colorPalette.textSecondary
+    color: colorPalette.textPrimary
+    rightPadding: clearButton.visible ? clearButton.width + 5 : 0 // Отступ справа, когда кнопка видна
+
+    background: Item 
+    {
+        // Фон поля ввода
+        Rectangle 
+        {
+            id: bg
+            anchors.fill: parent
+            color: colorPalette.surface
+            border.color: parent.parent.focus ? colorPalette.primaryOrange : colorPalette.border
+            border.width: 1
+            radius: 4
         }
     }
-    
-    // Дополнительные элементы
-    Item {
-        anchors {
-            right: parent.right
-            rightMargin: 10
-            verticalCenter: parent.verticalCenter
+
+    Keys.onPressed: (event) => {
+        if (event.key === Qt.Key_Escape) 
+        {
+            filter.text = ""
+            filter.focus = false
+            event.accepted = true
         }
-        visible: customField.text.length > 0
-        
-        Image {
+    }
+
+    // Кнопка стирания
+    Rectangle 
+    {
+        id: clearButton
+        width: 32
+        height: 32
+        anchors.right: parent.right
+        anchors.rightMargin: 10
+        anchors.verticalCenter: parent.verticalCenter
+        color: "transparent" // Прозрачный фон кнопки
+        visible: filter.length > 0 // Кнопка видна только при наличии текста
+
+        // Символ "×" для кнопки
+        Image 
+        {
+            anchors.centerIn: parent
             source: "qrc:/resources/icons/clear.png"
-            width: 16
-            height: 16
-            MouseArea {
-                anchors.fill: parent
-                onClicked: customField.clear()
-            }
+            width: 32
+            height: 32
+        }
+
+        // Обработка нажатия
+        MouseArea 
+        {
+            anchors.fill: parent
+            onClicked: filter.text = "" // Очистка текста
         }
     }
 }

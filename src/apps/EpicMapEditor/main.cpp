@@ -5,6 +5,7 @@
 #include <memory>
 #include "core/lib.h"
 #include "ui/lib.h"
+#include <QQuickStyle>
 
 void registreTypes()
 {
@@ -52,9 +53,11 @@ int main(int argc, char* argv[])
 {
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+    
 
 
     QApplication app(argc, argv);
+    QQuickStyle::setStyle("Material");
     
     registreTypes();
 

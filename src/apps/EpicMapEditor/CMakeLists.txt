@@ -10,6 +10,7 @@ nw_add_qml_app(
         Qt6::Widgets
         Qt6::Gui
         Qt6::Core5Compat
+        Qt6::QuickControls2
     )
 
 accumulate_files_relative(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} png_resources png)
