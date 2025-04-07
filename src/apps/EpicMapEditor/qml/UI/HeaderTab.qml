@@ -14,11 +14,11 @@ Rectangle
 	signal closeClicked()
 
 	height: parent.height
-	width: label.implicitWidth+20
+	width: label.implicitWidth + 30
 
     color: (control.checked) ? colorPalette.neonOrange : 
 		   (mouseArea.pressed) ? colorPalette.lightOrange : 		
-		   (mouseArea.containsMouse) ? colorPalette.darkOrange : colorPalette.background
+		   (mouseArea.containsMouse) ? colorPalette.primaryOrange : colorPalette.background
 
 	Behavior on color {
         ColorAnimation { duration: 100 }
