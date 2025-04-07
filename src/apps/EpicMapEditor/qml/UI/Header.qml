@@ -10,6 +10,8 @@ Rectangle
 	property alias tabsModel: bar.model
 	property alias bar: bar
 
+	signal closeRequest(int index)
+
 	id: header
 	height: 32
 	color: colorPalette.background
@@ -35,7 +37,8 @@ Rectangle
 		}
 	}
 
-	ListView {
+	ListView 
+	{
         id: bar
         anchors.top: parent.top
         anchors.left: menuButton.right
@@ -56,6 +59,10 @@ Rectangle
 			checked: currentIndex === index
 			onClicked: currentIndex = index
 			closable: !element.fixed
+			onCloseClicked:
+			{
+				header.closeRequest(index)
+			}
         }
     }
 		

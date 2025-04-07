@@ -100,7 +100,7 @@ Rectangle
 
 		onClicked:
 		{
-			closeClicked();
+			control.closeClicked();
 		}
 		iconSource: "qrc:/resources/icons/close.png"
 	}

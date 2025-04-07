@@ -54,6 +54,11 @@ EpicEditorWindow
 	    anchors.top: parent.top
 
         tabsModel: tabsContentCreator.tabsModel
+        onCloseRequest:(index)=>
+        {
+            tabsContentCreator.tabsModel.remove(index)
+            header.currentIndex = header.currentIndex - 1
+        }
     }
     
     ColorPalette
