@@ -10,9 +10,11 @@ AssetImageProvider::AssetImageProvider(AssetsLibrary* library_)
 
 void AssetImageProvider::loadAllImages()
 {
-    for (int packIndex = 0; packIndex < _library->rowCount(); ++packIndex)
+    for (int packIndex = 0; packIndex < _library->size(); ++packIndex)
     {
         AssetPack* pack = _library->element(packIndex);
+        QImage packThumbnail = pack->thumbnail();
+        _imageCache.insert(pack->uuid(), packThumbnail);
 
         for (int i = 0; i < pack->rowCount(); ++i)
         {
@@ -22,10 +24,12 @@ void AssetImageProvider::loadAllImages()
             if (asset)
             {
                 QImage image = asset->thumbnail();
-                if (!image.isNull()) {
+                if (!image.isNull()) 
+                {
                     _imageCache.insert(asset->uuid(), image);
                 }
-                else {
+                else 
+                {
                     qWarning() << "Failed to load image for asset with UUID" << asset->uuid();
                 }
             }

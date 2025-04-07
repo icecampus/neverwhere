@@ -1,10 +1,23 @@
 #include "asset_pack.h"
 
-AssetPack::AssetPack(QString name_, QObject* parent) :
+AssetPack::AssetPack(std::filesystem::path& packPath_, QObject* parent) :
     QAbstractListModel(parent),
-    _name(name_)
+    _packPath(packPath_)
 {
+    _uuid = QUuid::createUuid();
+    _name = _packPath.filename().string().c_str();
+    
+}
 
+QUuid AssetPack::uuid() const
+{
+    return _uuid;
+}
+
+QString AssetPack::getThumbnailUrl()
+{
+    QString url = QString("image://assetImages/") + _uuid.toString(QUuid::WithoutBraces);
+    return url;
 }
 
 QString AssetPack::name() const
@@ -41,4 +54,17 @@ void AssetPack::addAsset(std::unique_ptr<Asset> asset)
     beginInsertRows(QModelIndex(), m_assets.size(), m_assets.size());
     m_assets.push_back(std::move(asset));
     endInsertRows();
+}
+
+QImage AssetPack::thumbnail()
+{
+    QImage result;
+
+    auto thumbnailPath = _packPath / "thumbnail.png";
+    if (fs::exists(thumbnailPath))
+    {
+        result.load(QString(thumbnailPath.c_str()));
+    }
+
+    return result;
 }

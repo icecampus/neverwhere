@@ -19,7 +19,7 @@ QString ImageAsset::imageFilename() const
 
 QString ImageAsset::getUrl() const
 {
-    QString url = QString("image://assetImages/") + m_uuid.toString(QUuid::WithoutBraces);
+    QString url = QString("image://assetImages/") + _uuid.toString(QUuid::WithoutBraces);
 
     return url;
 }
@@ -37,14 +37,13 @@ void ImageAsset::load(const std::filesystem::path& indexPath,  const nlohmann::j
 
 QImage ImageAsset::thumbnail()
 {
+    QImage result;
     if (fs::exists(imagePath))
     {
-        QImage result;
         result.load(QString(imagePath.c_str()));
-        return result;
     }
 
-    return QImage();
+    return result;
 }
 
 nlohmann::json ImageAsset::save()
@@ -55,7 +54,7 @@ nlohmann::json ImageAsset::save()
     };
 
     json j = {
-        {"uuid", m_uuid.toString(QUuid::WithoutBraces).toStdString()},
+        {"uuid", _uuid.toString(QUuid::WithoutBraces).toStdString()},
         {"name", m_name.toStdString()},
         {"graphics", graphics}
     };

@@ -7,22 +7,16 @@ class Tool : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString name READ name CONSTANT)
+    Q_PROPERTY(QString icon READ icon CONSTANT)
 public:
-    explicit Tool(const QString& name, QObject* parent = nullptr);
+    explicit Tool(const QString& name, const QString& icon, QObject* parent);
 
     QString name() const;
+    QString icon() const;
 
 private:
     QString _name;
-
-};
-
-//ToolsModel
-class ToolsModel: public SimpleModel<Tool>
-{
-    Q_OBJECT
-public:
-    explicit ToolsModel(QObject* parent = nullptr);
+    QString _icon;
 
 };
 

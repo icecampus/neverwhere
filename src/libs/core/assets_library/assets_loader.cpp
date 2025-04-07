@@ -23,9 +23,8 @@ void AssetsLoader::load(const std::filesystem::path& rootPath, AssetsLibrary& li
             continue;
         }
         fs::path packPath = entry.path();
-        std::string packName = packPath.filename().string();
 
-        library.addElement<AssetPack>(QString::fromStdString(packName), &library);
+        library.addElement<AssetPack>(packPath, &library);
         AssetPack* lastPack = library.element(library.size()-1);
         loadPack(packPath, lastPack);
     }

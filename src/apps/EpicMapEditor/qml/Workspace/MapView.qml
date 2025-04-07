@@ -11,10 +11,7 @@ Rectangle
     color: "#ffffff"
     border.color: "#cccccc"
     clip: true
-/*
-    layer.enabled: true
-    layer.smooth: true
-*/    
+
     property var hoveredCell: math.ivec2(1, 1)
     property bool showCoordinates: true
 
@@ -171,5 +168,13 @@ Rectangle
         anchors.margins: 10
         width: 100
         height: 30
+    }
+
+    Tools
+    {
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: 10
+        
     }
 }

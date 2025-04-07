@@ -10,7 +10,7 @@ import "Workspace"
     LeftPanel 
     {
         id: leftPanel
-        SplitView.preferredWidth: 300
+        SplitView.preferredWidth: 370
         SplitView.minimumWidth: 100
         SplitView.maximumWidth: 500
     }
@@ -32,7 +32,7 @@ import "Workspace"
 
     handle: Rectangle 
     {
-        implicitWidth: 8
+        implicitWidth: 4
         color: SplitHandle.pressed ? colorPalette.darkOrange : colorPalette.surface2
     }
 }

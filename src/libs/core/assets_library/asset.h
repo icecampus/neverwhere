@@ -33,6 +33,6 @@ public:
 
 protected:
     std::filesystem::path indexPath;
-    QUuid m_uuid;           
+    QUuid _uuid;           
     QString m_name;         
 };

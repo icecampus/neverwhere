@@ -3,6 +3,8 @@
 #include <QQmlContext>
 #include "assets_library/asset_pack.h"
 #include "assets_library/assets_loader.h"
+#include "assets_library/tools/pencil.h"
+#include "assets_library/tools/eraser.h"
 
 
 CoreContext::CoreContext(QQmlApplicationEngine& engine_):
@@ -21,6 +23,11 @@ AssetsLibrary* CoreContext::getAssetsLibraty()
 ChaptersModel* CoreContext::getChaptersModel()
 {
     return &chaptersModel;
+}
+
+ToolsModel* CoreContext::getTools() 
+{
+    return toolsModel.get();
 }
 
 void CoreContext::load()
@@ -46,6 +53,10 @@ void CoreContext::load()
     chaptersModel.addElement<Chapter>("Chapter 8", this);
     chaptersModel.addElement<Chapter>("Chapter 9", this);
 
+    toolsModel.reset(new ToolsModel(&engine));
+
+    toolsModel->addElement<Pencil>(&engine);
+    toolsModel->addElement<Eraser>(&engine);
 }
 
 void CoreContext::loadAssets()

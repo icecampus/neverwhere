@@ -8,7 +8,7 @@ Asset::Asset(QObject* parent)
 
 QUuid Asset::uuid() const 
 { 
-    return m_uuid; 
+    return _uuid; 
 }
 
 QString Asset::name() const 
@@ -18,6 +18,6 @@ QString Asset::name() const
 
 void Asset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
 {
-    m_uuid = QUuid::fromString(QString::fromStdString(j["uuid"].get<std::string>()));
+    _uuid = QUuid::fromString(QString::fromStdString(j["uuid"].get<std::string>()));
     m_name = QString::fromStdString(indexPath.parent_path().stem().string());
 }
