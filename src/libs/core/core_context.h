@@ -13,7 +13,6 @@ class CoreContext: public QObject
     Q_OBJECT
     Q_PROPERTY(AssetsLibraryModel* assetsLibrary READ getAssetsLibraty CONSTANT);
     Q_PROPERTY(ChaptersModel* chapters READ getChaptersModel CONSTANT);
-    Q_PROPERTY(ToolsModel* tools READ getTools CONSTANT);
 
 public:
     explicit CoreContext(QQmlApplicationEngine& engine);
@@ -22,7 +21,7 @@ public:
 
     AssetsLibraryModel* getAssetsLibraty();
     ChaptersModel* getChaptersModel();
-    ToolsModel* getTools();
+    AssetToolsSelector* getTools();
 
 private:
     void loadAssets();
@@ -34,7 +33,6 @@ private:
     AssetImageProvider* imageProvider;
     ChaptersImageProvider* chapterProvider;
 
-    std::unique_ptr<ToolsModel> toolsModel;
 
 
 };

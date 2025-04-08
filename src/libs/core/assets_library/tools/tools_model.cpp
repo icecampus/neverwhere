@@ -24,7 +24,7 @@ void AssetToolsModel::setCurrentTool(int currentIndex)
 }
 
 //ToolsModel
-ToolsModel::ToolsModel(QObject* parent):
+AssetToolsSelector::AssetToolsSelector(QObject* parent):
     tmpToolsMode(this)
 {
     tmpToolsMode.addElement<Pencil>(this);
@@ -32,12 +32,12 @@ ToolsModel::ToolsModel(QObject* parent):
 
 }
 
-Asset* ToolsModel::getCurrentAsset()
+Asset* AssetToolsSelector::getCurrentAsset()
 {
     return currentAsset;
 }
 
-void ToolsModel::setCurrentAsset(Asset* asset)
+void AssetToolsSelector::setCurrentAsset(Asset* asset)
 {
     if (asset != currentAsset)
     {
@@ -48,7 +48,7 @@ void ToolsModel::setCurrentAsset(Asset* asset)
     }
 }
 
-AssetToolsModel* ToolsModel::getToolsModel()
+AssetToolsModel* AssetToolsSelector::getToolsModel()
 {
     return &tmpToolsMode;
 }

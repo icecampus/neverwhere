@@ -32,12 +32,15 @@ void registreTypes()
     qmlRegisterType<Building>("Game", 1, 0, "Building");
 
     qmlRegisterType<AssetsContext>("Game", 1, 0, "AssetsContext");
+    qmlRegisterType<AssetToolsSelector>("Game", 1, 0, "AssetToolsSelector");
+
 
     qmlRegisterType<StaggeredIsometryView>("Game", 1, 0, "StaggeredIsometryView");
     qmlRegisterType<staggered_dimensions>("Game", 1, 0, "staggered_dimensions");
 
     qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
     qmlRegisterType<StaggeredCursor>("Game", 1, 0, "StaggeredCursor");
+
     
 }
 

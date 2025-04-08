@@ -40,7 +40,7 @@ Item
 		        width: 44
 		        height: 36
                 
-                selected: index === core.tools.toolsModel.currentTool
+                selected: index === toolsModel.currentTool
                 image: element.icon
 
                 onClicked:

@@ -14,3 +14,4 @@
 #include "render/staggered_grid/staggered_cursor.h"
 #include "core_context.h"
 #include "models/chapters_image_provider.h"
+#include "assets_library/tools/tools_model.h"

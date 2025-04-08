@@ -25,11 +25,6 @@ ChaptersModel* CoreContext::getChaptersModel()
     return &chaptersModel;
 }
 
-ToolsModel* CoreContext::getTools() 
-{
-    return toolsModel.get();
-}
-
 void CoreContext::load()
 {
     
@@ -52,8 +47,6 @@ void CoreContext::load()
     chaptersModel.addElement<Chapter>("Chapter 7", this);
     chaptersModel.addElement<Chapter>("Chapter 8", this);
     chaptersModel.addElement<Chapter>("Chapter 9", this);
-
-    toolsModel.reset(new ToolsModel(&engine));
 }
 
 void CoreContext::loadAssets()

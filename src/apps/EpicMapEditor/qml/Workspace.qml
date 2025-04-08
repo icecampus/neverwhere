@@ -5,6 +5,7 @@ import "Workspace"
 
  SplitView 
 {
+    property var assetsContext: null
     orientation: Qt.Horizontal
 
     AssetsContext
@@ -29,6 +30,8 @@ import "Workspace"
         SplitView.fillWidth: true
         color: colorPalette.background  // Глубокий черный фон (#0A0A0A)
         border.color: colorPalette.border // Граница (#404040)
+
+        assetsContext: assetsContext
     }
 
     RightPanel {

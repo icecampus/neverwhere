@@ -7,14 +7,16 @@ import "MapView"
 
 Rectangle 
 {
+    property var assetsContext: null
+    property var hoveredCell: math.ivec2(1, 1)
+    property bool showCoordinates: true
+
     id: centerPanel
+
     SplitView.fillWidth: true
     color: "#ffffff"
     border.color: "#cccccc"
     clip: true
-
-    property var hoveredCell: math.ivec2(1, 1)
-    property bool showCoordinates: true
 
     Component.onCompleted: 
     {
@@ -24,6 +26,13 @@ Rectangle
     MapModel
     {
         id: mapModel
+    }
+    
+    AssetToolsSelector
+    {
+        id: toolsSelector
+
+        currentAsset: assetsContext.asset
     }
 
     StaggeredIsometryView
@@ -103,10 +112,10 @@ Rectangle
         anchors.left: parent.left
         anchors.margins: 10
         
-        toolsModel: core.tools.toolsModel
+        toolsModel: toolsSelector.toolsModel
         onToolClicked:(index) =>
         {
-            core.tools.toolsModel.currentTool = index
+            toolsSelector.toolsModel.currentTool = index
         }
     }
 }

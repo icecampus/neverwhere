@@ -23,14 +23,14 @@ private:
 };
 
 
-//ToolsModel
-class ToolsModel: public QObject
+//AssetToolsSelector
+class AssetToolsSelector: public QObject
 {
     Q_OBJECT
     Q_PROPERTY(Asset* currentAsset READ getCurrentAsset WRITE setCurrentAsset NOTIFY currentAssetChanged)
     Q_PROPERTY(AssetToolsModel* toolsModel READ getToolsModel NOTIFY toolsModelChanged)
 public:
-    explicit ToolsModel(QObject* parent);
+    explicit AssetToolsSelector(QObject* parent = nullptr);
 
     Asset* getCurrentAsset();
     void setCurrentAsset(Asset* asset);
