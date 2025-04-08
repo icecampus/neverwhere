@@ -6,7 +6,10 @@ import "../Common"
 
 Rectangle 
 {
+    property var assetsContext: null
     property int currenPackIndex: 0
+
+    id: leftPanel
     color: colorPalette.surface      
 
     RowLayout 
@@ -31,7 +34,7 @@ Rectangle
                         width: 50
                         height: 50
 
-                        selected: currenPackIndex == index
+                        selected: assetsContext.assetPack == element
                                 
                         hoveredColor: colorPalette.darkOrange
                         borderColor: colorPalette.surface
@@ -41,6 +44,7 @@ Rectangle
                         onClicked:
                         {
                             currenPackIndex = index
+                            assetsContext.assetPack = element
                         }
                     }
                 }
@@ -57,6 +61,8 @@ Rectangle
                 id: packLayout
                 anchors.fill: parent                    
                 currentIndex: currenPackIndex
+                
+                assetsContext: leftPanel.assetsContext
                 model: core.assetsLibrary
             }
             

@@ -4,9 +4,11 @@ import Qt5Compat.GraphicalEffects
 import Game 1.0
 import "Tools"
 
-
 Item 
 {
+    property alias toolsModel: toolsRepeater.model
+    signal toolClicked(int index)
+
     id: coordinateDisplay
     width:  50
     height: toolsRow.height + 20
@@ -29,7 +31,8 @@ Item
 
         Repeater
         {
-            model: core.tools.toolsModel
+            id: toolsRepeater
+            
             
             ToolButton
             {
@@ -42,13 +45,11 @@ Item
 
                 onClicked:
                 {
-                    core.tools.toolsModel.currentTool = index
+                    toolClicked(index)
                 }
             }
 
         }
         
     }
-        
-   
 }

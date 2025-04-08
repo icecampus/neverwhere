@@ -6,7 +6,9 @@ import "../../Common"
 
 StackLayout
 {
+    property var assetsContext: null
     property alias model: contentRepeater.model
+    
     id: packLayout
 
     Repeater
@@ -14,6 +16,7 @@ StackLayout
         id: contentRepeater
         AssetsPack
         {
+            assetsContext: packLayout.assetsContext
             assetsPackModel: element
         }
     }

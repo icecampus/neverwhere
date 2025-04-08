@@ -20,17 +20,6 @@ QString AssetsPackModel::getThumbnailUrl()
     return url;
 }
 
-Asset* AssetsPackModel::getCurrent()
-{
-    if (currentAssetIndex < _assets.size())
-    {
-        Asset* currentAsset = _assets[currentAssetIndex].get();
-        return currentAsset;
-    }
-
-    return nullptr;
-}
-
 QString AssetsPackModel::name() const
 {
     return _name;
@@ -78,13 +67,4 @@ QImage AssetsPackModel::thumbnail()
     }
 
     return result;
-}
-
-Q_INVOKABLE void AssetsPackModel::setCurrentByIndex(int index)
-{
-    if(currentAssetIndex != index)
-    {
-        currentAssetIndex = index;
-        emit currentChanged();
-    }
 }

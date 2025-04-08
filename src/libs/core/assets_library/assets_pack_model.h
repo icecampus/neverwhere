@@ -8,7 +8,6 @@ class AssetsPackModel: public QAbstractListModel
     Q_PROPERTY(QUuid uuid READ uuid CONSTANT)
     Q_PROPERTY(QString name READ name CONSTANT)
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
-    Q_PROPERTY(Asset* current READ getCurrent NOTIFY currentChanged)
     
 public:
     enum AssetRoles
@@ -33,8 +32,6 @@ public:
     void addAsset(std::unique_ptr<Asset> asset);
     QImage thumbnail();
 
-    Q_INVOKABLE void setCurrentByIndex(int index);
-
 signals:
     void currentChanged();
 
@@ -46,6 +43,4 @@ private:
     QImage _thumbnail;
 
     std::vector<std::unique_ptr<Asset>> _assets;
-
-    int currentAssetIndex{0};
 };

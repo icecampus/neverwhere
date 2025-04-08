@@ -6,7 +6,9 @@ import "../../Common"
 
 GridView 
 {
+    property var assetsContext: null
     property alias assetsPackModel: paletteView.model
+    
     id: paletteView
     clip: true
 
@@ -20,11 +22,11 @@ GridView
         height: paletteView.cellHeight
         text: element.name
         imageSource: element.url
-        selected: assetsPackModel.current === element
+        selected: assetsContext.asset === element
 
         onClicked: 
         {
-            assetsPackModel.setCurrentByIndex(index)
+            assetsContext.asset = element
         }
     }
 }

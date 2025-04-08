@@ -7,12 +7,20 @@ import "Workspace"
 {
     orientation: Qt.Horizontal
 
+    AssetsContext
+    {
+        id: assetsContext
+        assetsLibrary: core.assetsLibrary
+    }
+
     LeftPanel 
     {
         id: leftPanel
         SplitView.preferredWidth: 370
         SplitView.minimumWidth: 100
         SplitView.maximumWidth: 500
+        
+        assetsContext: assetsContext
     }
 
     MapView 

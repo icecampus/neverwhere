@@ -31,6 +31,8 @@ void registreTypes()
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
     qmlRegisterType<Building>("Game", 1, 0, "Building");
 
+    qmlRegisterType<AssetsContext>("Game", 1, 0, "AssetsContext");
+
     qmlRegisterType<StaggeredIsometryView>("Game", 1, 0, "StaggeredIsometryView");
     qmlRegisterType<staggered_dimensions>("Game", 1, 0, "staggered_dimensions");
 
