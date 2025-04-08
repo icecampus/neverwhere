@@ -2,13 +2,14 @@ import QtQuick
 import QtQuick.Controls 2.15
 import Qt5Compat.GraphicalEffects 
 import Game 1.0
+import "Tools"
 
 
 Item 
 {
     id: coordinateDisplay
-    width:  toolsRow.width + 20
-    height: 46
+    width:  50
+    height: toolsRow.height + 20
         
     Rectangle 
     {
@@ -19,7 +20,7 @@ Item
         radius: 5
     }
 
-    Row
+    Column
     {
         id: toolsRow
         anchors.horizontalCenter: parent.horizontalCenter
@@ -30,24 +31,18 @@ Item
         {
             model: core.tools.toolsModel
             
-            Rectangle
+            ToolButton
             {
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.horizontalCenter: parent.horizontalCenter
 		        width: 44
 		        height: 36
-                border.color: colorPalette.primaryOrange 
-                color: colorPalette.surface2
-                radius: 5
+                
+                selected: index === core.tools.toolsModel.currentTool
+                image: element.icon
 
-                Image
+                onClicked:
                 {
-                    id: icon
-                    anchors.centerIn: parent
-    
-       		        width: 32
-    		        height: 32
-
-                    source: element.icon
+                    core.tools.toolsModel.currentTool = index
                 }
             }
 

@@ -9,6 +9,20 @@ AssetToolsModel::AssetToolsModel(QObject* parent):
 
 }
 
+int AssetToolsModel::getCurrentTool() const
+{
+    return currentTool;
+}
+
+void AssetToolsModel::setCurrentTool(int currentIndex)
+{
+    if (currentTool != currentIndex)
+    {
+        currentTool = currentIndex;
+        emit currentToolChanged();
+    }
+}
+
 //ToolsModel
 ToolsModel::ToolsModel(QObject* parent):
     tmpToolsMode(this)

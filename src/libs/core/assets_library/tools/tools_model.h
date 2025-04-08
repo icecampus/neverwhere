@@ -8,9 +8,18 @@
 class AssetToolsModel : public SimpleModel<Tool>
 {
     Q_OBJECT
+    Q_PROPERTY(int currentTool READ getCurrentTool WRITE setCurrentTool NOTIFY currentToolChanged)
 public:
     explicit AssetToolsModel(QObject* parent);
+    
+    int getCurrentTool() const;
+    void setCurrentTool(int currentIndex);
 
+signals:
+    void currentToolChanged();
+
+private:
+    int currentTool = 0;
 };
 
 
