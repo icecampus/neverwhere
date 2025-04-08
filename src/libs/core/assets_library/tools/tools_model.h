@@ -3,6 +3,8 @@
 #include "simple_model.h"
 #include "tool.h"
 #include "assets_library/asset.h"
+#include "map/map_model.h"
+#include "topology/staggered_isometry.h"
 
 //AssetToolsModel
 class AssetToolsModel : public SimpleModel<Tool>
@@ -14,6 +16,8 @@ public:
     
     int getCurrentTool() const;
     void setCurrentTool(int currentIndex);
+
+    void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso);
 
 signals:
     void currentToolChanged();
@@ -37,6 +41,7 @@ public:
 
     AssetToolsModel* getToolsModel();
 
+    Q_INVOKABLE void click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso);
 signals:
     void currentAssetChanged();
     void toolsModelChanged();

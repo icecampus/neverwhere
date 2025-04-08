@@ -2,6 +2,7 @@
 #include "cursor.h"
 #include "pencil.h"
 #include "eraser.h"
+#include "math/lib.h"
 
 
 //AssetToolsModel
@@ -23,6 +24,19 @@ void AssetToolsModel::setCurrentTool(int currentIndex)
         currentTool = currentIndex;
         emit currentToolChanged();
     }
+}
+
+void AssetToolsModel::click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso)
+{
+
+    std::unique_ptr<GameObject> gameObject = std::make_unique<GameObject>();
+
+    gameObject->setName(QString("Object"));
+
+    math::ivec2 position = iso->screenToMap(math::vec2(screenPos.x(), screenPos.y()));
+    gameObject->setPosition(position);
+
+    mapModel->addGameObject(std::move(gameObject));
 }
 
 //ToolsModel
@@ -65,4 +79,13 @@ AssetToolsModel* AssetToolsSelector::getToolsModel()
     }
 
     return nullptr;
+}
+
+void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso)
+{
+    AssetToolsModel* currentToolsModel = getToolsModel();
+    if (currentToolsModel)
+    {
+        currentToolsModel->click(screenPos, currentAsset, mapModel, iso);
+    }
 }
