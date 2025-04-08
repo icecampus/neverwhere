@@ -25,10 +25,15 @@ void AssetToolsModel::setCurrentTool(int currentIndex)
 
 //ToolsModel
 AssetToolsSelector::AssetToolsSelector(QObject* parent):
-    tmpToolsMode(this)
+    QObject(parent)
 {
-    tmpToolsMode.addElement<Pencil>(this);
-    tmpToolsMode.addElement<Eraser>(this);
+
+    assetType2ToolsModel[AssetTypes::image].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::image]->addElement<Pencil>(this);
+    assetType2ToolsModel[AssetTypes::image]->addElement<Eraser>(this);
+
+    assetType2ToolsModel[AssetTypes::slice].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::slice]->addElement<Pencil>(this);
 
 }
 
@@ -42,6 +47,7 @@ void AssetToolsSelector::setCurrentAsset(Asset* asset)
     if (asset != currentAsset)
     {
         currentAsset = asset;
+    
         emit currentAssetChanged();
         emit toolsModelChanged();
         
@@ -50,5 +56,10 @@ void AssetToolsSelector::setCurrentAsset(Asset* asset)
 
 AssetToolsModel* AssetToolsSelector::getToolsModel()
 {
-    return &tmpToolsMode;
+    if (currentAsset)
+    {
+        return assetType2ToolsModel[currentAsset->type].get();
+    }
+
+    return nullptr;
 }

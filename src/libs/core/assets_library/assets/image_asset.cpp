@@ -1,7 +1,7 @@
 #include "image_asset.h"
 
 ImageAsset::ImageAsset(QObject* parent):
-    Asset(parent)
+    Asset(AssetTypes::image, parent)
 {
     //m_image.load(QString::fromStdString(imagePath.string()));
 

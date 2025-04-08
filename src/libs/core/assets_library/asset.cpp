@@ -1,8 +1,9 @@
 #include "asset.h"
 
 
-Asset::Asset(QObject* parent)
-    : QObject(parent)
+Asset::Asset(AssetTypes type_, QObject* parent):
+    QObject(parent),
+    type(type_)
 {
 }
 

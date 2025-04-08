@@ -12,6 +12,7 @@ Item
     id: coordinateDisplay
     width:  50
     height: toolsRow.height + 20
+    visible: (toolsModel) ? true : false
         
     Rectangle 
     {

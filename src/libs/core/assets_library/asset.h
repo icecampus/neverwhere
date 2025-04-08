@@ -23,7 +23,7 @@ class Asset : public QObject
     Q_PROPERTY(QString name READ name CONSTANT)
 
 public:
-    explicit Asset(QObject* parent);
+    explicit Asset(AssetTypes type, QObject* parent);
 
     QUuid uuid() const;
     QString name() const;
@@ -31,8 +31,11 @@ public:
     virtual void load(const std::filesystem::path& indexPath,  const nlohmann::json& j);
     virtual QImage thumbnail() = 0;
 
+    
+    const AssetTypes type;
 protected:
     std::filesystem::path indexPath;
     QUuid _uuid;           
-    QString m_name;         
+    QString m_name;   
+    
 };
