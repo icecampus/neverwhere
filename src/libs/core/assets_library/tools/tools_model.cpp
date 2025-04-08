@@ -35,6 +35,7 @@ void AssetToolsModel::click(QPoint screenPos, Asset* currentAsset, MapModel* map
 
     math::ivec2 position = iso->screenToMap(math::vec2(screenPos.x(), screenPos.y()));
     gameObject->setPosition(position);
+    gameObject->setAssetUiid(currentAsset->getThumbnailUrl());
 
     mapModel->addGameObject(std::move(gameObject));
 }

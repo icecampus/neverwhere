@@ -7,31 +7,22 @@ class GameObject : public QObject
     Q_OBJECT
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)
     Q_PROPERTY(math::ivec2 position READ getPosition WRITE setPosition NOTIFY positionChanged);
+    Q_PROPERTY(QString assetUuid READ getAssetUuid CONSTANT )
 
 public:
-    explicit GameObject(QObject *parent = nullptr) : QObject(parent) {}
+    explicit GameObject(QObject *parent = nullptr);
 
-    QString name() const {
-        return m_name;
-    }
+    //propertis
+    QString name() const;
+    void setName(const QString &name);
 
-    void setName(const QString &name) {
-        if (m_name != name) {
-            m_name = name;
-            emit nameChanged();
-        }
-    }
+    math::ivec2 getPosition() const;
+    void setPosition(const math::ivec2& position);
 
-    math::ivec2 getPosition() const {
-        return m_position;
-    }
+    QString getAssetUuid();
+    void setAssetUiid(const QString& uuid);
 
-    void setPosition(const math::ivec2& position) {
-        if (m_position != position) {
-            m_position = position;
-            emit positionChanged();
-        }
-    }
+
 signals:
     void nameChanged();
     void positionChanged();
@@ -39,4 +30,5 @@ signals:
 private:
     QString m_name;
     math::ivec2 m_position;
+    QString assetUuid;
 };

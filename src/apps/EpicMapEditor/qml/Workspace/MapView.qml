@@ -97,7 +97,10 @@ Rectangle
         isoView: isoView
         onClicked:(mouse)=>
         {
-            toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView)
+            if(mouse.button === Qt.LeftButton )
+            {
+                toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView)
+            }
         }
     }
 
