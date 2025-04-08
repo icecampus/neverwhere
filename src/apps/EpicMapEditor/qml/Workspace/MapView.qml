@@ -37,7 +37,7 @@ Rectangle
         topology: isoView
         size: Qt.size(200, 200)
         
-        color: "blue"
+        color: "grey"
 
         transform: [
             Scale 

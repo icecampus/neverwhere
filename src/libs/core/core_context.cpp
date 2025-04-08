@@ -1,7 +1,7 @@
 #include "core_context.h"
 #include <format>
 #include <QQmlContext>
-#include "assets_library/asset_pack.h"
+#include "assets_library/assets_pack_model.h"
 #include "assets_library/assets_loader.h"
 #include "assets_library/tools/pencil.h"
 #include "assets_library/tools/eraser.h"
@@ -15,7 +15,7 @@ CoreContext::CoreContext(QQmlApplicationEngine& engine_):
 
 }
 
-AssetsLibrary* CoreContext::getAssetsLibraty()
+AssetsLibraryModel* CoreContext::getAssetsLibraty()
 {
     return assetsLibrary.get();
 }
@@ -33,7 +33,7 @@ ToolsModel* CoreContext::getTools()
 void CoreContext::load()
 {
     
-    assetsLibrary.reset(new AssetsLibrary(&engine));
+    assetsLibrary.reset(new AssetsLibraryModel(&engine));
     loadAssets();
 
     imageProvider = new AssetImageProvider(assetsLibrary.get());

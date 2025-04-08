@@ -10,6 +10,7 @@ Item
     property color borderColor: colorPalette.primaryOrange 
     property bool rounded: true
     property alias margin: content.anchors.margins
+    property bool selected: false
 
     id: rootGridElement
 
@@ -17,9 +18,9 @@ Item
     {
         id: content
         anchors.fill: parent
-        radius: (rounded) ? 10 : 0
-        color: (mouseArea.containsMouse) ? hoveredColor : backroundColor    
-        border.color: borderColor
+        radius: (rounded) ? 5 : 0
+        color: (selected) ? hoveredColor : backroundColor    
+        border.color: (mouseArea.containsMouse) ? borderColor : "transparent"
         anchors.margins: 2
                 
         Image 

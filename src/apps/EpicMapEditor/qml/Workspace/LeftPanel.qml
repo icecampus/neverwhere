@@ -52,39 +52,12 @@ Rectangle
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            StackLayout
+            AssetsLibrary
 	        {
                 id: packLayout
                 anchors.fill: parent                    
                 currentIndex: currenPackIndex
-
-                Repeater
-		        {
-                    model: core.assetsLibrary
-                    GridView 
-                    {
-                        id: paletteView
-                        model: element
-                        clip: true
-
-                        property int minCellWidth: 150    // Минимальная ширина ячейки
-                        cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    // Динамическая ширина ячейки
-                        cellHeight: 150    // Фиксированная высота ячейки
-
-                        delegate: GridElement 
-                        {
-                            width: paletteView.cellWidth
-                            height: paletteView.cellHeight
-                            text: element.name
-                            imageSource: element.url
-
-                            onClicked: 
-                            {
-                                console.log("Asset selected:", element.name)
-                            }
-                        }
-                    }
-                }
+                model: core.assetsLibrary
             }
             
             FilterInput

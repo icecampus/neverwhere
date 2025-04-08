@@ -1,7 +1,7 @@
-#include "asset_image_provider.h"
+#include "assets_image_provider.h"
 
 
-AssetImageProvider::AssetImageProvider(AssetsLibrary* library_)
+AssetImageProvider::AssetImageProvider(AssetsLibraryModel* library_)
     : QQuickImageProvider(QQuickImageProvider::Image), _library(library_) 
 {
     
@@ -12,14 +12,14 @@ void AssetImageProvider::loadAllImages()
 {
     for (int packIndex = 0; packIndex < _library->size(); ++packIndex)
     {
-        AssetPack* pack = _library->element(packIndex);
+        AssetsPackModel* pack = _library->element(packIndex);
         QImage packThumbnail = pack->thumbnail();
         _imageCache.insert(pack->uuid(), packThumbnail);
 
         for (int i = 0; i < pack->rowCount(); ++i)
         {
             QModelIndex index = pack->index(i);
-            Asset* asset = pack->data(index, AssetsLibrary::ElementRole).value<Asset*>();
+            Asset* asset = pack->data(index, AssetsLibraryModel::ElementRole).value<Asset*>();
 
             if (asset)
             {

@@ -3,15 +3,15 @@
 
 #include "models/chapters_model.h"
 #include "models/chapters_image_provider.h"
-#include "assets_library/assets_library.h"
-#include "assets_library/asset_image_provider.h"
+#include "assets_library/assets_library_model.h"
+#include "assets_library/assets_image_provider.h"
 #include "assets_library/tools/tools_model.h"
 
 
 class CoreContext: public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(AssetsLibrary* assetsLibrary READ getAssetsLibraty CONSTANT);
+    Q_PROPERTY(AssetsLibraryModel* assetsLibrary READ getAssetsLibraty CONSTANT);
     Q_PROPERTY(ChaptersModel* chapters READ getChaptersModel CONSTANT);
     Q_PROPERTY(ToolsModel* tools READ getTools CONSTANT);
 
@@ -20,7 +20,7 @@ public:
 
     Q_INVOKABLE void load();
 
-    AssetsLibrary* getAssetsLibraty();
+    AssetsLibraryModel* getAssetsLibraty();
     ChaptersModel* getChaptersModel();
     ToolsModel* getTools();
 
@@ -30,7 +30,7 @@ private:
     ChaptersModel chaptersModel;
 
     QQmlApplicationEngine& engine;
-    std::unique_ptr<AssetsLibrary> assetsLibrary;
+    std::unique_ptr<AssetsLibraryModel> assetsLibrary;
     AssetImageProvider* imageProvider;
     ChaptersImageProvider* chapterProvider;
 

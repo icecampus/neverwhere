@@ -4,11 +4,11 @@
 
 #include "assets/image_asset.h"
 #include "assets/slice_asset.h"
-#include "asset_pack.h"
+#include "assets_pack_model.h"
 
 namespace fs = std::filesystem;
 
-void AssetsLoader::load(const std::filesystem::path& rootPath, AssetsLibrary& library)
+void AssetsLoader::load(const std::filesystem::path& rootPath, AssetsLibraryModel& library)
 {
     if (!fs::exists(rootPath))
     {
@@ -24,13 +24,13 @@ void AssetsLoader::load(const std::filesystem::path& rootPath, AssetsLibrary& li
         }
         fs::path packPath = entry.path();
 
-        library.addElement<AssetPack>(packPath, &library);
-        AssetPack* lastPack = library.element(library.size()-1);
+        library.addElement<AssetsPackModel>(packPath, &library);
+        AssetsPackModel* lastPack = library.element(library.size()-1);
         loadPack(packPath, lastPack);
     }
 }
 
-void AssetsLoader::loadPack(const std::filesystem::path& packPath, AssetPack* model)
+void AssetsLoader::loadPack(const std::filesystem::path& packPath, AssetsPackModel* model)
 {
     const std::string& groupName = packPath.filename().string();
     
@@ -49,7 +49,7 @@ void AssetsLoader::loadPack(const std::filesystem::path& packPath, AssetPack* mo
     }
 }
 
-void AssetsLoader::loadAsset(const fs::path& assetPath, AssetPack* pack)
+void AssetsLoader::loadAsset(const fs::path& assetPath, AssetsPackModel* pack)
 {
     fs::path jsonFilePath = assetPath / "index.json";
 

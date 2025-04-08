@@ -2,12 +2,13 @@
 #include <QObject>
 #include "asset.h"
 
-class AssetPack: public QAbstractListModel
+class AssetsPackModel: public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(QUuid uuid READ uuid CONSTANT)
     Q_PROPERTY(QString name READ name CONSTANT)
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
+    Q_PROPERTY(Asset* current READ getCurrent NOTIFY currentChanged)
     
 public:
     enum AssetRoles
@@ -15,22 +16,27 @@ public:
         ElementRole = Qt::UserRole + 1
     };
 
-    explicit AssetPack(std::filesystem::path& packPath, QObject* parent = nullptr);
+    explicit AssetsPackModel(std::filesystem::path& packPath, QObject* parent = nullptr);
 
+    //property
     QString name() const;
     QUuid uuid() const;
     QString getThumbnailUrl();
+    Asset* getCurrent();
 
     //QAbstractListModel
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    
-
     //
     void addAsset(std::unique_ptr<Asset> asset);
     QImage thumbnail();
+
+    Q_INVOKABLE void setCurrentByIndex(int index);
+
+signals:
+    void currentChanged();
 
 private:
 
@@ -39,5 +45,7 @@ private:
     QString _name;
     QImage _thumbnail;
 
-    std::vector<std::unique_ptr<Asset>> m_assets;
+    std::vector<std::unique_ptr<Asset>> _assets;
+
+    int currentAssetIndex{0};
 };

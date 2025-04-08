@@ -12,10 +12,10 @@ Rectangle
     signal clicked()
 
     id: toolButton
-    border.color: selected ? colorPalette.primaryOrange : "transparent"
+    border.color:  mouseArea.containsMouse ? colorPalette.primaryOrange : "transparent"
 
     color:  ( mouseArea.pressed ) ?  colorPalette.darkOrange: 
-			( mouseArea.containsMouse ) ? colorPalette.primaryOrange : colorPalette.surface2
+			( selected ) ? colorPalette.primaryOrange : colorPalette.surface2
     
   
     radius: 4
