@@ -32,7 +32,7 @@ import "Workspace"
 
     handle: Rectangle 
     {
-        implicitWidth: 4
+        implicitWidth: 3
         color: SplitHandle.pressed ? colorPalette.darkOrange : colorPalette.surface2
     }
 }

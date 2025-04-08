@@ -28,7 +28,7 @@ Item
 
         Repeater
         {
-            model: core.tools
+            model: core.tools.toolsModel
             
             Rectangle
             {

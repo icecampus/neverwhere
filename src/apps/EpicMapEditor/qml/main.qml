@@ -111,7 +111,7 @@ EpicEditorWindow
                     delegate: Rectangle
                     {
                         id: worspaceWrapper
-                        color: "green"
+                        color: "purple"
                         Component.onCompleted: 
                         {
                             element.item.parent = worspaceWrapper

@@ -54,9 +54,6 @@ void CoreContext::load()
     chaptersModel.addElement<Chapter>("Chapter 9", this);
 
     toolsModel.reset(new ToolsModel(&engine));
-
-    toolsModel->addElement<Pencil>(&engine);
-    toolsModel->addElement<Eraser>(&engine);
 }
 
 void CoreContext::loadAssets()

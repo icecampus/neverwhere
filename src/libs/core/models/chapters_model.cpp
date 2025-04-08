@@ -14,7 +14,8 @@ QString Chapter::name() const
 
 
 //LayersModel
-ChaptersModel::ChaptersModel(QObject* parent)
+ChaptersModel::ChaptersModel(QObject* parent):
+    SimpleModel<Chapter>(parent)
 {
 
 }

@@ -13,7 +13,7 @@ public:
         ElementRole = Qt::UserRole + 1
     };
 
-    explicit SimpleModel(QObject *parent = nullptr) : 
+    explicit SimpleModel(QObject *parent) : 
         QAbstractListModel(parent) 
     {
     

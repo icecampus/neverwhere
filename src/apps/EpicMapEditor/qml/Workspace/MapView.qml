@@ -30,13 +30,14 @@ Rectangle
         id: isoView
     }
 
+    
     StaggeredGrid 
     {
         id: customItem
         topology: isoView
         size: Qt.size(200, 200)
         
-        color: "green"
+        color: "blue"
 
         transform: [
             Scale 
@@ -79,7 +80,7 @@ Rectangle
             }
         }
     }
-
+    
     StaggeredCursor
     {
         topology: isoView

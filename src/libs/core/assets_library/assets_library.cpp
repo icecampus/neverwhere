@@ -2,7 +2,8 @@
 
 
 //LayersModel
-AssetsLibrary::AssetsLibrary(QObject* parent)
+AssetsLibrary::AssetsLibrary(QObject* parent):
+    SimpleModel<AssetPack>(parent)
 {
 
 }
