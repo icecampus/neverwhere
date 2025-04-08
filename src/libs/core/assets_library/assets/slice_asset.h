@@ -5,10 +5,18 @@ class SliceAsset: public Asset
 {
     Q_OBJECT
 
+    
 public:
     explicit SliceAsset(QObject* parent);
 
-
+    //
     void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
     QImage thumbnail() override;
+
+protected:
+    QString getUrlInternal() const override;
+
+private:
+    std::string thumbnailFilename;
+    fs::path thumbnailPath;
 };

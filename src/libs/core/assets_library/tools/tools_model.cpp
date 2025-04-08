@@ -1,6 +1,8 @@
 #include "tools_model.h"
+#include "cursor.h"
 #include "pencil.h"
 #include "eraser.h"
+
 
 //AssetToolsModel
 AssetToolsModel::AssetToolsModel(QObject* parent):
@@ -29,6 +31,7 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
 {
 
     assetType2ToolsModel[AssetTypes::image].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::image]->addElement<Cursor>(this);
     assetType2ToolsModel[AssetTypes::image]->addElement<Pencil>(this);
     assetType2ToolsModel[AssetTypes::image]->addElement<Eraser>(this);
 

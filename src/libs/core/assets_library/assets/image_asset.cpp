@@ -17,7 +17,7 @@ QString ImageAsset::imageFilename() const
     return m_imageFilename; 
 }
 
-QString ImageAsset::getUrl() const
+QString ImageAsset::getUrlInternal() const
 {
     QString url = QString("image://assetImages/") + _uuid.toString(QUuid::WithoutBraces);
 
@@ -55,9 +55,10 @@ nlohmann::json ImageAsset::save()
 
     json j = {
         {"uuid", _uuid.toString(QUuid::WithoutBraces).toStdString()},
-        {"name", m_name.toStdString()},
+        {"name", _name.toStdString()},
         {"graphics", graphics}
     };
 
     return j;
 }
+

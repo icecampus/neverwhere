@@ -10,23 +10,41 @@ MouseArea
     id: mouseArea
     anchors.fill: parent
     hoverEnabled: true 
+    acceptedButtons: Qt.LeftButton | Qt.RightButton 
 
     property int startX: 0
     property int startY: 0
     property int startCamX: 0
     property int startCamY: 0
+    property bool startDrag: false
 
-    onPressed: 
+    onPressed:(mouse)=>
     {
-        startX = mouseX
-        startY = mouseY
-        startCamX = isoView.cameraX
-        startCamY = isoView.cameraY
+        if(mouse.button === Qt.RightButton )
+        {
+            startX = mouseX
+            startY = mouseY
+            startCamX = isoView.cameraX
+            startCamY = isoView.cameraY
+            
+            startDrag = true
+            console.log("startDrag")
+        }
     }
 
-    onPositionChanged: 
+
+    onReleased:(mouse)=>
     {
-        if (pressed) 
+        if(mouse.button === Qt.RightButton )
+        {
+            startDrag = false
+        }
+    }
+
+
+    onPositionChanged:(mouse)=>
+    {
+        if (startDrag) 
         {
             var dx = mouseX - startX
             var dy = mouseY - startY

@@ -21,7 +21,7 @@ GridView
         width: paletteView.cellWidth
         height: paletteView.cellHeight
         text: element.name
-        imageSource: element.url
+        imageSource: element.thumbnailUrl
         selected: assetsContext.asset === element
 
         onClicked: 
