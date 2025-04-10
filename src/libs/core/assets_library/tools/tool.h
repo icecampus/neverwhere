@@ -1,6 +1,9 @@
 #pragma once
 #include <QObject>
 #include "simple_model.h"
+#include "assets_library/asset.h"
+#include "map/map_model.h"
+#include "topology/staggered_isometry.h"
 
 //Tool
 class Tool : public QObject
@@ -14,6 +17,8 @@ public:
     QString name() const;
     QString icon() const;
 
+
+    virtual void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso)=0;
 private:
     QString _name;
     QString _icon;
