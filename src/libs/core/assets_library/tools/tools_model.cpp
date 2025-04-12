@@ -1,8 +1,10 @@
 #include "tools_model.h"
-#include "cursor.h"
-#include "pencil.h"
-#include "eraser.h"
 #include "math/lib.h"
+
+#include "tile_2d/cursor.h"
+#include "tile_2d/pencil.h"
+#include "tile_2d/eraser.h"
+#include "landscape/landscape_pencil.h"
 
 
 //AssetToolsModel
@@ -45,7 +47,7 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
     assetType2ToolsModel[AssetTypes::image]->addElement<Eraser>(this);
 
     assetType2ToolsModel[AssetTypes::slice].reset(new AssetToolsModel(this));
-    assetType2ToolsModel[AssetTypes::slice]->addElement<Pencil>(this);
+    assetType2ToolsModel[AssetTypes::slice]->addElement<LandscapePencil>(this);
 
 }
 

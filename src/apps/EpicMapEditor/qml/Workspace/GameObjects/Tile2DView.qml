@@ -19,13 +19,4 @@ Item
         anchors.fill: parent
         source: imageAsset.thumbnailUrl
     }
-
-    Rectangle
-    {
-        anchors.centerIn: parent
-        width: 5
-        height: 5
-        color: "red"
-    }
-
 }

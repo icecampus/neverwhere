@@ -37,6 +37,14 @@ Item
                     gameObject: element
                 }
             }
+            DelegateChoice 
+            {   
+                roleValue: GameObjectTypes.Landscape
+                delegate: LandscapeView
+                {
+                    gameObject: element
+                }
+            }
         }
     }
 }

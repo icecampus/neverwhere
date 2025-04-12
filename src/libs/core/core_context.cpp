@@ -3,8 +3,6 @@
 #include <QQmlContext>
 #include "assets_library/assets_pack_model.h"
 #include "assets_library/assets_loader.h"
-#include "assets_library/tools/pencil.h"
-#include "assets_library/tools/eraser.h"
 
 namespace fs = std::filesystem;
 

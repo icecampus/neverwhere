@@ -1,10 +1,10 @@
 #pragma once
-#include "tool.h"
+#include "assets_library/tools/tool.h"
 
-class Cursor: public Tool
+class Eraser: public Tool
 {
 public:
-    Cursor(QObject* parent);
+    Eraser(QObject* parent);
 
     void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso) override;
 

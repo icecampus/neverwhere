@@ -1,10 +1,10 @@
 #pragma once
-#include "tool.h"
+#include "assets_library/tools/tool.h"
 
-class Pencil: public Tool
+class LandscapePencil: public Tool
 {
 public:
-    Pencil(QObject* parent);
+    LandscapePencil(QObject* parent);
 
 
     void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso) override;

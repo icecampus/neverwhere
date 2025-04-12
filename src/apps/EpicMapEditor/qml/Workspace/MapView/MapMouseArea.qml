@@ -28,7 +28,6 @@ MouseArea
             startCamY = isoView.cameraY
             
             startDrag = true
-            console.log("startDrag")
         }
     }
 
