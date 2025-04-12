@@ -36,12 +36,12 @@ void GameObject::setPosition(const math::ivec2& position)
     }
 }
 
-QString GameObject::getAssetUuid()
+QUuid GameObject::getAssetUuid()
 {
     return assetUuid;
 }
 
-void GameObject::setAssetUiid(const QString& uuid)
+void GameObject::setAssetUiid(const QUuid& uuid)
 {
     assetUuid = uuid;
 }

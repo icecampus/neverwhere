@@ -31,8 +31,8 @@ Item
 
             DelegateChoice 
             {   
-                roleValue: AssetTypes.image
-                delegate: ImageGOView
+                roleValue: GameObjectTypes.Tile2D
+                delegate: Tile2DView
                 {
                     gameObject: element
                 }

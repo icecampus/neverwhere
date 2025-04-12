@@ -1,5 +1,7 @@
-#include "map_model.h"
+﻿#include "map_model.h"
 #include <QRandomGenerator>
+
+#include "game_objects/tile_2d.h"
 #include "game_objects/building.h"
 
 MapModel::MapModel(QObject* parent):
@@ -26,7 +28,7 @@ QVariant MapModel::data(const QModelIndex& index, int role) const
 
     if (role == TypeRole)
     {
-        return QVariant();
+        return m_gameObjects[index.row()]->getType();
     }
 
     if (role == ElementRole)
@@ -72,15 +74,15 @@ void MapModel::populateMapModel()
     QRandomGenerator* rand = QRandomGenerator::global();
 
     std::vector<std::string>  imageSources{
-        "image://assetImages/a3771d55-8ca0-44aa-9d9f-5ab3e9cb300e", 
-        "image://assetImages/9813e80b-c6f7-43f9-9f11-f074009bb8f1", 
-        "image://assetImages/737179d4-0535-4141-ab2c-68758b71c141", 
-        "image://assetImages/a32aee74-1e74-45c4-a34c-de5e8847d1da", 
-        "image://assetImages/a476f78f-c329-4a78-be82-b7c5dbe49c6c"  
+        "a3771d55-8ca0-44aa-9d9f-5ab3e9cb300e", 
+        "9813e80b-c6f7-43f9-9f11-f074009bb8f1", 
+        "737179d4-0535-4141-ab2c-68758b71c141", 
+        "a32aee74-1e74-45c4-a34c-de5e8847d1da", 
+        "a476f78f-c329-4a78-be82-b7c5dbe49c6c"  
     };
 
     for (int i = 1; i <= 2000; ++i) {
-        std::unique_ptr<Building> gameObject = std::make_unique<Building>();
+        std::unique_ptr<Tile2D> gameObject = std::make_unique<Tile2D>();
 
         gameObject->setName(QString("Object %1").arg(i));
 
@@ -90,7 +92,11 @@ void MapModel::populateMapModel()
         gameObject->setPosition(randomPosition);
 
         int assetIndex = rand->generateDouble() * 3;
-        gameObject->setAssetUiid(QString::fromStdString(imageSources[assetIndex]));
+
+        QString uuidStr = QString::fromStdString(imageSources[assetIndex]);
+
+        QUuid uuid(uuidStr); 
+        gameObject->setAssetUiid(uuid);
 
         addGameObject(std::move(gameObject));
     }

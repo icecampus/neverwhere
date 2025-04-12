@@ -26,12 +26,13 @@ void registreTypes()
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
 
     qmlRegisterType<MapModel>("Game", 1, 0, "MapModel");
-    qmlRegisterType<LandTile>("Game", 1, 0, "LandTile");
+    qmlRegisterType<Tile2D>("Game", 1, 0, "Tile2D");
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
     qmlRegisterType<Building>("Game", 1, 0, "Building");
 
     qmlRegisterType<AssetsContext>("Game", 1, 0, "AssetsContext");
     qmlRegisterType<AssetToolsSelector>("Game", 1, 0, "AssetToolsSelector");
+    qmlRegisterType<ImageAsset>("Game", 1, 0, "ImageAsset");
 
 
     qmlRegisterType<StaggeredIsometryView>("Game", 1, 0, "StaggeredIsometryView");

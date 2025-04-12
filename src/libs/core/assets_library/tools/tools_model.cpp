@@ -28,7 +28,7 @@ void AssetToolsModel::setCurrentTool(int currentIndex)
 
 void AssetToolsModel::click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso)
 {
-    if (currentTool > 0 && currentAsset && mapModel)
+    if (currentTool >= 0 && currentAsset && mapModel)
     {
         element(currentTool)->click(screenPos, currentAsset, mapModel, iso);
     }

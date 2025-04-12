@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QUuid>
 #include "math/lib.h"
 
 
@@ -8,8 +9,8 @@ namespace GameObjectTypes
     Q_NAMESPACE;
     enum Type
     {
+        Tile2D,
         Landscape,
-        Tile,
         Resource,
         Buildings,
         Cloud
@@ -23,7 +24,7 @@ class GameObject : public QObject
     Q_OBJECT
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)
     Q_PROPERTY(math::ivec2 position READ getPosition WRITE setPosition NOTIFY positionChanged);
-    Q_PROPERTY(QString assetUuid READ getAssetUuid CONSTANT )
+    Q_PROPERTY(QUuid assetUuid READ getAssetUuid CONSTANT )
     Q_PROPERTY(GameObjectTypes::Type type READ getType CONSTANT)
 
 public:
@@ -36,8 +37,8 @@ public:
     math::ivec2 getPosition() const;
     void setPosition(const math::ivec2& position);
 
-    QString getAssetUuid();
-    void setAssetUiid(const QString& uuid);
+    QUuid getAssetUuid();
+    void setAssetUiid(const QUuid& uuid);
 
     GameObjectTypes::Type getType();
 
@@ -48,6 +49,6 @@ signals:
 private:
     QString m_name;
     math::ivec2 m_position;
-    QString assetUuid;
+    QUuid assetUuid;
     GameObjectTypes::Type type;
 };

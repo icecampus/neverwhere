@@ -10,15 +10,39 @@ AssetsLibraryModel::AssetsLibraryModel(QObject* parent):
 
 Q_INVOKABLE Asset* AssetsLibraryModel::getAsset(const QUuid& uuid)
 {
-    return uuid2Asset[uuid];
+    auto found = uuid2Asset.find(uuid);
+    if (found != uuid2Asset.end())
+    {
+        return found->second;
+    }
+    
+    qWarning() << "Can't find asset: " << uuid;
+
+    return nullptr;
 }
 
 void AssetsLibraryModel::processElement(AssetsPackModel& assetPack)
 {
+    QObject::connect(&assetPack, &AssetsPackModel::rowsInserted,
+        [assetPackPtr = &assetPack, this](const QModelIndex& parent, int first, int last) 
+        {
+            for (int i=first; i<=last; i++)
+            {
+                processAsset(assetPackPtr->element(i));
+            }
+            
+        });
+
+
     for (int i=0; i < assetPack.size(); ++i)
     {
         Asset* asset = assetPack.element(i);
-
-        uuid2Asset[asset->uuid()] = asset;
+        processAsset(asset);
     }
+}
+
+void AssetsLibraryModel::processAsset(Asset* asset)
+{
+    uuid2Asset[asset->uuid()] = asset;
+
 }

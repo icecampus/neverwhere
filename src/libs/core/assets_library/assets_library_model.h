@@ -15,8 +15,11 @@ public:
 
     Q_INVOKABLE Asset* getAsset(const QUuid& uuid);
 
+
+
 protected:
     void processElement(AssetsPackModel& element) override;
+    void processAsset(Asset* asset);
 
     std::map<QUuid, Asset*> uuid2Asset;
 };
