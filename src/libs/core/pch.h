@@ -1,6 +1,7 @@
 #pragma once
 #include <iostream>
 #include <unordered_map>
+#include <array>
 #include <vector>
 #include <cmath>
 #include <functional>
@@ -27,8 +28,7 @@
 #include <QFile>
 #include <QDebug>
 #include <QQuickImageProvider>
-#include <QImage>
-#include <QUuid>
+#include <QUrlQuery>
 #include <QQmlEngine>
 #include <QQuickItem>
 

@@ -5,6 +5,7 @@
 #include "game_objects/landscape.h"
 #include "game_objects/resource.h"
 #include "game_objects/building.h"
+#include "game_objects/background.h"
 #include "topology/staggered_isometry.h"
 #include "assets_library/asset.h"
 #include "assets_library/assets/image_asset.h"

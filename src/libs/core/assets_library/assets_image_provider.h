@@ -7,6 +7,12 @@
 class AssetImageProvider : public QQuickImageProvider 
 {
 public:
+    struct ReuqestParams
+    {
+        QUuid uuid;
+        std::optional<size_t> index;
+    };
+
     AssetImageProvider(AssetsLibraryModel* library);
     void loadAllImages();
 
@@ -14,6 +20,7 @@ public:
 
 private:
     
+    ReuqestParams parse(const QString& request);
 
     AssetsLibraryModel* _library = nullptr; 
     QMap<QUuid, QImage> _imageCache; 

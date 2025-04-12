@@ -63,6 +63,8 @@ void registreTypes()
         "Error: only enums"             // error in case someone tries to create a MyNamespace object
     );
 
+
+    qmlRegisterType<CustomItem>("Game", 1, 0, "CustomItem");
 }
 
 void registerGlobalObject(QQmlApplicationEngine& engine)

@@ -1,4 +1,5 @@
 #include "assets_image_provider.h"
+#include <QUrlQuery>
 
 
 AssetImageProvider::AssetImageProvider(AssetsLibraryModel* library_)
@@ -38,15 +39,20 @@ void AssetImageProvider::loadAllImages()
     }
 }
 
-QImage AssetImageProvider::requestImage(const QString& id, QSize* size, const QSize& requestedSize) 
+// use HTTP like format image://provider/mainId?color=green&size=200x300
+// alternative use json "image://provider/{\"color\":\"green\", \"size\":\"200x300\"} 
+// or image://provider/{"gradient":["#FF0000", "#00FF00"], "angle":45}
+QImage AssetImageProvider::requestImage(const QString& request, QSize* size, const QSize& requestedSize) 
 {
-    QUuid uuid(id);
-    if (!_imageCache.contains(uuid)) {
-        qWarning() << "Image for UUID: " << id << " can't find in cache";
+
+    ReuqestParams params = parse(request);
+    if (!_imageCache.contains(params.uuid)) 
+    {
+        qWarning() << "Image for UUID: " << request << " can't find in cache";
         return QImage();
     }
 
-    QImage image = _imageCache.value(uuid);
+    QImage image = _imageCache.value(params.uuid);
     if (size)
     { 
         *size = image.size();
@@ -56,4 +62,24 @@ QImage AssetImageProvider::requestImage(const QString& id, QSize* size, const QS
         return image.scaled(requestedSize, Qt::KeepAspectRatio);
     }
     return image;
+}
+
+AssetImageProvider::ReuqestParams AssetImageProvider::parse(const QString& request)
+{
+    ReuqestParams result;
+
+    QStringList parts = request.split('?');
+    result.uuid = QUuid(parts[0]);
+
+    QUrlQuery query(parts.size() > 1 ? parts[1] : "");
+
+    if (query.hasQueryItem("index"))
+    {
+        size_t color = query.queryItemValue("index").toUInt();
+    }
+    
+
+
+    return result;
+
 }

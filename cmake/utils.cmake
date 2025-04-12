@@ -228,10 +228,10 @@ function(nw_add_app_sources)
 
 
     #create executable
-    set_target_properties(${AppName} PROPERTIES
-        WIN32_EXECUTABLE TRUE
-        MACOSX_BUNDLE TRUE
-    )
+    # set_target_properties(${AppName} PROPERTIES
+    #     WIN32_EXECUTABLE TRUE
+    #     MACOSX_BUNDLE TRUE
+    # )
 
     qt_add_resources(ARG_SOURCES resources.qrc)
     
@@ -275,7 +275,7 @@ function(nw_add_app_sources)
 
 
     # return AppName
-    set(AppName ${AppName} PARENT_SCOPE)
+    set(AppName ${ARG_NAME} PARENT_SCOPE)
 endfunction()
 
 # nw_add_app
