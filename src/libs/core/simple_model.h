@@ -51,6 +51,19 @@ public:
         beginInsertRows(QModelIndex(), _elements.size(), _elements.size());
         _elements.push_back(std::make_unique<T>(std::forward<Args>(args)...));
         endInsertRows();
+
+        processElement(*_elements.back().get());
+    }
+
+    template <typename T>
+    void addElement(std::unique_ptr<T> element)
+    {
+        static_assert(std::is_base_of<Element, T>::value, "T must derive from Element");
+        beginInsertRows(QModelIndex(), _elements.size(), _elements.size());
+        _elements.push_back(std::move(element));
+        endInsertRows();
+
+        processElement(*_elements.back().get());
     }
 
     Element *element(int index) const 
@@ -68,6 +81,8 @@ public:
 
     size_t size();
 
+protected:
+    virtual void processElement(Element& element){}
 
 private:
     std::deque<std::unique_ptr<Element>> _elements;

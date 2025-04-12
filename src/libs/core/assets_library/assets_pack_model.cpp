@@ -1,7 +1,9 @@
 #include "assets_pack_model.h"
 
+namespace fs = std::filesystem;
+
 AssetsPackModel::AssetsPackModel(std::filesystem::path& packPath_, QObject* parent) :
-    QAbstractListModel(parent),
+    SimpleModel<Asset>(parent),
     _packPath(packPath_)
 {
     _uuid = QUuid::createUuid();
@@ -23,37 +25,6 @@ QString AssetsPackModel::getThumbnailUrl()
 QString AssetsPackModel::name() const
 {
     return _name;
-}
-
-
-int AssetsPackModel::rowCount(const QModelIndex& parent) const
-{
-    return parent.isValid() ? 0 : static_cast<int>(_assets.size());
-}
-
-QVariant AssetsPackModel::data(const QModelIndex& index, int role) const
-{
-    if (!index.isValid() || index.row() >= static_cast<int>(_assets.size()))
-        return QVariant();
-
-    if (role == ElementRole)
-        return QVariant::fromValue(_assets.at(index.row()).get());
-
-    return QVariant();
-}
-
-QHash<int, QByteArray> AssetsPackModel::roleNames() const
-{
-    QHash<int, QByteArray> roles;
-    roles[ElementRole] = "element";
-    return roles;
-}
-
-void AssetsPackModel::addAsset(std::unique_ptr<Asset> asset)
-{
-    beginInsertRows(QModelIndex(), _assets.size(), _assets.size());
-    _assets.push_back(std::move(asset));
-    endInsertRows();
 }
 
 QImage AssetsPackModel::thumbnail()

@@ -6,6 +6,7 @@
 #include "assets_library/tools/pencil.h"
 #include "assets_library/tools/eraser.h"
 
+namespace fs = std::filesystem;
 
 CoreContext::CoreContext(QQmlApplicationEngine& engine_):
     QObject(&engine_),

@@ -1,5 +1,7 @@
 #include "image_asset.h"
 
+namespace fs = std::filesystem;
+
 ImageAsset::ImageAsset(QObject* parent):
     Asset(AssetTypes::image, parent)
 {
@@ -48,12 +50,12 @@ QImage ImageAsset::thumbnail()
 
 nlohmann::json ImageAsset::save()
 {
-    json graphics = {
+    nlohmann::json graphics = {
     {"width", m_width},
     {"imageFilename", m_imageFilename.toStdString()}
     };
 
-    json j = {
+    nlohmann::json j = {
         {"uuid", _uuid.toString(QUuid::WithoutBraces).toStdString()},
         {"name", _name.toStdString()},
         {"graphics", graphics}

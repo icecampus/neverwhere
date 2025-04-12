@@ -7,14 +7,16 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 
-using json = nlohmann::json;
-namespace fs = std::filesystem;
-
-enum class AssetTypes: uint8_t
+namespace AssetTypes
 {
-    image,
-    slice
-};
+    Q_NAMESPACE;
+    enum Type
+    {
+        image,
+        slice
+    };
+    Q_ENUM_NS(Type);
+}
 
 class Asset : public QObject
 {
@@ -24,7 +26,7 @@ class Asset : public QObject
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
 
 public:
-    explicit Asset(AssetTypes type, QObject* parent);
+    explicit Asset(AssetTypes::Type type, QObject* parent);
 
     QUuid uuid() const;
     QString name() const;
@@ -34,7 +36,7 @@ public:
     virtual QImage thumbnail() = 0;
 
     
-    const AssetTypes type;
+    const AssetTypes::Type type;
 protected:
     virtual QString getUrlInternal() const=0;
 

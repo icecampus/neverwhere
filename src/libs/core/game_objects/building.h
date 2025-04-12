@@ -7,18 +7,10 @@ class Building : public GameObject
     Q_PROPERTY(int level READ level WRITE setLevel NOTIFY levelChanged);
 
 public:
-    explicit Building(QObject* parent = nullptr) : GameObject(parent), m_level(1) {}
+    explicit Building(QObject* parent = nullptr);
 
-    int level() const {
-        return m_level;
-    }
-
-    void setLevel(int level) {
-        if (m_level != level) {
-            m_level = level;
-            emit levelChanged();
-        }
-    }
+    int level() const;
+    void setLevel(int level);
 
 signals:
     void levelChanged();

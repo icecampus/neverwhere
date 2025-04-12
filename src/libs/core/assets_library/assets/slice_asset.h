@@ -18,5 +18,5 @@ protected:
 
 private:
     std::string thumbnailFilename;
-    fs::path thumbnailPath;
+    std::filesystem::path thumbnailPath;
 };

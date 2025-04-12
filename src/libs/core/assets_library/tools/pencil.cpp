@@ -1,4 +1,5 @@
 #include "pencil.h"
+#include "game_objects/building.h"
 
 Pencil::Pencil(QObject* parent):
     Tool("Pencil", "pencil", parent)
@@ -8,7 +9,7 @@ Pencil::Pencil(QObject* parent):
 
 void Pencil::click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso)
 {
-    std::unique_ptr<GameObject> gameObject = std::make_unique<GameObject>();
+    std::unique_ptr<Building> gameObject = std::make_unique<Building>();
 
     gameObject->setName(QString("Object"));
 

@@ -1,5 +1,7 @@
 #include "slice_asset.h"
 
+namespace fs = std::filesystem;
+
 SliceAsset::SliceAsset(QObject* parent):
     Asset(AssetTypes::slice, parent)
 {

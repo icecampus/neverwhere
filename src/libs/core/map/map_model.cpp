@@ -1,5 +1,71 @@
 #include "map_model.h"
 #include <QRandomGenerator>
+#include "game_objects/building.h"
+
+MapModel::MapModel(QObject* parent):
+    QAbstractListModel(parent) 
+{
+
+}
+
+int MapModel::rowCount(const QModelIndex& parent) const 
+{
+    if (parent.isValid())
+    {
+        return 0;
+    }
+    return static_cast<int>(m_gameObjects.size());
+}
+
+QVariant MapModel::data(const QModelIndex& index, int role) const  
+{
+    if (!index.isValid() || index.row() >= static_cast<int>(m_gameObjects.size()))
+    {
+        return QVariant();
+    }
+
+    if (role == TypeRole)
+    {
+        return QVariant();
+    }
+
+    if (role == ElementRole)
+    {
+        return QVariant::fromValue(m_gameObjects[index.row()].get());
+    }
+
+    return QVariant();
+}
+
+QHash<int, QByteArray> MapModel::roleNames() const 
+{
+    QHash<int, QByteArray> roles;
+    roles[ElementRole] = "element";
+    roles[TypeRole] = "type";
+    return roles;
+}
+
+void MapModel::addGameObject(std::unique_ptr<GameObject> gameObject) 
+{
+    beginInsertRows(QModelIndex(), m_gameObjects.size(), m_gameObjects.size());
+    m_gameObjects.push_back(std::move(gameObject));
+    endInsertRows();
+}
+
+GameObject* MapModel::getGameObject(int index) const 
+{
+    if (index >= 0 && index < static_cast<int>(m_gameObjects.size()))
+        return m_gameObjects[index].get();
+    return nullptr;
+}
+
+void MapModel::clear() 
+{
+    beginResetModel();
+    m_gameObjects.clear();
+    endResetModel();
+}
+
 
 void MapModel::populateMapModel()
 {
@@ -14,7 +80,7 @@ void MapModel::populateMapModel()
     };
 
     for (int i = 1; i <= 2000; ++i) {
-        std::unique_ptr<GameObject> gameObject = std::make_unique<GameObject>();
+        std::unique_ptr<Building> gameObject = std::make_unique<Building>();
 
         gameObject->setName(QString("Object %1").arg(i));
 

@@ -1,8 +1,9 @@
 #include "game_object.h"
 
 
-GameObject::GameObject(QObject* parent) 
-    : QObject(parent) 
+GameObject::GameObject(GameObjectTypes::Type type_, QObject* parent) 
+    : QObject(parent),
+    type(type_)
 {
 
 }
@@ -43,4 +44,9 @@ QString GameObject::getAssetUuid()
 void GameObject::setAssetUiid(const QString& uuid)
 {
     assetUuid = uuid;
+}
+
+GameObjectTypes::Type GameObject::getType()
+{
+    return type;
 }

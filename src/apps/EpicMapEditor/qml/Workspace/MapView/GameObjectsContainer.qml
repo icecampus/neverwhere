@@ -1,4 +1,5 @@
 ﻿import QtQuick
+import Qt.labs.qmlmodels
 import Game 1.0
 import "../GameObjects"
 
@@ -23,9 +24,19 @@ Item
     Repeater 
     {
         id: gameObjectsRepeater
-        delegate: GameObject 
+        DelegateChooser 
         {
-            gameObject: element
+            id: chooser
+            role: "type"
+
+            DelegateChoice 
+            {   
+                roleValue: AssetTypes.image
+                delegate: ImageGOView
+                {
+                    gameObject: element
+                }
+            }
         }
     }
 }

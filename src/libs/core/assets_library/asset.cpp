@@ -1,7 +1,10 @@
 #include "asset.h"
 
 
-Asset::Asset(AssetTypes type_, QObject* parent):
+using json = nlohmann::json;
+namespace fs = std::filesystem;
+
+Asset::Asset(AssetTypes::Type type_, QObject* parent):
     QObject(parent),
     type(type_)
 {

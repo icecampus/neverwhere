@@ -27,6 +27,6 @@ protected:
 private:
     int m_width;
     QString m_imageFilename;
-    fs::path imagePath;
+    std::filesystem::path imagePath;
 };
 

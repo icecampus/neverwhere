@@ -66,21 +66,21 @@ void AssetsLoader::loadAsset(const fs::path& assetPath, AssetsPackModel* pack)
         return;
     }
 
-    json j;
+    nlohmann::json j;
     jsonFile >> j;
 
     if ( j.count(magic_enum::enum_name(AssetTypes::image)) )
     {
         auto asset = std::make_unique<ImageAsset>(pack);
         asset->load(jsonFilePath, j);
-        pack->addAsset(std::move(asset));
+        pack->addElement(std::move(asset));
     }
 
     if (j.count(magic_enum::enum_name(AssetTypes::slice)))
     {
         auto asset = std::make_unique<SliceAsset>(pack);
         asset->load(jsonFilePath, j);
-        pack->addAsset(std::move(asset));
+        pack->addElement(std::move(asset));
     }
 
 }

@@ -13,5 +13,11 @@ class AssetsLibraryModel : public SimpleModel<AssetsPackModel>
 public:
     explicit AssetsLibraryModel(QObject* parent = nullptr);
 
+    Q_INVOKABLE Asset* getAsset(const QUuid& uuid);
+
+protected:
+    void processElement(AssetsPackModel& element) override;
+
+    std::map<QUuid, Asset*> uuid2Asset;
 };
 

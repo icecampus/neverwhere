@@ -26,7 +26,6 @@ void registreTypes()
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
 
     qmlRegisterType<MapModel>("Game", 1, 0, "MapModel");
-    qmlRegisterType<GameObject>("Game", 1, 0, "GameObject");
     qmlRegisterType<LandTile>("Game", 1, 0, "LandTile");
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
     qmlRegisterType<Building>("Game", 1, 0, "Building");
@@ -41,7 +40,26 @@ void registreTypes()
     qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
     qmlRegisterType<StaggeredCursor>("Game", 1, 0, "StaggeredCursor");
 
-    
+
+    qmlRegisterUncreatableMetaObject(
+        AssetTypes::staticMetaObject,   // static meta object
+        "Game",                         // import statement (can be any string)
+        1,
+        0,                              // major and minor version of the import
+        "AssetTypes",                   // name in QML (does not have to match C++ name)
+        "Error: only enums"             // error in case someone tries to create a MyNamespace object
+    );
+
+
+    qmlRegisterUncreatableMetaObject(
+        GameObjectTypes::staticMetaObject,   // static meta object
+        "Game",                         // import statement (can be any string)
+        1,
+        0,                              // major and minor version of the import
+        "GameObjectTypes",                   // name in QML (does not have to match C++ name)
+        "Error: only enums"             // error in case someone tries to create a MyNamespace object
+    );
+
 }
 
 void registerGlobalObject(QQmlApplicationEngine& engine)

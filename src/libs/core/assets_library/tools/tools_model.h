@@ -49,5 +49,5 @@ signals:
 private:
     Asset* currentAsset{nullptr};
 
-    std::unordered_map<AssetTypes, std::unique_ptr<AssetToolsModel>> assetType2ToolsModel;
+    std::unordered_map<AssetTypes::Type, std::unique_ptr<AssetToolsModel>> assetType2ToolsModel;
 };

@@ -5,21 +5,13 @@
 class Resource : public GameObject
 {
     Q_OBJECT
-        Q_PROPERTY(int quantity READ quantity WRITE setQuantity NOTIFY quantityChanged)
+    Q_PROPERTY(int quantity READ quantity WRITE setQuantity NOTIFY quantityChanged)
 
 public:
-    explicit Resource(QObject* parent = nullptr) : GameObject(parent), m_quantity(0) {}
+    explicit Resource(QObject* parent = nullptr);
 
-    int quantity() const {
-        return m_quantity;
-    }
-
-    void setQuantity(int quantity) {
-        if (m_quantity != quantity) {
-            m_quantity = quantity;
-            emit quantityChanged();
-        }
-    }
+    int quantity() const;
+    void setQuantity(int quantity);
 
 signals:
     void quantityChanged();
