@@ -2,7 +2,7 @@
 #include <QObject>
 #include <QUuid>
 #include "math/lib.h"
-
+#include "base.h"
 
 namespace GameObjectTypes
 {
@@ -14,18 +14,6 @@ namespace GameObjectTypes
         Resource,
         Buildings,
         Cloud
-    };
-    Q_ENUM_NS(Type);
-}
-
-namespace LayerTypes
-{
-    Q_NAMESPACE;
-    enum Type
-    {
-        BaseLandscape,
-        Decoration,
-        GameplayInteractive
     };
     Q_ENUM_NS(Type);
 }

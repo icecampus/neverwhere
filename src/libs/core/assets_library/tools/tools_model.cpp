@@ -81,10 +81,13 @@ AssetToolsModel* AssetToolsSelector::getToolsModel()
 void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso)
 {
     AssetToolsModel* currentToolsModel = getToolsModel();
-    LayerModel* layerModel = mapModel->layer(LayerTypes::GameplayInteractive);
-
-    if (currentToolsModel && layerModel)
+    if (currentToolsModel && currentAsset)
     {
-        currentToolsModel->click(screenPos, currentAsset, layerModel, iso);
+        LayerModel* layerModel = mapModel->layer(currentAsset->getLayerType());
+
+        if (layerModel)
+        {
+            currentToolsModel->click(screenPos, currentAsset, layerModel, iso);
+        }
     }
 }

@@ -1,21 +1,14 @@
 #pragma once
-#include <unordered_map>
-#include <glm/glm.hpp>
-struct IVec2Hash
+#include <QObject>
+
+namespace LayerTypes
 {
-    std::size_t operator()(const glm::ivec2& v) const 
+    Q_NAMESPACE;
+    enum Type
     {
-        std::size_t seed = 0;
-        hash_combine(seed, v.x);
-        hash_combine(seed, v.y);
-        return seed;
-    }
-
-private:
-    template <typename T>
-    static void hash_combine(std::size_t& seed, const T& val) {
-        std::hash<T> hasher;
-        seed ^= hasher(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    }
-};
-
+        Decoration,
+        BaseLandscape,
+        GameplayInteractive
+    };
+    Q_ENUM_NS(Type);
+}
