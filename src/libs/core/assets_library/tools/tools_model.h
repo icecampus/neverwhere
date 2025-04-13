@@ -41,7 +41,7 @@ public:
 
     AssetToolsModel* getToolsModel();
 
-    Q_INVOKABLE void click(QPoint screenPos, LayerModel* mapModel, StaggeredIsometryView* iso);
+    Q_INVOKABLE void click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso);
 signals:
     void currentAssetChanged();
     void toolsModelChanged();

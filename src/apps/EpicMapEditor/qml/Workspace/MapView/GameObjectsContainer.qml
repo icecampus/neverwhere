@@ -5,19 +5,22 @@ import "../GameObjects"
 
 Item 
 {
+    property var isometryView: null
     property alias model: gameObjectsRepeater.model
-    property var isoView: null
 
     id: mapContainer
-                
-    transform: [
-        Scale {
-            xScale: isoView.cameraZoom
-            yScale: isoView.cameraZoom
+     
+    transform: 
+    [
+        Scale 
+        {
+            xScale: isometryView.cameraZoom
+            yScale: isometryView.cameraZoom
         },
-        Translate {
-            x: isoView.cameraX
-            y: isoView.cameraY
+        Translate 
+        {
+            x: isometryView.cameraX
+            y: isometryView.cameraY
         }
     ]
 

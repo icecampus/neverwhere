@@ -26,6 +26,8 @@ void registreTypes()
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
 
     qmlRegisterType<LayerModel>("Game", 1, 0, "LayerModel");
+    qmlRegisterType<MapModel>("Game", 1, 0, "MapModel");
+    
     qmlRegisterType<Tile2D>("Game", 1, 0, "Tile2D");
     qmlRegisterType<Landscape>("Game", 1, 0, "Landscape");
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
@@ -45,24 +47,32 @@ void registreTypes()
 
 
     qmlRegisterUncreatableMetaObject(
-        AssetTypes::staticMetaObject,   // static meta object
-        "Game",                         // import statement (can be any string)
+        AssetTypes::staticMetaObject,       // static meta object
+        "Game",                             // import statement (can be any string)
         1,
-        0,                              // major and minor version of the import
-        "AssetTypes",                   // name in QML (does not have to match C++ name)
-        "Error: only enums"             // error in case someone tries to create a MyNamespace object
+        0,                                  // major and minor version of the import
+        "AssetTypes",                       // name in QML (does not have to match C++ name)
+        "Error: only enums"                 // error in case someone tries to create a MyNamespace object
     );
 
 
     qmlRegisterUncreatableMetaObject(
-        GameObjectTypes::staticMetaObject,   // static meta object
-        "Game",                         // import statement (can be any string)
+        GameObjectTypes::staticMetaObject,  // static meta object
+        "Game",                             // import statement (can be any string)
         1,
-        0,                              // major and minor version of the import
-        "GameObjectTypes",                   // name in QML (does not have to match C++ name)
-        "Error: only enums"             // error in case someone tries to create a MyNamespace object
+        0,                                  // major and minor version of the import
+        "GameObjectTypes",                  // name in QML (does not have to match C++ name)
+        "Error: only enums"                 // error in case someone tries to create a MyNamespace object
     );
 
+    qmlRegisterUncreatableMetaObject(
+        LayerTypes::staticMetaObject,       // static meta object
+        "Game",                             // import statement (can be any string)
+        1,                              
+        0,                                  // major and minor version of the import
+        "LayerTypes",                       // name in QML (does not have to match C++ name)
+        "Error: only enums"                 // error in case someone tries to create a MyNamespace object
+    );
 
     qmlRegisterType<CustomItem>("Game", 1, 0, "CustomItem");
 }

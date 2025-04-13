@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include "game_object.h"
+#include "simple_model.h"
 
 class LayerModel : public QAbstractListModel
 {
@@ -26,9 +27,22 @@ public:
 
     void clear();
 
-    Q_INVOKABLE void populateMapModel();
+    
 
 private:
     std::vector<std::unique_ptr<GameObject>> m_gameObjects;
 };
 
+//MapModel
+class MapModel: public SimpleModel<LayerModel>
+{
+    Q_OBJECT
+public:
+    explicit MapModel(QObject* parent = nullptr);
+
+    LayerModel* layer(LayerTypes::Type type);
+    void addGameObject(LayerTypes::Type layerType, std::unique_ptr<GameObject> gameObject);
+
+    Q_INVOKABLE void populateMapModel();
+
+};

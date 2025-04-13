@@ -23,7 +23,7 @@ Rectangle
         mapModel.populateMapModel();
     }
 
-    LayerModel
+    MapModel
     {
         id: mapModel
     }
@@ -96,15 +96,20 @@ Rectangle
             }
         ]
     }
-
-    GameObjectsContainer 
+    
+    Repeater
     {
         id: mapContainer
-        anchors.fill: parent        
-        
-        isoView: isoView
         model: mapModel
+
+        GameObjectsContainer 
+        {
+            anchors.fill: parent        
+        
+            isometryView: isoView
+            model: element
     
+        }
     }
     
     StaggeredCursor

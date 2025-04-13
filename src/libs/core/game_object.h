@@ -18,6 +18,18 @@ namespace GameObjectTypes
     Q_ENUM_NS(Type);
 }
 
+namespace LayerTypes
+{
+    Q_NAMESPACE;
+    enum Type
+    {
+        BaseLandscape,
+        Decoration,
+        GameplayInteractive
+    };
+    Q_ENUM_NS(Type);
+}
+
 //GameObject
 class GameObject : public QObject
 {
