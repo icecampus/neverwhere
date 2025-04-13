@@ -39,6 +39,41 @@ Rectangle
     {
         id: isoView
     }
+
+
+    CustomItem 
+    {
+        property real t: 1
+        center: Qt.point(-0.748, 0.1);
+        iterationLimit: 3 * (zoom + 30)
+        zoom: t * t / 10
+        
+        width: 20000
+        height: 20000    
+
+        transform: 
+        [
+            Scale 
+            {
+                xScale: isoView.cameraZoom
+                yScale: isoView.cameraZoom
+            },
+            Translate 
+            {
+                x: isoView.cameraX
+                y: isoView.cameraY
+            }
+        ]
+        
+        NumberAnimation on t {
+            from: 1
+            to: 60
+            duration: 30*1000;
+            running: true
+            loops: Animation.Infinite
+        }
+        
+    }
     
     StaggeredGrid 
     {
