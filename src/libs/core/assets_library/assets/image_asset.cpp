@@ -74,3 +74,8 @@ nlohmann::json ImageAsset::save()
     return j;
 }
 
+void ImageAsset::registerImages(RegistationHandle handle)
+{
+    handle(0, image);
+}
+

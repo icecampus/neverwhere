@@ -17,24 +17,24 @@ int LayerModel::rowCount(const QModelIndex& parent) const
     {
         return 0;
     }
-    return static_cast<int>(m_gameObjects.size());
+    return static_cast<int>(_gameObjects.size());
 }
 
 QVariant LayerModel::data(const QModelIndex& index, int role) const  
 {
-    if (!index.isValid() || index.row() >= static_cast<int>(m_gameObjects.size()))
+    if (!index.isValid() || index.row() >= static_cast<int>(_gameObjects.size()))
     {
         return QVariant();
     }
 
     if (role == TypeRole)
     {
-        return m_gameObjects[index.row()]->getType();
+        return _gameObjects[index.row()]->getType();
     }
 
     if (role == ElementRole)
     {
-        return QVariant::fromValue(m_gameObjects[index.row()].get());
+        return QVariant::fromValue(_gameObjects[index.row()].get());
     }
 
     return QVariant();
@@ -50,26 +50,73 @@ QHash<int, QByteArray> LayerModel::roleNames() const
 
 void LayerModel::addGameObject(std::unique_ptr<GameObject> gameObject) 
 {
-    beginInsertRows(QModelIndex(), m_gameObjects.size(), m_gameObjects.size());
-    m_gameObjects.push_back(std::move(gameObject));
+    GameObject* obj = gameObject.get();
+
+    beginInsertRows(QModelIndex(), _gameObjects.size(), _gameObjects.size());
+    _gameObjects.push_back(std::move(gameObject));
+
+    connect(obj, &GameObject::positionChanged, this, &LayerModel::onGameObjectPositionChanged);
+    // Обновляем структуры данных
+    math::ivec2 pos = obj->getPosition();
+    _objectOldPositions[obj] = pos;
+    _positionMap[pos].push_back(obj);
+
     endInsertRows();
 }
 
 GameObject* LayerModel::getGameObject(int index) const 
 {
-    if (index >= 0 && index < static_cast<int>(m_gameObjects.size()))
-        return m_gameObjects[index].get();
+    if (index >= 0 && index < static_cast<int>(_gameObjects.size()))
+        return _gameObjects[index].get();
     return nullptr;
+}
+
+std::vector<GameObject*> LayerModel::getObjectsAt(const math::ivec2& position)
+{
+    auto it = _positionMap.find(position);
+    if (it != _positionMap.end()) 
+    {
+        return it->second;
+    }
+    return {};
+}
+
+void LayerModel::iterate(GameObjectHandler handler)
+{
+    for (auto& gameObject: _gameObjects)
+    {
+        handler(*gameObject.get());
+    }
 }
 
 void LayerModel::clear() 
 {
     beginResetModel();
-    m_gameObjects.clear();
+    _gameObjects.clear();
+    _positionMap.clear();
+    _objectOldPositions.clear();
     endResetModel();
 }
 
 
+
+void LayerModel::onGameObjectPositionChanged()
+{
+    GameObject* obj = qobject_cast<GameObject*>(sender());
+    if (!obj || _objectOldPositions.find(obj) == _objectOldPositions.end()) return;
+
+    math::ivec2 oldPos = _objectOldPositions[obj];
+    math::ivec2 newPos = obj->getPosition();
+
+    // Удаляем из старой позиции
+    auto& oldList = _positionMap[oldPos];
+    oldList.erase(std::remove(oldList.begin(), oldList.end(), obj), oldList.end());
+    if (oldList.empty()) _positionMap.erase(oldPos);
+
+    // Добавляем в новую позицию
+    _positionMap[newPos].push_back(obj);
+    _objectOldPositions[obj] = newPos;
+}
 
 //MapModel
 MapModel::MapModel(QObject* parent):

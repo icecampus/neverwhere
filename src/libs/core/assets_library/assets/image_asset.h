@@ -26,6 +26,8 @@ public:
 
     nlohmann::json save();
 
+    void registerImages(RegistationHandle handle) override;
+
 protected:
     QString getUrlInternal() const override;
 

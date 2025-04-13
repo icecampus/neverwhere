@@ -19,9 +19,10 @@ public:
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override;
 
 private:
-    
+    using ImageCache = std::map<QUuid, std::vector<QImage>>;
+
     ReuqestParams parse(const QString& request);
 
     AssetsLibraryModel* _library = nullptr; 
-    QMap<QUuid, QImage> _imageCache; 
+    ImageCache _imageCache; 
 };

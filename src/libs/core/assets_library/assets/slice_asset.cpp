@@ -48,6 +48,121 @@ QSize SliceAsset::getSize(StaggeredIsometry* iso)
 
 }
 
+void SliceAsset::registerImages(RegistationHandle handle)
+{
+    for(int i=0; i<tiles.size(); ++i)
+    {
+        handle(i, tiles[i]);
+    }
+}
+
+TileSet::TileType SliceAsset::subTileTypeByIndex(size_t tileIndex) const
+{
+    switch (tileIndex)
+    {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+        return TileSet::Full;
+
+    case 4:
+        return TileSet::DownLack;
+    case 5:
+        return TileSet::LeftLack;
+    case 6:
+        return TileSet::UpLack;
+    case 7:
+        return TileSet::RightLack;
+
+    case 8:
+        return TileSet::UpCorner;
+    case 9:
+        return TileSet::RightCorner;
+    case 10:
+        return TileSet::DownCorner;
+    case 11:
+        return TileSet::LeftCorner;
+
+    case 12:
+    case 16:
+        return TileSet::RightUpLine;
+    
+    case 13:
+    case 17:
+        return TileSet::RightDownLine;
+    
+    case 14:
+    case 18:
+        return TileSet::LeftDownLine;
+
+    case 15:
+    case 19:
+        return TileSet::LeftUpLine;
+
+    case 20:
+        return TileSet::UpAndDownCorners;
+
+    case 21:
+        return TileSet::LeftRightCorners;
+
+    default:
+        break;
+    }
+
+    return TileSet::Unknown;
+}
+
+size_t SliceAsset::subTileIndexByType(TileSet::TileType type) const
+{
+    switch (type)
+    {
+    case TileSet::Full:
+        return 0;
+
+    case TileSet::DownLack:
+        return 4;
+    case TileSet::LeftLack:
+        return 5;
+    case TileSet::UpLack:
+        return 6;
+    case TileSet::RightLack:
+        return 7;
+
+    case TileSet::UpCorner:
+        return 8;
+    case TileSet::RightCorner:
+        return 9;
+    case TileSet::DownCorner:
+        return 10;
+    case TileSet::LeftCorner:
+        return 11;
+
+    case TileSet::RightUpLine:
+        return 12;
+
+    case TileSet::RightDownLine:
+        return 13;
+
+    case TileSet::LeftDownLine:
+        return 14;
+
+    case TileSet::LeftUpLine:
+        return 15;
+
+    case TileSet::UpAndDownCorners:
+        return 20;
+
+    case TileSet::LeftRightCorners:
+        return 21;
+
+    default:
+        break;
+    }
+
+    return 22;
+}
+
 QString SliceAsset::getUrlInternal() const
 {
     QString url = QString("image://assetImages/") + _uuid.toString(QUuid::WithoutBraces);

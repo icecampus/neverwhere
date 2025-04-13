@@ -21,10 +21,10 @@ StaggeredIsometry::StaggeredIsometry(QObject* parent):
 
 }
 
-math::ivec2 StaggeredIsometry::fieldToMap(const math::vec2& screenPosition) const
+math::ivec2 StaggeredIsometry::fieldToMap(const math::vec2& fieldPosition) const
 {
     const math::vec2 cellSize = dimensions.cellSize();
-    math::vec2 normPos = screenPosition / cellSize; // Normalize screen position
+    math::vec2 normPos = fieldPosition / cellSize; // Normalize screen position
 
     // First candidate (even rows)
     math::vec2 floorNorm = glm::floor(normPos);
@@ -109,6 +109,35 @@ VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize
 }
 
 
+math::ivec2 StaggeredIsometry::fieldToNode(const math::vec2& fieldPosition) const
+{
+    math::vec2 delta(0, dimensions.cellSize().y / 2);
+    return fieldToMap(fieldPosition + delta);
+}
+
+StaggeredIsometry::Neighbours StaggeredIsometry::nodeNeighboursCell(const math::ivec2& nodePosition)
+{
+    Neighbours result;
+
+    Neighbours mask;
+
+    if (nodePosition.y % 2)
+    {
+        mask = { math::ivec2(0,0), math::ivec2(0,-2), math::ivec2(0,-1), math::ivec2(1,-1) };
+    }
+    else
+    {
+        mask = { math::ivec2(0,0), math::ivec2(0,-2), math::ivec2(-1,-1), math::ivec2(0,-1) };
+    }
+
+    for (size_t i = 0; i < mask.size(); ++i)
+    {
+        result[i] = nodePosition + mask[i];
+    }
+
+    return result;
+}
+
 //StaggeredIsometryView
 StaggeredIsometryView::StaggeredIsometryView(QObject* parent) :
     StaggeredIsometry(parent),
@@ -137,6 +166,12 @@ VisibleRegion StaggeredIsometryView::getVisibleCellBounds(const math::vec2& view
     math::vec2 adjustedCameraOffset = (cameraOffset - math::vec2(m_cameraX, m_cameraY)) / m_cameraZoom;
     math::vec2 adjustedViewSize = viewSize / m_cameraZoom;
     return StaggeredIsometry::getVisibleCellBounds(adjustedViewSize, adjustedCameraOffset);
+}
+
+math::ivec2 StaggeredIsometryView::screendToNode(const math::vec2& screenPosition) const
+{
+    math::vec2 adjustedPos = (screenPosition - math::vec2(m_cameraX, m_cameraY)) / m_cameraZoom;
+    return fieldToNode(adjustedPos);
 }
 
 float StaggeredIsometryView::getCameraX() const 

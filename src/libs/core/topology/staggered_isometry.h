@@ -52,16 +52,22 @@ class StaggeredIsometry: public QObject
     Q_OBJECT
     Q_PROPERTY(staggered_dimensions dimensions READ getDimensions CONSTANT)
 public:
+    using Neighbours = std::array<math::ivec2, 4>;
+
 
     StaggeredIsometry(QObject* parent = nullptr);
 
     staggered_dimensions getDimensions() const { return dimensions; }
 
-    Q_INVOKABLE math::ivec2 fieldToMap(const math::vec2& screenPosition) const;
+    Q_INVOKABLE math::ivec2 fieldToMap(const math::vec2& fieldPosition) const;
     Q_INVOKABLE math::vec2  mapToField(const math::ivec2& cellPosition) const;
     Q_INVOKABLE uint64_t zOffset(const math::ivec2& cellPosition);
 
     virtual VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const;
+
+    math::ivec2 fieldToNode(const math::vec2& fieldPosition) const;
+    static Neighbours nodeNeighboursCell(const math::ivec2& nodePosition);
+
 
     staggered_dimensions dimensions;
 };
@@ -90,6 +96,8 @@ public:
     Q_INVOKABLE math::ivec2 screenToMap(const math::vec2& screenPosition) const;
     Q_INVOKABLE math::vec2 mapToScreen(const math::ivec2& cellPosition) const;
     Q_INVOKABLE VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const override;
+
+    math::ivec2 screendToNode(const math::vec2& screenPosition) const;
 
 
 signals:

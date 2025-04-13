@@ -37,7 +37,7 @@ public:
     math::ivec2 getPosition() const;
     void setPosition(const math::ivec2& position);
 
-    QUuid getAssetUuid();
+    QUuid getAssetUuid() const;
     void setAssetUiid(const QUuid& uuid);
 
     GameObjectTypes::Type getType();

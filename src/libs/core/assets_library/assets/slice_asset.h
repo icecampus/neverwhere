@@ -2,6 +2,7 @@
 #include "assets_library/asset.h"
 #include <array>
 #include "topology/staggered_isometry.h"
+#include "topology/staggered_tiled_landscape.h"
 
 class SliceAsset: public Asset
 {
@@ -15,9 +16,16 @@ public:
     void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
     QImage thumbnail() override;
 
-    //
+    //INVOKABLE 
     Q_INVOKABLE QSize getSize(StaggeredIsometry* iso);
 
+    //
+    void registerImages(RegistationHandle handle) override;
+
+    //
+    TileSet::TileType subTileTypeByIndex(size_t tileIndex) const;
+    size_t subTileIndexByType(TileSet::TileType type) const;
+    
 protected:
     QString getUrlInternal() const override;
 

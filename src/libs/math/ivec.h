@@ -86,4 +86,13 @@ inline ivec2 operator/(int scalar, const ivec2& v) { return ivec2(scalar / v.get
 
 }//
 
+namespace std {
+    template<>
+    struct hash<math::ivec2> {
+        size_t operator()(const math::ivec2& v) const {
+            return hash<int>()(v.x) ^ (hash<int>()(v.y) << 1);
+        }
+    };
+}
+
 Q_DECLARE_METATYPE(math::ivec2)

@@ -6,6 +6,5 @@ class LandscapePencil: public Tool
 public:
     LandscapePencil(QObject* parent);
 
-
     void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso) override;
 };

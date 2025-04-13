@@ -36,7 +36,7 @@ void GameObject::setPosition(const math::ivec2& position)
     }
 }
 
-QUuid GameObject::getAssetUuid()
+QUuid GameObject::getAssetUuid() const
 {
     return assetUuid;
 }

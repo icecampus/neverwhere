@@ -18,6 +18,6 @@ Item
     Image 
     {
         anchors.fill: parent
-        source: sliceAsset.thumbnailUrl
+        source: sliceAsset.thumbnailUrl + "?index=" + gameObject.tileIndex.toString()
     }
 }

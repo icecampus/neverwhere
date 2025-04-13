@@ -15,7 +15,7 @@ void AssetImageProvider::loadAllImages()
     {
         AssetsPackModel* pack = _library->element(packIndex);
         QImage packThumbnail = pack->thumbnail();
-        _imageCache.insert(pack->uuid(), packThumbnail);
+        _imageCache[pack->uuid()].push_back(packThumbnail);
 
         for (int i = 0; i < pack->rowCount(); ++i)
         {
@@ -24,15 +24,18 @@ void AssetImageProvider::loadAllImages()
 
             if (asset)
             {
-                QImage image = asset->thumbnail();
-                if (!image.isNull()) 
+                asset->registerImages([&](int index, const QImage& image)
                 {
-                    _imageCache.insert(asset->uuid(), image);
-                }
-                else 
-                {
-                    qWarning() << "Failed to load image for asset with UUID" << asset->uuid();
-                }
+                    if (!image.isNull())
+                    {
+                        _imageCache[asset->uuid()].push_back(image);
+                    }
+                    else
+                    {
+                        qWarning() << "Failed to load image for asset with UUID" << asset->uuid();
+                    }
+
+                });
             }
         }
 
@@ -44,24 +47,29 @@ void AssetImageProvider::loadAllImages()
 // or image://provider/{"gradient":["#FF0000", "#00FF00"], "angle":45}
 QImage AssetImageProvider::requestImage(const QString& request, QSize* size, const QSize& requestedSize) 
 {
-
     ReuqestParams params = parse(request);
-    if (!_imageCache.contains(params.uuid)) 
+    if (_imageCache.count(params.uuid)) 
     {
-        qWarning() << "Image for UUID: " << request << " can't find in cache";
-        return QImage();
+        std::vector<QImage>& assetImages = _imageCache.at(params.uuid);
+
+        QImage image;
+        image = assetImages[params.index.value_or(0)];
+        
+        if (size)
+        { 
+            *size = image.size();
+        }
+
+        if (requestedSize.isValid()) 
+        {
+            return image.scaled(requestedSize, Qt::KeepAspectRatio);
+        }
+
+        return image;
     }
 
-    QImage image = _imageCache.value(params.uuid);
-    if (size)
-    { 
-        *size = image.size();
-    }
-
-    if (requestedSize.isValid()) {
-        return image.scaled(requestedSize, Qt::KeepAspectRatio);
-    }
-    return image;
+    qWarning() << "Image for UUID: " << request << " can't find in cache";
+    return QImage();
 }
 
 AssetImageProvider::ReuqestParams AssetImageProvider::parse(const QString& request)
@@ -75,10 +83,8 @@ AssetImageProvider::ReuqestParams AssetImageProvider::parse(const QString& reque
 
     if (query.hasQueryItem("index"))
     {
-        size_t color = query.queryItemValue("index").toUInt();
+        result.index = query.queryItemValue("index").toUInt();
     }
-    
-
 
     return result;
 

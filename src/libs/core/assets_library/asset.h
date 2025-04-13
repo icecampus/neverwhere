@@ -29,6 +29,7 @@ class Asset : public QObject
     Q_PROPERTY(LayerTypes::Type layerType READ getLayerType CONSTANT)
 
 public:
+    using RegistationHandle = std::function<void(int index, const QImage& image)>;
     explicit Asset(AssetTypes::Type type, QObject* parent);
 
     //properties
@@ -42,6 +43,7 @@ public:
     virtual void load(const std::filesystem::path& indexPath,  const nlohmann::json& j);
     virtual QImage thumbnail() = 0;
 
+    virtual void registerImages(RegistationHandle handle)=0;
     
     const AssetTypes::Type type;
 protected:
