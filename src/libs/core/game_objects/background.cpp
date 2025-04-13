@@ -37,6 +37,7 @@ public:
         float zoom;
         int limit;
         bool dirty;
+        float time{0};
     } uniforms;
 };
 
@@ -64,23 +65,30 @@ bool CustomShader::updateUniformData(RenderState& state, QSGMaterial* newMateria
     QByteArray* buf = state.uniformData();
     Q_ASSERT(buf->size() >= 84);
 
-    if (state.isMatrixDirty()) {
+    
+
+    if (state.isMatrixDirty()) 
+    {
         const QMatrix4x4 m = state.combinedMatrix();
         memcpy(buf->data(), m.constData(), 64);
         changed = true;
     }
 
-    if (state.isOpacityDirty()) {
+    if (state.isOpacityDirty()) 
+    {
         const float opacity = state.opacity();
         memcpy(buf->data() + 64, &opacity, 4);
         changed = true;
     }
 
     auto* customMaterial = static_cast<CustomMaterial*>(newMaterial);
-    if (oldMaterial != newMaterial || customMaterial->uniforms.dirty) {
+    customMaterial->uniforms.time += 0.01;
+    if (oldMaterial != newMaterial || customMaterial->uniforms.dirty) 
+    {
         memcpy(buf->data() + 68, &customMaterial->uniforms.zoom, 4);
         memcpy(buf->data() + 72, &customMaterial->uniforms.center, 8);
         memcpy(buf->data() + 80, &customMaterial->uniforms.limit, 4);
+        memcpy(buf->data() + 84, &customMaterial->uniforms.time, 4);
         customMaterial->uniforms.dirty = false;
         changed = true;
     }
