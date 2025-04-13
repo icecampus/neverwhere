@@ -4,7 +4,7 @@
 #include <memory>
 #include "game_object.h"
 
-class MapModel : public QAbstractListModel
+class LayerModel : public QAbstractListModel
 {
     Q_OBJECT
 
@@ -15,7 +15,7 @@ public:
         TypeRole
     };
 
-    explicit MapModel(QObject *parent = nullptr);
+    explicit LayerModel(QObject *parent = nullptr);
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;

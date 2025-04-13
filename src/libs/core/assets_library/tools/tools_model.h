@@ -17,7 +17,7 @@ public:
     int getCurrentTool() const;
     void setCurrentTool(int currentIndex);
 
-    void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso);
+    void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso);
 
 signals:
     void currentToolChanged();
@@ -41,7 +41,7 @@ public:
 
     AssetToolsModel* getToolsModel();
 
-    Q_INVOKABLE void click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso);
+    Q_INVOKABLE void click(QPoint screenPos, LayerModel* mapModel, StaggeredIsometryView* iso);
 signals:
     void currentAssetChanged();
     void toolsModelChanged();

@@ -6,6 +6,6 @@ class Cursor: public Tool
 public:
     Cursor(QObject* parent);
 
-    void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso) override;
+    void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso) override;
 
 };

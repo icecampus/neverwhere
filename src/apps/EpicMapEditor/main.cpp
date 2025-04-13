@@ -25,7 +25,7 @@ void registreTypes()
 
     qRegisterMetaType<VisibleRegion>("VisibleRegion");
 
-    qmlRegisterType<MapModel>("Game", 1, 0, "MapModel");
+    qmlRegisterType<LayerModel>("Game", 1, 0, "LayerModel");
     qmlRegisterType<Tile2D>("Game", 1, 0, "Tile2D");
     qmlRegisterType<Landscape>("Game", 1, 0, "Landscape");
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");

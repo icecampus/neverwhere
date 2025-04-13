@@ -6,6 +6,6 @@ class Eraser: public Tool
 public:
     Eraser(QObject* parent);
 
-    void click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso) override;
+    void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso) override;
 
 };

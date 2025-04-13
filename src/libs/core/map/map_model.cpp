@@ -4,13 +4,13 @@
 #include "game_objects/tile_2d.h"
 #include "game_objects/building.h"
 
-MapModel::MapModel(QObject* parent):
+LayerModel::LayerModel(QObject* parent):
     QAbstractListModel(parent) 
 {
 
 }
 
-int MapModel::rowCount(const QModelIndex& parent) const 
+int LayerModel::rowCount(const QModelIndex& parent) const 
 {
     if (parent.isValid())
     {
@@ -19,7 +19,7 @@ int MapModel::rowCount(const QModelIndex& parent) const
     return static_cast<int>(m_gameObjects.size());
 }
 
-QVariant MapModel::data(const QModelIndex& index, int role) const  
+QVariant LayerModel::data(const QModelIndex& index, int role) const  
 {
     if (!index.isValid() || index.row() >= static_cast<int>(m_gameObjects.size()))
     {
@@ -39,7 +39,7 @@ QVariant MapModel::data(const QModelIndex& index, int role) const
     return QVariant();
 }
 
-QHash<int, QByteArray> MapModel::roleNames() const 
+QHash<int, QByteArray> LayerModel::roleNames() const 
 {
     QHash<int, QByteArray> roles;
     roles[ElementRole] = "element";
@@ -47,21 +47,21 @@ QHash<int, QByteArray> MapModel::roleNames() const
     return roles;
 }
 
-void MapModel::addGameObject(std::unique_ptr<GameObject> gameObject) 
+void LayerModel::addGameObject(std::unique_ptr<GameObject> gameObject) 
 {
     beginInsertRows(QModelIndex(), m_gameObjects.size(), m_gameObjects.size());
     m_gameObjects.push_back(std::move(gameObject));
     endInsertRows();
 }
 
-GameObject* MapModel::getGameObject(int index) const 
+GameObject* LayerModel::getGameObject(int index) const 
 {
     if (index >= 0 && index < static_cast<int>(m_gameObjects.size()))
         return m_gameObjects[index].get();
     return nullptr;
 }
 
-void MapModel::clear() 
+void LayerModel::clear() 
 {
     beginResetModel();
     m_gameObjects.clear();
@@ -69,7 +69,7 @@ void MapModel::clear()
 }
 
 
-void MapModel::populateMapModel()
+void LayerModel::populateMapModel()
 {
     QRandomGenerator* rand = QRandomGenerator::global();
 

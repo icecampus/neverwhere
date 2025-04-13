@@ -6,7 +6,7 @@ Cursor::Cursor(QObject* parent):
 
 }
 
-void Cursor::click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso)
+void Cursor::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso)
 {
 
 }

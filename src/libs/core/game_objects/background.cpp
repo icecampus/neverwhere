@@ -82,7 +82,7 @@ bool CustomShader::updateUniformData(RenderState& state, QSGMaterial* newMateria
     }
 
     auto* customMaterial = static_cast<CustomMaterial*>(newMaterial);
-    customMaterial->uniforms.time += 0.01;
+    customMaterial->uniforms.time += 0.005;
     if (oldMaterial != newMaterial || customMaterial->uniforms.dirty) 
     {
         memcpy(buf->data() + 68, &customMaterial->uniforms.zoom, 4);

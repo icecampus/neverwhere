@@ -23,7 +23,7 @@ Rectangle
         mapModel.populateMapModel();
     }
 
-    MapModel
+    LayerModel
     {
         id: mapModel
     }

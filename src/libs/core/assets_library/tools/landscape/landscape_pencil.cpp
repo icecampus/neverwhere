@@ -7,7 +7,7 @@ LandscapePencil::LandscapePencil(QObject* parent):
 
 }
 
-void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, MapModel* mapModel, StaggeredIsometryView* iso)
+void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso)
 {
     std::unique_ptr<Landscape> gameObject = std::make_unique<Landscape>();
 
