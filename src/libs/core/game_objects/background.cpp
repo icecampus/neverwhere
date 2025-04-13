@@ -1,17 +1,12 @@
 #include "background.h"
 
-
-// Copyright (C) 2020 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
-
 #include <QtCore/QPointer>
-
 #include <QtQuick/QSGMaterial>
 #include <QtQuick/QSGTexture>
 #include <QtQuick/QSGGeometryNode>
 #include <QtQuick/QSGTextureProvider>
 
-//! [2]
+//CustomShader
 class CustomShader : public QSGMaterialShader
 {
 public:
@@ -23,48 +18,7 @@ public:
     bool updateUniformData(RenderState& state,
         QSGMaterial* newMaterial, QSGMaterial* oldMaterial) override;
 };
-//! [2]
 
-//! [1]
-class CustomMaterial : public QSGMaterial
-{
-public:
-    CustomMaterial();
-    QSGMaterialType* type() const override;
-    int compare(const QSGMaterial* other) const override;
-
-    QSGMaterialShader* createShader(QSGRendererInterface::RenderMode) const override
-    {
-        return new CustomShader;
-    }
-
-    struct {
-        float center[2];
-        float zoom;
-        int limit;
-        bool dirty;
-    } uniforms;
-};
-//! [1]
-
-CustomMaterial::CustomMaterial()
-{
-}
-
-QSGMaterialType* CustomMaterial::type() const
-{
-    static QSGMaterialType type;
-    return &type;
-}
-
-int CustomMaterial::compare(const QSGMaterial* o) const
-{
-    Q_ASSERT(o && type() == o->type());
-    const auto* other = static_cast<const CustomMaterial*>(o);
-    return other == this ? 0 : 1; // ### TODO: compare state???
-}
-
-//! [3]
 bool CustomShader::updateUniformData(RenderState& state, QSGMaterial* newMaterial, QSGMaterial* oldMaterial)
 {
     bool changed = false;
@@ -93,9 +47,46 @@ bool CustomShader::updateUniformData(RenderState& state, QSGMaterial* newMateria
     }
     return changed;
 }
-//! [3]
 
-//! [4]
+//CustomMaterial
+class CustomMaterial : public QSGMaterial
+{
+public:
+    CustomMaterial();
+    QSGMaterialType* type() const override;
+    int compare(const QSGMaterial* other) const override;
+
+    QSGMaterialShader* createShader(QSGRendererInterface::RenderMode) const override
+    {
+        return new CustomShader;
+    }
+
+    struct {
+        float center[2];
+        float zoom;
+        int limit;
+        bool dirty;
+    } uniforms;
+};
+
+CustomMaterial::CustomMaterial()
+{
+}
+
+QSGMaterialType* CustomMaterial::type() const
+{
+    static QSGMaterialType type;
+    return &type;
+}
+
+int CustomMaterial::compare(const QSGMaterial* o) const
+{
+    Q_ASSERT(o && type() == o->type());
+    const auto* other = static_cast<const CustomMaterial*>(o);
+    return other == this ? 0 : 1; // ### TODO: compare state???
+}
+
+//CustomNode
 class CustomNode : public QSGGeometryNode
 {
 public:
@@ -142,15 +133,14 @@ public:
         markDirty(DirtyMaterial);
     }
 };
-//! [4]
 
+//CustomItem
 CustomItem::CustomItem(QQuickItem* parent)
     : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
 }
 
-//! [5]
 void CustomItem::setZoom(qreal zoom)
 {
     if (qFuzzyCompare(m_zoom, zoom))
@@ -183,7 +173,6 @@ void CustomItem::setCenter(QPointF center)
     emit centerChanged(m_center);
     update();
 }
-//! [5]
 
 void CustomItem::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry)
 {
@@ -192,7 +181,6 @@ void CustomItem::geometryChange(const QRectF& newGeometry, const QRectF& oldGeom
     QQuickItem::geometryChange(newGeometry, oldGeometry);
 }
 
-//! [6]
 QSGNode* CustomItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
 {
     auto* node = static_cast<CustomNode*>(old);
@@ -218,4 +206,3 @@ QSGNode* CustomItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
 
     return node;
 }
-//! [6]

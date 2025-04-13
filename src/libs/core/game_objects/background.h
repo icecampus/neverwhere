@@ -6,12 +6,12 @@
 class CustomItem : public QQuickItem
 {
     Q_OBJECT
-        //! [2]
-        Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
-        Q_PROPERTY(int iterationLimit READ iterationLimit WRITE setIterationLimit NOTIFY iterationLimitChanged)
-        Q_PROPERTY(QPointF center READ center WRITE setCenter NOTIFY centerChanged)
-        //! [2]
-        QML_ELEMENT
+
+    Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
+    Q_PROPERTY(int iterationLimit READ iterationLimit WRITE setIterationLimit NOTIFY iterationLimitChanged)
+    Q_PROPERTY(QPointF center READ center WRITE setCenter NOTIFY centerChanged)
+
+    QML_ELEMENT
 
 public:
     explicit CustomItem(QQuickItem* parent = nullptr);
