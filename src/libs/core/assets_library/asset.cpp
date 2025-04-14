@@ -33,7 +33,8 @@ LayerTypes::Type Asset::getLayerType() const
 
 void Asset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
 {
-    _uuid = QUuid::fromString(QString::fromStdString(j["uuid"].get<std::string>()));
+    std::string uuidStr = j["uuid"];
+    _uuid = QUuid::fromString(QString::fromStdString(uuidStr));
     _name = QString::fromStdString(indexPath.parent_path().stem().string());
 
     std::string layerTypeStr = j["layerType"];

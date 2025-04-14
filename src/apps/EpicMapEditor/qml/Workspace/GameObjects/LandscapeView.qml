@@ -13,7 +13,7 @@ Item
     y: isoView.mapToField(gameObject.position).y - assetSize.height/2
     width:  assetSize.width
     height: assetSize.height
-    z: isoView.zOffset(gameObject.position)
+    z: isoView.zOffset(gameObject.position) 
 
     Image 
     {

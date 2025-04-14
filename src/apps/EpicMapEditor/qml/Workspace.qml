@@ -17,9 +17,9 @@ import "Workspace"
     LeftPanel 
     {
         id: leftPanel
-        SplitView.preferredWidth: 370
-        SplitView.minimumWidth: 100
-        SplitView.maximumWidth: 500
+        SplitView.preferredWidth: 420
+        SplitView.minimumWidth: 200
+        SplitView.maximumWidth: 600
         
         assetsContext: assetsContext
     }

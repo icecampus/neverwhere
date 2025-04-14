@@ -28,7 +28,7 @@ class Asset : public QObject
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
     Q_PROPERTY(LayerTypes::Type layerType READ getLayerType CONSTANT)
 
-public:
+    public:
     using RegistationHandle = std::function<void(int index, const QImage& image)>;
     explicit Asset(AssetTypes::Type type, QObject* parent);
 

@@ -12,9 +12,9 @@ GridView
     id: paletteView
     clip: true
 
-    property int minCellWidth: 150    // Минимальная ширина ячейки
+    property int minCellWidth: 120    // Минимальная ширина ячейки
     cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    // Динамическая ширина ячейки
-    cellHeight: 150    // Фиксированная высота ячейки
+    cellHeight: 120    // Фиксированная высота ячейки
 
     delegate: GridElement 
     {

@@ -75,6 +75,21 @@ Rectangle
         
     }
     
+    Repeater
+    {
+        id: mapContainer
+        model: mapModel
+
+        GameObjectsContainer 
+        {
+            anchors.fill: parent        
+        
+            isometryView: isoView
+            model: element
+    
+        }
+    }
+    
     StaggeredGrid 
     {
         id: customItem
@@ -95,21 +110,6 @@ Rectangle
                 y: isoView.cameraY
             }
         ]
-    }
-    
-    Repeater
-    {
-        id: mapContainer
-        model: mapModel
-
-        GameObjectsContainer 
-        {
-            anchors.fill: parent        
-        
-            isometryView: isoView
-            model: element
-    
-        }
     }
     
     StaggeredCursor
