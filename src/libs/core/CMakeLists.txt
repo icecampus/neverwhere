@@ -8,4 +8,5 @@ nw_add_lib(
 		glm::glm-header-only
 		math
 		nlohmann_json::nlohmann_json
+		spdlog::spdlog
 		)

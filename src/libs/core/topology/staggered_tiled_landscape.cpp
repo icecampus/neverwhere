@@ -20,18 +20,18 @@ StaggeredTiledLandscape::NeighboursWithDiagonal StaggeredTiledLandscape::cellNei
     return result;
 }
 
-StaggeredTiledLandscape::ModeNeighbours StaggeredTiledLandscape::getNodeNeighbours(const math::ivec2& position)
+StaggeredTiledLandscape::ModeNeighbours StaggeredTiledLandscape::getNeighboursNodeForCell(const math::ivec2& cellPosition)
 {
     static const ModeNeighbours evenNeighbours = { { math::ivec2(-1, 1), math::ivec2(0, 0),  math::ivec2(0, 1), math::ivec2(0, 2) } };
 
     static const ModeNeighbours oddNeighbours = { { math::ivec2(0, 1), math::ivec2(0, 0),  math::ivec2(1, 1), math::ivec2(0, 2)  } };
 
-    const ModeNeighbours& cellNeighbours = (position.y % 2) ? oddNeighbours : evenNeighbours;
+    const ModeNeighbours& cellNeighbours = (cellPosition.y % 2) ? oddNeighbours : evenNeighbours;
 
     ModeNeighbours result;
     for (int i = 0; i < cellNeighbours.size(); ++i)
     {
-        result[i] = position + cellNeighbours[i];
+        result[i] = cellPosition + cellNeighbours[i];
     }
 
     return result;
@@ -43,10 +43,6 @@ std::optional<size_t> StaggeredTiledLandscape::neighboursIndex(const math::ivec2
     using Delata2NeighboursIndex = std::unordered_map<math::ivec2, size_t>;
 
     const math::ivec2 delta = neighbour - position;
-
-    //qDebug() << "position: " << position;
-    //qDebug() << "neighbour: " << neighbour;
-    //qDebug() << "delta: " << delta;
 
     static const Delata2NeighboursIndex evenDelta2index = { { math::ivec2(0, -1),  0 },
                                                           { math::ivec2(1, -1),  1 },
@@ -128,6 +124,8 @@ TileSet::TileSet()
     {
         TileType tilename = UpAndDownCorners; //"testset_3_4";
         NeighboursNodeMask mask = { 0, 1, 0, 1 };
+        
+        tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 

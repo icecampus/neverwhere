@@ -8,6 +8,6 @@
     "magic-enum",
     "glm",
     "nlohmann-json",
-    "spirv-tools"
+    "spdlog"
   ]
 }

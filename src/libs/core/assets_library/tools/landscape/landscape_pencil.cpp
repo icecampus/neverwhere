@@ -4,10 +4,6 @@
 #include "topology/staggered_tiled_landscape.h"
 #include "assets_library/assets/slice_asset.h"
 
-
-
-
-
 namespace
 {
     //LandNodes
@@ -27,7 +23,7 @@ namespace
 
                 TileSet::NeighboursNodeMask mask = tileSet.tilename2mask[tileName];
 
-                StaggeredTiledLandscape::ModeNeighbours neighbours = StaggeredTiledLandscape::getNodeNeighbours(gameObject.getPosition());
+                StaggeredTiledLandscape::ModeNeighbours neighbours = StaggeredTiledLandscape::getNeighboursNodeForCell(gameObject.getPosition());
                 for (size_t i = 0; i < mask.size(); ++i)
                 {
                     math::ivec2 nodePos = neighbours[i];
@@ -46,12 +42,12 @@ namespace
         landNodes[nodePos] = 1;
 
         TileSet::NeighboursNodeMask nodesMaskForCell;
-        StaggeredTiledLandscape::ModeNeighbours cellNodeNeighbours = StaggeredTiledLandscape::getNodeNeighbours(cellPosition);
+        StaggeredTiledLandscape::ModeNeighbours cellNeighboursNodes = StaggeredTiledLandscape::getNeighboursNodeForCell(cellPosition);
 
         for (size_t i = 0; i < nodesMaskForCell.size(); ++i)
         {
-            math::ivec2 neighbourNodePos = cellNodeNeighbours[i];
-            bool nodeState = landNodes[cellNodeNeighbours[i]];
+            math::ivec2 neighbourNodePos = cellNeighboursNodes[i];
+            bool nodeState = landNodes[cellNeighboursNodes[i]];
 
             nodesMaskForCell[i] = nodeState;
         }
@@ -59,36 +55,11 @@ namespace
         static TileSet tileSet;
         result = tileSet.tileset[nodesMaskForCell];
 
-        return result;
-    }
-
-    /*
-    std::string getTileByMask(LandNodes landNodes, const math::ivec2& cellPosition)
-    {
-        std::string result;
-
-        TileSet::NeighboursNodeMask nodesMaskForCell;
-        StaggeredTiledLandscape::ModeNeighbours cellNodeNeighbours = StaggeredTiledLandscape::getNodeNeighbours(cellPosition);
-
-        for (size_t i = 0; i < nodesMaskForCell.size(); ++i)
-        {
-            math::ivec2 neighbourNodePos = cellNodeNeighbours[i];
-            bool nodeState = landNodes[cellNodeNeighbours[i]];
-
-            nodesMaskForCell[i] = nodeState;
-        }
-
-        static TileSet tileSet;
-        result = tileSet.tileset[nodesMaskForCell];
+        //spdlog::info("neighbours nodes: {}", nodesMaskForCell);
 
         return result;
     }
-    */
-
 }
-
-
-
 
 LandscapePencil::LandscapePencil(QObject* parent):
     Tool("LandscapePencil", "land_pencil", parent)
@@ -101,14 +72,20 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* m
     SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
     if (sliceAsset)
     {
-        const math::ivec2 nodeMapPosition = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
+        //spdlog::info( "=========================== click ===============================");
+        const math::ivec2 nodePos = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
 
-        StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodeMapPosition);
+        //spdlog::info("node: {}",  nodePos);
+
+        StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
         for (const math::ivec2& curCellPosition : neighbours)
         {
-            TileSet::TileType tileType = getTileByMask(*mapModel, nodeMapPosition, curCellPosition, *sliceAsset);
+            //spdlog::info("neighbour: {}",  curCellPosition);
 
-            if (tileType > 0)
+            TileSet::TileType tileType = getTileByMask(*mapModel, nodePos, curCellPosition, *sliceAsset);
+            //spdlog::info("neighbour: tile_type{}",  magic_enum::enum_name(tileType));
+
+            if (tileType != TileSet::Unknown)
             {
                 std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>();
                 landObject->setName(QString("Landscape"));
@@ -123,16 +100,5 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* m
             }
         }
     }
-
-    //math::ivec2 position = iso->screenToMap(math::vec2(screenPos.x(), screenPos.y()));
-    //std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>();
-
-    //landObject->setName(QString("Landscape"));
-    //landObject->setPosition(position);
-    //landObject->setAssetUiid(currentAsset->uuid());
-    //landObject->setTileIndex(0);
-
-    //mapModel->addGameObject(std::move(landObject));
-
 }
 

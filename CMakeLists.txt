@@ -23,6 +23,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 qt_policy(SET QTP0001 OLD )
 qt_policy(SET QTP0004 NEW )

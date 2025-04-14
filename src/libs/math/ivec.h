@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 #include <QObject>
 #include <QMetaType>
+#include <spdlog/spdlog.h>
 
 namespace math
 {
@@ -84,7 +85,7 @@ inline ivec2 operator-(int scalar, const ivec2& v) { return ivec2(scalar - v.get
 inline ivec2 operator*(int scalar, const ivec2& v) { return ivec2(scalar * v.getX(), scalar * v.getY()); }
 inline ivec2 operator/(int scalar, const ivec2& v) { return ivec2(scalar / v.getX(), scalar / v.getY()); }
 
-}//
+}//math
 
 namespace std {
     template<>
@@ -94,5 +95,15 @@ namespace std {
         }
     };
 }
+
+template<>
+struct fmt::formatter<math::ivec2> : fmt::formatter<std::string>
+{
+    auto format(math::ivec2 iv2, format_context& ctx) const -> decltype(ctx.out())
+    {
+        return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
+    }
+};
+
 
 Q_DECLARE_METATYPE(math::ivec2)

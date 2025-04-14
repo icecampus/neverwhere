@@ -9,7 +9,7 @@ struct StaggeredTiledLandscape
     
 
     static NeighboursWithDiagonal cellNeighbours(const math::ivec2& position);
-    static ModeNeighbours getNodeNeighbours(const math::ivec2& position);
+    static ModeNeighbours getNeighboursNodeForCell(const math::ivec2& position);
     static std::optional<size_t> neighboursIndex(const math::ivec2& position, const math::ivec2& neighbour);
 
 };
@@ -47,6 +47,16 @@ struct TileSet
 
     std::map<NeighboursNodeMask, TileType> tileset;
     std::map<TileType, NeighboursNodeMask> tilename2mask;
+};
+
+
+template<>
+struct fmt::formatter<TileSet::NeighboursNodeMask> : fmt::formatter<std::string>
+{
+    auto format(TileSet::NeighboursNodeMask nodesMask, format_context& ctx) const -> decltype(ctx.out())
+    {
+        return fmt::format_to(ctx.out(), "[{}, {}, {}, {}]", nodesMask[0], nodesMask[1], nodesMask[2], nodesMask[3] );
+    }
 };
 
 //LandNodes
