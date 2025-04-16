@@ -11,17 +11,19 @@ Rectangle
     property var hoveredCell: math.ivec2(1, 1)
     property bool showCoordinates: true
 
+    function load(path)
+    {
+        console.log(path)
+        mapModel.load(path);
+    }
+
     id: centerPanel
+
 
     SplitView.fillWidth: true
     color: "#ffffff"
     border.color: "#cccccc"
     clip: true
-
-    Component.onCompleted: 
-    {
-        mapModel.populateMapModel();
-    }
 
     MapModel
     {

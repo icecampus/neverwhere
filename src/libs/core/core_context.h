@@ -16,6 +16,7 @@ class CoreContext: public QObject
 
 public:
     explicit CoreContext(QQmlApplicationEngine& engine);
+    virtual ~CoreContext();
 
     Q_INVOKABLE void load();
 
@@ -26,10 +27,13 @@ public:
 private:
     void loadAssets();
 
-    ChaptersModel chaptersModel;
+    
 
     QQmlApplicationEngine& engine;
+    
+    std::unique_ptr<ChaptersModel> chaptersModel;
     std::unique_ptr<AssetsLibraryModel> assetsLibrary;
+
     AssetImageProvider* imageProvider;
     ChaptersImageProvider* chapterProvider;
 

@@ -1,52 +1,65 @@
 #include "game_object.h"
+#include "base.h"
+#include "base.h"
 
 
-GameObject::GameObject(GameObjectTypes::Type type_, QObject* parent) 
-    : QObject(parent),
-    type(type_)
+GameObject::GameObject(GameObjectTypes::Type type, QObject* parent): 
+    QObject(parent)
 {
+    data.type = type;
+}
 
+void GameObject::load(const BaseData::GameObject& data_)
+{
+    assert(data.type == data_.type );
+    data = data_;
+    emit positionChanged();
+}
+
+BaseData::GameObject GameObject::getData() const
+{
+    return data;
 }
 
 QString GameObject::name() const 
 {
-    return m_name;
+    return _name;
 }
 
 void GameObject::setName(const QString& name) 
 {
-    if (m_name != name) 
+    if (_name != name) 
     {
-        m_name = name;
+        _name = name;
         emit nameChanged();
     }
 }
 
 math::ivec2 GameObject::getPosition() const 
 {
-    return m_position;
+    return data.position;
 }
 
 void GameObject::setPosition(const math::ivec2& position) 
 {
-    if (m_position != position) 
+    if (data.position != position) 
     {
-        m_position = position;
+        data.position = position;
         emit positionChanged();
     }
 }
 
 QUuid GameObject::getAssetUuid() const
 {
-    return assetUuid;
+    return base::boostUuidToQUuid(data.assetUuid);
 }
 
 void GameObject::setAssetUiid(const QUuid& uuid)
 {
-    assetUuid = uuid;
+     data.assetUuid = base::QUuidToBoostUuid(uuid);
 }
 
 GameObjectTypes::Type GameObject::getType()
 {
-    return type;
+    return data.type;
 }

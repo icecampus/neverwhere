@@ -6,6 +6,7 @@ import "../Common"
 
 Rectangle 
 {
+    signal save()
     property var assetsContext: null
     property int currenPackIndex: 0
 
@@ -25,7 +26,12 @@ Rectangle
             
             Column 
             {
-                anchors.fill: parent
+                id: tabsContainer
+                anchors.top: parent.top
+                anchors.bottom: buttonsContainer.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+
                 Repeater 
                 {
                     model: core.assetsLibrary
@@ -48,6 +54,23 @@ Rectangle
                         }
                     }
                 }
+            }
+
+            Row
+            {
+                id: buttonsContainer
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right   
+
+                GridElement
+                {
+                    width: 50
+                    height: 50
+                    imageSource: "qrc:/resources/icons/save.png"
+                    onClicked: leftPanel.save()
+                }
+
             }
         }
 

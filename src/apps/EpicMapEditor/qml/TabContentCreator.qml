@@ -9,16 +9,9 @@ Item
     property var contentParent: null
     property var bar: null
 
-    function openChapterByName(name) 
+    function openChapterByUuid(name, uuid) 
     {
-        if (name)
-        {
-            createOrActivateTab(name, TabType.Workspace, {}, {})
-        }    
-        else
-        {
-            //newMapPopup.open()
-        }
+        createOrActivateTab(name, TabType.Workspace, { chapterUuid: uuid }, {})
     }
 
     function createOrActivateTab(name, type, data, extraData) 

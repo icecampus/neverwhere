@@ -10,6 +10,8 @@ class Resource : public GameObject
 public:
     explicit Resource(QObject* parent = nullptr);
 
+    void load(const BaseData::GameObject& data);
+
     int quantity() const;
     void setQuantity(int quantity);
 

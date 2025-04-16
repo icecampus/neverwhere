@@ -153,6 +153,22 @@ QImage generateRandomImage(const QString& seedString) {
    
 }
 
+void ChaptersImageProvider::load(ChaptersModel& model)
+{
+    for (int i=0; i<model.size(); ++i)
+    {
+        Chapter* chapter = model.element(i);
+        QString path = chapter->getThumbnailPath();
+        if (!path.isEmpty())
+        {
+            QImage image;
+            image.load(path);
+
+            m_imageCache[chapter->name()] = image;
+        }
+    }
+}
+
 QImage ChaptersImageProvider::requestImage(const QString& id, QSize* size, const QSize& requestedSize) 
 {
     QImage& image = m_imageCache[id];

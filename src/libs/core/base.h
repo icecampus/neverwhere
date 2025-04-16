@@ -1,14 +1,10 @@
 #pragma once
 #include <QObject>
+#include <QUuid>
+#include <boost/uuid/uuid.hpp>
 
-namespace LayerTypes
+struct base
 {
-    Q_NAMESPACE;
-    enum Type
-    {
-        Decoration,
-        BaseLandscape,
-        GameplayInteractive
-    };
-    Q_ENUM_NS(Type);
-}
+    static QUuid boostUuidToQUuid(const boost::uuids::uuid& boostUuid);
+    static boost::uuids::uuid QUuidToBoostUuid(const QUuid& quuid);
+};

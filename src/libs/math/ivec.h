@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QMetaType>
 #include <spdlog/spdlog.h>
+#include <nlohmann/json.hpp>
 
 namespace math
 {
@@ -77,6 +78,8 @@ public:
 
     // Унарный побитовый оператор
     ivec2 operator~() const { return ivec2(~this->x, ~this->y); }
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ivec2, x, y);
 };
 
 // Внешние операторы (для операций со скаляром слева)
@@ -84,6 +87,8 @@ inline ivec2 operator+(int scalar, const ivec2& v) { return ivec2(scalar + v.get
 inline ivec2 operator-(int scalar, const ivec2& v) { return ivec2(scalar - v.getX(), scalar - v.getY()); }
 inline ivec2 operator*(int scalar, const ivec2& v) { return ivec2(scalar * v.getX(), scalar * v.getY()); }
 inline ivec2 operator/(int scalar, const ivec2& v) { return ivec2(scalar / v.getX(), scalar / v.getY()); }
+
+
 
 }//math
 

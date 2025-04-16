@@ -3,20 +3,7 @@
 #include <QUuid>
 #include "math/lib.h"
 #include "base.h"
-
-namespace GameObjectTypes
-{
-    Q_NAMESPACE;
-    enum Type
-    {
-        Tile2D,
-        Landscape,
-        Resource,
-        Buildings,
-        Cloud
-    };
-    Q_ENUM_NS(Type);
-}
+#include "base_data/lib.h"
 
 //GameObject
 class GameObject : public QObject
@@ -28,7 +15,9 @@ class GameObject : public QObject
     Q_PROPERTY(GameObjectTypes::Type type READ getType CONSTANT)
 
 public:
-    explicit GameObject(GameObjectTypes::Type type, QObject *parent = nullptr);
+    explicit GameObject(GameObjectTypes::Type type, QObject *parent);
+
+    BaseData::GameObject getData() const;
 
     //propertis
     QString name() const;
@@ -46,9 +35,13 @@ signals:
     void nameChanged();
     void positionChanged();
 
+protected:
+    virtual void load(const BaseData::GameObject& data);
+
+    BaseData::GameObject data;
 private:
-    QString m_name;
-    math::ivec2 m_position;
-    QUuid assetUuid;
-    GameObjectTypes::Type type;
+    
+    QString _name;
+    
+
 };

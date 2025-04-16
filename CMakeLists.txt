@@ -18,6 +18,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Boost REQUIRED COMPONENTS uuid lexical_cast)
 find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets Gui QuickControls2 ShaderTools)
 find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
 find_package(magic_enum CONFIG REQUIRED)

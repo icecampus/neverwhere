@@ -5,7 +5,14 @@ import "Workspace"
 
  SplitView 
 {
-    property var assetsContext: null
+    property var chapter: null
+
+    function load(data) 
+    {
+        chapter = core.chapters.getByUuid(data.chapterUuid)
+        mapView.load(chapter.mapPath)
+    }
+
     orientation: Qt.Horizontal
 
     AssetsContext
@@ -22,11 +29,15 @@ import "Workspace"
         SplitView.maximumWidth: 600
         
         assetsContext: assetsContext
+        onSave:
+        {
+
+        }
     }
 
     MapView 
     {
-        id: centerPanel
+        id: mapView
         SplitView.fillWidth: true
         color: colorPalette.background  // Глубокий черный фон (#0A0A0A)
         border.color: colorPalette.border // Граница (#404040)
@@ -34,7 +45,8 @@ import "Workspace"
         assetsContext: assetsContext
     }
 
-    RightPanel {
+    RightPanel 
+    {
         id: rightPanel
         SplitView.preferredWidth: 200
         SplitView.minimumWidth: 100

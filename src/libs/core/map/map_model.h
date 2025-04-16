@@ -4,6 +4,7 @@
 #include <memory>
 #include "game_object.h"
 #include "simple_model.h"
+#include "base_data/lib.h"
 
 //LayerModel
 class LayerModel : public QAbstractListModel
@@ -19,7 +20,10 @@ public:
 
     using GameObjectHandler = std::function<void(GameObject& gameObject)>;
 
-    explicit LayerModel(QObject *parent = nullptr);
+    explicit LayerModel(QObject *parent);
+
+    void load(const BaseData::Layer& layer);
+    void save(BaseData::Layer& layer);
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
@@ -51,6 +55,7 @@ public:
     LayerModel* layer(LayerTypes::Type type);
     void addGameObject(LayerTypes::Type layerType, std::unique_ptr<GameObject> gameObject);
 
-    Q_INVOKABLE void populateMapModel();
+    Q_INVOKABLE void load(QString mapPath);
+    Q_INVOKABLE void save(QString mapPath);
 
 };

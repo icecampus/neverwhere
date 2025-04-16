@@ -97,9 +97,9 @@ EpicEditorWindow
                             element.item.parent = homeWrapper
                             element.item.anchors.fill = homeWrapper
 
-                            element.item.openTabRequest.connect(function (chapterName) 
+                            element.item.openTabRequest.connect(function (chapterName, chapter) 
                             {       
-                                tabsContentCreator.openChapterByName(chapterName)
+                                tabsContentCreator.openChapterByUuid(chapter.name, chapter.uuid)
                             })
                         }
                     }
@@ -116,6 +116,7 @@ EpicEditorWindow
                         {
                             element.item.parent = worspaceWrapper
                             element.item.anchors.fill = worspaceWrapper
+                            element.item.load(element.data)
                         }
                     }
                 }

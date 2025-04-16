@@ -5,7 +5,7 @@ import Qt5Compat.GraphicalEffects
 
 Rectangle 
 {
-    signal openTabRequest(string chapterName)
+    signal openTabRequest(string chapterName, var chapter)
     
     color: colorPalette.background 
     property int selectedIndex: -1
@@ -59,7 +59,7 @@ Rectangle
 
             property int minCellWidth: 300    
             cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    
-            cellHeight: 150    
+            cellHeight: cellWidth / 16.0 * 9
             property int selectedIndex: -1
             
             model: core.chapters
@@ -84,6 +84,7 @@ Rectangle
                         anchors.centerIn: parent
                         width:  chaptersView.cellWidth - 20
                         height: chaptersView.cellHeight - 20
+
                         source: "image://chaptersImage/" + element.name
                     }
 
@@ -109,14 +110,15 @@ Rectangle
                     }
                 }
 
-                MouseArea {
+                MouseArea 
+                {
                     anchors.fill: parent
                     hoverEnabled: true
                     onEntered: parent.children[0].color = colorPalette.primaryOrange
                     onExited: parent.children[0].color =  colorPalette.surface 
                     onClicked: 
                     {
-                        openTabRequest(element.name)
+                        openTabRequest(element.name, element)
                     }
                 }
             }

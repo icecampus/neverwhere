@@ -6,10 +6,16 @@
 
 namespace fs = std::filesystem;
 
+std::filesystem::path baseDataPath = "d:/campus/neverwhere/resources";
+
 CoreContext::CoreContext(QQmlApplicationEngine& engine_):
     QObject(&engine_),
-    engine(engine_),
-    chaptersModel(this)
+    engine(engine_)
+{
+
+}
+
+CoreContext::~CoreContext()
 {
 
 }
@@ -21,13 +27,15 @@ AssetsLibraryModel* CoreContext::getAssetsLibraty()
 
 ChaptersModel* CoreContext::getChaptersModel()
 {
-    return &chaptersModel;
+    return chaptersModel.get();
 }
 
 void CoreContext::load()
 {
-    
-    assetsLibrary.reset(new AssetsLibraryModel(&engine));
+    chaptersModel.reset( new ChaptersModel(this));
+
+
+    assetsLibrary.reset(new AssetsLibraryModel(this));
     loadAssets();
 
     imageProvider = new AssetImageProvider(assetsLibrary.get());
@@ -38,19 +46,14 @@ void CoreContext::load()
     chapterProvider = new ChaptersImageProvider();
     engine.addImageProvider("chaptersImage", chapterProvider);
 
-    chaptersModel.addElement<Chapter>("Chapter 2", this);
-    chaptersModel.addElement<Chapter>("Chapter 3", this);
-    chaptersModel.addElement<Chapter>("Chapter 4", this);
-    chaptersModel.addElement<Chapter>("Chapter 5", this);
-    chaptersModel.addElement<Chapter>("Chapter 6", this);
-    chaptersModel.addElement<Chapter>("Chapter 7", this);
-    chaptersModel.addElement<Chapter>("Chapter 8", this);
-    chaptersModel.addElement<Chapter>("Chapter 9", this);
+    ChaptersModel::load(*chaptersModel, baseDataPath / "chapters");
+
+    chapterProvider->load(*chaptersModel);
 }
 
 void CoreContext::loadAssets()
 {
-    fs::path rootPath = "d:/campus/neverwhere/resources/assets";
+    fs::path rootPath = baseDataPath / "assets";
 
     AssetsLoader::load(rootPath, *assetsLibrary.get());
 }

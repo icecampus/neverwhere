@@ -2,13 +2,64 @@
 #include <QRandomGenerator>
 
 #include "game_objects/tile_2d.h"
+#include "game_objects/resource.h"
 #include "game_objects/building.h"
+#include "game_objects/landscape.h"
 #include <magic_enum/magic_enum.hpp>
+
+namespace fs = std::filesystem;
 
 LayerModel::LayerModel(QObject* parent):
     QAbstractListModel(parent) 
 {
 
+}
+
+void LayerModel::load(const BaseData::Layer& layer)
+{
+    for (const BaseData::GameObject& gameObject : layer)
+    {
+        if (gameObject.tile2dData)
+        {
+            auto go = std::make_unique<Tile2D>(this);
+            go->load(gameObject);
+
+            addGameObject(std::move(go));
+
+        }
+        if (gameObject.resourceData)
+        {
+            auto go = std::make_unique<Resource>(this);
+            go->load(gameObject);
+
+            addGameObject(std::move(go));
+
+        }
+        if (gameObject.landscapeData)
+        {
+            auto go = std::make_unique<Landscape>(this);
+            go->load(gameObject);
+
+            addGameObject(std::move(go));
+            
+        }
+        if (gameObject.buildingData)
+        {
+            auto go = std::make_unique<Building>(this);
+            go->load(gameObject);
+
+            addGameObject(std::move(go));
+        }   
+        
+    }
+}
+
+void LayerModel::save(BaseData::Layer& layer)
+{
+    for (auto& go: _gameObjects)
+    {
+        layer.push_back(go->getData());
+    }
 }
 
 int LayerModel::rowCount(const QModelIndex& parent) const 
@@ -29,7 +80,8 @@ QVariant LayerModel::data(const QModelIndex& index, int role) const
 
     if (role == TypeRole)
     {
-        return _gameObjects[index.row()]->getType();
+        GameObjectTypes::Type type = _gameObjects[index.row()]->getType();
+        return type;
     }
 
     if (role == ElementRole)
@@ -56,6 +108,7 @@ void LayerModel::addGameObject(std::unique_ptr<GameObject> gameObject)
     _gameObjects.push_back(std::move(gameObject));
 
     connect(obj, &GameObject::positionChanged, this, &LayerModel::onGameObjectPositionChanged);
+
     // Обновляем структуры данных
     math::ivec2 pos = obj->getPosition();
     _objectOldPositions[obj] = pos;
@@ -122,7 +175,7 @@ void LayerModel::onGameObjectPositionChanged()
 MapModel::MapModel(QObject* parent):
     SimpleModel<LayerModel>(parent)
 {
-    for (LayerTypes::Type layer : magic_enum::enum_values<LayerTypes::Type>())
+    for (const LayerTypes::Type layer : magic_enum::enum_values<LayerTypes::Type>())
     {
         addElement<LayerModel>(this);        
     }
@@ -139,37 +192,62 @@ void MapModel::addGameObject(LayerTypes::Type layerType, std::unique_ptr<GameObj
     layer(layerType)->addGameObject(std::move(gameObject));
 }
 
-void MapModel::populateMapModel()
+void MapModel::load(QString mapPath)
 {
-    QRandomGenerator* rand = QRandomGenerator::global();
+    fs::path path = mapPath.toStdString();
 
-    std::vector<std::string>  imageSources{
-        "a3771d55-8ca0-44aa-9d9f-5ab3e9cb300e",
-        "9813e80b-c6f7-43f9-9f11-f074009bb8f1",
-        "737179d4-0535-4141-ab2c-68758b71c141",
-        "a32aee74-1e74-45c4-a34c-de5e8847d1da",
-        "a476f78f-c329-4a78-be82-b7c5dbe49c6c"
-    };
+    if (fs::exists(path))
+    {
+        BaseData::Map baseMap = BaseData::Map::load(mapPath.toStdString());
 
-
-
-    for (int i = 1; i <= 2000; ++i) {
-        std::unique_ptr<Tile2D> gameObject = std::make_unique<Tile2D>();
-
-        gameObject->setName(QString("Object %1").arg(i));
-
-        int x = rand->generateDouble() * 200;
-        int y = rand->generateDouble() * 200;
-        math::ivec2 randomPosition(x, y);
-        gameObject->setPosition(randomPosition);
-
-        int assetIndex = rand->generateDouble() * 3;
-
-        QString uuidStr = QString::fromStdString(imageSources[assetIndex]);
-
-        QUuid uuid(uuidStr);
-        gameObject->setAssetUiid(uuid);
-
-        addGameObject(LayerTypes::GameplayInteractive, std::move(gameObject));
+        for (const LayerTypes::Type layerType : magic_enum::enum_values<LayerTypes::Type>())
+        {
+            size_t layerIndex = magic_enum::enum_index(layerType).value();
+            element(layerIndex)->load(baseMap.at(layerType));
+        }
     }
+
+
+    //QRandomGenerator* rand = QRandomGenerator::global();
+
+    //std::vector<std::string>  imageSources{
+    //    "a3771d55-8ca0-44aa-9d9f-5ab3e9cb300e",
+    //    "9813e80b-c6f7-43f9-9f11-f074009bb8f1",
+    //    "737179d4-0535-4141-ab2c-68758b71c141",
+    //    "a32aee74-1e74-45c4-a34c-de5e8847d1da",
+    //    "a476f78f-c329-4a78-be82-b7c5dbe49c6c"
+    //};
+
+    //for (int i = 1; i <= 200; ++i) 
+    //{
+    //    std::unique_ptr<Tile2D> gameObject = std::make_unique<Tile2D>();
+
+    //    gameObject->setName(QString("Object %1").arg(i));
+
+    //    int x = rand->generateDouble() * 200;
+    //    int y = rand->generateDouble() * 200;
+    //    math::ivec2 randomPosition(x, y);
+    //    gameObject->setPosition(randomPosition);
+
+    //    int assetIndex = rand->generateDouble() * 3;
+
+    //    QString uuidStr = QString::fromStdString(imageSources[assetIndex]);
+
+    //    QUuid uuid(uuidStr);
+    //    gameObject->setAssetUiid(uuid);
+
+    //    addGameObject(LayerTypes::GameplayInteractive, std::move(gameObject));
+    //}
+}
+
+void MapModel::save(QString mapPath)
+{
+    BaseData::Map baseMap;
+    for (const LayerTypes::Type layerType : magic_enum::enum_values<LayerTypes::Type>())
+    {
+        size_t layerIndex = magic_enum::enum_index(layerType).value();
+        element(layerIndex)->save(baseMap[layerType]);
+    }
+
+    BaseData::Map::save(baseMap, mapPath.toStdString());
 }

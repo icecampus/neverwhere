@@ -1,1 +1,8 @@
-#include "ivec.h"
+﻿#include "ivec.h"
+
+namespace math
+{
+
+
+
+}//Ъ..

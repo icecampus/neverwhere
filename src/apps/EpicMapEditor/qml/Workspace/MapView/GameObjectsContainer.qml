@@ -40,6 +40,16 @@ Item
                     gameObject: element
                 }
             }
+
+            DelegateChoice 
+            {   
+                roleValue: GameObjectTypes.Buildings
+                delegate: Tile2DView
+                {
+                    gameObject: element
+                }
+            }
+
             DelegateChoice 
             {   
                 roleValue: GameObjectTypes.Landscape

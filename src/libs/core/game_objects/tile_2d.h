@@ -8,6 +8,7 @@ class Tile2D : public GameObject
 public:
     explicit Tile2D(QObject* parent = nullptr);
 
+    virtual void load(const BaseData::GameObject& data) override;
 signals:
 
 private:

@@ -8,6 +8,12 @@ Building::Building(QObject* parent):
 
 }
 
+void Building::load(const BaseData::GameObject& data)
+{
+    GameObject::load(data);
+}
+
+
 int Building::level() const 
 {
     return m_level;

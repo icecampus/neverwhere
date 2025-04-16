@@ -67,7 +67,7 @@ LandscapePencil::LandscapePencil(QObject* parent):
 
 }
 
-void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso)
+void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso)
 {
     SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
     if (sliceAsset)
@@ -82,17 +82,17 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* m
         {
             //spdlog::info("neighbour: {}",  curCellPosition);
 
-            TileSet::TileType tileType = getTileByMask(*mapModel, nodePos, curCellPosition, *sliceAsset);
+            TileSet::TileType tileType = getTileByMask(*layerModel, nodePos, curCellPosition, *sliceAsset);
             //spdlog::info("neighbour: tile_type{}",  magic_enum::enum_name(tileType));
 
             if (tileType != TileSet::Unknown)
             {
-                std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>();
+                std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>(layerModel);
                 landObject->setName(QString("Landscape"));
                 landObject->setPosition(curCellPosition);
                 landObject->setAssetUiid(currentAsset->uuid());
                 landObject->setTileIndex(sliceAsset->subTileIndexByType(tileType));
-                mapModel->addGameObject(std::move(landObject));
+                layerModel->addGameObject(std::move(landObject));
             }
             else
             {

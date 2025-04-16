@@ -8,6 +8,11 @@ Resource::Resource(QObject* parent):
 
 }
 
+void Resource::load(const BaseData::GameObject& data)
+{
+    GameObject::load(data);
+}
+
 int Resource::quantity() const 
 {
     return m_quantity;

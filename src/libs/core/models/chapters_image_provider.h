@@ -2,6 +2,7 @@
 #include <QQuickImageProvider>
 #include <QImage>
 #include <QUuid>
+#include "chapters_model.h"
 
 class ChaptersImageProvider : public QQuickImageProvider 
 {
@@ -11,6 +12,8 @@ public:
     {
     
     }
+
+    void load(ChaptersModel& model);
 
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override;
 
