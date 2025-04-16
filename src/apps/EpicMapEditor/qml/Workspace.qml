@@ -48,9 +48,12 @@ import "Workspace"
     RightPanel 
     {
         id: rightPanel
-        SplitView.preferredWidth: 200
+        SplitView.preferredWidth: 250
         SplitView.minimumWidth: 100
-        SplitView.maximumWidth: 300
+        SplitView.maximumWidth: 350
+
+        asset: assetsContext.asset
+        
     }
 
     handle: Rectangle 

@@ -45,6 +45,9 @@ void registreTypes()
     qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
     qmlRegisterType<StaggeredCursor>("Game", 1, 0, "StaggeredCursor");
 
+    
+    qmlRegisterType<PropertyContainersModel>("Game", 1, 0, "PropertyContainersModel");
+
 
     qmlRegisterUncreatableMetaObject(
         AssetTypes::staticMetaObject,       // static meta object
@@ -71,6 +74,15 @@ void registreTypes()
         1,                              
         0,                                  // major and minor version of the import
         "LayerTypes",                       // name in QML (does not have to match C++ name)
+        "Error: only enums"                 // error in case someone tries to create a MyNamespace object
+    );
+
+    qmlRegisterUncreatableMetaObject(
+        PropertiesContainerTypes::staticMetaObject, // static meta object
+        "Game",                             // import statement (can be any string)
+        1,
+        0,                                  // major and minor version of the import
+        "PropertiesContainerTypes",         // name in QML (does not have to match C++ name)
         "Error: only enums"                 // error in case someone tries to create a MyNamespace object
     );
 
