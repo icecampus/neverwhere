@@ -27,6 +27,7 @@ class Asset : public QObject
     Q_PROPERTY(QString name READ name CONSTANT)
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
     Q_PROPERTY(LayerTypes::Type layerType READ getLayerType CONSTANT)
+    Q_PROPERTY(math::vec2 pivot READ getPivot WRITE setPivot NOTIFY pivotChanged)
 
     public:
     using RegistationHandle = std::function<void(int index, const QImage& image)>;
@@ -38,6 +39,9 @@ class Asset : public QObject
     QString getThumbnailUrl() const;
     LayerTypes::Type getLayerType() const;
 
+    math::vec2 getPivot() const;
+    void setPivot(const math::vec2& pivot);
+
 
     //
     virtual void load(const std::filesystem::path& indexPath,  const nlohmann::json& j);
@@ -46,6 +50,10 @@ class Asset : public QObject
     virtual void registerImages(RegistationHandle handle)=0;
     
     const AssetTypes::Type type;
+
+signals:
+    void pivotChanged();
+
 protected:
     virtual QString getUrlInternal() const=0;
 
@@ -53,5 +61,6 @@ protected:
     QUuid _uuid;           
     QString _name;   
     LayerTypes::Type _layerType{ LayerTypes::Decoration };
+    math::vec2 pivot{ 0.5, 1.0f };
     
 };

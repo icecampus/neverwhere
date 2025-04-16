@@ -8,8 +8,8 @@ Item
     property size assetSize: imageAsset.getSize(isoView)
 
     // Позиция относительно контейнера, без учета камерыc
-    x: isoView.mapToField(gameObject.position).x - assetSize.width/2
-    y: isoView.mapToField(gameObject.position).y - assetSize.height
+    x: isoView.mapToField(gameObject.position).x - (assetSize.width * imageAsset.pivot.x)
+    y: isoView.mapToField(gameObject.position).y - (assetSize.height * imageAsset.pivot.y)
     width:  assetSize.width
     height: assetSize.height
     z: isoView.zOffset(gameObject.position)

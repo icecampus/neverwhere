@@ -48,7 +48,6 @@ Rectangle
                 delegate: AssetSettings
                 {
                     width: conteinersView.width
-                    height: 200
                     text: element.title
                     asset: rightPanel.asset
                 }

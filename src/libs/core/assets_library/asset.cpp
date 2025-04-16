@@ -31,6 +31,20 @@ LayerTypes::Type Asset::getLayerType() const
     return _layerType;
 }
 
+math::vec2 Asset::getPivot() const
+{
+    return pivot;
+}
+
+void Asset::setPivot(const math::vec2& pivot_)
+{
+    if (pivot != pivot_)
+    {
+        pivot = pivot_;
+        emit pivotChanged();
+    }
+}
+
 void Asset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
 {
     std::string uuidStr = j["uuid"];
