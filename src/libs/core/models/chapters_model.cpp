@@ -71,7 +71,8 @@ void ChaptersModel::load(ChaptersModel& model, const std::filesystem::path& chap
 
 Chapter* ChaptersModel::getByUuid(const QUuid& chapterUuid)
 {
-    return uuid2Chapter.at(chapterUuid);
+    Chapter* chapter = uuid2Chapter.at(chapterUuid);
+    return chapter;
 }
 
 void ChaptersModel::processElement(Chapter& chapter)

@@ -31,7 +31,7 @@ import "Workspace"
         assetsContext: assetsContext
         onSave:
         {
-
+            mapView.save(chapter.mapPath)
         }
     }
 

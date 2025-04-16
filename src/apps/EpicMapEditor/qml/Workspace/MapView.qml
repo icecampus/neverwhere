@@ -13,9 +13,14 @@ Rectangle
 
     function load(path)
     {
-        console.log(path)
         mapModel.load(path);
     }
+    
+    function save(path)
+    {
+        mapModel.save(path)
+    }
+    
 
     id: centerPanel
 
