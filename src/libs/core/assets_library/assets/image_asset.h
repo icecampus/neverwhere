@@ -6,19 +6,20 @@
 class ImageAsset: public Asset
 {
     Q_OBJECT
-    Q_PROPERTY(int width READ width CONSTANT)
-    Q_PROPERTY(QString imageFilename READ imageFilename CONSTANT)
-
-    
+    Q_PROPERTY(float widthInCells READ getWidth WRITE setWidth NOTIFY widthChanged)
+    Q_PROPERTY(QString imageFilename READ getImageFilename CONSTANT)
 
 public:
     explicit ImageAsset(QObject* parent);
 
     //properties
-    int width() const;
-    QString imageFilename() const;
+    float getWidth() const;
+    void setWidth(float widthInCells);
+
+    QString getImageFilename() const;
 
     Q_INVOKABLE QSize getSize(StaggeredIsometry* iso);
+    Q_INVOKABLE void setSize(const math::vec2& screenSize, StaggeredIsometry* iso);
 
     //
     void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
@@ -27,13 +28,15 @@ public:
     nlohmann::json save();
 
     void registerImages(RegistationHandle handle) override;
+signals:
+    void widthChanged();
 
 protected:
     QString getUrlInternal() const override;
 
 private:
-    int m_width;
-    QString m_imageFilename;
+    float widthInCells;
+    QString imageFilename;
     std::filesystem::path imagePath;
     QImage image;
 

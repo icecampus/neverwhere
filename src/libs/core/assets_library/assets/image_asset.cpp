@@ -9,25 +9,41 @@ ImageAsset::ImageAsset(QObject* parent):
 
 }
 
-int ImageAsset::width() const 
+float ImageAsset::getWidth() const 
 { 
-    return m_width; 
+    return widthInCells; 
 }
 
-QString ImageAsset::imageFilename() const 
+void ImageAsset::setWidth(float widthInCells_)
+{
+    spdlog::info("setWidth: {}",  widthInCells_);
+    if(widthInCells != widthInCells_)
+    {
+        widthInCells = widthInCells_;
+        emit widthChanged();
+    }
+}
+
+QString ImageAsset::getImageFilename() const 
 { 
-    return m_imageFilename; 
+    return imageFilename; 
 }
 
 QSize ImageAsset::getSize(StaggeredIsometry* iso)
 {
     staggered_dimensions dimensions = iso->getDimensions();
-    float mapSize = dimensions.getCellWidth() * m_width;
+    float mapSize = dimensions.getCellWidth() * widthInCells;
 
     QSize imageRealSize = thumbnail().size();
     float k = imageRealSize.width() / mapSize;
 
     return imageRealSize / k;
+}
+
+void ImageAsset::setSize(const math::vec2& screenSize, StaggeredIsometry* iso)
+{
+   widthInCells = screenSize.x /  iso->dimensions.getCellWidth();
+   emit widthChanged();
 }
 
 QString ImageAsset::getUrlInternal() const
@@ -42,10 +58,10 @@ void ImageAsset::load(const std::filesystem::path& indexPath,  const nlohmann::j
 {
     Asset::load(indexPath, j);
 
-    m_width = j["image"]["width"].get<int>();
-    m_imageFilename = QString::fromStdString(j["image"]["imageFilename"].get<std::string>());
+    widthInCells = j["image"]["width"].get<int>();
+    imageFilename = QString::fromStdString(j["image"]["imageFilename"].get<std::string>());
 
-    imagePath = indexPath.parent_path() / m_imageFilename.toStdString();
+    imagePath = indexPath.parent_path() / imageFilename.toStdString();
 
     if (fs::exists(imagePath))
     {
@@ -61,8 +77,8 @@ QImage ImageAsset::thumbnail()
 nlohmann::json ImageAsset::save()
 {
     nlohmann::json graphics = {
-    {"width", m_width},
-    {"imageFilename", m_imageFilename.toStdString()}
+    {"width", widthInCells},
+    {"imageFilename", imageFilename.toStdString()}
     };
 
     nlohmann::json j = {

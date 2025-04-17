@@ -1,0 +1,15 @@
+{
+    "BaseLandscape": [],
+    "Decoration": [],
+    "GameplayInteractive": [
+        {
+            "assetUuid": "bee8d3f1-b8c0-4b22-95cb-e3ae17f9e1d7",
+            "position": {
+                "x": 2,
+                "y": 13
+            },
+            "tile2dData": null,
+            "type": 0
+        }
+    ]
+}

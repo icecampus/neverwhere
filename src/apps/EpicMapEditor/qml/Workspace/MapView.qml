@@ -42,6 +42,21 @@ Rectangle
         currentAsset: assetsContext.asset
     }
 
+    MapMouseArea 
+    {
+        id: mouseArea
+        anchors.fill: parent
+        isoView: isoView
+        onClicked:(mouse)=>
+        {
+            if(mouse.button === Qt.LeftButton )
+            {
+                toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView)
+            }
+        }
+    }
+
+
     StaggeredIsometryView
     {
         id: isoView
@@ -137,19 +152,6 @@ Rectangle
         ]
     }
     
-    MapMouseArea 
-    {
-        id: mouseArea
-        anchors.fill: parent
-        isoView: isoView
-        onClicked:(mouse)=>
-        {
-            if(mouse.button === Qt.LeftButton )
-            {
-                toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView)
-            }
-        }
-    }
 
     CoordinateIndicator
     {
