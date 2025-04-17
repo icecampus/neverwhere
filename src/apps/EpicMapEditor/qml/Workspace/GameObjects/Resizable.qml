@@ -8,6 +8,8 @@ Rectangle
     signal startDrag()
     signal endDrag()
 
+    property int borderWidth: 10
+
     id: root
 
     color: "gray"
@@ -15,21 +17,24 @@ Rectangle
     border.color: "black"
     border.width: 1
 
+    Rectangle
+    {
+        id: activeEdge
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        width: borderWidth
+        color: "red"
+    }
+
     MouseArea 
     {
-        property int borderWidth: 10
-        property int minSize: 50
-
         property point clickPos: Qt.point(0, 0)
-        property rect startGeometry: Qt.rect(0, 0, 0, 0)
         property int edge: 0
 
         readonly property int edgeSize: borderWidth
-        readonly property int leftEdge: 0x01
         readonly property int rightEdge: 0x02
-        readonly property int topEdge: 0x04
-        readonly property int bottomEdge: 0x08
-
+        
         id: resizeHandler
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
@@ -50,7 +55,6 @@ Rectangle
         onPressed:(mouse)=>  
         {
             clickPos = Qt.point(mouse.x, mouse.y)
-            startGeometry = Qt.rect(root.x, root.y, root.width, root.height)
             edge = getEdge(clickPos)
             startDrag()
         }

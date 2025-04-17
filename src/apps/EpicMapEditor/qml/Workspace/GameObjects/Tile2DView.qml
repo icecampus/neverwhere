@@ -15,8 +15,6 @@ Item
     {
         var assetSize = imageAsset.getSize(isoView)
         
-        console.log("newScreenPivot: " + screenDelta)
-        
         imageAsset.pivot.x += (screenDelta.x/assetSize.width)
         imageAsset.pivot.y += (screenDelta.y/assetSize.height)
     }
@@ -44,8 +42,6 @@ Item
 
         frame.width =  assetSize.width
         frame.height = assetSize.height
-
-        //assetSize = imageAsset.getSize(isoView)
     }
 
     function updateImageSize()
@@ -91,7 +87,6 @@ Item
 
         onUpdateScreenWidthDelta:(screenWidthDelta)=>
         {
-            //console.log("onUpdateScreenWidthDelta: " + screenWidthDelta)
             updateAssetWidth(screenWidthDelta)
         }
 

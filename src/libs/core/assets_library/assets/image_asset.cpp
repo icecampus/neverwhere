@@ -16,7 +16,7 @@ float ImageAsset::getWidth() const
 
 void ImageAsset::setWidth(float widthInCells_)
 {
-    spdlog::info("setWidth: {}",  widthInCells_);
+    //spdlog::info("setWidth: {}",  widthInCells_);
     if(widthInCells != widthInCells_)
     {
         widthInCells = widthInCells_;
