@@ -38,6 +38,8 @@ math::vec2 Asset::getPivot() const
 
 void Asset::setPivot(const math::vec2& pivot_)
 {
+    //spdlog::info("pivot: {}", pivot_);
+    
     if (pivot != pivot_)
     {
         pivot = pivot_;

@@ -8,7 +8,9 @@ Rectangle
     signal startDrag()
     signal endDrag()
 
-    property int borderWidth: 10
+    property int borderWidth: 15
+    property int edge: 0
+    readonly property int rightEdge: 0x02
 
     id: root
 
@@ -23,17 +25,17 @@ Rectangle
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        width: borderWidth
-        color: "red"
+        width: 5
+        color: (resizeHandler.containsMouse && (edge & rightEdge))? "black" : "transparent"
     }
 
     MouseArea 
     {
         property point clickPos: Qt.point(0, 0)
-        property int edge: 0
+        
 
         readonly property int edgeSize: borderWidth
-        readonly property int rightEdge: 0x02
+        
         
         id: resizeHandler
         anchors.fill: parent
@@ -72,15 +74,27 @@ Rectangle
 
                 if (pressed && !edge) 
                 {
+                    // !!!!!!!!!!!!!!!!!!!!!!!!!
+                    // когда двигается весь элемент - он начинает следовать за мышкой и и dragDelta содержит сдвиг с прошолого кадра
                     updateScreenDragDelta(dragDelta) 
                     return
                 }
             
                 if (edge & rightEdge) 
                 {
+                    // !!!!!!!!!!!!!!!!!!!!!!!!!
+                    // когда двигается грань - dragDelta содержит сдвиг относительно точки нажатия, 
+                    // то есть обсалютный сдвиг относительно начала перетаскивания
                     updateScreenWidthDelta(-dragDelta.x)
                 }
             }
+
+            edge = getEdge(Qt.point(mouse.x, mouse.y))
+        }
+        
+        onExited:
+        {
+            //edge = 0
         }
         
         onCursorShapeChanged: 

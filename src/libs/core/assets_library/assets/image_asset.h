@@ -18,8 +18,8 @@ public:
 
     QString getImageFilename() const;
 
-    Q_INVOKABLE QSize getSize(StaggeredIsometry* iso);
-    Q_INVOKABLE void setSize(const math::vec2& screenSize, StaggeredIsometry* iso);
+    Q_INVOKABLE QSize getScreenSize(StaggeredIsometry* iso);
+    Q_INVOKABLE void setScreenWidth(const float screenWidth, StaggeredIsometry* iso);
 
     //
     void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;

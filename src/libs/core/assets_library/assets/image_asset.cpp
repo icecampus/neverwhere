@@ -29,7 +29,7 @@ QString ImageAsset::getImageFilename() const
     return imageFilename; 
 }
 
-QSize ImageAsset::getSize(StaggeredIsometry* iso)
+QSize ImageAsset::getScreenSize(StaggeredIsometry* iso)
 {
     staggered_dimensions dimensions = iso->getDimensions();
     float mapSize = dimensions.getCellWidth() * widthInCells;
@@ -40,9 +40,10 @@ QSize ImageAsset::getSize(StaggeredIsometry* iso)
     return imageRealSize / k;
 }
 
-void ImageAsset::setSize(const math::vec2& screenSize, StaggeredIsometry* iso)
+void ImageAsset::setScreenWidth(const float screenWidth, StaggeredIsometry* iso)
 {
-   widthInCells = screenSize.x /  iso->dimensions.getCellWidth();
+   //spdlog::info("screenWidth: {}",  screenWidth);
+   widthInCells = screenWidth /  iso->dimensions.getCellWidth();
    emit widthChanged();
 }
 

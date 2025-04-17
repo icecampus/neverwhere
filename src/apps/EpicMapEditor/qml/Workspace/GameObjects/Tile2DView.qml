@@ -8,58 +8,47 @@ Item
     property var cellCenter: isoView.mapToField(gameObject.position)
 
     property ImageAsset imageAsset: core.assetsLibrary.getAsset(gameObject.assetUuid)
-    property size assetSize
+    //property size assetSize
     property real startWidt: 0
 
     function updateAssetPivot(screenDelta)
     {
-        var assetSize = imageAsset.getSize(isoView)
-        
-        imageAsset.pivot.x += (screenDelta.x/assetSize.width)
-        imageAsset.pivot.y += (screenDelta.y/assetSize.height)
+        //console.log("screenDelta.x: " + screenDelta.x + ", screenDelta.y: " + screenDelta.y)
+
+        imageAsset.pivot.x -= (screenDelta.x.toFixed()/isoView.dimensions.cellSize.x)
+        imageAsset.pivot.y -= (screenDelta.y.toFixed()/isoView.dimensions.cellSize.y)
     }
 
     function updateAssetWidth(screenWidthDelta)
     {
-        var assetSize = imageAsset.getSize(isoView)
+        //console.log("screenDelta.x: " + screenWidthDelta)
+        var assetSize = imageAsset.setScreenWidth(startWidt + screenWidthDelta,isoView)
 
-        imageAsset.widthInCells = startWidt + (screenWidthDelta / isoView.dimensions.cellWidth)
-        updateImageSize()
+        imageAsset.setScreenWidth(startWidt + screenWidthDelta, isoView)
     }
 
-    function updateFramePosition()
-    {
-        frame.x = - (assetSize.width * imageAsset.pivot.x)
-        frame.y = - (assetSize.height * imageAsset.pivot.y)  
-    }
-    
     function updateFrameGeometry()
     {
-        var assetSize = imageAsset.getSize(isoView)
+        var assetSize = imageAsset.getScreenSize(isoView)
 
-        frame.x = - (assetSize.width * imageAsset.pivot.x)
-        frame.y = - (assetSize.height * imageAsset.pivot.y)
+        //console.log("isoView.dimensions.cellSize.x: " + isoView.dimensions.cellSize.x)
+        //console.log("imageAsset.pivot.x: " + imageAsset.pivot.x)
 
+        frame.x = (isoView.dimensions.cellSize.x * imageAsset.pivot.x) - assetSize.width/2
+        frame.y = (isoView.dimensions.cellSize.y * imageAsset.pivot.y) - assetSize.height/2
         frame.width =  assetSize.width
         frame.height = assetSize.height
+
+        //console.log("frame.x: " + frame.x)
     }
 
-    function updateImageSize()
-    {
-        assetSize = imageAsset.getSize(isoView)
-    }
 
     Component.onCompleted: 
     {
-        updateImageSize()
         updateFrameGeometry()
-        frame.width =  assetSize.width
-        frame.height = assetSize.height
         
-        imageAsset.widthChanged.connect(updateImageSize)
         imageAsset.widthChanged.connect(updateFrameGeometry)
-
-        imageAsset.pivotChanged.connect(updateFramePosition)
+        imageAsset.pivotChanged.connect(updateFrameGeometry)
     }
 
     x: cellCenter.x 
@@ -76,6 +65,9 @@ Item
         height: isoView.dimensions.cellSize.y
     }
 
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // его позиция обновляется через pivot поинт, поэтому обновляется позиция MouseArea 
+    // и при перетаскивание всего элемента приходит только дельта
     Resizable 
     {
         id: frame
@@ -92,15 +84,11 @@ Item
 
         onStartDrag:
         {
-            imageAsset.widthChanged.disconnect(updateImageSize)
-            imageAsset.widthChanged.disconnect(updateFramePosition)
-            startWidt = imageAsset.widthInCells
+            startWidt = imageAsset.getScreenSize(isoView).width
             
         }
         onEndDrag:
         {
-            imageAsset.widthChanged.connect(updateImageSize)
-            imageAsset.widthChanged.connect(updateFramePosition)
             startWidt = 0
         }
     }
@@ -109,10 +97,12 @@ Item
     Image 
     {
         id: image
-        x: - (assetSize.width * imageAsset.pivot.x)
-        y: - (assetSize.height * imageAsset.pivot.y)
-        width:  assetSize.width
-        height: assetSize.height
+        
+        x:  frame.x
+        y: frame.y
+        width:  frame.width
+        height: frame.height
+        
 
         source: imageAsset.thumbnailUrl
     }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <QObject>
 #include <QUuid>
 #include <QJsonObject>
@@ -27,6 +27,12 @@ class Asset : public QObject
     Q_PROPERTY(QString name READ name CONSTANT)
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
     Q_PROPERTY(LayerTypes::Type layerType READ getLayerType CONSTANT)
+
+    // pivot - это смещение ЦЕНТРА картинки относительно центра клетки игрового поля в размере клеток игрового поля
+    // (0,0) - нет смешения, 
+    // (1,1) смещение на ширину одной клетки вправо и на высоту(!) одной клетки вниз, 
+    // (2, -2) на две вправо и на 2 высоты клетки вверх
+    // высота или шира определяются топологией карты
     Q_PROPERTY(math::vec2 pivot READ getPivot WRITE setPivot NOTIFY pivotChanged)
 
     public:
@@ -61,6 +67,6 @@ protected:
     QUuid _uuid;           
     QString _name;   
     LayerTypes::Type _layerType{ LayerTypes::Decoration };
-    math::vec2 pivot{ 0.5, 1.0f };
+    math::vec2 pivot{ 0.5, -1.0f };
     
 };

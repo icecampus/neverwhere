@@ -56,7 +56,7 @@ Rectangle
             height: 38
             width: parent.width
             Item{ height: 30; width: parent.width/2;  Text{ text: "Name: ";  anchors.verticalCenter: parent.verticalCenter;  color: colorPalette.textPrimary; font.pixelSize: 16 }} 
-            Text{ width: parent.width/2; text: asset.name; anchors.verticalCenter: parent.verticalCenter;  color: colorPalette.textPrimary; font.pixelSize: 16 }
+            Text{ width: parent.width/2; text: (asset)? asset.name : ""; anchors.verticalCenter: parent.verticalCenter;  color: colorPalette.textPrimary; font.pixelSize: 16 }
         }
 
         Row
