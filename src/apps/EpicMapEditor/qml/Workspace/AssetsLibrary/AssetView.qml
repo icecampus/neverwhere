@@ -9,6 +9,7 @@ GridElement
     id: assetView
     signal settingsClicked()
     signal settingComplete()
+    signal settingCancel()
 
     property bool settingsMode: false
 
@@ -59,7 +60,7 @@ GridElement
         //opacity: 0.7    
     
         backroundColor: colorPalette.surface2   
-        onClicked: settingComplete()
+        onClicked: settingCancel()
     }
 
 }

@@ -6,19 +6,9 @@
 #include <QFileInfo>
 #include <nlohmann/json.hpp>
 #include <filesystem>
+#include "base_data/lib.h"
 
 #include "base.h"
-
-namespace AssetTypes
-{
-    Q_NAMESPACE;
-    enum Type
-    {
-        image,
-        slice
-    };
-    Q_ENUM_NS(Type);
-}
 
 class Asset : public QObject
 {
@@ -53,12 +43,13 @@ class Asset : public QObject
     bool getEditMode() const;
     void setEditMode(bool state);
     //
-    virtual void load(const std::filesystem::path& indexPath,  const nlohmann::json& j);
+    virtual void load(const BaseData::AssetData& data);
     virtual QImage thumbnail() = 0;
 
     virtual void registerImages(RegistationHandle handle)=0;
     
     const AssetTypes::Type type;
+    const BaseData::AssetData& getData();
 
 signals:
     void pivotChanged();
@@ -67,11 +58,7 @@ signals:
 protected:
     virtual QString getUrlInternal() const=0;
 
-    std::filesystem::path indexPath;
-    QUuid _uuid;           
-    QString _name;   
-    LayerTypes::Type _layerType{ LayerTypes::Decoration };
-    math::vec2 pivot{ 0.5, -1.0f };
+    BaseData::AssetData data;
 
     bool editMode{false};
     

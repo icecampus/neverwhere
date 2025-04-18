@@ -22,10 +22,8 @@ public:
     Q_INVOKABLE void setScreenWidth(const float screenWidth, StaggeredIsometry* iso);
 
     //
-    void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
+    void load(const BaseData::AssetData& data) override;
     QImage thumbnail() override;
-
-    nlohmann::json save();
 
     void registerImages(RegistationHandle handle) override;
 signals:
@@ -35,8 +33,6 @@ protected:
     QString getUrlInternal() const override;
 
 private:
-    float widthInCells;
-    QString imageFilename;
     std::filesystem::path imagePath;
     QImage image;
 

@@ -36,6 +36,16 @@ GridView
             element.editMode = true
         }
 
-        onSettingComplete: element.editMode = false
+        onSettingComplete:
+        {   
+            element.editMode = false
+            core.assetsLibrary.save(element)
+        }
+
+        onSettingCancel:
+        {   
+            element.editMode = false
+        }
+
     }
 }

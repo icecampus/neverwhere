@@ -5,81 +5,44 @@
 #include "assets/image_asset.h"
 #include "assets/slice_asset.h"
 #include "assets_pack_model.h"
+#include "base_data/lib.h"
 
 namespace fs = std::filesystem;
 
 void AssetsLoader::load(const std::filesystem::path& rootPath, AssetsLibraryModel& library)
 {
-    if (!fs::exists(rootPath))
-    {
-        std::cerr << "The root directory does not exist: " << rootPath << std::endl;
-        return;
-    }
+   BaseData::Assets assetsData = BaseData::Assets::load(rootPath);
 
-    for (const auto& entry : fs::directory_iterator(rootPath)) 
-    {
-        if (!entry.is_directory()) 
-        {
-            continue;
-        }
-        fs::path packPath = entry.path();
+   for (const BaseData::AssetsPack& packData : assetsData)
+   {
+       library.addElement<AssetsPackModel>(packData.path, &library);
+       AssetsPackModel* lastPack = library.element(library.size() - 1);
+       loadPack(packData, lastPack);
 
-        library.addElement<AssetsPackModel>(packPath, &library);
-        AssetsPackModel* lastPack = library.element(library.size()-1);
-        loadPack(packPath, lastPack);
+   }
+}
+
+void AssetsLoader::loadPack(const BaseData::AssetsPack& packData, AssetsPackModel* model)
+{
+    for (const BaseData::AssetData& assetData: packData) 
+    {
+        loadAsset(assetData, model);
     }
 }
 
-void AssetsLoader::loadPack(const std::filesystem::path& packPath, AssetsPackModel* model)
+void AssetsLoader::loadAsset(const BaseData::AssetData& assetData, AssetsPackModel* pack)
 {
-    const std::string& groupName = packPath.filename().string();
-    
-    if (!fs::exists(packPath) || !fs::is_directory(packPath)) 
-    {
-        std::cerr << "Group directory does not exist: " << packPath << std::endl;
-        return;
-    }
-
-    for (const auto& entry : fs::directory_iterator(packPath)) 
-    {
-        if (entry.is_directory()) 
-        {
-            loadAsset(entry.path(), model);
-        }
-    }
-}
-
-void AssetsLoader::loadAsset(const fs::path& assetPath, AssetsPackModel* pack)
-{
-    fs::path jsonFilePath = assetPath / "index.json";
-
-    if (!fs::exists(jsonFilePath)) 
-    {
-        std::cerr << "JSON file not found: " << jsonFilePath << std::endl;
-        return;
-    }
-
-    std::ifstream jsonFile(jsonFilePath);
-    if (!jsonFile.is_open()) 
-    {
-        std::cerr << "Failed to open JSON file: " << jsonFilePath << std::endl;
-        return;
-    }
-
-    nlohmann::json j;
-    jsonFile >> j;
-
-    if ( j.count(magic_enum::enum_name(AssetTypes::image)) )
+    if ( assetData.imageData.has_value() )
     {
         auto asset = std::make_unique<ImageAsset>(pack);
-        asset->load(jsonFilePath, j);
+        asset->load(assetData);
         pack->addElement(std::move(asset));
     }
 
-    if (j.count(magic_enum::enum_name(AssetTypes::slice)))
+    if (assetData.sliceData.has_value() )
     {
         auto asset = std::make_unique<SliceAsset>(pack);
-        asset->load(jsonFilePath, j);
+        asset->load(assetData);
         pack->addElement(std::move(asset));
     }
 

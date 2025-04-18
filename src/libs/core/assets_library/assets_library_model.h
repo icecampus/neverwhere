@@ -15,7 +15,7 @@ public:
 
     Q_INVOKABLE Asset* getAsset(const QUuid& uuid);
 
-
+    Q_INVOKABLE void save(Asset* asset);
 
 protected:
     void processElement(AssetsPackModel& element) override;

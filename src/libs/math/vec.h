@@ -62,6 +62,7 @@ public:
     float& operator[](int i) { return glm::vec2::operator[](i); }
     const float& operator[](int i) const { return glm::vec2::operator[](i); }
 
+     NLOHMANN_DEFINE_TYPE_INTRUSIVE(vec2, x, y);
 };
 
 // Внешние операторы (для симметрии со скалярами слева)

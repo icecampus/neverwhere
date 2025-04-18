@@ -8,15 +8,12 @@ SliceAsset::SliceAsset(QObject* parent):
 
 }
 
-void SliceAsset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
+void SliceAsset::load(const BaseData::AssetData& data)
 {
-    Asset::load(indexPath, j);
+    Asset::load(data);
 
-    thumbnailFilename = j["slice"]["thumbnail"].get<std::string>();
-    thumbnailPath = indexPath.parent_path() / thumbnailFilename;
-
-    atlasFilename = j["slice"]["atlas"].get<std::string>();
-    atlasPath = indexPath.parent_path() / atlasFilename;
+    thumbnailPath = data.root() / data.sliceData->thumbnail;
+    atlasPath = data.root() / data.sliceData->atlas;
 
     if (fs::exists(thumbnailPath))
     {
@@ -165,7 +162,7 @@ size_t SliceAsset::subTileIndexByType(TileSet::TileType type) const
 
 QString SliceAsset::getUrlInternal() const
 {
-    QString url = QString("image://assetImages/") + _uuid.toString(QUuid::WithoutBraces);
+    QString url = QString("image://assetImages/") + uuid().toString(QUuid::WithoutBraces);
 
     return url;
 }

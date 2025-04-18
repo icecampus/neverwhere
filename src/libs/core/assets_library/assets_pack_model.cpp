@@ -2,7 +2,7 @@
 
 namespace fs = std::filesystem;
 
-AssetsPackModel::AssetsPackModel(std::filesystem::path& packPath_, QObject* parent) :
+AssetsPackModel::AssetsPackModel(const std::filesystem::path& packPath_, QObject* parent) :
     SimpleModel<Asset>(parent),
     _packPath(packPath_)
 {

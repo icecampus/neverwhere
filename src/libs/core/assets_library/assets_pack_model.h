@@ -11,7 +11,7 @@ class AssetsPackModel: public SimpleModel<Asset>
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
     
 public:
-    explicit AssetsPackModel(std::filesystem::path& packPath, QObject* parent = nullptr);
+    explicit AssetsPackModel(const std::filesystem::path& packPath, QObject* parent = nullptr);
 
     //property
     QString name() const;

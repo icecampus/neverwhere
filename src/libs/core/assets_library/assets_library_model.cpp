@@ -8,7 +8,7 @@ AssetsLibraryModel::AssetsLibraryModel(QObject* parent):
 
 }
 
-Q_INVOKABLE Asset* AssetsLibraryModel::getAsset(const QUuid& uuid)
+Asset* AssetsLibraryModel::getAsset(const QUuid& uuid)
 {
     auto found = uuid2Asset.find(uuid);
     if (found != uuid2Asset.end())
@@ -19,6 +19,12 @@ Q_INVOKABLE Asset* AssetsLibraryModel::getAsset(const QUuid& uuid)
     qWarning() << "Can't find asset: " << uuid;
 
     return nullptr;
+}
+
+void AssetsLibraryModel::save(Asset* asset)
+{
+    auto indexPath = asset->getData().indexPath;
+    BaseData::AssetData::save(asset->getData(), asset->getData().indexPath);
 }
 
 void AssetsLibraryModel::processElement(AssetsPackModel& assetPack)

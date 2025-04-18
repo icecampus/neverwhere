@@ -13,7 +13,7 @@ public:
     explicit SliceAsset(QObject* parent);
 
     //properties
-    void load(const std::filesystem::path& indexPath,  const nlohmann::json& j) override;
+    void load(const BaseData::AssetData& data) override;
     QImage thumbnail() override;
 
     //INVOKABLE 
@@ -32,11 +32,9 @@ protected:
 private:
     static std::vector<QImage> splitImageIntoTiles(const QImage& source, int cols, int rows);
 
-    std::string thumbnailFilename;
     std::filesystem::path thumbnailPath;
     QImage thumbnailImage;
 
-    std::string atlasFilename;
     std::filesystem::path atlasPath;
     QImage atlasImage;
 

@@ -13,12 +13,12 @@ Asset::Asset(AssetTypes::Type type_, QObject* parent):
 
 QUuid Asset::uuid() const 
 { 
-    return _uuid; 
+    return base::boostUuidToQUuid(data.uuid); 
 }
 
 QString Asset::name() const 
 { 
-    return _name; 
+    return data.name.c_str(); 
 }
 
 QString Asset::getThumbnailUrl() const
@@ -28,21 +28,21 @@ QString Asset::getThumbnailUrl() const
 
 LayerTypes::Type Asset::getLayerType() const
 {
-    return _layerType;
+    return data.layerType;
 }
 
 math::vec2 Asset::getPivot() const
 {
-    return pivot;
+    return data.pivot;
 }
 
-void Asset::setPivot(const math::vec2& pivot_)
+void Asset::setPivot(const math::vec2& pivot)
 {
     //spdlog::info("pivot: {}", pivot_);
     
-    if (pivot != pivot_)
+    if (data.pivot != pivot)
     {
-        pivot = pivot_;
+        data.pivot = pivot;
         emit pivotChanged();
     }
 }
@@ -61,23 +61,12 @@ void Asset::setEditMode(bool state)
     }
 }
 
-void Asset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
+void Asset::load(const BaseData::AssetData& data_)
 {
-    std::string uuidStr = j["uuid"];
-    _uuid = QUuid::fromString(QString::fromStdString(uuidStr));
-    _name = QString::fromStdString(indexPath.parent_path().stem().string());
+    data = data_;
+}
 
-    std::string layerTypeStr = j["layerType"];
-    auto layerType = magic_enum::enum_cast<LayerTypes::Type>(layerTypeStr, magic_enum::case_insensitive);
-    
-    if (layerType.has_value())
-    {
-        _layerType = layerType.value();
-    }
-    else
-    {
-        qWarning() << "Undefined layer type for asset: " << _name;
-    }
-
-
+const BaseData::AssetData& Asset::getData()
+{
+    return data;
 }

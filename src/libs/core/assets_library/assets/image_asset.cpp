@@ -11,28 +11,28 @@ ImageAsset::ImageAsset(QObject* parent):
 
 float ImageAsset::getWidth() const 
 { 
-    return widthInCells; 
+    return data.imageData->width; 
 }
 
-void ImageAsset::setWidth(float widthInCells_)
+void ImageAsset::setWidth(float widthInCells)
 {
     //spdlog::info("setWidth: {}",  widthInCells_);
-    if(widthInCells != widthInCells_)
+    if(data.imageData->width != widthInCells)
     {
-        widthInCells = widthInCells_;
+        data.imageData->width = widthInCells;
         emit widthChanged();
     }
 }
 
 QString ImageAsset::getImageFilename() const 
 { 
-    return imageFilename; 
+    return data.imageData->imageFilename.c_str(); 
 }
 
 QSize ImageAsset::getScreenSize(StaggeredIsometry* iso)
 {
     staggered_dimensions dimensions = iso->getDimensions();
-    float mapSize = dimensions.getCellWidth() * widthInCells;
+    float mapSize = dimensions.getCellWidth() * data.imageData->width;
 
     QSize imageRealSize = thumbnail().size();
     float k = imageRealSize.width() / mapSize;
@@ -43,26 +43,23 @@ QSize ImageAsset::getScreenSize(StaggeredIsometry* iso)
 void ImageAsset::setScreenWidth(const float screenWidth, StaggeredIsometry* iso)
 {
    //spdlog::info("screenWidth: {}",  screenWidth);
-   widthInCells = screenWidth /  iso->dimensions.getCellWidth();
+   data.imageData->width = screenWidth /  iso->dimensions.getCellWidth();
    emit widthChanged();
 }
 
 QString ImageAsset::getUrlInternal() const
 {
-    QString url = QString("image://assetImages/") + _uuid.toString(QUuid::WithoutBraces);
+    QString url = QString("image://assetImages/") +  uuid().toString(QUuid::WithoutBraces);
 
     return url;
 }
 
 
-void ImageAsset::load(const std::filesystem::path& indexPath,  const nlohmann::json& j)
+void ImageAsset::load(const BaseData::AssetData& data)
 {
-    Asset::load(indexPath, j);
+    Asset::load(data);
 
-    widthInCells = j["image"]["width"].get<int>();
-    imageFilename = QString::fromStdString(j["image"]["imageFilename"].get<std::string>());
-
-    imagePath = indexPath.parent_path() / imageFilename.toStdString();
+    imagePath = data.root() / data.imageData->imageFilename;
 
     if (fs::exists(imagePath))
     {
@@ -73,22 +70,6 @@ void ImageAsset::load(const std::filesystem::path& indexPath,  const nlohmann::j
 QImage ImageAsset::thumbnail()
 {
     return image;
-}
-
-nlohmann::json ImageAsset::save()
-{
-    nlohmann::json graphics = {
-    {"width", widthInCells},
-    {"imageFilename", imageFilename.toStdString()}
-    };
-
-    nlohmann::json j = {
-        {"uuid", _uuid.toString(QUuid::WithoutBraces).toStdString()},
-        {"name", _name.toStdString()},
-        {"graphics", graphics}
-    };
-
-    return j;
 }
 
 void ImageAsset::registerImages(RegistationHandle handle)
