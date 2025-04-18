@@ -10169,6 +10169,15 @@
             },
             "tile2dData": null,
             "type": 0
+        },
+        {
+            "assetUuid": "a476f78f-c329-4a78-be82-b7c5dbe49c6c",
+            "position": {
+                "x": 5,
+                "y": 22
+            },
+            "tile2dData": null,
+            "type": 0
         }
     ]
 }

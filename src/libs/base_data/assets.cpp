@@ -13,7 +13,7 @@ void to_json(nlohmann::json& j, const AssetData& obj)
     j = nlohmann::json
     {
         {"uuid", obj.uuid},
-        {"layerType", obj.layerType},
+        {"layerType", magic_enum::enum_name(obj.layerType)},
         {"pivot", obj.pivot}
     };
 
@@ -44,7 +44,7 @@ void from_json(const nlohmann::json& j, AssetData& obj)
     
     obj.pivot = {0,0};
 
-    //j.at("pivot").get_to(obj.pivot);
+    j.at("pivot").get_to(obj.pivot);
 
     if (j.contains("image"))
     {

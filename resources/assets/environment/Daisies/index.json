@@ -1,9 +1,12 @@
 {
-  "uuid": "33344841-e243-4272-9431-caf4109fb300",
-  "layerType": "GameplayInteractive",
-  "image": 
-  {
-    "width": 2,
-    "imageFilename": "image.png"
-  }
+    "image": {
+        "imageFilename": "image.png",
+        "width": 1.005468726158142
+    },
+    "layerType": "GameplayInteractive",
+    "pivot": {
+        "x": -0.0078125,
+        "y": -0.203125
+    },
+    "uuid": "33344841-e243-4272-9431-caf4109fb300"
 }
