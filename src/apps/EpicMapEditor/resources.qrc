@@ -1,15 +1,19 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/">
+        <file>resources/icons/tools/cursor.png</file>
+        <file>resources/icons/tools/pencil.png</file>
+        <file>resources/icons/tools/eraser.png</file>
+        <file>resources/icons/tools/land_pencil.png</file>
+
         <file>resources/icons/close.png</file>
         <file>resources/icons/maximaze.png</file>
         <file>resources/icons/minimize.png</file>
         <file>resources/icons/clear.png</file>
         <file>resources/icons/save.png</file>
         <file>resources/icons/coordinate_system.png</file>
-        <file>resources/icons/tools/cursor.png</file>
-        <file>resources/icons/tools/pencil.png</file>
-        <file>resources/icons/tools/eraser.png</file>
-        <file>resources/icons/tools/land_pencil.png</file>
+        <file>resources/icons/settings.png</file>
+        <file>resources/icons/cancel.png</file>
+    
     </qresource>
 </RCC>

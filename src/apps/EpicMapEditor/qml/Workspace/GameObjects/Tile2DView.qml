@@ -91,6 +91,8 @@ Item
         {
             startWidt = 0
         }
+
+        visible: imageAsset.editMode
     }
     
 

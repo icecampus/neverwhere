@@ -16,7 +16,7 @@ GridView
     cellWidth: width / Math.max(1, Math.floor(width / minCellWidth))    // Динамическая ширина ячейки
     cellHeight: 120    // Фиксированная высота ячейки
 
-    delegate: GridElement 
+    delegate: AssetView 
     {
         width: paletteView.cellWidth
         height: paletteView.cellHeight
@@ -24,9 +24,18 @@ GridView
         imageSource: element.thumbnailUrl
         selected: assetsContext.asset === element
 
+        settingsMode: element.editMode
+
         onClicked: 
         {
             assetsContext.asset = element
         }
+
+        onSettingsClicked:
+        {
+            element.editMode = true
+        }
+
+        onSettingComplete: element.editMode = false
     }
 }

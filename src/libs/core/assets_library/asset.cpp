@@ -47,6 +47,20 @@ void Asset::setPivot(const math::vec2& pivot_)
     }
 }
 
+bool Asset::getEditMode() const
+{
+    return editMode;
+}
+
+void Asset::setEditMode(bool state)
+{
+    if (editMode != state)
+    {
+        editMode = state;
+        emit editModeChanged();
+    }
+}
+
 void Asset::load(const std::filesystem::path& indexPath, const nlohmann::json& j)
 {
     std::string uuidStr = j["uuid"];

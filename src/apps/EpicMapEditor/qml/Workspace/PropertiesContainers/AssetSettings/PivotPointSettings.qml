@@ -13,7 +13,7 @@ Item
     function updatePivot(pivot)
     {
         active = false
-        console.log("pivot.x: " + pivot.x + ", pivot.y: " + pivot.y)
+        //console.log("pivot.x: " + pivot.x + ", pivot.y: " + pivot.y)
         circle.x = (container.width - circle.width) * pivot.x
         circle.y = (container.height - circle.height) * pivot.y
         active = true

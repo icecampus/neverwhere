@@ -11,7 +11,6 @@ Item
     property bool rounded: true
     property alias margin: content.anchors.margins
     property bool selected: false
-    readonly property alias hovered: mouseArea.containsMouse
 
     id: rootGridElement
 
@@ -59,7 +58,6 @@ Item
         id: mouseArea
         anchors.fill: parent
         hoverEnabled: true
-
         onClicked: 
         {
            rootGridElement.clicked()

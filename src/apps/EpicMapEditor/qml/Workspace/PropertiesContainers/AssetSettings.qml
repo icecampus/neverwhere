@@ -1,6 +1,7 @@
 ﻿import QtQuick
 import Game 1.0
 import "AssetSettings"
+import "../../Common"
 
 Rectangle 
 {
@@ -44,71 +45,46 @@ Rectangle
         anchors.left: parent.left
         anchors.right: parent.right
         
-        
         anchors.leftMargin: 5
         anchors.rightMargin: 5
         anchors.topMargin: 5
-        
 
         spacing: 5
         Row
         {
-            height: 38
+            height: 40
             width: parent.width
             Item{ height: 30; width: parent.width/2;  Text{ text: "Name: ";  anchors.verticalCenter: parent.verticalCenter;  color: colorPalette.textPrimary; font.pixelSize: 16 }} 
             Text{ width: parent.width/2; text: (asset)? asset.name : ""; anchors.verticalCenter: parent.verticalCenter;  color: colorPalette.textPrimary; font.pixelSize: 16 }
         }
 
         Row
-        {
-            height: 38
-            width: parent.width
-            Item{ height: 30; width: parent.width/2;  Text{ text: "Width: ";  anchors.verticalCenter: parent.verticalCenter;  color: colorPalette.textPrimary; font.pixelSize: 16 }} 
-            PropertyInput{width: parent.width/2}
-        }
+        { 
+            anchors.horizontalCenter: parent.horizontalCenter
+            height: 40
 
-        Rectangle
-        {
-            width: parent.width
-            height: width
-            color: colorPalette.surface
-
-            PivotPointSettings
+            ImageButton
             {
-                property var internalAsset: assetSettings.asset
-                onInternalAssetChanged:
-                {
-                    if(assetSettings.asset)
-                    {
-                        updatePivot(assetSettings.asset.pivot)
-                    }
-                }   
-                id: pivotPointSettings
-                anchors.fill: parent
-                imageSource: (asset)? asset.thumbnailUrl : ""
-                onPivotXChanged:
-                {
-                    if(asset)
-                    {
-                        asset.pivot = math.vec2(pivotX, pivotY)
-                    }
-                }
-
-                onPivotYChanged:
-                {
-                    if(asset)
-                    {
-                        asset.pivot = math.vec2(pivotX, pivotY)
-                    }
-                }
+                width: 40
+                height: 40
+                imageSource: "qrc:/resources/icons/cancel.png"
+            }
+            
+            ImageButton
+            {
+                width: 40
+                height: 40
+                imageSource: "qrc:/resources/icons/save.png"
             }
         }
-        
+
+       
         Item
         {
             width: parent.width
             height:5
         }
+
     }
 
 }
