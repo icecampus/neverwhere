@@ -1,12 +1,12 @@
 {
     "image": {
         "imageFilename": "image.png",
-        "width": 4.0
+        "width": 2.4749999046325684
     },
     "layerType": "GameplayInteractive",
     "pivot": {
-        "x": 0.0,
-        "y": 0.0
+        "x": -0.0546875,
+        "y": -0.6875
     },
     "uuid": "a3771d55-8ca0-44aa-9d9f-5ab3e9cb300e"
 }
