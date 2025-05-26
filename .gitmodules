@@ -1,6 +1,6 @@
-[submodule "vcpkg"]
-	path = vcpkg
-	url = https://github.com/microsoft/vcpkg.git
 [submodule "toolchain/emsdk"]
 	path = toolchain/emsdk
 	url = https://github.com/emscripten-core/emsdk.git
+[submodule "toolchain/vcpkg"]
+	path = toolchain/vcpkg
+	url = https://github.com/microsoft/vcpkg/
