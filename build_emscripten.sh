@@ -16,7 +16,7 @@ print_path()
 #start
 root_path=$(pwd)
 emsdk_path=$root_path/toolchain/emsdk
-vcpkg_path=$root_path/vcpkg
+vcpkg_path=$root_path/toolchain/vcpkg
 ninja_dir_path=$root_path/toolchain/ninja-win
 
 echo "==========================================================="

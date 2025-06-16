@@ -2,7 +2,7 @@
   "dependencies": [
     "boost-uuid",
     "boost-lexical-cast",
-    "qtbase",
+    {"name":"qtbase",          "default-features":false, "features": [ "widgets" ]},
     "qtdeclarative",
     "qtquickcontrols2",
     "qtlottie",
