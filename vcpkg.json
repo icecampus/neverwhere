@@ -3,12 +3,13 @@
     "boost-uuid",
     "boost-lexical-cast",
     {"name": "qtbase",            "platform": "!emscripten"},
-    {"name": "qtdeclarative",     "platform": "!emscripten"},
-    {"name": "qtquickcontrols2",  "platform": "!emscripten"},
-    {"name": "qtlottie",          "platform": "!emscripten"},
-    {"name": "qt5compat",         "platform": "!emscripten"},
+    {"name": "qtbase",            "platform": "emscripten",  "default-features":false, "features": [ "gles2", "opengl", "freetype", "gui", "jpeg", "png", "zstd", "widgets" ]},
 
-    {"name": "qtbase",            "platform": "emscripten",  "default-features":false, "features": [ "gles2", "opengl", "brotli", "freetype", "gui", "jpeg", "png", "zstd", "widgets" ]},
+    {"name": "qtdeclarative"},
+    {"name": "qtquickcontrols2"},
+    {"name": "qtlottie"},
+    {"name": "qt5compat"},
+
 
     "magic-enum",
     "glm",

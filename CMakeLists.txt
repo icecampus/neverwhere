@@ -20,22 +20,26 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Boost REQUIRED COMPONENTS uuid lexical_cast)
 
-set(CMAKE_CACHE_ARGS
-    -QT_FEATURE_rt=OFF  # Отключаем поиск librt
-    -QT_SKIP_AUTO_WRAPPER=WrapRt  # Пропускаем обёртку для rt
-)
+if(EMSCRIPTEN AND NOT TARGET WrapRt::WrapRt)
+    add_library(WrapRt::WrapRt INTERFACE IMPORTED)
+    message(STATUS "Создан фиктивный таргет WrapRt::WrapRt для Emscripten")
+    
+    # Отключаем проверку RT в Qt
+    set(QT_FEATURE_rt OFF CACHE BOOL "Disable rt feature" FORCE)
+    set(QT_SKIP_AUTO_WRAPPER WrapRt CACHE BOOL "Skip WrapRt wrapper" FORCE)
+endif()
 find_package(Qt6 REQUIRED COMPONENTS Core )
-# find_package(Qt6 REQUIRED COMPONENTS Qml Quick Widgets Gui QuickControls2 ShaderTools)
-# find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
+find_package(Qt6 REQUIRED COMPONENTS Qml Quick Widgets Gui QuickControls2 ShaderTools)
+find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
-
-qt_policy(SET QTP0001 OLD )
-qt_policy(SET QTP0004 NEW )
+if(MSVC)
+  qt_policy(SET QTP0001 OLD )
+  qt_policy(SET QTP0004 NEW )
+endif()
 qt_standard_project_setup()
-
 
 
 if(EMSCRIPTEN)

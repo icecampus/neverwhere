@@ -40,6 +40,7 @@ mkdir _b-em
 cd _b-em
 	echo $(pwd)
 	emcmake cmake \
+	-DVCPKG_INSTALL_OPTIONS="--x-buildtrees-root=d:/_build" \
 	-DCMAKE_CXX_FLAGS="-gsource-map -O0" \
     -DCMAKE_C_FLAGS="-gsource-map -O0" \
     -DCMAKE_EXE_LINKER_FLAGS="-gsource-map --emdebug" \
