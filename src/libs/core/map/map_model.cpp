@@ -80,13 +80,13 @@ QVariant LayerModel::data(const QModelIndex& index, int role) const
 
     if (role == TypeRole)
     {
-        GameObjectTypes::Type type = _gameObjects[index.row()]->getType();
+        GameObjectTypes::Type type = getGameObject(index.row())->getType();
         return type;
     }
 
     if (role == ElementRole)
     {
-        return QVariant::fromValue(_gameObjects[index.row()].get());
+        return QVariant::fromValue(getGameObject(index.row()));
     }
 
     return QVariant();
@@ -120,7 +120,10 @@ void LayerModel::addGameObject(std::unique_ptr<GameObject> gameObject)
 GameObject* LayerModel::getGameObject(int index) const 
 {
     if (index >= 0 && index < static_cast<int>(_gameObjects.size()))
+    {
         return _gameObjects[index].get();
+    }
+
     return nullptr;
 }
 

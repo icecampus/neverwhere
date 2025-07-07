@@ -2,11 +2,14 @@
   "dependencies": [
     "boost-uuid",
     "boost-lexical-cast",
-    {"name":"qtbase",          "default-features":false, "features": [ "widgets" ]},
-    "qtdeclarative",
-    "qtquickcontrols2",
-    "qtlottie",
-    "qt5compat",
+    {"name": "qtbase",            "platform": "!emscripten"},
+    {"name": "qtdeclarative",     "platform": "!emscripten"},
+    {"name": "qtquickcontrols2",  "platform": "!emscripten"},
+    {"name": "qtlottie",          "platform": "!emscripten"},
+    {"name": "qt5compat",         "platform": "!emscripten"},
+
+    {"name": "qtbase",            "platform": "emscripten",  "default-features":false, "features": [ "gles2", "opengl", "brotli", "freetype", "gui", "jpeg", "png", "zstd", "widgets" ]},
+
     "magic-enum",
     "glm",
     "nlohmann-json",

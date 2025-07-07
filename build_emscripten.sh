@@ -31,9 +31,9 @@ echo "==========================================================="
 export EMSDK_QUIET=1
 
 cd $emsdk_path
+	./emsdk install 3.1.70
+	./emsdk activate 3.1.70
 	source emsdk_env.sh 
-	./emsdk install latest
-	./emsdk activate latest
 cd $root_path
 
 mkdir _b-em

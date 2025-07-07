@@ -30,6 +30,7 @@ void SliceAsset::load(const BaseData::AssetData& data)
 
 QImage SliceAsset::thumbnail()
 {
+    assert(tiles.size());
     return tiles[0];
 }
 

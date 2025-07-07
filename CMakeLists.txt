@@ -19,8 +19,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Boost REQUIRED COMPONENTS uuid lexical_cast)
-find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Widgets Gui QuickControls2 ShaderTools)
-find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
+
+set(CMAKE_CACHE_ARGS
+    -QT_FEATURE_rt=OFF  # Отключаем поиск librt
+    -QT_SKIP_AUTO_WRAPPER=WrapRt  # Пропускаем обёртку для rt
+)
+find_package(Qt6 REQUIRED COMPONENTS Core )
+# find_package(Qt6 REQUIRED COMPONENTS Qml Quick Widgets Gui QuickControls2 ShaderTools)
+# find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
