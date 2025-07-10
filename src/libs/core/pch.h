@@ -32,7 +32,8 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 
-#include <spdlog/spdlog.h>
+// #include <spdlog/spdlog.h>
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
 #include <magic_enum/magic_enum.hpp>
 

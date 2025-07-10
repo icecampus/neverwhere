@@ -19,7 +19,7 @@
 #include <glm/gtx/transform.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <spdlog/spdlog.h>
+// #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <magic_enum/magic_enum.hpp>
 

@@ -2,7 +2,7 @@
 #include <glm/glm.hpp>
 #include <QObject>
 #include <QMetaType>
-#include <spdlog/spdlog.h>
+// #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 
 namespace math
@@ -101,14 +101,14 @@ namespace std {
     };
 }
 
-template<>
-struct fmt::formatter<math::ivec2> : fmt::formatter<std::string>
-{
-    auto format(math::ivec2 iv2, format_context& ctx) const -> decltype(ctx.out())
-    {
-        return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
-    }
-};
+// template<>
+// struct fmt::formatter<math::ivec2> : fmt::formatter<std::string>
+// {
+//     auto format(math::ivec2 iv2, format_context& ctx) const -> decltype(ctx.out())
+//     {
+//         return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
+//     }
+// };
 
 
 Q_DECLARE_METATYPE(math::ivec2)

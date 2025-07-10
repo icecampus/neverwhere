@@ -26,3 +26,4 @@ qt6_add_shaders(${AppName} "${AppName}_shaders"
         "shaders/mandelbrot.vert"
         "shaders/mandelbrot.frag"
 )
+

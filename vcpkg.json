@@ -14,6 +14,7 @@
     "magic-enum",
     "glm",
     "nlohmann-json",
-    "spdlog"
+    "fmt",
+    {"name": "spdlog",            "platform": "!emscripten"}
   ]
 }

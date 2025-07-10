@@ -74,14 +74,14 @@ inline vec2 operator/(float scalar, const vec2& v) { return vec2(scalar / v.getX
 }//math
 
 
-template<>
-struct fmt::formatter<math::vec2> : fmt::formatter<std::string>
-{
-    auto format(math::vec2 iv2, format_context& ctx) const -> decltype(ctx.out())
-    {
-        return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
-    }
-};
+// template<>
+// struct fmt::formatter<math::vec2> : fmt::formatter<std::string>
+// {
+//     auto format(math::vec2 iv2, format_context& ctx) const -> decltype(ctx.out())
+//     {
+//         return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
+//     }
+// };
 
 
 Q_DECLARE_METATYPE(math::vec2)

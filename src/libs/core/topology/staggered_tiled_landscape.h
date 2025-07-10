@@ -50,14 +50,14 @@ struct TileSet
 };
 
 
-template<>
-struct fmt::formatter<TileSet::NeighboursNodeMask> : fmt::formatter<std::string>
-{
-    auto format(TileSet::NeighboursNodeMask nodesMask, format_context& ctx) const -> decltype(ctx.out())
-    {
-        return fmt::format_to(ctx.out(), "[{}, {}, {}, {}]", nodesMask[0], nodesMask[1], nodesMask[2], nodesMask[3] );
-    }
-};
+// template<>
+// struct fmt::formatter<TileSet::NeighboursNodeMask> : fmt::formatter<std::string>
+// {
+//     auto format(TileSet::NeighboursNodeMask nodesMask, format_context& ctx) const -> decltype(ctx.out())
+//     {
+//         return fmt::format_to(ctx.out(), "[{}, {}, {}, {}]", nodesMask[0], nodesMask[1], nodesMask[2], nodesMask[3] );
+//     }
+// };
 
 //LandNodes
 struct LandNodes : public std::vector<uint8_t>

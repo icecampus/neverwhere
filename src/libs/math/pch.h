@@ -15,4 +15,5 @@
 #include <QObject>
 #include <QMetaType>
 
-#include <spdlog/spdlog.h>
+#include <fmt/format.h>
+// #include <spdlog/spdlog.h>

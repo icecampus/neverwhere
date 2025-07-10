@@ -1,7 +1,7 @@
 #include "maps.h"
 #include <fstream>
 #include <magic_enum/magic_enum.hpp>
-#include <spdlog/spdlog.h>
+// #include <spdlog/spdlog.h>
 
 
 namespace BaseData
@@ -83,7 +83,7 @@ Map Map::load(const std::filesystem::path& chaptersPath)
     std::ifstream file(chaptersPath);
     if (!file.is_open()) 
     {
-         spdlog::error("Failed to open file: " + chaptersPath.string());
+         // spdlog::error("Failed to open file: " + chaptersPath.string());
     }
 
     nlohmann::json j;
@@ -112,7 +112,7 @@ void Map::save(const Map& map, const std::filesystem::path& chaptersPath)
     std::ofstream file(chaptersPath);
     if (!file.is_open()) 
     {
-         spdlog::error("Failed to create file: " + chaptersPath.string());
+         // spdlog::error("Failed to create file: " + chaptersPath.string());
     }
 
     file << j.dump(4); 
