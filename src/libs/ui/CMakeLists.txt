@@ -1,10 +1,38 @@
-nw_add_lib(
-	GROUP 
-		libs 
-	LIBS 
-		Qt6::Core
-		Qt6::Gui
-		Qt6::Quick
-		Qt6::Widgets
-		Shcore.lib
-		)
+if(EMSCRIPTEN)
+	nw_add_lib_sources(
+		NAME
+			ui
+		GROUP 
+			libs 
+		SOURCES 
+			lib.h
+			tabs_model.h
+			tabs_model.cpp
+		LIBS 
+			Qt6::Core
+			Qt6::Gui
+			Qt6::Quick
+			Qt6::Widgets
+			Shcore.lib
+			)
+else()
+	nw_add_lib_sources(
+		NAME
+			ui
+		GROUP 
+			libs 
+		SOURCES 
+			lib.h
+			main_window.h
+			main_window.cpp
+			tabs_model.h
+			tabs_model.cpp
+		LIBS 
+			Qt6::Core
+			Qt6::Gui
+			Qt6::Quick
+			Qt6::Widgets
+			Shcore.lib
+			)
+
+endif()

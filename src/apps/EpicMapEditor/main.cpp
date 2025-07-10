@@ -117,7 +117,7 @@ int main(int argc, char* argv[])
     engine.addImportPath(engine.importPathList()[0] + "/qml");
     //qDebug() << engine.importPathList();
 
-#ifdef USE_EMSCRIPTEN
+#ifdef __EMSCRIPTEN__
     const QUrl url(u"qrc:/EpicMapEditor/qml/AppWindowCommon.qml"_qs);
 #else
     const QUrl url(u"qrc:/EpicMapEditor/qml/AppWindowWindows.qml"_qs);

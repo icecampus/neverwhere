@@ -39,7 +39,7 @@ void from_json(const nlohmann::json& j, AssetData& obj)
     }
     else
     {
-        spdlog::error("Failed read layer type: {} of asset at: {}", layaerSrt, boost::uuids::to_string(obj.uuid));
+        //spdlog::error("Failed read layer type: {} of asset at: {}", layaerSrt, boost::uuids::to_string(obj.uuid));
     }
     
     obj.pivot = {0,0};
@@ -63,7 +63,7 @@ AssetData AssetData::load(const std::filesystem::path& path)
     std::ifstream file(indexPath);
     if (!file.is_open())
     {
-        spdlog::error("Failed to open file: {}",  path.string());
+        //spdlog::error("Failed to open file: {}",  path.string());
     }
 
     nlohmann::json j;
@@ -85,7 +85,7 @@ void AssetData::save(const AssetData& assetData, const std::filesystem::path& pa
     std::ofstream file(path);
     if (!file.is_open())
     {
-        spdlog::error("Failed to create file: " + path.string());
+        //spdlog::error("Failed to create file: " + path.string());
     }
 
     file << j.dump(4);
@@ -102,7 +102,7 @@ AssetsPack AssetsPack::load(const std::filesystem::path& path)
 {
     if (!fs::exists(path))
     {
-        spdlog::error("The asset library directory does not exist: {}", path.string());
+        //spdlog::error("The asset library directory does not exist: {}", path.string());
         return {};
     }
 
