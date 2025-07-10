@@ -9,7 +9,10 @@
 
 void registreTypes()
 {
+#ifdef _WINDOWS
     qmlRegisterType<EpicEditorWindow>("UI", 1, 0, "EpicEditorWindow");
+#endif
+
     qmlRegisterType<TabsModel>("UI", 1, 0, "TabsModel");
     qmlRegisterUncreatableMetaObject(
         TabType::staticMetaObject, // static meta object

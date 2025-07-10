@@ -13,7 +13,6 @@ if(EMSCRIPTEN)
 			Qt6::Gui
 			Qt6::Quick
 			Qt6::Widgets
-			Shcore.lib
 			)
 else()
 	nw_add_lib_sources(

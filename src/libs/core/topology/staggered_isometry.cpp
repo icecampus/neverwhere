@@ -74,7 +74,8 @@ uint64_t StaggeredIsometry::zOffset(const math::ivec2& cellPosition)
 
 VisibleRegion StaggeredIsometry::getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const
 {
-    throw std::exception("function incomplete");
+    assert(0);
+    //throw std::exception("function incomplete");
 
     std::vector<math::vec2> screenPoints;
     

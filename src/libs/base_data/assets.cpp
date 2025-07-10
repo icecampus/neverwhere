@@ -131,7 +131,7 @@ Assets Assets::load(const std::filesystem::path& assetsPath)
 {
     if (!fs::exists(assetsPath))
     {
-        spdlog::error("The asset library directory does not exist: {}", assetsPath.string() );
+        //spdlog::error("The asset library directory does not exist: {}", assetsPath.string() );
         return {};
     }
 

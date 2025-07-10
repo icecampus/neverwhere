@@ -13,13 +13,13 @@ namespace
     {
         if (!std::filesystem::exists(chapterDataPath)) 
         {
-            spdlog::error("File not found: " + chapterDataPath.string());
+            //spdlog::error("File not found: " + chapterDataPath.string());
         }
 
         std::ifstream file(chapterDataPath);
         if (!file.is_open()) 
         {
-            spdlog::error("Failed to open file: " + chapterDataPath.string());
+            //spdlog::error("Failed to open file: " + chapterDataPath.string());
         }
 
         try 
@@ -31,7 +31,7 @@ namespace
         }
         catch (const nlohmann::json::exception& e) 
         {
-            spdlog::error("JSON parsing error: " + std::string(e.what()));
+            //spdlog::error("JSON parsing error: " + std::string(e.what()));
         }
 
         return {};
@@ -43,7 +43,7 @@ namespace
         std::ofstream file(chapterDataPath);
         if (!file.is_open()) 
         {
-            spdlog::error("Failed to create file: " + chapterDataPath.string());
+            //spdlog::error("Failed to create file: " + chapterDataPath.string());
         }
 
         try 
@@ -53,7 +53,7 @@ namespace
         }
         catch (const nlohmann::json::exception& e) 
         {
-            spdlog::error("JSON serialization error: " + std::string(e.what()));
+            //spdlog::error("JSON serialization error: " + std::string(e.what()));
         }
     }
 }
@@ -109,7 +109,7 @@ Chaptets Chaptets::load(const std::filesystem::path& chaptersPath)
     }
     else
     {
-        spdlog::error("Chapters directory does not exist: {}", chaptersPath.string() );
+        //spdlog::error("Chapters directory does not exist: {}", chaptersPath.string() );
     }
 
     return result;

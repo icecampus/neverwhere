@@ -4,7 +4,7 @@
 Landscape::Landscape(QObject* parent ):
     GameObject(GameObjectTypes::Landscape, parent)
 {
-    data.landscapeData = std::make_optional<BaseData::LandscapeData>({TileSet::Unknown});
+    data.landscapeData = std::make_optional<BaseData::LandscapeData>(BaseData::LandscapeData{TileSet::Unknown});
 }
 
 void Landscape::load(const BaseData::GameObject& data)

@@ -32,7 +32,7 @@ void AssetImageProvider::loadAllImages()
                     }
                     else
                     {
-                        spdlog::error( "Failed to load image for asset with UUID {} ", asset->uuid().toString().toStdString());
+                        //spdlog::error( "Failed to load image for asset with UUID {} ", asset->uuid().toString().toStdString());
                     }
 
                 });

@@ -164,7 +164,7 @@ function(nw_add_lib_sources)
         target_compile_options(${ARG_NAME} PRIVATE "/MP")
     endif()
 
-    target_include_directories(${ARG_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_include_directories(${ARG_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     target_precompile_headers(${ARG_NAME} PRIVATE pch.h)
 
     target_link_libraries(${ARG_NAME} PUBLIC ${ARG_LIBS})
