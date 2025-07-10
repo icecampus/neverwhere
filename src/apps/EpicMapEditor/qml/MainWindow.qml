@@ -5,20 +5,14 @@ import Qt.labs.qmlmodels
 import UI 1.0
 import "UI"
 
-EpicEditorWindow 
+Item 
 {
     id: window
     property int previousX
     property int previousY
-
-    visible: true
-    x: 400
-    y: 200
-    width: 1920
-    height: 1080
-    title: "EpicMapEditor"
+    property alias dragElement: header.dragElement
+    property alias showWindowButtons: header.showWindowButtons
     
-    caption: header.dragElement
 
     function maximaze()
 	{

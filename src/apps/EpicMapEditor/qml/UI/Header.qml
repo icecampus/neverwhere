@@ -9,6 +9,7 @@ Rectangle
 	property alias dragElement: dragPanel
 	property alias tabsModel: bar.model
 	property alias bar: bar
+	property bool showWindowButtons: false
 
 	signal closeRequest(int index)
 
@@ -90,6 +91,8 @@ Rectangle
 		{
 			id: minButton
 			height: parent.height
+			visible: showWindowButtons
+
 			onClicked:
 			{
 				window.showMinimized();
@@ -101,6 +104,7 @@ Rectangle
 		{
 			id: maxButton
 			height: parent.height
+			visible: showWindowButtons
 
 			onClicked:
 			{
@@ -114,6 +118,7 @@ Rectangle
 			id: closeButton
 			height: parent.height
 			hoveredColor: colorPalette.error
+			visible: showWindowButtons	
 
 			onClicked:
 			{
