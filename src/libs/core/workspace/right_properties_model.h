@@ -11,7 +11,8 @@ namespace PropertiesContainerTypes
     {
         Unknown,
         MapSettings,
-        AssetSettings
+        AssetSettings,
+        GeneratorSettings
     };
     Q_ENUM_NS(Type);
 }
@@ -48,6 +49,15 @@ class AssetSettings: public PropertyContainer
     Q_OBJECT
 public:
     AssetSettings(QObject* parent);
+
+};
+
+//GeneratorSettings
+class GeneratorSettings : public PropertyContainer
+{
+    Q_OBJECT
+public:
+    GeneratorSettings(QObject* parent);
 
 };
 

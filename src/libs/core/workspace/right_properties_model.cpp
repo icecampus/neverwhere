@@ -25,12 +25,20 @@ MapSetting::MapSetting(QObject* parent):
 
 }
 
-//
+//AssetSettings
 AssetSettings::AssetSettings(QObject* parent):
     PropertyContainer(PropertiesContainerTypes::AssetSettings, parent)
 {
 
 }
+
+//GeneratorSettings
+GeneratorSettings::GeneratorSettings(QObject* parent):
+    PropertyContainer(PropertiesContainerTypes::GeneratorSettings, parent)
+{
+
+}
+
 
 //PropertyContainersModel
 PropertyContainersModel::PropertyContainersModel(QObject* parent):
@@ -38,4 +46,6 @@ PropertyContainersModel::PropertyContainersModel(QObject* parent):
 {
     addElement<MapSetting>(this);
     addElement<AssetSettings>(this);
+    addElement<GeneratorSettings>(this);
 }
+

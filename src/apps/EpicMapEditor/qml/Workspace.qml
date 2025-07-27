@@ -53,7 +53,7 @@ import "Workspace"
         SplitView.maximumWidth: 350
 
         asset: assetsContext.asset
-        
+        mapModel: mapView.model
     }
 
     handle: Rectangle 

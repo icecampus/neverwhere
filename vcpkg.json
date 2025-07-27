@@ -10,6 +10,7 @@
     "magic-enum",
     "glm",
     "nlohmann-json",
-    "spdlog"
+    "spdlog",
+    "libnoise"
   ]
 }

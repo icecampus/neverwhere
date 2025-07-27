@@ -10,6 +10,7 @@ Rectangle
     property var assetsContext: null
     property var hoveredCell: math.ivec2(1, 1)
     property bool showCoordinates: true
+    property alias model: mapModel
 
     function load(path)
     {

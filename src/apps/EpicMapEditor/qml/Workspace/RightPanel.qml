@@ -6,6 +6,7 @@ import "PropertiesContainers"
 Rectangle 
 {
     property var asset: null
+    property var mapModel: null
 
     id: rightPanel
     color: colorPalette.surface     
@@ -52,7 +53,17 @@ Rectangle
                     asset: rightPanel.asset
                 }
             }
-
+            DelegateChoice 
+            {   
+                roleValue: PropertiesContainerTypes.GeneratorSettings
+                delegate: NoiseGenerator
+                {
+                    width: conteinersView.width
+                    text: element.title
+                    mapModel: rightPanel.mapModel
+                    
+                }
+            }
         }
 
     }
