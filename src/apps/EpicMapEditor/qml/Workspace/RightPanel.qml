@@ -5,7 +5,7 @@ import "PropertiesContainers"
 
 Rectangle 
 {
-    property var asset: null
+    property var currentAsset: null
     property var mapModel: null
 
     id: rightPanel
@@ -50,7 +50,7 @@ Rectangle
                 {
                     width: conteinersView.width
                     text: element.title
-                    asset: rightPanel.asset
+                    asset: rightPanel.currentAsset
                 }
             }
             DelegateChoice 
@@ -61,6 +61,7 @@ Rectangle
                     width: conteinersView.width
                     text: element.title
                     mapModel: rightPanel.mapModel
+                    currentAsset: rightPanel.currentAsset
                     
                 }
             }

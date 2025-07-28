@@ -52,7 +52,7 @@ import "Workspace"
         SplitView.minimumWidth: 100
         SplitView.maximumWidth: 350
 
-        asset: assetsContext.asset
+        currentAsset: assetsContext.asset
         mapModel: mapView.model
     }
 

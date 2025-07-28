@@ -6,7 +6,9 @@ Rectangle
 {
     property alias text: titleText.text
     property var mapModel: null
+    property var currentAsset: null
 
+    id: noiseGenerator
     color: colorPalette.surface2     
     border.color: colorPalette.border 
     radius: 5 
@@ -16,6 +18,7 @@ Rectangle
     NoiseGenerator
     {
         id: generator
+        currentAsset: noiseGenerator.currentAsset
     }
 
     Rectangle
@@ -57,7 +60,7 @@ Rectangle
             text: "Generate"
             onClicked: 
             {
-                generator.generatre(mapModel)
+                generator.generate(mapModel)
             }
         }
 

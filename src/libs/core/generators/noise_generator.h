@@ -3,6 +3,7 @@
 
 #include "topology/staggered_tiled_landscape.h"
 #include "map/map_model.h"
+#include "assets_library/asset.h"
 
 struct PerlinGen
 {
@@ -14,8 +15,21 @@ struct PerlinGen
 class NoiseGenerator: public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(Asset* currentAsset READ getCurrentAsset WRITE setCurrentAsset NOTIFY currentAssetChanged)
 public:
-    Q_INVOKABLE void generatre(MapModel* mapModel);
 
+    //properties
+    Asset* getCurrentAsset();
+    void setCurrentAsset(Asset* asset);
 
+    //
+    Q_INVOKABLE void generate(MapModel* mapModel);
+
+signals:
+    void currentAssetChanged();
+
+private:
+    void generate(MapModel* mapModel,  SliceAsset* sliceAsset);
+
+    Asset* currentAsset{nullptr};
 };

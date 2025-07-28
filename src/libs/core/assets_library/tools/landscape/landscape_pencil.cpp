@@ -5,28 +5,6 @@
 #include "assets_library/assets/slice_asset.h"
 
 
-namespace
-{
-    void updateCell(LayerModel* layerModel, SliceAsset* sliceAsset, const math::ivec2& cellPosition, TileSet::TileType tileType)
-    {
-        std::vector<GameObject*> objects = layerModel->getObjectsAt(cellPosition);
-
-        if (tileType != TileSet::Unknown)
-        {
-            std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>(layerModel);
-            landObject->setName(QString("Landscape"));
-            landObject->setPosition(cellPosition);
-            landObject->setAssetUiid(sliceAsset->uuid());
-            landObject->setTileIndex(sliceAsset->subTileIndexByType(tileType));
-            layerModel->addGameObject(std::move(landObject));
-        }
-        else
-        {
-            //canvas.getMap()->removeObjects(curCellPosition, Tiles);
-        }
-    
-    }
-}
 
 LandscapePencil::LandscapePencil(QObject* parent):
     Tool("LandscapePencil", "land_pencil", parent)
@@ -50,8 +28,44 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
         for (const math::ivec2& curCellPosition : neighbours)
         {
             TileSet::TileType tileType = landNodes.getTileType(curCellPosition, *sliceAsset);
-            updateCell(layerModel, sliceAsset, curCellPosition, tileType);
+            updateLandscapeCell(layerModel, sliceAsset, curCellPosition, tileType);
         }
     }
 }
 
+void LandscapePencil::updateLandscapeCell(LayerModel* layerModel, SliceAsset* sliceAsset, const math::ivec2& cellPosition, TileSet::TileType tileType)
+{
+    std::vector<GameObject*> objects = layerModel->getObjectsAt(cellPosition);
+
+    if (tileType != TileSet::Unknown)
+    {
+        if (objects.size())
+        {
+            GameObject* gameObject = objects.back();
+            if (gameObject->getType() == GameObjectTypes::Landscape)
+            {
+                Landscape* landObject = dynamic_cast<Landscape*>(gameObject);
+                if (landObject)
+                {
+                    landObject->setName(QString("Landscape"));
+                    landObject->setPosition(cellPosition);
+                    landObject->setAssetUiid(sliceAsset->uuid());
+                    landObject->setTileIndex(sliceAsset->subTileIndexByType(tileType));
+                }
+            }
+        }
+        else
+        {
+            std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>(layerModel);
+            landObject->setName(QString("Landscape"));
+            landObject->setPosition(cellPosition);
+            landObject->setAssetUiid(sliceAsset->uuid());
+            landObject->setTileIndex(sliceAsset->subTileIndexByType(tileType));
+            layerModel->addGameObject(std::move(landObject));
+        }
+    }
+    else
+    {
+        //canvas.getMap()->removeObjects(curCellPosition, Tiles);
+    }
+}

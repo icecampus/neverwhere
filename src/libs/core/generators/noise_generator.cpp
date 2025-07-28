@@ -1,5 +1,6 @@
 #include "noise_generator.h"
 #include <noise/noise.h>
+#include "assets_library/tools/landscape/landscape_pencil.h"
 
 using namespace noise;
 
@@ -64,8 +65,47 @@ LandNodes PerlinGen::generate(float frequency, float secondOctave, float thirdOc
     return result;
 }
 
-//
-void NoiseGenerator::generatre(MapModel* mapModel)
+//NoiseGenerator
+Asset* NoiseGenerator::getCurrentAsset()
 {
+    return currentAsset;
+}
 
+void NoiseGenerator::setCurrentAsset(Asset* asset)
+{
+    if (asset != currentAsset)
+    {
+        currentAsset = asset;
+
+        emit currentAssetChanged();
+    }
+}
+
+
+void NoiseGenerator::generate(MapModel* mapModel)
+{
+    if (currentAsset && currentAsset->type == AssetTypes::slice)
+    {
+        SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
+        generate(mapModel, sliceAsset);
+    }
+    
+}
+
+void NoiseGenerator::generate(MapModel* mapModel, SliceAsset* sliceAsset)
+{
+    LandNodes generatedNodes = PerlinGen::generate(1.0f, 1.0f, 1.0f, 0.0f);
+
+    LayerModel* landLayer = mapModel->layer(LayerTypes::BaseLandscape);
+
+    for (size_t x=0; x<generatedNodes._width-1; ++x)
+    {
+        for (size_t y=0; y<generatedNodes._height-1; ++y)
+        {
+            math::ivec2 cellPos(x, y);
+
+            TileSet::TileType tileType = generatedNodes.getTileType(cellPos, *sliceAsset);
+            LandscapePencil::updateLandscapeCell(landLayer, sliceAsset, cellPos, tileType);
+        }
+    }
 }
