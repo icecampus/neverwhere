@@ -1,6 +1,9 @@
 #pragma once
 #include "math/lib.h"
 
+class SliceAsset;
+class LayerModel;
+
 //StaggeredTiledLandscape
 struct StaggeredTiledLandscape
 {
@@ -62,26 +65,15 @@ struct fmt::formatter<TileSet::NeighboursNodeMask> : fmt::formatter<std::string>
 //LandNodes
 struct LandNodes : public std::vector<uint8_t>
 {
-    void init(size_t width_, size_t height_)
-    {
-        _width = width_;
-        _height = height_;
+    static LandNodes createByMap(LayerModel& map, SliceAsset& sliceAsset);
 
-        clear();
-        resize(_width * _height);
-    }
+    void init(size_t width_, size_t height_);
 
-    uint8_t& operator[](const math::ivec2& position)
-    {
-        uint8_t index = position.y * _width + position.x;
-        return std::vector<uint8_t>::operator[](index);
-    }
+    uint8_t& operator[](const math::ivec2& position);
+    uint8_t operator[](const math::ivec2& position) const;
+    uint8_t at(const math::ivec2& position) const;
 
-    uint8_t operator[](const math::ivec2& position) const
-    {
-        uint8_t index = position.y * _width + position.x;
-        return std::vector<uint8_t>::operator[](index);
-    }
+    TileSet::TileType getTileType(const math::ivec2& cellPosition, SliceAsset& sliceAsset);
 
     size_t _width = 0;
     size_t _height = 0;
