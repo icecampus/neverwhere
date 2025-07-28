@@ -35,11 +35,9 @@ namespace
         return landMask;
     }
 
-    TileSet::TileType getTileByMask(LayerModel& map, const math::ivec2& nodePos, const math::ivec2& cellPosition, SliceAsset& sliceAsset)
+    TileSet::TileType getTileByMask(const LandNodes& landNodes, const math::ivec2& cellPosition, SliceAsset& sliceAsset)
     {
         TileSet::TileType result;
-        LandNodes landNodes = getLandNodes(map, sliceAsset);
-        landNodes[nodePos] = 1;
 
         TileSet::NeighboursNodeMask nodesMaskForCell;
         StaggeredTiledLandscape::ModeNeighbours cellNeighboursNodes = StaggeredTiledLandscape::getNeighboursNodeForCell(cellPosition);
@@ -70,19 +68,22 @@ LandscapePencil::LandscapePencil(QObject* parent):
 void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso)
 {
     SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
-    if (sliceAsset)
+    if (sliceAsset && layerModel)
     {
-        //spdlog::info( "=========================== click ===============================");
-        const math::ivec2 nodePos = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
+        LandNodes landNodes = getLandNodes(*layerModel, *sliceAsset);
 
-        //spdlog::info("node: {}",  nodePos);
+        //set node UP upder cursor 
+        const math::ivec2 nodePos = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
+        landNodes[nodePos] = 1;
+
+
 
         StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
         for (const math::ivec2& curCellPosition : neighbours)
         {
             //spdlog::info("neighbour: {}",  curCellPosition);
 
-            TileSet::TileType tileType = getTileByMask(*layerModel, nodePos, curCellPosition, *sliceAsset);
+            TileSet::TileType tileType = getTileByMask(landNodes, curCellPosition, *sliceAsset);
             //spdlog::info("neighbour: tile_type{}",  magic_enum::enum_name(tileType));
 
             if (tileType != TileSet::Unknown)

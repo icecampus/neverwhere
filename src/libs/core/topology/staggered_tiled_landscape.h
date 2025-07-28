@@ -73,7 +73,13 @@ struct LandNodes : public std::vector<uint8_t>
 
     uint8_t& operator[](const math::ivec2& position)
     {
-        size_t index = position.y * _width + position.x;
+        uint8_t index = position.y * _width + position.x;
+        return std::vector<uint8_t>::operator[](index);
+    }
+
+    uint8_t operator[](const math::ivec2& position) const
+    {
+        uint8_t index = position.y * _width + position.x;
         return std::vector<uint8_t>::operator[](index);
     }
 
