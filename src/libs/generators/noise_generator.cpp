@@ -1,6 +1,5 @@
 #include "noise_generator.h"
 #include <noise/noise.h>
-#include "assets_library/tools/landscape/landscape_pencil.h"
 
 using namespace noise;
 
@@ -88,6 +87,10 @@ void NoiseGenerator::generate(MapModel* mapModel)
     {
         SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
         generate(mapModel, sliceAsset);
+    }
+    else
+    {
+        spdlog::error("Selected asset empty or nit 'slice' type");
     }
     
 }

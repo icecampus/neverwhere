@@ -1,9 +1,7 @@
 #pragma once
 #include <QObject>
 
-#include "topology/staggered_tiled_landscape.h"
-#include "map/map_model.h"
-#include "assets_library/asset.h"
+#include "core/lib.h"
 
 struct PerlinGen
 {
