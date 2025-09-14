@@ -36,19 +36,9 @@ cd $emsdk_path
 	source emsdk_env.sh 
 cd $root_path
 
-mkdir _b-em
-cd _b-em
-	echo $(pwd)
-	emcmake cmake \
-	-DVCPKG_INSTALL_OPTIONS="--x-buildtrees-root=d:/_build" \
-	-DCMAKE_CXX_FLAGS="-gsource-map -O0" \
-    -DCMAKE_C_FLAGS="-gsource-map -O0" \
-    -DCMAKE_EXE_LINKER_FLAGS="-gsource-map --emdebug" \
-	-DCMAKE_TOOLCHAIN_FILE=$vcpkg_path/scripts/buildsystems/vcpkg.cmake \
-	-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$emsdk_path/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake \
-	-DVCPKG_TARGET_TRIPLET=wasm32-emscripten \
-	../ -G Ninja
+echo Current dir: %cd%
+echo ========================== Start configure ===========================
+cmake --preset=default -DPRELOAD=TRUE . -G Ninja
 
-
-cmake --build .  --config Release 
-cd ..
+echo ========================== Start build ===============================
+cmake --build . --preset=Debug  --target coem-ipad
