@@ -41,4 +41,4 @@ echo ========================== Start configure ===========================
 cmake -DVCPKG_INSTALL_OPTIONS="--x-buildtrees-root=d:/_build" --preset=default -DPRELOAD=TRUE . -G Ninja
 
 echo ========================== Start build ===============================
-cmake -DVCPKG_INSTALL_OPTIONS="--x-buildtrees-root=d:/_build" --build . --preset=Debug  --target EpicMapEditor
+cmake --build . --preset=Debug --target EpicMapEditor
