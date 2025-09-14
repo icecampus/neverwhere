@@ -36,6 +36,8 @@ void registreTypes()
     qmlRegisterType<Resource>("Game", 1, 0, "Resource");
     qmlRegisterType<Building>("Game", 1, 0, "Building");
 
+    qmlRegisterType<NoiseGenerator>("Game", 1, 0, "NoiseGenerator");
+
     qmlRegisterType<AssetsContext>("Game", 1, 0, "AssetsContext");
     qmlRegisterType<AssetToolsSelector>("Game", 1, 0, "AssetToolsSelector");
     qmlRegisterType<ImageAsset>("Game", 1, 0, "ImageAsset");

@@ -64,14 +64,17 @@ namespace BaseData
 std::vector<MapDescription> loadMapsDescriptions(const std::filesystem::path& mapsPath)
 {
     std::vector<MapDescription> restult;
-    for (const auto& entry : fs::directory_iterator(mapsPath))
+    if (fs::exists(mapsPath))
     {
-        if (!entry.is_directory())
+        for (const auto& entry : fs::directory_iterator(mapsPath))
         {
-            continue;
-        }
+            if (!entry.is_directory())
+            {
+                continue;
+            }
 
-        restult.push_back({ entry.path() });
+            restult.push_back({ entry.path() });
+        }
     }
 
     return restult;

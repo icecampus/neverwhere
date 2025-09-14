@@ -2,6 +2,7 @@
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 import Qt.labs.qmlmodels
+import QtQml.Models
 import UI 1.0
 import "UI"
 

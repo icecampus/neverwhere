@@ -19,3 +19,5 @@
 #include "models/chapters_image_provider.h"
 #include "assets_library/tools/tools_model.h"
 #include "workspace/right_properties_model.h"
+#include "generators/noise_generator.h"
+#include "assets_library/tools/landscape/landscape_pencil.h"

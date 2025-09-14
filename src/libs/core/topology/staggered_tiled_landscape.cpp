@@ -1,4 +1,7 @@
 #include "staggered_tiled_landscape.h"
+#include "assets_library/assets/slice_asset.h"
+#include "game_objects/landscape.h"
+#include "map/map_model.h"
 
 
 StaggeredTiledLandscape::NeighboursWithDiagonal StaggeredTiledLandscape::cellNeighbours(const math::ivec2& position)
@@ -198,4 +201,78 @@ TileSet::TileSet()
     }
 }
 
-//
+LandNodes LandNodes::createByMap(LayerModel& map, SliceAsset& sliceAsset)
+{
+    LandNodes landMask;
+    landMask.init(200, 200);
+
+    TileSet tileSet;
+    map.iterate([&landMask, &tileSet, &sliceAsset](const GameObject& gameObject)
+        {
+            const Landscape* landObject = dynamic_cast<const Landscape*>(&gameObject);
+            if (landObject && landObject->getPosition().x < 200 && landObject->getPosition().y < 200)
+            {
+                size_t tileIndex = landObject->getTileIndex();
+                TileSet::TileType tileName = sliceAsset.subTileTypeByIndex(tileIndex);
+
+                TileSet::NeighboursNodeMask mask = tileSet.tilename2mask[tileName];
+
+                StaggeredTiledLandscape::ModeNeighbours neighbours = StaggeredTiledLandscape::getNeighboursNodeForCell(gameObject.getPosition());
+                for (size_t i = 0; i < mask.size(); ++i)
+                {
+                    math::ivec2 nodePos = neighbours[i];
+                    landMask[nodePos] = mask[i];
+                }
+            }
+        });
+
+    return landMask;
+}
+
+//LandNodes
+void LandNodes::init(size_t width_, size_t height_)
+{
+    _width = width_;
+    _height = height_;
+
+    clear();
+    resize(_width * _height);
+}
+
+uint8_t& LandNodes::operator[](const math::ivec2& position)
+{
+    uint8_t index = position.y * _width + position.x;
+    return std::vector<uint8_t>::operator[](index);
+}
+
+uint8_t LandNodes::operator[](const math::ivec2& position) const
+{
+    return at(position);
+}
+
+uint8_t LandNodes::at(const math::ivec2& position) const
+{
+    uint8_t index = position.y * _width + position.x;
+    return std::vector<uint8_t>::operator[](index);
+}
+
+TileSet::TileType LandNodes::getTileType(const math::ivec2& cellPosition, SliceAsset& sliceAsset)
+{
+    TileSet::TileType result;
+
+    TileSet::NeighboursNodeMask nodesMaskForCell;
+    StaggeredTiledLandscape::ModeNeighbours cellNeighboursNodes = StaggeredTiledLandscape::getNeighboursNodeForCell(cellPosition);
+
+    for (size_t i = 0; i < nodesMaskForCell.size(); ++i)
+    {
+        math::ivec2 neighbourNodePos = cellNeighboursNodes[i];
+        bool nodeState = at(cellNeighboursNodes[i]);
+
+        nodesMaskForCell[i] = nodeState;
+    }
+
+    static TileSet tileSet;
+    result = tileSet.tileset[nodesMaskForCell];
+
+    return result;
+}

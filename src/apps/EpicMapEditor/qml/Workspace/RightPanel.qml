@@ -5,7 +5,8 @@ import "PropertiesContainers"
 
 Rectangle 
 {
-    property var asset: null
+    property var currentAsset: null
+    property var mapModel: null
 
     id: rightPanel
     color: colorPalette.surface     
@@ -49,10 +50,21 @@ Rectangle
                 {
                     width: conteinersView.width
                     text: element.title
-                    asset: rightPanel.asset
+                    asset: rightPanel.currentAsset
                 }
             }
-
+            DelegateChoice 
+            {   
+                roleValue: PropertiesContainerTypes.GeneratorSettings
+                delegate: NoiseGenerator
+                {
+                    width: conteinersView.width
+                    text: element.title
+                    mapModel: rightPanel.mapModel
+                    currentAsset: rightPanel.currentAsset
+                    
+                }
+            }
         }
 
     }

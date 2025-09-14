@@ -1,6 +1,5 @@
 #include "game_object.h"
 #include "base.h"
-#include "base.h"
 
 
 GameObject::GameObject(GameObjectTypes::Type type, QObject* parent): 

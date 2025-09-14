@@ -12,5 +12,6 @@ nw_add_lib(
 
 		math
 		base_data
+		unofficial::noise::noise
 		)
 
