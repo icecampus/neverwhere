@@ -41,4 +41,4 @@ echo ========================== Start configure ===========================
 cmake --preset=default -DPRELOAD=TRUE . -G Ninja
 
 echo ========================== Start build ===============================
-cmake --build . --preset=Debug  --target coem-ipad
+cmake --build . --preset=Debug  --target EpicMapEditor
