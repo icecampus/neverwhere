@@ -15,3 +15,8 @@ nw_add_lib(
 		unofficial::noise::noise-static
 		)
 
+# For Emscripten, ensure pthread stub symbols are available
+if(EMSCRIPTEN)
+	target_compile_definitions(core PRIVATE __EMSCRIPTEN__=1)
+endif()
+

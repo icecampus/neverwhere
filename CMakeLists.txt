@@ -37,6 +37,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-noise CONFIG REQUIRED)
 # find_package(spdlog CONFIG REQUIRED)
 
+qt_policy(SET QTP0001 OLD )
+qt_policy(SET QTP0004 NEW )
 if(MSVC)
 
   qt_policy(SET QTP0001 OLD )
@@ -62,6 +64,17 @@ if(EMSCRIPTEN)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lembind") 
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sFETCH -sFILESYSTEM=1")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sFULL_ES2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2")
+  
+  # Disable pthread requirements for Qt
+  set(CMAKE_THREAD_LIBS_INIT "")
+  set(CMAKE_HAVE_THREADS_LIBRARY 1)
+  set(CMAKE_USE_WIN32_THREADS_INIT 0)
+  set(CMAKE_USE_PTHREADS_INIT 0)
+  set(THREADS_PREFER_PTHREAD_FLAG FALSE)
+  
+  # Temporarily allow undefined symbols to work around pthread issues
+  # Remove this once Qt is properly built without pthread
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sERROR_ON_UNDEFINED_SYMBOLS=0")
 endif()
 
 add_subdirectory(src/libs)

@@ -1,0 +1,67 @@
+diff --git a/src/corelib/thread/qthread_unix.cpp b/src/corelib/thread/qthread_unix.cpp
+index 1234567..abcdefg 100644
+--- a/src/corelib/thread/qthread_unix.cpp
++++ b/src/corelib/thread/qthread_unix.cpp
+@@ -500,6 +500,9 @@ int QThread::idealThreadCount() noexcept
+ 
+ void QThread::yieldCurrentThread()
+ {
++#ifdef __EMSCRIPTEN__
++    // No-op for Emscripten without pthreads
++#else
+     sched_yield();
++#endif
+ }
+ 
+ static void setCurrentThreadName(const char *name)
+@@ -550,6 +553,11 @@ void QThread::setPriority(Priority priority)
+     if (!d->running) {
+         qWarning("QThread::setPriority: Cannot set priority, thread is not running");
+         return;
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    // Priority setting not supported on Emscripten without pthreads
++    Q_UNUSED(priority);
++#else
+     d->priority = priority;
+ 
+     // copied from start() with a few modifications:
+@@ -570,6 +578,7 @@ void QThread::setPriority(Priority priority)
+             param.sched_priority = prio;
+             pthread_setschedparam(d->thread_id, sched_policy, &param);
+         }
+     }
++#endif
+ }
+ 
+ #endif // QT_CONFIG(thread)
+diff --git a/src/corelib/thread/qmutex.cpp b/src/corelib/thread/qmutex.cpp
+index 2345678..9012345 100644
+--- a/src/corelib/thread/qmutex.cpp
++++ b/src/corelib/thread/qmutex.cpp
+@@ -600,6 +600,16 @@ bool QBasicMutex::lockInternal(QDeadlineTimer deadlineTimer) QT_MUTEX_LOCK_NOIN
+ 
+ bool QBasicMutex::lockInternal(int timeout) QT_MUTEX_LOCK_NOEXCEPT
+ {
++#ifdef __EMSCRIPTEN__
++    // Emscripten without pthreads: simplified implementation
++    Q_UNUSED(timeout);
++    while (d_ptr.testAndSetAcquire(nullptr, dummyLocked())) {
++        // Busy wait or yield
++        QThread::yieldCurrentThread();
++    }
++    return true;
++#else
++    // Original implementation with sem_timedwait
+     Q_ASSERT(!isRecursive());
+ 
+     while (!fastTryLock()) {
+@@ -620,6 +630,7 @@ bool QBasicMutex::lockInternal(int timeout) QT_MUTEX_LOCK_NOEXCEPT
+             return false;
+     }
+     return true;
++#endif
+ }
+ 
+ void QBasicMutex::unlockInternal() noexcept
