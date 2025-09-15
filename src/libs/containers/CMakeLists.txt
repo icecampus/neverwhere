@@ -4,5 +4,5 @@ nw_add_lib(
 	LIBS 
 		Qt6::Core
 		magic_enum::magic_enum 
-		spdlog::spdlog
+		# spdlog::spdlog
 		)

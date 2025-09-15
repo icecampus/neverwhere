@@ -16,7 +16,6 @@
     "nlohmann-json",
     "fmt",
     {"name": "spdlog",            "platform": "!emscripten"},
-    "spdlog",
     "libnoise"
   ]
 }

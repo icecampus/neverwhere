@@ -25,7 +25,7 @@ LandNodes PerlinGen::generate(float frequency, float secondOctave, float thirdOc
     module::Perlin thirdOctavePerlin;
     thirdOctavePerlin.SetSeed(9945);
 
-    spdlog::info(__FUNCTION__ );
+    // spdlog::info(__FUNCTION__ );
 
     constexpr int width = 90;
     constexpr int height = 160;
@@ -90,7 +90,7 @@ void NoiseGenerator::generate(MapModel* mapModel)
     }
     else
     {
-        spdlog::error("Selected asset empty or nit 'slice' type");
+        // spdlog::error("Selected asset empty or nit 'slice' type");
     }
     
 }

@@ -15,7 +15,7 @@
 #include <QObject>
 #include <QMetaType>
 
-#include <spdlog/spdlog.h>
+// #include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <fstream>
