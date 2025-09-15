@@ -10,11 +10,12 @@
             "name": "default",
             "displayName": "Emscripten",
             "binaryDir": "_b-em",
-            "generator": "Ninja Multi-Config",
+            "generator": "Ninja",
             "toolchainFile": "toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
                 "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchain/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
-                "VCPKG_TARGET_TRIPLET": "wasm32-emscripten"
+                "VCPKG_TARGET_TRIPLET": "wasm32-emscripten",
+                "CMAKE_MAKE_PROGRAM": "${sourceDir}/toolchain/ninja-win/ninja.exe"
             }
         }
     ],
