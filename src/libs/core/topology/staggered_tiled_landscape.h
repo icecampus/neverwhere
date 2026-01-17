@@ -65,7 +65,7 @@ struct TileSet
 //LandNodes
 struct LandNodes : public std::vector<uint8_t>
 {
-    static LandNodes createByMap(LayerModel& map, SliceAsset& sliceAsset);
+    static LandNodes createByMap(LayerModel& map);
 
     void init(size_t width_, size_t height_);
 
@@ -73,7 +73,7 @@ struct LandNodes : public std::vector<uint8_t>
     uint8_t operator[](const math::ivec2& position) const;
     uint8_t at(const math::ivec2& position) const;
 
-    TileSet::TileType getTileType(const math::ivec2& cellPosition, SliceAsset& sliceAsset);
+    TileSet::TileType getTileType(const math::ivec2& cellPosition);
 
     size_t _width = 0;
     size_t _height = 0;

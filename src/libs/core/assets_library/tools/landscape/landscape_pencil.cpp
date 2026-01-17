@@ -17,7 +17,7 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
     SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
     if (sliceAsset && layerModel)
     {
-        LandNodes landNodes = LandNodes::createByMap(*layerModel, *sliceAsset);
+        LandNodes landNodes = LandNodes::createByMap(*layerModel);
 
         //set node UP upder cursor 
         const math::ivec2 nodePos = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
@@ -27,7 +27,7 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
         StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
         for (const math::ivec2& curCellPosition : neighbours)
         {
-            TileSet::TileType tileType = landNodes.getTileType(curCellPosition, *sliceAsset);
+            TileSet::TileType tileType = landNodes.getTileType(curCellPosition);
             updateLandscapeCell(layerModel, sliceAsset, curCellPosition, tileType);
         }
     }

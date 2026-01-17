@@ -107,7 +107,7 @@ void NoiseGenerator::generate(MapModel* mapModel, SliceAsset* sliceAsset)
         {
             math::ivec2 cellPos(x, y);
 
-            TileSet::TileType tileType = generatedNodes.getTileType(cellPos, *sliceAsset);
+            TileSet::TileType tileType = generatedNodes.getTileType(cellPos);
             LandscapePencil::updateLandscapeCell(landLayer, sliceAsset, cellPos, tileType);
         }
     }

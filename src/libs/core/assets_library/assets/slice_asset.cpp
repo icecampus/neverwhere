@@ -54,7 +54,7 @@ void SliceAsset::registerImages(RegistationHandle handle)
     }
 }
 
-TileSet::TileType SliceAsset::subTileTypeByIndex(size_t tileIndex) const
+TileSet::TileType SliceAsset::subTileTypeByIndex(size_t tileIndex)
 {
     switch (tileIndex)
     {

@@ -23,7 +23,7 @@ public:
     void registerImages(RegistationHandle handle) override;
 
     //
-    TileSet::TileType subTileTypeByIndex(size_t tileIndex) const;
+    static TileSet::TileType subTileTypeByIndex(size_t tileIndex);
     size_t subTileIndexByType(TileSet::TileType type) const;
     
 protected:

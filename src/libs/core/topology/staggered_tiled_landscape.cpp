@@ -201,30 +201,30 @@ TileSet::TileSet()
     }
 }
 
-LandNodes LandNodes::createByMap(LayerModel& map, SliceAsset& sliceAsset)
+LandNodes LandNodes::createByMap(LayerModel& map)
 {
     LandNodes landMask;
     landMask.init(200, 200);
 
     TileSet tileSet;
-    map.iterate([&landMask, &tileSet, &sliceAsset](const GameObject& gameObject)
+    map.iterate([&landMask, &tileSet](const GameObject& gameObject)
+    {
+        const Landscape* landObject = dynamic_cast<const Landscape*>(&gameObject);
+        if (landObject && landObject->getPosition().x < 200 && landObject->getPosition().y < 200)
         {
-            const Landscape* landObject = dynamic_cast<const Landscape*>(&gameObject);
-            if (landObject && landObject->getPosition().x < 200 && landObject->getPosition().y < 200)
+            size_t tileIndex = landObject->getTileIndex();
+            TileSet::TileType tileName = SliceAsset::subTileTypeByIndex(tileIndex);
+
+            TileSet::NeighboursNodeMask mask = tileSet.tilename2mask[tileName];
+
+            StaggeredTiledLandscape::ModeNeighbours neighbours = StaggeredTiledLandscape::getNeighboursNodeForCell(gameObject.getPosition());
+            for (size_t i = 0; i < mask.size(); ++i)
             {
-                size_t tileIndex = landObject->getTileIndex();
-                TileSet::TileType tileName = sliceAsset.subTileTypeByIndex(tileIndex);
-
-                TileSet::NeighboursNodeMask mask = tileSet.tilename2mask[tileName];
-
-                StaggeredTiledLandscape::ModeNeighbours neighbours = StaggeredTiledLandscape::getNeighboursNodeForCell(gameObject.getPosition());
-                for (size_t i = 0; i < mask.size(); ++i)
-                {
-                    math::ivec2 nodePos = neighbours[i];
-                    landMask[nodePos] = mask[i];
-                }
+                math::ivec2 nodePos = neighbours[i];
+                landMask[nodePos] = mask[i];
             }
-        });
+        }
+    });
 
     return landMask;
 }
@@ -256,7 +256,7 @@ uint8_t LandNodes::at(const math::ivec2& position) const
     return std::vector<uint8_t>::operator[](index);
 }
 
-TileSet::TileType LandNodes::getTileType(const math::ivec2& cellPosition, SliceAsset& sliceAsset)
+TileSet::TileType LandNodes::getTileType(const math::ivec2& cellPosition)
 {
     TileSet::TileType result;
 
