@@ -7,7 +7,8 @@ Pencil::Pencil(QObject* parent):
 
 }
 
-void Pencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso)
+void Pencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso,
+    bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
     std::unique_ptr<Tile2D> gameObject = std::make_unique<Tile2D>();
 

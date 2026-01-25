@@ -52,7 +52,8 @@ Rectangle
         {
             if(mouse.button === Qt.LeftButton )
             {
-                toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView)
+                toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView, 
+                    mouse.modifiers & Qt.ControlModifier, mouse.modifiers & Qt.ShiftModifier, mouse.modifiers & Qt.AltModifier)
             }
         }
     }

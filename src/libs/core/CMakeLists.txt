@@ -8,10 +8,12 @@ nw_add_lib(
 		Qt6::Quick
 		glm::glm-header-only
 		nlohmann_json::nlohmann_json
-		# spdlog::spdlog
-
+		spdlog::spdlog
+		unofficial::noise::noise
+		
 		math
 		base_data
-		unofficial::noise::noise
+		utils
+		
 		)
 

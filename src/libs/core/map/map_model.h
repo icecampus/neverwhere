@@ -30,6 +30,9 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void addGameObject(std::unique_ptr<GameObject> gameObject);
+    void remove(const math::ivec2& cellPosition);
+    void removeAll(const math::ivec2& cellPosition);
+
     GameObject *getGameObject(int index) const;
     std::vector<GameObject*> getObjectsAt(const math::ivec2& position);
     void iterate(GameObjectHandler handler);
@@ -40,8 +43,8 @@ private slots:
     void onGameObjectPositionChanged();
     
 private:
-    std::vector<std::unique_ptr<GameObject>> _gameObjects;
     std::unordered_map<math::ivec2, std::vector<GameObject*>> _positionMap;
+    std::vector<std::unique_ptr<GameObject>> _gameObjects;
     std::unordered_map<GameObject*, math::ivec2> _objectOldPositions;
 };
 

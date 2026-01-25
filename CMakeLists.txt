@@ -18,7 +18,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Boost REQUIRED COMPONENTS uuid lexical_cast)
+find_package(Boost REQUIRED COMPONENTS container_hash uuid lexical_cast)
 
 if(EMSCRIPTEN AND NOT TARGET WrapRt::WrapRt)
     add_library(WrapRt::WrapRt INTERFACE IMPORTED)

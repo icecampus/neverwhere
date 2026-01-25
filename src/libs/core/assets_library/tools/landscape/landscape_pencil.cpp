@@ -5,15 +5,17 @@
 #include "assets_library/assets/slice_asset.h"
 
 
-
 LandscapePencil::LandscapePencil(QObject* parent):
     Tool("LandscapePencil", "land_pencil", parent)
 {
 
 }
 
-void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso)
+void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso,
+    bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
+    spdlog::info("Screen pos {}", screenPos);
+
     SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
     if (sliceAsset && layerModel)
     {
@@ -21,8 +23,15 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
 
         //set node UP upder cursor 
         const math::ivec2 nodePos = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
-        landNodes[nodePos] = 1;
-
+        if (!ctrlModifier)
+        {
+            landNodes[nodePos] = 1;
+        }
+        else
+        {
+            landNodes[nodePos] = 0;
+        }
+        
         //update cells around node
         StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
         for (const math::ivec2& curCellPosition : neighbours)
@@ -66,6 +75,6 @@ void LandscapePencil::updateLandscapeCell(LayerModel* layerModel, SliceAsset* sl
     }
     else
     {
-        //canvas.getMap()->removeObjects(curCellPosition, Tiles);
+        layerModel->remove(cellPosition);
     }
 }

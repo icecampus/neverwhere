@@ -2,8 +2,9 @@
 #include <glm/glm.hpp>
 #include <QObject>
 #include <QMetaType>
-// #include <spdlog/spdlog.h>
+#include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <boost/container_hash/hash.hpp>
 
 namespace math
 {
@@ -92,23 +93,30 @@ inline ivec2 operator/(int scalar, const ivec2& v) { return ivec2(scalar / v.get
 
 }//math
 
-namespace std {
+
+namespace std 
+{
     template<>
-    struct hash<math::ivec2> {
-        size_t operator()(const math::ivec2& v) const {
-            return hash<int>()(v.x) ^ (hash<int>()(v.y) << 1);
+    struct hash<math::ivec2> 
+    {
+        size_t operator()(const math::ivec2& v) const noexcept 
+        {
+            size_t seed = 0;
+            boost::hash_combine(seed, v.x);
+            boost::hash_combine(seed, v.y);
+            return seed;
         }
     };
 }
 
-// template<>
-// struct fmt::formatter<math::ivec2> : fmt::formatter<std::string>
-// {
-//     auto format(math::ivec2 iv2, format_context& ctx) const -> decltype(ctx.out())
-//     {
-//         return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
-//     }
-// };
+ template<>
+ struct fmt::formatter<math::ivec2> : fmt::formatter<std::string>
+ {
+     auto format(math::ivec2 iv2, format_context& ctx) const -> decltype(ctx.out())
+     {
+         return fmt::format_to(ctx.out(), "[{}, {}]", iv2.x, iv2.y);
+     }
+ };
 
 
 Q_DECLARE_METATYPE(math::ivec2)
