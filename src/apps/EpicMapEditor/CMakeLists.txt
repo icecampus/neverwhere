@@ -28,3 +28,17 @@ qt6_add_shaders(${AppName} "${AppName}_shaders"
         "shaders/mandelbrot.frag"
 )
 
+if(APPLE AND CMAKE_GENERATOR MATCHES "Xcode")
+    # Отключаем встроенную подпись Xcode (чтобы не конфликтовала)
+    set_target_properties(EpicMapEditor PROPERTIES
+        XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+    )
+
+    # Добавляем пост-сборочную подпись через кастомную команду
+    add_custom_command(TARGET EpicMapEditor POST_BUILD
+        COMMAND codesign -f -s - "$<TARGET_FILE:EpicMapEditor>"
+        COMMENT "Ad-hoc signing ${TARGET_FILE_NAME} for local debugging"
+        VERBATIM
+    )
+endif()

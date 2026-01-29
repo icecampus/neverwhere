@@ -1,19 +1,22 @@
-﻿#include "main_window.h"
+#include "main_window.h"
 #include <QQuickItem>
 #include <QSettings>
 #include <QScreen>
 #include <QApplication>
 
+#ifdef USE_WINDOWS
 #define NOMINMAX
 #include <windows.h>
 #include <windef.h>
 #include "Windowsx.h"
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#endif
 
 
 namespace
 {
+#ifdef USE_WINDOWS
     const int BORDER_MARGIN = 8; // Увеличьте отступ для лучшего захвата
 
     LRESULT bordersHitTest(const QQuickWindow& mainWindow, const QPoint& ptMouse) 
@@ -39,13 +42,15 @@ namespace
 
         return HTCLIENT;
     }
+#endif
 }
 
 //EpicEditorWindow
 EpicEditorWindow::EpicEditorWindow(QWindow* parent)
 	: QQuickWindow(parent)
 {
-    if (QSysInfo::productType() == "windows") 
+#ifdef USE_WINDOWS
+    if (QSysInfo::productType() == "windows")
     {
         HWND hwnd = (HWND)winId();
 
@@ -56,7 +61,7 @@ EpicEditorWindow::EpicEditorWindow(QWindow* parent)
         // Добавляем стандартный оконный стиль
         SetWindowLongPtr(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_THICKFRAME | WS_CAPTION);
     }
-
+#endif
 	setMinimumHeight(600);
 	setMinimumWidth(800);
 
@@ -66,6 +71,7 @@ EpicEditorWindow::EpicEditorWindow(QWindow* parent)
 //
 bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)
 {
+#ifdef USE_WINDOWS
 	const auto msg = (MSG*)message;
 
 	switch (msg->message)
@@ -156,7 +162,7 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
             return true;
         }
     }
-
+#endif
     return QQuickWindow::nativeEvent(eventType, message, result);
 }
 

@@ -261,7 +261,9 @@ function(nw_add_app_sources)
         RESOURCE_PREFIX "/"
     )
 
-    add_custom_command(TARGET ${ARG_NAME} POST_BUILD COMMAND Qt6::windeployqt --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE:${ARG_NAME}>" ) 
+    if(MSVC)
+        add_custom_command(TARGET ${ARG_NAME} POST_BUILD COMMAND Qt6::windeployqt --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE:${ARG_NAME}>" ) 
+    endif()
 
     target_include_directories(${ARG_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_include_directories(${ARG_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/src/libs")

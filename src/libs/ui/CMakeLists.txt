@@ -14,7 +14,7 @@ if(EMSCRIPTEN)
 			Qt6::Quick
 			Qt6::Widgets
 			)
-else()
+elseif(MSVC)
 	nw_add_lib_sources(
 		NAME
 			ui
@@ -33,5 +33,22 @@ else()
 			Qt6::Widgets
 			Shcore.lib
 			)
-
+else()
+	nw_add_lib_sources(
+		NAME
+			ui
+		GROUP 
+			libs 
+		SOURCES 
+			lib.h
+			main_window.h
+			main_window.cpp
+			tabs_model.h
+			tabs_model.cpp
+		LIBS 
+			Qt6::Core
+			Qt6::Gui
+			Qt6::Quick
+			Qt6::Widgets
+			)
 endif()
