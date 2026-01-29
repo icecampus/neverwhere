@@ -2,9 +2,10 @@ nw_add_lib(
 	GROUP 
 		libs 
 	LIBS 
+		Boost::container_hash
 		magic_enum::magic_enum 
 		Qt6::Core
 		Qt6::Gui
 		glm::glm-header-only
-		# spdlog::spdlog
+		spdlog::spdlog
 		)

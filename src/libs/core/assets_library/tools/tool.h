@@ -18,7 +18,8 @@ public:
     QString icon() const;
 
 
-    virtual void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso)=0;
+    virtual void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso, 
+        bool ctrlModifier, bool shiftModifier, bool altModifier)=0;
 private:
     QString _name;
     QString _icon;

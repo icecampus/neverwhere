@@ -9,9 +9,11 @@ nw_add_lib(
 		glm::glm-header-only
 		nlohmann_json::nlohmann_json
 		spdlog::spdlog
-
+		unofficial::noise::noise
+		
 		math
 		base_data
-		unofficial::noise::noise-static
+		utils
+		
 		)
 

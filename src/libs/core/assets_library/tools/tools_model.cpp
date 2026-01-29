@@ -28,11 +28,12 @@ void AssetToolsModel::setCurrentTool(int currentIndex)
     }
 }
 
-void AssetToolsModel::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso)
+void AssetToolsModel::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso,
+    bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
     if (currentTool >= 0 && currentAsset && layerModel)
     {
-        element(currentTool)->click(screenPos, currentAsset, layerModel, iso);
+        element(currentTool)->click(screenPos, currentAsset, layerModel, iso, ctrlModifier, shiftModifier, altModifier);
     }
 }
 
@@ -78,7 +79,8 @@ AssetToolsModel* AssetToolsSelector::getToolsModel()
     return nullptr;
 }
 
-void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso)
+void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso, 
+    bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
     AssetToolsModel* currentToolsModel = getToolsModel();
     if (currentToolsModel && currentAsset)
@@ -87,7 +89,7 @@ void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, StaggeredIs
 
         if (layerModel)
         {
-            currentToolsModel->click(screenPos, currentAsset, layerModel, iso);
+            currentToolsModel->click(screenPos, currentAsset, layerModel, iso, ctrlModifier, shiftModifier, altModifier);
         }
     }
 }

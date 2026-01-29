@@ -117,6 +117,85 @@ void LayerModel::addGameObject(std::unique_ptr<GameObject> gameObject)
     endInsertRows();
 }
 
+void LayerModel::remove(const math::ivec2& cellPosition)
+{
+    auto it = std::find_if(_gameObjects.begin(), _gameObjects.end(),
+        [&cellPosition](const std::unique_ptr<GameObject>& obj) {
+            return obj && obj->getPosition() == cellPosition;
+        });
+
+    if (it == _gameObjects.end()) {
+        return; // Ничего не найдено
+    }
+
+    const int rowIndex = static_cast<int>(std::distance(_gameObjects.begin(), it));
+
+    // === Уведомляем модель о начале удаления ===
+    beginRemoveRows(QModelIndex(), rowIndex, rowIndex);
+
+    GameObject* objPtr = it->get();
+
+    // 1. Удаляем из _positionMap
+    auto posIt = _positionMap.find(cellPosition);
+    if (posIt != _positionMap.end()) {
+        auto& vec = posIt->second;
+        vec.erase(std::remove(vec.begin(), vec.end(), objPtr), vec.end());
+        if (vec.empty()) {
+            _positionMap.erase(posIt);
+        }
+    }
+
+    // 2. Удаляем из _objectOldPositions
+    _objectOldPositions.erase(objPtr);
+
+    // 3. Удаляем из основного вектора
+    _gameObjects.erase(it);
+
+    // === Завершаем удаление ===
+    endRemoveRows();
+}
+
+void LayerModel::removeAll(const math::ivec2& cellPosition)
+{
+    // Собираем индексы удаляемых объектов (в порядке убывания!)
+    std::vector<int> indicesToRemove;
+    for (size_t i = 0; i < _gameObjects.size(); ++i) {
+        if (_gameObjects[i] && _gameObjects[i]->getPosition() == cellPosition) {
+            indicesToRemove.push_back(static_cast<int>(i));
+        }
+    }
+
+    if (indicesToRemove.empty()) {
+        return;
+    }
+
+    // Сортируем в обратном порядке, чтобы удалять с конца
+    std::sort(indicesToRemove.rbegin(), indicesToRemove.rend());
+
+    // Удаляем по одному, с уведомлениями
+    for (int rowIndex : indicesToRemove) {
+        GameObject* objPtr = _gameObjects[rowIndex].get();
+
+        // Удаляем из _positionMap
+        auto posIt = _positionMap.find(cellPosition);
+        if (posIt != _positionMap.end()) {
+            auto& vec = posIt->second;
+            vec.erase(std::remove(vec.begin(), vec.end(), objPtr), vec.end());
+            if (vec.empty()) {
+                _positionMap.erase(posIt);
+            }
+        }
+
+        // Удаляем из _objectOldPositions
+        _objectOldPositions.erase(objPtr);
+
+        // Уведомляем модель
+        beginRemoveRows(QModelIndex(), rowIndex, rowIndex);
+        _gameObjects.erase(_gameObjects.begin() + rowIndex);
+        endRemoveRows();
+    }
+}
+
 GameObject* LayerModel::getGameObject(int index) const 
 {
     if (index >= 0 && index < static_cast<int>(_gameObjects.size()))
