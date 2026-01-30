@@ -1,4 +1,4 @@
-INTERMEDIATE_PATH="_int_mac"  
+INTERMEDIATE_PATH="_intermediate_64"  
 
 if [ ! -d "$INTERMEDIATE_PATH" ]; then
     mkdir -p "$INTERMEDIATE_PATH"

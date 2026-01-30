@@ -1,5 +1,5 @@
 #pragma once
-#ifdef _WINDOWS
+#ifndef __EMSCRIPTEN__
     #include "main_window.h"
 #endif // _WINDOWS
 

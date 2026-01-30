@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -9,7 +9,7 @@
 
 void registreTypes()
 {
-#ifdef _WINDOWS
+#ifndef __EMSCRIPTEN__
     qmlRegisterType<EpicEditorWindow>("UI", 1, 0, "EpicEditorWindow");
 #endif
 

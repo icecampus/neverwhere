@@ -17,6 +17,11 @@ function(check_preprocessor_configuration)
     check_preprocessor(USE_FREEBSD __FreeBSD__)
 endfunction()
 
+function(configure_common_param)
+    set(INT_PATH "${CMAKE_SOURCE_DIR}/_intermediate_64" PARENT_SCOPE)
+
+endfunction()
+
 
 # Print text with color, colors can be one of 
 # normal black red green yellow blue magenta cyan white
@@ -241,7 +246,7 @@ function(nw_add_app_sources)
         set_target_properties(${ARG_NAME} PROPERTIES
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.nw.${ARG_NAME}"
             MACOSX_BUNDLE_BUNDLE_NAME ${ARG_NAME}
-            XCODE_GENERATE_SCHEME TRUE XCODE_SCHEME_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/_intermediate_64"
+            XCODE_GENERATE_SCHEME TRUE XCODE_SCHEME_WORKING_DIRECTORY "${INT_PATH}"
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
         )
     elseif(USE_WINDOWS)
