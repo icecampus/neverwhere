@@ -221,7 +221,10 @@ LandNodes LandNodes::createByMap(LayerModel& map)
             for (size_t i = 0; i < mask.size(); ++i)
             {
                 math::ivec2 nodePos = neighbours[i];
-                landMask[nodePos] = mask[i];
+                if (mask[i]) 
+                {
+                    landMask[nodePos] = 1;
+                }
             }
         }
     });
