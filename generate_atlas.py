@@ -148,16 +148,18 @@ def generate_png_atlas():
                 z = Z_SCALE if m[k] else 0
                 pts_3d.append((coords_2d_logical[k][0], coords_2d_logical[k][1], z))
 
-            # Split into 2 triangles: (0, 1, 3) and (1, 2, 3)
-            # Tri 1: Left, Up, Down
-            col1 = get_lighting_color(grass_color, pts_3d[0], pts_3d[1], pts_3d[3], light_dir)
-            tri1_2d = [pts_surface[0], pts_surface[1], pts_surface[3]]
-            draw.polygon(tri1_2d, fill=col1)
-            
-            # Tri 2: Up, Right, Down
-            col2 = get_lighting_color(grass_color, pts_3d[1], pts_3d[2], pts_3d[3], light_dir)
-            tri2_2d = [pts_surface[1], pts_surface[2], pts_surface[3]]
-            draw.polygon(tri2_2d, fill=col2)
+            # Split into 2 triangles
+            if t_type in ['UpCorner', 'DownCorner']:
+                # Split along Left-Right (0-2)
+                tris = [(0, 1, 2), (0, 2, 3)]
+            else:
+                # Default: Split along Up-Down (1-3)
+                tris = [(0, 1, 3), (1, 2, 3)]
+
+            for (i1, i2, i3) in tris:
+                col = get_lighting_color(grass_color, pts_3d[i1], pts_3d[i2], pts_3d[i3], light_dir)
+                poly = [pts_surface[i1], pts_surface[i2], pts_surface[i3]]
+                draw.polygon(poly, fill=col)
             
             # Outline for the whole shape
             draw.polygon(pts_surface, outline=grass_outline)
