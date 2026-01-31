@@ -16,7 +16,8 @@
     "glm",
     "nlohmann-json",
     "fmt",
-    {"name": "spdlog",            "platform": "!emscripten"},
-    "libnoise"
+    {"name":     "spdlog",            "platform": "!emscripten"},
+    "libnoise",
+    "gtest"
   ]
 }
