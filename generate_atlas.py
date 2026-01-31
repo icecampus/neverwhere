@@ -1,4 +1,45 @@
+import math
 from PIL import Image, ImageDraw
+
+def normalize(v):
+    l = math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
+    if l == 0: return (0, 0, 1)
+    return (v[0]/l, v[1]/l, v[2]/l)
+
+def sub(a, b):
+    return (a[0]-b[0], a[1]-b[1], a[2]-b[2])
+
+def cross(a, b):
+    return (a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0])
+
+def dot(a, b):
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+
+def get_lighting_color(base_color, p1, p2, p3, light_dir):
+    v1 = sub(p2, p1)
+    v2 = sub(p3, p1)
+    # Normal
+    n = cross(v1, v2)
+    # Ensure pointing up (Z > 0)
+    if n[2] < 0:
+        n = (-n[0], -n[1], -n[2])
+    n = normalize(n)
+    
+    intensity = dot(n, light_dir)
+    # Lighting model: Ambient + Diffuse
+    # Even higher contrast: Ambient 0.3, Diffuse 1.4
+    bright = 0.3 + 1.4 * intensity
+    bright = max(0.2, min(2.5, bright)) # Clamp
+
+    def clamp_255(v):
+        return max(0, min(255, int(v)))
+
+    return (
+        clamp_255(base_color[0] * bright),
+        clamp_255(base_color[1] * bright),
+        clamp_255(base_color[2] * bright),
+        base_color[3]
+    )
 
 def generate_png_atlas():
     COLS, ROWS = 4, 6
@@ -48,6 +89,19 @@ def generate_png_atlas():
     soil_color = (120, 90, 60, 255)
     soil_dark = (90, 65, 45, 255)
 
+    # 3D coords for lighting calculation
+    # Center (0,0). Left(-1,0), Up(0,1), Right(1,0), Down(0,-1). Z up.
+    coords_2d_logical = [
+        (-1, 0), # 0: Left
+        (0, 1),  # 1: Up
+        (1, 0),  # 2: Right
+        (0, -1)  # 3: Down
+    ]
+    Z_SCALE = 0.3
+    # Light direction: Top-Left (Left-Up)
+    # (-1, 1, 1) roughly points from Top-Left-Up towards Origin
+    light_dir = normalize((-1, 1, 1))
+
     for i in range(COLS * ROWS):
         col, row = i % COLS, i // COLS
         x, y = col * TILE_W, row * TILE_H
@@ -83,18 +137,45 @@ def generate_png_atlas():
 
         # Поверхность
         if any(m):
-            draw.polygon(pts_surface, fill=grass_color, outline=grass_outline)
+            # Calculate 3D points for lighting
+            pts_3d = []
+            for k in range(4):
+                z = Z_SCALE if m[k] else 0
+                pts_3d.append((coords_2d_logical[k][0], coords_2d_logical[k][1], z))
+
+            # Split into 2 triangles: (0, 1, 3) and (1, 2, 3)
+            # Tri 1: Left, Up, Down
+            col1 = get_lighting_color(grass_color, pts_3d[0], pts_3d[1], pts_3d[3], light_dir)
+            tri1_2d = [pts_surface[0], pts_surface[1], pts_surface[3]]
+            draw.polygon(tri1_2d, fill=col1)
+            
+            # Tri 2: Up, Right, Down
+            col2 = get_lighting_color(grass_color, pts_3d[1], pts_3d[2], pts_3d[3], light_dir)
+            tri2_2d = [pts_surface[1], pts_surface[2], pts_surface[3]]
+            draw.polygon(tri2_2d, fill=col2)
+            
+            # Outline for the whole shape
+            draw.polygon(pts_surface, outline=grass_outline)
+            
             for j in range(4):
                 nj = (j + 1) % 4
                 if m[j] and m[nj]:
                     draw.line([pts_top[j], pts_top[nj]], fill=grass_outline, width=2)
 
         # Текст
-        draw.text((x + 15, y + 10), f"ID: {i}", fill=(200, 200, 200, 255))
-        draw.text((x + 15, y + 25), t_type, fill=(100, 255, 100, 255))
+        # Center of the tile slot
+        tx = x + 128
+        ty = y + 110
+        
+        # Red color for visibility against green
+        text_color = (255, 0, 0, 255)
+        
+        # Use anchor='mm' (middle-middle) to center text
+        draw.text((tx, ty - 8), f"ID: {i}", fill=text_color, anchor="mm")
+        draw.text((tx, ty + 8), t_type, fill=text_color, anchor="mm")
 
     img.save('technical_atlas.png')
-    print("Previous stable version of technical atlas saved.")
+    print("Technical atlas with lighting saved.")
 
 if __name__ == "__main__":
     generate_png_atlas()
