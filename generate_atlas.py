@@ -107,11 +107,16 @@ def generate_png_atlas():
         x, y = col * TILE_W, row * TILE_H
         cy_base = y + 110 
         
+        # Grid mathematics: 
+        # Cell size in staggered isometry is 2:1 ratio (width:height).
+        # To match the grid perfectly and avoid gaps ("brown stripes"), 
+        # the base diamond must be exactly 256x128 (since TILE_W=256).
+        
         pts_base = [
-            (x + 10, cy_base),       # 0: Left
-            (x + 128, cy_base - 54), # 1: Up
-            (x + 246, cy_base),      # 2: Right
-            (x + 128, cy_base + 54)  # 3: Down
+            (x + 0,   cy_base),       # 0: Left
+            (x + 128, cy_base - 64),  # 1: Up
+            (x + 256, cy_base),       # 2: Right
+            (x + 128, cy_base + 64)   # 3: Down
         ]
         
         pts_top = [(p[0], p[1] - ELEVATION) for p in pts_base]
