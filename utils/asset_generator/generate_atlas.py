@@ -1,4 +1,5 @@
 import math
+import sys
 from PIL import Image, ImageDraw
 
 def normalize(v):
@@ -126,7 +127,7 @@ def generate_png_atlas():
         pts_surface = [pts_top[j] if m[j] else pts_base[j] for j in range(4)]
         
         # Основание
-        draw.polygon(pts_base, outline=(230, 230, 230, 100))
+        # draw.polygon(pts_base, outline=(230, 230, 230, 100))
 
         # Стенки почвы
         for j in [1, 0, 2, 3]: 
@@ -157,12 +158,16 @@ def generate_png_atlas():
                 tris = [(0, 1, 3), (1, 2, 3)]
 
             for (i1, i2, i3) in tris:
+                # Skip triangle if all vertices are at zero level
+                if m[i1] == 0 and m[i2] == 0 and m[i3] == 0:
+                    continue
+
                 col = get_lighting_color(grass_color, pts_3d[i1], pts_3d[i2], pts_3d[i3], light_dir)
                 poly = [pts_surface[i1], pts_surface[i2], pts_surface[i3]]
                 draw.polygon(poly, fill=col)
             
             # Outline for the whole shape
-            draw.polygon(pts_surface, outline=grass_outline)
+            # draw.polygon(pts_surface, outline=grass_outline)
             
             for j in range(4):
                 nj = (j + 1) % 4
@@ -181,8 +186,12 @@ def generate_png_atlas():
         draw.text((tx, ty - 8), f"ID: {i}", fill=text_color, anchor="mm")
         draw.text((tx, ty + 8), t_type, fill=text_color, anchor="mm")
 
-    img.save('technical_atlas.png')
-    print("Technical atlas with lighting saved.")
+    output_path = 'technical_atlas.png'
+    if len(sys.argv) > 1:
+        output_path = sys.argv[1]
+
+    img.save(output_path)
+    print(f"Technical atlas with lighting saved to {output_path}")
 
 if __name__ == "__main__":
     generate_png_atlas()
