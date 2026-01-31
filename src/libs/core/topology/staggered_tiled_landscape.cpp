@@ -244,7 +244,7 @@ void LandNodes::init(size_t width_, size_t height_)
 
 uint8_t& LandNodes::operator[](const math::ivec2& position)
 {
-    uint8_t index = position.y * _width + position.x;
+    size_t index = static_cast<size_t>(position.y) * _width + position.x;
     return std::vector<uint8_t>::operator[](index);
 }
 
@@ -255,7 +255,7 @@ uint8_t LandNodes::operator[](const math::ivec2& position) const
 
 uint8_t LandNodes::at(const math::ivec2& position) const
 {
-    uint8_t index = position.y * _width + position.x;
+    size_t index = static_cast<size_t>(position.y) * _width + position.x;
     return std::vector<uint8_t>::operator[](index);
 }
 
