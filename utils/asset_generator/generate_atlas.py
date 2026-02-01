@@ -150,7 +150,7 @@ def generate_png_atlas():
                 pts_3d.append((coords_2d_logical[k][0], coords_2d_logical[k][1], z))
 
             # Split into 2 triangles
-            if t_type in ['UpCorner', 'DownCorner']:
+            if t_type in ['UpCorner', 'DownCorner', 'LeftLack', 'RightLack']:
                 # Split along Left-Right (0-2)
                 tris = [(0, 1, 2), (0, 2, 3)]
             else:
