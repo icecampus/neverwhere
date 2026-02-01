@@ -238,7 +238,9 @@ function(nw_add_app_sources)
     #     MACOSX_BUNDLE TRUE
     # )
 
-    qt_add_resources(ARG_SOURCES resources.qrc)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources.qrc")
+        qt_add_resources(ARG_SOURCES resources.qrc)
+    endif()
     
     if(USE_APPLE)
         qt6_add_executable(${ARG_NAME} ${ARG_SOURCES})
@@ -251,7 +253,11 @@ function(nw_add_app_sources)
         )
     elseif(USE_WINDOWS)
         set(RC_FILE "${CMAKE_CURRENT_SOURCE_DIR}/app.rc")
-        qt6_add_executable(${ARG_NAME} ${ARG_SOURCES} ${RC_FILE})
+        if(EXISTS "${RC_FILE}")
+            qt6_add_executable(${ARG_NAME} ${ARG_SOURCES} ${RC_FILE})
+        else()
+            qt6_add_executable(${ARG_NAME} ${ARG_SOURCES})
+        endif()
         # target_compile_options(${AppName} PRIVATE "/MP")
     else()
         qt6_add_executable(${ARG_NAME} ${ARG_SOURCES} )
@@ -278,8 +284,6 @@ function(nw_add_app_sources)
 
     # grouping in source tree
     set_property(TARGET ${ARG_NAME} PROPERTY FOLDER ${ARG_GROUP}) 
-
-
 
     # return AppName
     set(AppName ${ARG_NAME} PARENT_SCOPE)

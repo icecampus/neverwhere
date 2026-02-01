@@ -1,6 +1,10 @@
-nw_add_console_app(
+nw_add_qml_app(
     GROUP 
         _apps 
     LIBS 
         EnTT::EnTT
+        Qt6::Core 
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
     )
