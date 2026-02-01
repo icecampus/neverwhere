@@ -52,25 +52,41 @@ def generate_png_atlas():
     # Высота подъема
     ELEVATION = 26 
     
+    # [L, LU, U, UR, R, RD, D, DL, C]
+    # Indices: L=0, LU=1, U=2, UR=3, R=4, RD=5, D=6, DL=7, C=8
+    # Previous code used indices 0,1,2,3 for L,U,R,D
+    # Now we must map: L->0, U->2, R->4, D->6 in the mask, but the loop iterates 0..3 for corners.
+    # To minimize refactoring, I'll keep the mask format as [L, U, R, D, ...optional others]
+    # or better, just use the 9-element mask and pick correctly.
+    
+    # Mapping for corner indices in the 9-element mask:
+    # Corner 0 (Left) -> Mask 0
+    # Corner 1 (Up)   -> Mask 2
+    # Corner 2 (Right)-> Mask 4
+    # Corner 3 (Down) -> Mask 6
+    
     masks = {
-        'Full': [1, 1, 1, 1],
-        'DownLack': [1, 1, 1, 0],
-        'LeftLack': [0, 1, 1, 1],
-        'UpLack': [1, 0, 1, 1],
-        'RightLack': [1, 1, 0, 1],
-        'UpCorner': [0, 1, 0, 0],
-        'RightCorner': [0, 0, 1, 0],
-        'DownCorner': [0, 0, 0, 1],
-        'LeftCorner': [1, 0, 0, 0],
-        'RightUpLine': [0, 1, 1, 0],
-        'RightDownLine': [0, 0, 1, 1],
-        'LeftDownLine': [1, 0, 0, 1],
-        'LeftUpLine': [1, 1, 0, 0],
-        'UpAndDownCorners': [0, 1, 0, 1],
-        'LeftRightCorners': [1, 0, 1, 0],
-        'Unknown': [0, 0, 0, 0]
+        'Full':             [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        'DownLack':         [1, 1, 1, 1, 1, 0.5, 0, 0.5, 0.5],
+        'LeftLack':         [0, 0.5, 1, 1, 1, 1, 1, 0.5, 0.5],
+        'UpLack':           [1, 0.5, 0, 0.5, 1, 1, 1, 1, 0.5],
+        'RightLack':        [1, 1, 1, 0.5, 0, 0.5, 1, 1, 0.5],
+        'UpCorner':         [0, 0.5, 1, 0.5, 0, 0, 0, 0, 0],
+        'RightCorner':      [0, 0, 0, 0.5, 1, 0.5, 0, 0, 0],
+        'DownCorner':       [0, 0, 0, 0, 0, 0.5, 1, 0.5, 0],
+        'LeftCorner':       [1, 0.5, 0, 0, 0, 0, 0, 0.5, 0],
+        'RightUpLine':      [0, 0.5, 1, 1, 1, 0.5, 0, 0, 0.5],
+        'RightDownLine':    [0, 0, 0, 0.5, 1, 1, 1, 0.5, 0.5],
+        'LeftDownLine':     [1, 0.5, 0, 0, 0, 0.5, 1, 1, 0.5],
+        'LeftUpLine':       [1, 1, 1, 0.5, 0, 0, 0, 0.5, 0.5],
+        'UpAndDownCorners': [0, 0.5, 1, 0.5, 0, 0.5, 1, 0.5, 0.5],
+        'LeftRightCorners': [1, 0.5, 0, 0.5, 1, 0.5, 0, 0.5, 0.5],
+        'Unknown':          [0, 0, 0, 0, 0, 0, 0, 0, 0]
     }
-
+    
+    # Map logic corner index (0..3) to mask index
+    c_idx = [0, 2, 4, 6] 
+    
     index_to_type = {i: 'Full' for i in range(4)}
     mappings = {
         4: 'DownLack', 5: 'LeftLack', 6: 'UpLack', 7: 'RightLack',
@@ -96,7 +112,8 @@ def generate_png_atlas():
         (-1, 0), # 0: Left
         (0, 1),  # 1: Up
         (1, 0),  # 2: Right
-        (0, -1)  # 3: Down
+        (0, -1), # 3: Down
+        (0, 0)   # 4: Center
     ]
     Z_SCALE = 0.3
     # Light direction: Top-Left (Left-Up)
@@ -120,59 +137,112 @@ def generate_png_atlas():
             (x + 128, cy_base + 64)   # 3: Down
         ]
         
-        pts_top = [(p[0], p[1] - ELEVATION) for p in pts_base]
+        # Calculate Center point (geometric center of diamond)
+        center_x = (pts_base[0][0] + pts_base[2][0]) / 2
+        center_y = (pts_base[1][1] + pts_base[3][1]) / 2
+        pt_center_base = (center_x, center_y)
+        
+        pts_base_all = pts_base + [pt_center_base] # 0..3 corners, 4 center
+        
+        pts_top = [(p[0], p[1] - ELEVATION) for p in pts_base_all]
         
         t_type = index_to_type.get(i, 'Unknown')
-        m = masks[t_type]
-        pts_surface = [pts_top[j] if m[j] else pts_base[j] for j in range(4)]
+        m = masks.get(t_type, masks['Unknown'])
         
-        # Основание
+        # Determine heights for points
+        # Corners: indices 0,1,2,3 map to mask indices 0,2,4,6
+        # Center: index 4 maps to mask index 8
+        
+        corner_heights = [m[0], m[2], m[4], m[6]]
+        center_height = m[8]
+        
+        heights = corner_heights + [center_height]
+        
+        pts_surface = []
+        for k in range(5): # 0..3 corners, 4 center
+            h = heights[k]
+            # Interpolate between base and top
+            # Usually h is 0 or 1, but can be 0.5
+            px = pts_base_all[k][0]
+            # y = base_y - elevation * h
+            py = pts_base_all[k][1] - ELEVATION * h
+            pts_surface.append((px, py))
+        
+        # Основание (debug)
         # draw.polygon(pts_base, outline=(230, 230, 230, 100))
 
-        # Стенки почвы
+        # Стенки почвы (только по периметру 0..3)
         for j in [1, 0, 2, 3]: 
             nj = (j + 1) % 4
-            if m[j] or m[nj]:
+            h_curr = heights[j]
+            h_next = heights[nj]
+            
+            # Draw wall if at least one corner is raised > 0
+            if h_curr > 0 or h_next > 0:
                 side_color = soil_dark if j < 2 else soil_color
-                if m[j] and m[nj]:
-                    draw.polygon([pts_base[j], pts_base[nj], pts_top[nj], pts_top[j]], fill=side_color)
-                elif m[j]:
-                    draw.polygon([pts_base[j], pts_base[nj], pts_top[j]], fill=side_color)
-                elif m[nj]:
-                    draw.polygon([pts_base[j], pts_base[nj], pts_top[nj]], fill=side_color)
+                
+                # Logic: Draw quad defined by surface edge and base edge
+                # pts_surface[j], pts_surface[nj], pts_base[nj], pts_base[j]
+                
+                poly = [pts_base[j], pts_base[nj], pts_surface[nj], pts_surface[j]]
+                draw.polygon(poly, fill=side_color)
 
         # Поверхность
-        if any(m):
+        if any(h > 0 for h in heights):
             # Calculate 3D points for lighting
             pts_3d = []
-            for k in range(4):
-                z = Z_SCALE if m[k] else 0
+            for k in range(5):
+                z = Z_SCALE * heights[k]
                 pts_3d.append((coords_2d_logical[k][0], coords_2d_logical[k][1], z))
 
-            # Split into 2 triangles
-            if t_type in ['UpCorner', 'DownCorner', 'LeftLack', 'RightLack']:
-                # Split along Left-Right (0-2)
-                tris = [(0, 1, 2), (0, 2, 3)]
+            tris = []
+            
+            # Triangulation Logic
+            if t_type in ['UpAndDownCorners', 'LeftRightCorners']:
+                # Fan from Center (index 4)
+                # 4 triangles: (Center, 0, 1), (Center, 1, 2), (Center, 2, 3), (Center, 3, 0)
+                tris = [
+                    (4, 0, 1),
+                    (4, 1, 2),
+                    (4, 2, 3),
+                    (4, 3, 0)
+                ]
+            elif t_type in ['UpCorner', 'DownCorner', 'UpLack', 'DownLack']:
+                 # Split along Up-Down (1-3)
+                 tris = [(0, 1, 3), (1, 2, 3)]
+            elif t_type in ['LeftCorner', 'RightCorner', 'LeftLack', 'RightLack']:
+                 # Split along Left-Right (0-2)
+                 tris = [(0, 1, 2), (0, 2, 3)]
             else:
-                # Default: Split along Up-Down (1-3)
-                tris = [(0, 1, 3), (1, 2, 3)]
+                 # Default (Full, Lines, etc) -> Default Split Up-Down
+                 tris = [(0, 1, 3), (1, 2, 3)]
 
             for (i1, i2, i3) in tris:
-                # Skip triangle if all vertices are at zero level
-                if m[i1] == 0 and m[i2] == 0 and m[i3] == 0:
+                # Skip triangle if all vertices are at zero level (optional optimization)
+                if heights[i1] == 0 and heights[i2] == 0 and heights[i3] == 0:
                     continue
 
                 col = get_lighting_color(grass_color, pts_3d[i1], pts_3d[i2], pts_3d[i3], light_dir)
                 poly = [pts_surface[i1], pts_surface[i2], pts_surface[i3]]
                 draw.polygon(poly, fill=col)
             
-            # Outline for the whole shape
-            # draw.polygon(pts_surface, outline=grass_outline)
-            
+            # Outline for the whole shape (perimeter)
             for j in range(4):
                 nj = (j + 1) % 4
-                if m[j] and m[nj]:
-                    draw.line([pts_top[j], pts_top[nj]], fill=grass_outline, width=2)
+                if heights[j] > 0 and heights[nj] > 0:
+                     draw.line([pts_surface[j], pts_surface[nj]], fill=grass_outline, width=2)
+                # Also draw outline if one is high and one is low? 
+                # Original code: if m[j] and m[nj]. This means both are HIGH.
+                # But now we have 0.5.
+                # Let's keep drawing line if both endpoints are > 0.
+                elif (heights[j] > 0 or heights[nj] > 0):
+                    # For Lacks/Corners, we want outline on the "ground" level? No.
+                    # Usually outline is only on the "green" part.
+                    # Since we draw walls for soil, green outline is on the top edge.
+                    # Let's stick to: draw line if edge is part of the "upper" structure.
+                    # It's hard to define for 0.5.
+                    # Simple heuristic: draw line between surface points.
+                    draw.line([pts_surface[j], pts_surface[nj]], fill=grass_outline, width=2)
 
         # Текст
         # Center of the tile slot
