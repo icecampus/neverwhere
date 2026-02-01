@@ -54,8 +54,8 @@ def generate_png_atlas():
     
     # VALLEY (CONCAVE) VARIANT
     # Corners: Flat bottom (Center 0)
-    # Opposites: Deep Canal (Center 0)
-    # Lacks: Flat Plateau (Center 1) - UPDATED per request
+    # Opposites: High Ridge (Center 1) - UPDATED per request
+    # Lacks: Flat Plateau (Center 1)
     
     masks = {
         'Full':             [1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -75,9 +75,9 @@ def generate_png_atlas():
         'LeftDownLine':     [1, 0.5, 0, 0, 0, 0.5, 1, 1, 0.5],
         'LeftUpLine':       [1, 1, 1, 0.5, 0, 0, 0, 0.5, 0.5],
         
-        # VALLEY SPECIFIC: Center 0 for Opposites
-        'UpAndDownCorners': [0, 0.5, 1, 0.5, 0, 0.5, 1, 0.5, 0],
-        'LeftRightCorners': [1, 0.5, 0, 0.5, 1, 0.5, 0, 0.5, 0],
+        # VALLEY SPECIFIC: Center 1 for Opposites (Ridge)
+        'UpAndDownCorners': [0, 0.5, 1, 0.5, 0, 0.5, 1, 0.5, 1],
+        'LeftRightCorners': [1, 0.5, 0, 0.5, 1, 0.5, 0, 0.5, 1],
         
         'Unknown':          [0, 0, 0, 0, 0, 0, 0, 0, 0]
     }
@@ -167,17 +167,25 @@ def generate_png_atlas():
             tris = []
             
             # TRIANGULATION LOGIC (VALLEY UPDATED)
-            # Use Center point for Opposites to show the valley
-            if t_type in ['UpAndDownCorners', 'LeftRightCorners']:
+            # Opposites: Ridge (High Center). Split along the ridge.
+            if t_type == 'UpAndDownCorners': # U=1, D=1. Ridge U-D. Split L-R (0-2) via Center?
+                # Center is 1. U and D are 1. L and R are 0.
+                # If we split L-R (0-2), we get (0,1,2) and (0,2,3).
+                # (0,1,2) has L=0, U=1, R=0. Center=1.
+                # Fan is better to show the ridge.
                 tris = [(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]
+            elif t_type == 'LeftRightCorners': # L=1, R=1. Ridge L-R.
+                tris = [(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]
+            
             # For Corners (Center 0), we want flat bottom.
             elif t_type in ['UpCorner', 'DownCorner', 'LeftCorner', 'RightCorner']:
                 tris = [(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]
+            
             # Lacks: Flat Plateau (Diagonal of adjacent raised corners)
             elif t_type == 'DownLack': # D=0, L,U,R=1. Split L-R (0-2).
                  tris = [(0, 1, 2), (0, 2, 3)]
             elif t_type == 'UpLack':   # U=0, L,R,D=1. Split L-R (0-2).
-                 tris = [(0, 1, 2), (0, 2, 3)] # (0,1,2) has U=0, so this is the sloped one. (0,2,3) is L,R,D=1, flat.
+                 tris = [(0, 1, 2), (0, 2, 3)]
             elif t_type == 'LeftLack': # L=0, U,R,D=1. Split U-D (1-3).
                  tris = [(0, 1, 3), (1, 2, 3)]
             elif t_type == 'RightLack':# R=0, L,U,D=1. Split U-D (1-3).
