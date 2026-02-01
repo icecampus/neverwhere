@@ -4,6 +4,9 @@
 - Documentation files can be in Russian or English depending on context.
 
 # Architecture & Code Style
+- **Monorepo Structure**: All applications and libraries must exist within the single project structure.
+  - Use shared CMake macros (`nw_add_...`) for consistency.
+  - Do not create isolated projects with their own `project(...)` calls unless necessary for external tools.
 - **Stack**: C++20 (Logic) + Qt 6 / QML (UI).
 - **State Management**: Using `immer` library for immutable data structures.
   - Avoid Command Pattern for Undo/Redo.

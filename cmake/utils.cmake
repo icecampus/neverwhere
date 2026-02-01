@@ -314,3 +314,41 @@ function(nw_add_qml_app)
 
     set(AppName ${AppName} PARENT_SCOPE)
 endfunction()
+
+# nw_add_console_app
+function(nw_add_console_app)
+
+    set(options "")
+    set(oneValueArgs GROUP)
+    set(multiValueArgs LIBS)
+    cmake_parse_arguments(ARG
+                        "${options}" 
+                        "${oneValueArgs}"
+                        "${multiValueArgs}" 
+                        ${ARGN} )
+
+
+    collect_sources(sources)
+    getProjectName(appName)
+
+    add_executable(${appName} ${sources})
+
+    if(USE_WINDOWS)
+        target_compile_options(${appName} PRIVATE "/MP")
+    endif()
+
+    target_include_directories(${appName} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_include_directories(${appName} PRIVATE "${CMAKE_SOURCE_DIR}/src/libs")
+    
+    # Optional PCH if it exists
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
+        target_precompile_headers(${appName} PRIVATE pch.h)
+    endif()
+
+    target_link_libraries(${appName} PUBLIC ${ARG_LIBS})
+
+    # grouping in source tree
+    set_property(TARGET ${appName} PROPERTY FOLDER ${ARG_GROUP}) 
+
+    set(AppName ${appName} PARENT_SCOPE)
+endfunction()
