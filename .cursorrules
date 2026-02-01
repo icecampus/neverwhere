@@ -1,0 +1,20 @@
+# General Behavior
+- Always communicate in Russian unless asked otherwise.
+- Code comments and variable names should be in English.
+- Documentation files can be in Russian or English depending on context.
+
+# Architecture & Code Style
+- **Stack**: C++20 (Logic) + Qt 6 / QML (UI).
+- **State Management**: Using `immer` library for immutable data structures.
+  - Avoid Command Pattern for Undo/Redo.
+  - Use State Snapshots strategy.
+- **Data/View Separation**:
+  - `BaseData` namespace (structs) -> Pure Data, Serializable.
+  - `QObject` wrappers -> View Logic only.
+- **Project Structure**:
+  - `src/libs/core`: Core business logic.
+  - `src/apps/EpicMapEditor`: UI and Application layer.
+
+# Constraints
+- Do not introduce new heavy dependencies without approval.
+- Keep QML and C++ logic separated (signals/slots).
