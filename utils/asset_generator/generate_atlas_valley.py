@@ -55,14 +55,14 @@ def generate_png_atlas():
     # VALLEY (CONCAVE) VARIANT
     # Corners: Flat bottom (Center 0)
     # Opposites: Deep Canal (Center 0)
-    # Lacks: Folded (Center 0.5) - as per Valley table
+    # Lacks: Flat Plateau (Center 1) - UPDATED per request
     
     masks = {
         'Full':             [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        'DownLack':         [1, 1, 1, 1, 1, 0.5, 0, 0.5, 0.5],
-        'LeftLack':         [0, 0.5, 1, 1, 1, 1, 1, 0.5, 0.5],
-        'UpLack':           [1, 0.5, 0, 0.5, 1, 1, 1, 1, 0.5],
-        'RightLack':        [1, 1, 1, 0.5, 0, 0.5, 1, 1, 0.5],
+        'DownLack':         [1, 1, 1, 1, 1, 0.5, 0, 0.5, 1],
+        'LeftLack':         [0, 0.5, 1, 1, 1, 1, 1, 0.5, 1],
+        'UpLack':           [1, 0.5, 0, 0.5, 1, 1, 1, 1, 1],
+        'RightLack':        [1, 1, 1, 0.5, 0, 0.5, 1, 1, 1],
         
         # VALLEY SPECIFIC: Center 0 for Corners
         'UpCorner':         [0, 0.5, 1, 0.5, 0, 0, 0, 0, 0],
@@ -157,7 +157,7 @@ def generate_png_atlas():
                 draw.polygon(poly, fill=side_color)
 
         # Surface
-        if any(h > 0 for h in heights) or t_type == 'Unknown': # Unknown is usually flat low, so skip
+        if any(h > 0 for h in heights) or t_type == 'Unknown': 
             # Calculate 3D points
             pts_3d = []
             for k in range(5):
@@ -166,17 +166,22 @@ def generate_png_atlas():
 
             tris = []
             
-            # TRIANGULATION LOGIC (VALLEY)
+            # TRIANGULATION LOGIC (VALLEY UPDATED)
             # Use Center point for Opposites to show the valley
             if t_type in ['UpAndDownCorners', 'LeftRightCorners']:
                 tris = [(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]
             # For Corners (Center 0), we want flat bottom.
-            # If Center 0, splitting via Center works well (0-0-1 triangles)
             elif t_type in ['UpCorner', 'DownCorner', 'LeftCorner', 'RightCorner']:
                 tris = [(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]
-            # Lacks are folded, Center 0.5. Fan works too.
-            elif t_type in ['UpLack', 'DownLack', 'LeftLack', 'RightLack']:
-                 tris = [(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]
+            # Lacks: Flat Plateau (Diagonal of adjacent raised corners)
+            elif t_type == 'DownLack': # D=0, L,U,R=1. Split L-R (0-2).
+                 tris = [(0, 1, 2), (0, 2, 3)]
+            elif t_type == 'UpLack':   # U=0, L,R,D=1. Split L-R (0-2).
+                 tris = [(0, 1, 2), (0, 2, 3)] # (0,1,2) has U=0, so this is the sloped one. (0,2,3) is L,R,D=1, flat.
+            elif t_type == 'LeftLack': # L=0, U,R,D=1. Split U-D (1-3).
+                 tris = [(0, 1, 3), (1, 2, 3)]
+            elif t_type == 'RightLack':# R=0, L,U,D=1. Split U-D (1-3).
+                 tris = [(0, 1, 3), (1, 2, 3)]
             else:
                  # Default Split Up-Down
                  tris = [(0, 1, 3), (1, 2, 3)]
