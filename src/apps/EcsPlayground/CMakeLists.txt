@@ -8,4 +8,5 @@ nw_add_qml_app(
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
+        graphics
     )

@@ -13,6 +13,10 @@ ApplicationWindow {
         color: "#2d2d2d"
     }
 
+    GameView {
+        anchors.fill: parent
+    }
+
     // Controls
     Row {
         anchors.top: parent.top

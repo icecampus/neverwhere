@@ -2,8 +2,10 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
+#include "graphics/lib.h"
 #include "EcsModel.h"
 #include <spdlog/spdlog.h>
+#include "GameView.h"
 
 int main(int argc, char* argv[])
 {
@@ -11,8 +13,12 @@ int main(int argc, char* argv[])
 
     QGuiApplication app(argc, argv);
     
+    // Force OpenGL for Sokol compatibility in this test
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    
     // Create the ECS Model
     spdlog::info("Initializing ECS Model...");
+    // Graphics::init(); // Moved to GameView to ensure context is active
     EcsModel model;
 
     QQmlApplicationEngine engine;
