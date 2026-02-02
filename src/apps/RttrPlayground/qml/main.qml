@@ -52,17 +52,14 @@ ApplicationWindow {
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: {
+                        drag.target: parent
+                        
+                        onPressed: {
                             selectedIndex = index
                             updateInspector()
                         }
-                    }
-                    
-                    // Simple drag to move
-                    MouseArea {
-                        anchors.fill: parent
-                        drag.target: parent
-                        // We would need to sync back x/y to model on release
+
+                        // Sync back x/y to model on release
                         onReleased: {
                             gameModel.setProperty(index, "TransformComponent", "x", parent.x)
                             gameModel.setProperty(index, "TransformComponent", "y", parent.y)
