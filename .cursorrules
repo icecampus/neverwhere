@@ -2,10 +2,12 @@
 - Always communicate in Russian unless asked otherwise.
 - Code comments and variable names should be in English.
 - Documentation files can be in Russian or English depending on context.
+- **Foundational Documents**: Always refer to `ROADMAP_VISION.md` (Product Goals) and `TECHNICAL_STACK.md` (Architecture & Tech Decisions) for high-level context and implementation standards.
 
 # Architecture & Code Style
 - **Monorepo Structure**: All applications and libraries must exist within the single project structure.
   - Use shared CMake macros (`nw_add_...`) for consistency.
+  - Project-specific CMake scripts and macros are stored in `cmake/utils.cmake`.
   - Do not create isolated projects with their own `project(...)` calls unless necessary for external tools.
 - **Stack**: C++20 (Logic) + Qt 6 / QML (UI).
 - **State Management**: Using `immer` library for immutable data structures.
@@ -21,5 +23,28 @@
 # Constraints
 - Do not introduce new heavy dependencies without approval.
 - Keep QML and C++ logic separated (signals/slots).
+
+# Workflow & Best Practices
+
+## Dependency Management (vcpkg)
+To add a new library:
+1. Add the package name to `vcpkg.json` in the "dependencies" array.
+2. Add `find_package(...)` in the root `CMakeLists.txt`.
+3. Link the library target (e.g., `EnTT::EnTT`, `RTTR::Core`) in the `LIBS` section of the `nw_add_...` macro in your application's or library's `CMakeLists.txt`.
+4. Re-configure CMake to download and install: `cmake -S . -B _intermediate_64`.
+
+## Building & Artifacts
+1. **Configure**: `cmake -S . -B _intermediate_64` (Generates solution in `_intermediate_64`).
+2. **Build**: `cmake --build _intermediate_64 --target <TargetName> --config Debug`.
+3. **Artifacts**: Executables are located in `_intermediate_64/Debug/bin/<TargetName>.exe`.
+
+## Testing & Prototyping
+1. **New Prototypes**: Create new test applications in `src/apps/<PrototypeName>`.
+   - Use `nw_add_qml_app` (for GUI) or `nw_add_console_app` (for CLI) in their `CMakeLists.txt`.
+2. **Smoke Tests (Agent Verification)**:
+   - Implement a `runTestScenario()` method in the main logic/model class.
+   - Perform key operations (data creation, modification) programmatically without UI interaction.
+   - Log results using `spdlog::info` (success) or `spdlog::error` (failure) with clear "TEST PASS" / "TEST FAIL" markers.
+   - Call this method via `QTimer::singleShot(1000, ...)` in `main.cpp` to run it automatically shortly after app startup.
 
 Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
