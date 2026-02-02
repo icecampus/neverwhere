@@ -19,6 +19,7 @@
     "entt",
     "libnoise",
     "gtest",
-    "sokol"
+    "sokol",
+    "glad"
   ]
 }

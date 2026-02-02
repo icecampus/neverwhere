@@ -9,6 +9,7 @@ else()
     set(GRAPHICS_LIBS OpenGL::GL)
 endif()
 
+find_package(glad CONFIG REQUIRED)
 find_path(SOKOL_INCLUDE_DIRS "sokol_gfx.h")
 
 nw_add_lib_sources(
@@ -21,6 +22,7 @@ nw_add_lib_sources(
         Qt6::Core
         Qt6::Quick
         spdlog::spdlog
+        glad::glad
         ${GRAPHICS_LIBS}
 )
 

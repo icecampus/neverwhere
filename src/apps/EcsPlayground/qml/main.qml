@@ -15,6 +15,7 @@ ApplicationWindow {
 
     GameView {
         anchors.fill: parent
+        model: ecsModel
     }
 
     // Controls
@@ -36,13 +37,14 @@ ApplicationWindow {
         }
         
         Label {
-            text: "Count: " + view.count
+            text: "Count: " + ecsModel.rowCount()
             color: "white"
             anchors.verticalCenter: parent.verticalCenter
         }
     }
 
-    // Game View
+    // Game View (Sokol)
+    /*
     Item {
         id: gameArea
         anchors.fill: parent
@@ -73,6 +75,7 @@ ApplicationWindow {
             }
         }
     }
+    */
 
     // Game Loop
     Timer {
