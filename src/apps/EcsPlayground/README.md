@@ -1,38 +1,31 @@
-# ECS Playground
+# EcsPlayground
 
-Демонстрационное приложение для валидации архитектурных решений проекта **Neverwhere**.
-Показывает интеграцию Entity Component System (EnTT) с пользовательским интерфейсом Qt/QML.
+Application for testing ECS (Entity Component System) architecture using the **EnTT** library and **Qt/QML**.
 
-## Архитектура: ECS Model Adapter
+## Architecture: ECS Model Adapter
 
-Ключевая идея приложения — разделение данных (ECS) и представления (View) через паттерн **Adapter**.
+The application demonstrates the "ECS Model Adapter" pattern:
 
-### 1. Мир Данных (EnTT)
-*   **Сущности (Entities):** Легковесные идентификаторы (`uint32_t`).
-*   **Компоненты (Components):** POD-структуры данных (Position, Velocity, Name).
-*   **Системы (Systems):** Чистые C++ функции, обрабатывающие массивы компонентов в `tick()`. Обеспечивают высокую производительность и cache locality.
+1.  **EnTT Registry (`entt::registry`)**: Stores all game entities and components (Pure Data).
+2.  **QAbstractListModel Adapter (`EcsModel`)**:
+    *   Wraps the EnTT registry.
+    *   Maintains a cached list of active entities (`std::vector<entt::entity>`) to provide stable indices for QML.
+    *   Exposes component data (Position, Name, etc.) via Qt Roles (`data()`, `roleNames()`).
+    *   Handles the Game Loop (`tick()`) and updates components.
+3.  **QML View**:
+    *   Uses standard `ListView` or `Repeater` to display entities.
+    *   Binds to the C++ model.
+    *   Uses `Timer` to trigger the game loop tick.
 
-### 2. Мир UI (Qt Quick)
-*   Использует стандартные компоненты `Repeater` / `ListView`.
-*   Не знает о существовании ECS.
-*   Работает через стандартный интерфейс `QAbstractListModel`.
+## Features
 
-### 3. Мост (EcsModel)
-Класс `EcsModel` (наследник `QAbstractListModel`) выступает адаптером:
-*   **Кэширование:** Хранит список `std::vector<entt::entity>`, обеспечивая стабильные индексы строк для QML.
-*   **Роли (Roles):** Проецирует компоненты ECS в свойства модели (`NameRole` -> компонент `DisplayName`, `PositionXRole` -> компонент `Position.x`).
-*   **Обновление:** В методе `tick()` обновляет игровую симуляцию и вызывает `dataChanged`, сигнализируя UI о необходимости перерисовки.
+*   **Entity Creation**: Add random entities with Position, Velocity, and Name components.
+*   **Systems**: Simple movement and boundary bounce logic implemented in C++.
+*   **Reactive UI**: QML automatically updates when the C++ model signals changes.
+*   **Logging**: Integration with `spdlog`.
 
-## Масштабирование подхода (Roadmap Views)
-Данный подход позволяет создавать множество различных представлений (Views) для одного и того же набора данных (Single Source of Truth), просто создавая разные адаптеры-модели:
+## Status
 
-1.  **Инвентарь (Grid View):** Модель `InventoryModel` фильтрует сущности по наличию компонента `InInventory` и отображает иконки предметов.
-2.  **Список Квестов (Tree View):** Модель `QuestJournalModel` отображает иерархию активных задач.
-3.  **Инспектор Свойств (Property Grid):** Модель `EntityPropertiesModel` отображает значения всех компонентов одной выбранной сущности для редактирования.
-4.  **Графы (Node Editor):** Модель `DialogueGraphModel` представляет сущности диалогов и связей как узлы и ребра графа.
-
-Изменение данных в любой из моделей (или игровой логикой) мгновенно отражается во всех остальных представлениях.
-
-## Как использовать
-1.  **Add Entity:** Добавляет новую сущность в `entt::registry` и обновляет модель.
-2.  **Simulation:** Таймер вызывает `ecsModel.tick()` 60 раз в секунду, обновляя позиции.
+*   **EnTT**: Integrated and working.
+*   **Rendering**: Currently using standard QML `Rectangle` items.
+    *   *Note: Integration with Magnum graphics engine was attempted but reverted due to build system conflicts. Future graphics integration should prioritize a unified dependency management strategy.*

@@ -47,4 +47,7 @@ private:
 
     entt::registry m_registry;
     std::vector<entt::entity> m_entities; // Cache for QAbstractListModel stability
+
+public:
+    const entt::registry& registry() const { return m_registry; }
 };
