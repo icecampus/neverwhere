@@ -84,7 +84,8 @@ void init() {
 
     sg_desc desc = {};
     desc.logger.func = slog_func;
-    // We assume context is set by Qt
+    // Important: We don't want Sokol to manage the context creation or swap chain, 
+    // as Qt handles that.
     sg_setup(&desc);
     
     if (!sg_isvalid()) {
@@ -110,6 +111,12 @@ void init() {
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+    
+    // Explicitly disable depth format expectation for the pipeline
+    // because we will render to an FBO pass that might not have depth wrapped.
+    pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
+    
+    pip_desc.label = "quad-pipeline";
     pip = sg_make_pipeline(&pip_desc);
 
     // Create dynamic vertex buffer (max 10000 quads = 60000 verts)
@@ -129,6 +136,7 @@ void init() {
     is_initialized = true;
 }
 
+// Legacy/Default begin_frame (for direct window rendering if used)
 void begin_frame(int width, int height) {
     if (!is_initialized) return;
     
@@ -138,8 +146,6 @@ void begin_frame(int width, int height) {
     frame_width = width;
     frame_height = height;
 
-    spdlog::trace("Graphics::begin_frame: {}x{}", width, height);
-
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_LOAD; 
     
@@ -147,10 +153,10 @@ void begin_frame(int width, int height) {
     sg_begin_default_pass(&action, width, height);
 }
 
-void draw_rects(const std::vector<Vertex>& vertices) {
+void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_height) {
     if (!is_initialized || vertices.empty()) return;
 
-    spdlog::trace("Graphics::draw_rects: {} vertices", vertices.size());
+    // spdlog::trace("Graphics::draw_rects: {} vertices", vertices.size());
 
     // Update buffer
     sg_range range = { vertices.data(), vertices.size() * sizeof(Vertex) };
@@ -159,7 +165,7 @@ void draw_rects(const std::vector<Vertex>& vertices) {
     sg_apply_pipeline(pip);
     sg_apply_bindings(&bind);
 
-    float vs_params[2] = { (float)frame_width, (float)frame_height };
+    float vs_params[2] = { (float)view_width, (float)view_height };
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, uniform_range);
 
@@ -174,8 +180,7 @@ void end_frame() {
 }
 
 void render_test_frame() {
-   begin_frame(800, 600);
-   end_frame();
+    // Legacy
 }
 
 }

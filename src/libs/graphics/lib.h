@@ -9,7 +9,8 @@ namespace Graphics {
 
     void init();
     void begin_frame(int width, int height);
-    void draw_rects(const std::vector<Vertex>& vertices);
+    // Modified to accept view size for projection
+    void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_height);
     void end_frame();
     
     // Legacy test

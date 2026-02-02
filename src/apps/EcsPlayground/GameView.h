@@ -1,12 +1,12 @@
 #pragma once
 
-#include <QQuickItem>
+#include <QQuickFramebufferObject>
 #include <QQuickWindow>
 #include <QSGNode>
 
 class EcsModel;
 
-class GameView : public QQuickItem
+class GameView : public QQuickFramebufferObject
 {
     Q_OBJECT
     QML_ELEMENT
@@ -18,16 +18,11 @@ public:
     EcsModel* model() const;
     void setModel(EcsModel* model);
 
+    Renderer *createRenderer() const override;
+
 signals:
     void modelChanged();
 
-public slots:
-    void sync();
-    void cleanup();
-    void handleWindowChanged(QQuickWindow *win);
-
 private:
-    void setupSokol();
-    bool m_sokolInitialized = false;
     EcsModel* m_model = nullptr;
 };
