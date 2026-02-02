@@ -115,32 +115,46 @@ public:
 
     void render() override 
     {
+        m_frameCount++;
+        spdlog::trace("GameViewRenderer::render() frame #{}", m_frameCount);
 
         SokolGlobal::lazyInit();
         if (!SokolGlobal::valid.load(std::memory_order_acquire)) 
         {
-            //spdlog::error("Sokol not valid, skipping render");
+            spdlog::error("Sokol not valid, skipping render frame #{}", m_frameCount);
             return;
         }
         sg_reset_state_cache();
 
         QOpenGLFramebufferObject* fbo = framebufferObject();
-        if (!fbo) return;
+        if (!fbo) {
+            spdlog::warn("No FBO available, skipping render frame #{}", m_frameCount);
+            return;
+        }
 
         QSize size = fbo->size();
         if (m_width != size.width() || m_height != size.height() || m_pass.id == SG_INVALID_ID) {
+            spdlog::debug("Updating pass for frame #{}: size {}x{}", m_frameCount, size.width(), size.height());
             updatePass(fbo);
-            if (m_pass.id == SG_INVALID_ID) return;
+            if (m_pass.id == SG_INVALID_ID) {
+                spdlog::error("Failed to create pass for frame #{}", m_frameCount);
+                return;
+            }
         }
 
         sg_pass_action action = {};
         action.colors[0].load_action = SG_LOADACTION_CLEAR;
         action.colors[0].clear_value = { 0.2f, 0.2f, 0.2f, 1.0f };
 
+        spdlog::trace("Frame #{}: begin_pass, {} vertices", m_frameCount, m_vertices.size());
         sg_begin_pass(m_pass, &action);
         Graphics::draw_rects(m_vertices, m_width, m_height);
         sg_end_pass();
-        // ❌ sg_commit() REMOVED!
+        
+        // ✅ sg_commit() is REQUIRED to finalize each frame!
+        // Without it, dynamic buffer updates will fail on subsequent frames.
+        sg_commit();
+        spdlog::trace("Frame #{}: sg_commit() done", m_frameCount);
 
         // Resetting the state for Qt
         auto gl = QOpenGLContext::currentContext()->functions();
@@ -230,6 +244,7 @@ private:
     sg_image m_depth_img = { SG_INVALID_ID };
     int m_width = 0;
     int m_height = 0;
+    int m_frameCount = 0;
 };
 
 GameView::GameView()
