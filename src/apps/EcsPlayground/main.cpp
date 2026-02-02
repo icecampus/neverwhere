@@ -13,6 +13,14 @@ int main(int argc, char* argv[])
     spdlog::info("Starting EcsPlayground application...");
 
     QGuiApplication app(argc, argv);
+
+    // Registering correct deinitialization
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, []() {
+        if (SokolGlobal::initialized.load()) {
+            sg_shutdown();
+            spdlog::info("Sokol shutdown completed");
+        }
+        });
     
     // Force OpenGL for Sokol compatibility in this test
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);

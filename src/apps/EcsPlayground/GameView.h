@@ -3,9 +3,33 @@
 #include <QQuickFramebufferObject>
 #include <QQuickWindow>
 #include <QSGNode>
+#include <atomic>
+
+// Sokol definitions must match those in sokol_impl.cpp
+#if defined(__EMSCRIPTEN__)
+#define SOKOL_GLES3
+#elif defined(_WIN32)
+#define SOKOL_GLCORE33
+#elif defined(__APPLE__)
+#define SOKOL_GLCORE33
+#else
+#define SOKOL_GLCORE33
+#endif
+
+#include <sokol_gfx.h>
+
 
 class EcsModel;
+namespace SokolGlobal 
+{
+    extern std::atomic<bool> initialized;
+    extern std::atomic<bool> valid;
 
+    // Called from ANY renderer on the render thread
+    void lazyInit();
+}
+
+//
 class GameView : public QQuickFramebufferObject
 {
     Q_OBJECT
@@ -25,4 +49,5 @@ signals:
 
 private:
     EcsModel* m_model = nullptr;
+    static bool s_sokolInitialized;
 };

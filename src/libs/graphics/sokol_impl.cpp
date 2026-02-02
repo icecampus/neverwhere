@@ -3,8 +3,6 @@
 // Define SOKOL_IMPL only once here
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
-// Suppress Sokol assertions for now to test rendering
-#define SOKOL_ASSERT(x) void(0)
 
 #if defined(__EMSCRIPTEN__)
     #define SOKOL_GLES3
@@ -68,20 +66,6 @@ void main() {
 void init() {
     if (is_initialized) return;
 
-#if !defined(__EMSCRIPTEN__)
-    // Initialize GLAD
-    // We use the current context's getProcAddress
-    QOpenGLContext* ctx = QOpenGLContext::currentContext();
-    if (ctx) {
-        gladLoadGLLoader((GLADloadproc)[](const char* name) {
-            return (void*)QOpenGLContext::currentContext()->getProcAddress(name);
-        });
-        spdlog::info("GLAD initialized");
-    } else {
-        spdlog::error("No QOpenGLContext found for GLAD initialization");
-    }
-#endif
-
     sg_desc desc = {};
     desc.logger.func = slog_func;
     // Important: We don't want Sokol to manage the context creation or swap chain, 
@@ -122,7 +106,7 @@ void init() {
     // Create dynamic vertex buffer (max 10000 quads = 60000 verts)
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 60000 * sizeof(Vertex);
-    buf_desc.usage = SG_USAGE_STREAM;
+    buf_desc.usage = SG_USAGE_DYNAMIC;
     buf_desc.label = "quad-vertices";
     vbuf = sg_make_buffer(&buf_desc);
 
@@ -176,7 +160,8 @@ void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_he
 void end_frame() {
     if (!is_initialized) return;
     sg_end_pass();
-    sg_commit();
+    // CRITICAL: Do NOT call sg_commit() here when rendering to an offscreen pass (FBO)
+    // sg_commit(); 
 }
 
 void render_test_frame() {

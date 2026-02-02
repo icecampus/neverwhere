@@ -1,4 +1,4 @@
-#include "GameView.h"
+﻿#include "GameView.h"
 #include "EcsModel.h"
 #include "graphics/lib.h"
 #include <spdlog/spdlog.h>
@@ -6,46 +6,68 @@
 #include <QtGui/QOpenGLFunctions>
 #include <QtGui/QOpenGLContext>
 #include <QOpenGLFramebufferObject>
+#include <QTimer>
 
-// Sokol definitions must match those in sokol_impl.cpp
-#if defined(__EMSCRIPTEN__)
-    #define SOKOL_GLES3
-#elif defined(_WIN32)
-    #define SOKOL_GLCORE33
-#elif defined(__APPLE__)
-    #define SOKOL_GLCORE33
-#else
-    #define SOKOL_GLCORE33
-#endif
+std::atomic<bool> SokolGlobal::initialized{ false };
+std::atomic<bool> SokolGlobal::valid{ false };
 
-#include <sokol_gfx.h>
+void SokolGlobal::lazyInit() 
+{
+    if (initialized.load(std::memory_order_acquire)) 
+    {
+        return;
+    }
+
+    // Double-checked locking pattern
+    static std::mutex initMutex;
+    std::lock_guard<std::mutex> lock(initMutex);
+
+    if (initialized.load(std::memory_order_relaxed)) 
+    {
+        return;
+    }
+
+    // Here the OpenGL/Metal/D3D11 context is already active (Qt rendering thread)
+    Graphics::init();
+    bool isOk = sg_isvalid();
+    valid.store(isOk, std::memory_order_release);
+    initialized.store(true, std::memory_order_release);
+
+    spdlog::info("Sokol global init: {}", isOk ? "SUCCESS" : "FAILED");
+}
+
 
 class GameViewRenderer : public QQuickFramebufferObject::Renderer
 {
 public:
-    GameViewRenderer() {
-        // Initialize Sokol if not already done.
-        // Graphics::init() handles the global sg_setup.
-        // We ensure it's called on the render thread.
-        Graphics::init();
+    GameViewRenderer()
+    {
+        // Initialization moved to createFramebufferObject to ensure active context
     }
 
-    ~GameViewRenderer() override {
+    ~GameViewRenderer() override 
+    {
         // We don't shutdown Sokol here because it might be used by other views.
         // sg_shutdown(); 
         // If we want to manage resources per view, we should destroy pass/images here.
-        if (m_pass.id != SG_INVALID_ID) {
+        if (m_pass.id != SG_INVALID_ID) 
+        {
             sg_destroy_pass(m_pass);
         }
-        if (m_pass_img.id != SG_INVALID_ID) {
+
+        if (m_pass_img.id != SG_INVALID_ID) 
+        {
             sg_destroy_image(m_pass_img);
         }
-        if (m_depth_img.id != SG_INVALID_ID) {
+
+        if (m_depth_img.id != SG_INVALID_ID) 
+        {
             sg_destroy_image(m_depth_img);
         }
     }
 
-    void synchronize(QQuickFramebufferObject *item) override {
+    void synchronize(QQuickFramebufferObject *item) override 
+    {
         GameView* view = static_cast<GameView*>(item);
         if (!view) return;
         
@@ -66,7 +88,8 @@ public:
         float w = 40.0f;
         float h = 40.0f;
         
-        viewPos.each([&](const Position& pos) {
+        viewPos.each([&](const Position& pos) 
+        {
             float x = pos.x;
             float y = pos.y;
             float r = 0.0f, g = 1.0f, b = 1.0f, a = 1.0f; // Cyan
@@ -81,7 +104,8 @@ public:
             m_vertices.push_back({x + w, y + h, r, g, b, a}); // BR
         });
 
-        if (m_vertices.empty()) {
+        if (m_vertices.empty()) 
+        {
             // Debug triangle
             m_vertices.push_back({50, 50, 1, 0, 0, 1});
             m_vertices.push_back({150, 50, 1, 0, 0, 1});
@@ -89,69 +113,58 @@ public:
         }
     }
 
-    void render() override {
-        // 1. Reset Qt OpenGL state (important before Sokol)
-        // QQuickFramebufferObject::Renderer automatically handles FBO binding,
-        // but we need to ensure Sokol knows about it or we wrap it.
-        
-        // Since we are in QQuickFramebufferObject, 'render()' is called when the FBO is bound.
-        // We need to create an sg_pass that wraps this FBO's textures.
-        
+    void render() override 
+    {
+
+        SokolGlobal::lazyInit();
+        if (!SokolGlobal::valid.load(std::memory_order_acquire)) 
+        {
+            //spdlog::error("Sokol not valid, skipping render");
+            return;
+        }
+        sg_reset_state_cache();
+
         QOpenGLFramebufferObject* fbo = framebufferObject();
         if (!fbo) return;
 
         QSize size = fbo->size();
-        int width = size.width();
-        int height = size.height();
-
-        // Check if we need to recreate the pass (resize)
-        if (m_width != width || m_height != height || m_pass.id == SG_INVALID_ID) {
+        if (m_width != size.width() || m_height != size.height() || m_pass.id == SG_INVALID_ID) {
             updatePass(fbo);
+            if (m_pass.id == SG_INVALID_ID) return;
         }
 
-        // 2. Begin Pass
-        // We render INTO the FBO provided by Qt.
-        // Since we wrapped it in 'm_pass', we use sg_begin_pass.
-        
         sg_pass_action action = {};
         action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        action.colors[0].clear_value = { 0.2f, 0.2f, 0.2f, 1.0f }; // Dark background for the View
-        
+        action.colors[0].clear_value = { 0.2f, 0.2f, 0.2f, 1.0f };
+
         sg_begin_pass(m_pass, &action);
-        
-        // 3. Draw using shared Graphics logic
-        Graphics::draw_rects(m_vertices, width, height);
-        
-        // 4. End Pass
+        Graphics::draw_rects(m_vertices, m_width, m_height);
         sg_end_pass();
-        sg_commit();
-        
-        // 5. Reset OpenGL state for Qt
-        QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
-        if (gl) {
-            gl->glUseProgram(0);
-            gl->glBindBuffer(GL_ARRAY_BUFFER, 0);
-            gl->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-            gl->glDisable(GL_DEPTH_TEST);
-            gl->glDisable(GL_CULL_FACE);
-            gl->glDisable(GL_SCISSOR_TEST);
-            gl->glDisable(GL_STENCIL_TEST);
-            gl->glEnable(GL_BLEND);
-            gl->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        }
-        
-        update(); // Request continuous update
+        // ❌ sg_commit() REMOVED!
+
+        // Resetting the state for Qt
+        auto gl = QOpenGLContext::currentContext()->functions();
+        gl->glUseProgram(0);
+        gl->glBindBuffer(GL_ARRAY_BUFFER, 0);
+        gl->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        gl->glDisable(GL_DEPTH_TEST);
+        gl->glDisable(GL_CULL_FACE);
+
     }
 
-    QOpenGLFramebufferObject *createFramebufferObject(const QSize &size) override {
+    QOpenGLFramebufferObject *createFramebufferObject(const QSize &size) override 
+    {
+        
         QOpenGLFramebufferObjectFormat format;
         format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    
         // format.setSamples(4); // MSAA if needed
         return new QOpenGLFramebufferObject(size, format);
     }
 
 private:
-    void updatePass(QOpenGLFramebufferObject* fbo) {
+    void updatePass(QOpenGLFramebufferObject* fbo) 
+    {
         if (m_pass.id != SG_INVALID_ID) {
             sg_destroy_pass(m_pass);
             m_pass.id = SG_INVALID_ID;
@@ -175,8 +188,15 @@ private:
         color_desc.height = m_height;
         // Qt usually uses GL_RGBA8
         color_desc.pixel_format = SG_PIXELFORMAT_RGBA8; 
+        color_desc.gl_texture_target = GL_TEXTURE_2D;  // ← NECESSARILY!!
         color_desc.gl_textures[0] = fbo->texture();
         m_pass_img = sg_make_image(&color_desc);
+        
+        if (m_pass_img.id == SG_INVALID_ID) 
+        {
+             spdlog::error("Failed to create Sokol color image wrapper");
+             return;
+        }
 
         // Create wrapper image for Depth/Stencil Attachment (optional, but good if we use depth)
         // Qt FBO has CombinedDepthStencil.
@@ -194,6 +214,12 @@ private:
         
         m_pass = sg_make_pass(&pass_desc);
         
+        if (m_pass.id == SG_INVALID_ID) 
+        {
+             spdlog::error("Failed to create Sokol pass");
+             return;
+        }
+        
         spdlog::info("Updated Sokol Pass for FBO: Size {}x{}, TexID {}", m_width, m_height, fbo->texture());
     }
 
@@ -209,7 +235,11 @@ private:
 GameView::GameView()
 {
     setFlag(ItemHasContents, true);
-    setMirrorVertically(true); // FBOs are usually flipped in Qt Quick
+    // setMirrorVertically(true); // FBOs are usually flipped in Qt Quick, but better handle in shader
+    
+    QTimer* timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, &QQuickItem::update);
+    timer->start(16); // ~60 FPS
 }
 
 EcsModel* GameView::model() const {
