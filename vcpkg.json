@@ -17,6 +17,7 @@
     "fmt",
     {"name":     "spdlog",            "platform": "!emscripten"},
     "entt",
+    "rttr",
     "libnoise",
     "gtest",
     "sokol",

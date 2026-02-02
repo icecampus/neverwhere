@@ -1,0 +1,12 @@
+nw_add_qml_app(
+    GROUP 
+        _apps 
+    LIBS 
+        EnTT::EnTT
+        RTTR::Core
+        spdlog::spdlog
+        Qt6::Core 
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+    )

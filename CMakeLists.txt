@@ -43,6 +43,7 @@ find_package(glm CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-noise CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
+find_package(rttr CONFIG REQUIRED)
 
 if(NOT EMSCRIPTEN)
   find_package(spdlog CONFIG REQUIRED)
