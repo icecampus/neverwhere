@@ -40,6 +40,7 @@ To add a new library:
 
 ## Testing & Prototyping
 1. **New Prototypes**: Create new test applications in `src/apps/<PrototypeName>`.
+   - All test applications and prototypes MUST have `Playground` suffix in their name (e.g., `RttrPlayground`, `EcsPlayground`).
    - Use `nw_add_qml_app` (for GUI) or `nw_add_console_app` (for CLI) in their `CMakeLists.txt`.
 2. **Smoke Tests (Agent Verification)**:
    - Implement a `runTestScenario()` method in the main logic/model class.

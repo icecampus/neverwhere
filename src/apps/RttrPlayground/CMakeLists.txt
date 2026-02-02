@@ -1,6 +1,8 @@
 nw_add_qml_app(
     GROUP 
         _apps 
+    NAME
+        RttrPlayground
     LIBS 
         EnTT::EnTT
         RTTR::Core

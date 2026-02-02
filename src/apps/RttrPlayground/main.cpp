@@ -8,7 +8,7 @@
 int main(int argc, char* argv[])
 {
     spdlog::set_level(spdlog::level::trace);
-    spdlog::info("Starting RttiEditor application...");
+    spdlog::info("Starting RttrPlayground application...");
 
     QGuiApplication app(argc, argv);
     
@@ -20,7 +20,7 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty("gameModel", &model);
     engine.addImportPath(engine.importPathList()[0] + "/qml");
     
-    const QUrl url(u"qrc:/RttiEditor/qml/main.qml"_qs);
+    const QUrl url(u"qrc:/RttrPlayground/qml/main.qml"_qs);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
         &app, [url](QObject* obj, const QUrl& objUrl) {
             if (!obj && url == objUrl) {
