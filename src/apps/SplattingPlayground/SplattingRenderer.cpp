@@ -120,6 +120,20 @@ vec2 getNeighborBR(vec2 cell) {
     return vec2(cell.x + isOdd, cell.y + 1.0);
 }
 
+// Orthogonal neighbors (at diamond vertices)
+vec2 getNeighborTop(vec2 cell) {
+    return vec2(cell.x, cell.y - 2.0);
+}
+vec2 getNeighborBottom(vec2 cell) {
+    return vec2(cell.x, cell.y + 2.0);
+}
+vec2 getNeighborLeft(vec2 cell) {
+    return vec2(cell.x - 1.0, cell.y);
+}
+vec2 getNeighborRight(vec2 cell) {
+    return vec2(cell.x + 1.0, cell.y);
+}
+
 void main() {
     vec2 cellCoord = floor(v_cellCoord + 0.5); // round to nearest int
     vec2 local = v_localNorm;
@@ -130,6 +144,12 @@ void main() {
     float matTR = getMaterialId(getNeighborTR(cellCoord));
     float matBL = getMaterialId(getNeighborBL(cellCoord));
     float matBR = getMaterialId(getNeighborBR(cellCoord));
+    
+    // Get material IDs for 4 orthogonal neighbors (at diamond vertices)
+    float matTop    = getMaterialId(getNeighborTop(cellCoord));
+    float matBottom = getMaterialId(getNeighborBottom(cellCoord));
+    float matLeft   = getMaterialId(getNeighborLeft(cellCoord));
+    float matRight  = getMaterialId(getNeighborRight(cellCoord));
     
     // Calculate UV based on mode
     vec2 uv;
@@ -183,7 +203,15 @@ void main() {
     float bBL = 1.0 - smoothstep(0.0, edgeBlendWidth, distBL + noiseJitter);
     float bBR = 1.0 - smoothstep(0.0, edgeBlendWidth, distBR + noiseJitter);
     
-    // Sample materials
+    // Vertex blend factors: for orthogonal neighbors at diamond vertices
+    // Use slightly wider blend for corners to ensure smooth transitions
+    float cornerBlendWidth = edgeBlendWidth * 1.2;
+    float bTop    = 1.0 - smoothstep(0.0, cornerBlendWidth, distToTop + noiseJitter);
+    float bRight  = 1.0 - smoothstep(0.0, cornerBlendWidth, distToRight + noiseJitter);
+    float bBottom = 1.0 - smoothstep(0.0, cornerBlendWidth, distToBottom + noiseJitter);
+    float bLeft   = 1.0 - smoothstep(0.0, cornerBlendWidth, distToLeft + noiseJitter);
+    
+    // Sample materials (diagonal neighbors)
     int slotC  = matIdToSlot(matC);
     int slotTL = matIdToSlot(matTL);
     int slotTR = matIdToSlot(matTR);
@@ -196,37 +224,70 @@ void main() {
     vec4 colBL = sampleMaterial(slotBL, uv);
     vec4 colBR = sampleMaterial(slotBR, uv);
     
+    // Sample materials (orthogonal neighbors - at vertices)
+    int slotTop    = matIdToSlot(matTop);
+    int slotBottom = matIdToSlot(matBottom);
+    int slotLeft   = matIdToSlot(matLeft);
+    int slotRight  = matIdToSlot(matRight);
+    
+    vec4 colTop    = sampleMaterial(slotTop, uv);
+    vec4 colBottom = sampleMaterial(slotBottom, uv);
+    vec4 colLeft   = sampleMaterial(slotLeft, uv);
+    vec4 colRight  = sampleMaterial(slotRight, uv);
+    
     // Height proxy from albedo luminance for height-aware blending
     float hC  = dot(colC.rgb, vec3(0.333));
     float hTL = dot(colTL.rgb, vec3(0.333));
     float hTR = dot(colTR.rgb, vec3(0.333));
     float hBL = dot(colBL.rgb, vec3(0.333));
     float hBR = dot(colBR.rgb, vec3(0.333));
+    float hTop    = dot(colTop.rgb, vec3(0.333));
+    float hRight  = dot(colRight.rgb, vec3(0.333));
+    float hBottom = dot(colBottom.rgb, vec3(0.333));
+    float hLeft   = dot(colLeft.rgb, vec3(0.333));
     
     // Height-aware adjustment: boost blend factor for "higher" neighbors
+    // Diagonal neighbors
     bTL *= 1.0 + (hTL - hC) * height_influence;
     bTR *= 1.0 + (hTR - hC) * height_influence;
     bBL *= 1.0 + (hBL - hC) * height_influence;
     bBR *= 1.0 + (hBR - hC) * height_influence;
+    // Orthogonal neighbors
+    bTop    *= 1.0 + (hTop    - hC) * height_influence;
+    bRight  *= 1.0 + (hRight  - hC) * height_influence;
+    bBottom *= 1.0 + (hBottom - hC) * height_influence;
+    bLeft   *= 1.0 + (hLeft   - hC) * height_influence;
     
     // Clamp blend factors
     bTL = clamp(bTL, 0.0, 1.0);
     bTR = clamp(bTR, 0.0, 1.0);
     bBL = clamp(bBL, 0.0, 1.0);
     bBR = clamp(bBR, 0.0, 1.0);
+    bTop    = clamp(bTop, 0.0, 1.0);
+    bRight  = clamp(bRight, 0.0, 1.0);
+    bBottom = clamp(bBottom, 0.0, 1.0);
+    bLeft   = clamp(bLeft, 0.0, 1.0);
     
     // MATERIAL PRIORITY: Only blend with neighbors that have HIGHER material ID
     // This prevents the "mirror" effect at boundaries
     // Higher ID materials "invade" lower ID materials, not vice versa
     // e.g., Sand(2) invades Grass(1), Rock(3) invades both
+    
+    // Diagonal neighbors
     if (matTL <= matC) bTL = 0.0;
     if (matTR <= matC) bTR = 0.0;
     if (matBL <= matC) bBL = 0.0;
     if (matBR <= matC) bBR = 0.0;
     
-    // WEIGHTED BLENDING
-    // Sum of neighbor blend factors determines how much we blend away from center
-    float sumNeighborBlend = bTL + bTR + bBL + bBR;
+    // Orthogonal neighbors (at diamond vertices)
+    if (matTop    <= matC) bTop    = 0.0;
+    if (matRight  <= matC) bRight  = 0.0;
+    if (matBottom <= matC) bBottom = 0.0;
+    if (matLeft   <= matC) bLeft   = 0.0;
+    
+    // WEIGHTED BLENDING with 8 neighbors
+    // Sum of all neighbor blend factors determines how much we blend away from center
+    float sumNeighborBlend = bTL + bTR + bBL + bBR + bTop + bRight + bBottom + bLeft;
     
     // Center weight: 1 when no neighbors blend, decreases as neighbors contribute
     // Clamp sumNeighborBlend to prevent center from going negative
@@ -237,24 +298,35 @@ void main() {
     float wTR = bTR;
     float wBL = bBL;
     float wBR = bBR;
+    float wTop    = bTop;
+    float wRight  = bRight;
+    float wBottom = bBottom;
+    float wLeft   = bLeft;
     
     // Normalize weights to sum to 1
-    float totalWeight = wC + wTL + wTR + wBL + wBR;
+    float totalWeight = wC + wTL + wTR + wBL + wBR + wTop + wRight + wBottom + wLeft;
     if (totalWeight > 0.001) {
         float invTotal = 1.0 / totalWeight;
-        wC  *= invTotal;
-        wTL *= invTotal;
-        wTR *= invTotal;
-        wBL *= invTotal;
-        wBR *= invTotal;
+        wC      *= invTotal;
+        wTL     *= invTotal;
+        wTR     *= invTotal;
+        wBL     *= invTotal;
+        wBR     *= invTotal;
+        wTop    *= invTotal;
+        wRight  *= invTotal;
+        wBottom *= invTotal;
+        wLeft   *= invTotal;
     } else {
         // Fallback: just use center material
         wC = 1.0;
         wTL = wTR = wBL = wBR = 0.0;
+        wTop = wRight = wBottom = wLeft = 0.0;
     }
     
-    // Final weighted blend of all 5 materials
-    vec4 col = colC * wC + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR;
+    // Final weighted blend of all 9 materials (center + 4 diagonal + 4 orthogonal)
+    vec4 col = colC * wC 
+             + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR
+             + colTop * wTop + colRight * wRight + colBottom * wBottom + colLeft * wLeft;
     
     // Edge darkening (pseudo-AO at material boundaries)
     float blendAmount = 1.0 - wC; // How much we're blending with neighbors
@@ -399,6 +471,20 @@ float2 getNeighborBR(float2 cell) {
     return float2(cell.x + isOdd, cell.y + 1.0);
 }
 
+// Orthogonal neighbors (at diamond vertices)
+float2 getNeighborTop(float2 cell) {
+    return float2(cell.x, cell.y - 2.0);
+}
+float2 getNeighborBottom(float2 cell) {
+    return float2(cell.x, cell.y + 2.0);
+}
+float2 getNeighborLeft(float2 cell) {
+    return float2(cell.x - 1.0, cell.y);
+}
+float2 getNeighborRight(float2 cell) {
+    return float2(cell.x + 1.0, cell.y);
+}
+
 float4 main(PSIn inp): SV_Target0 {
     float2 cellCoord = floor(inp.cellCoord + 0.5);
     float2 local = inp.localNorm;
@@ -409,6 +495,12 @@ float4 main(PSIn inp): SV_Target0 {
     float matTR = getMaterialId(getNeighborTR(cellCoord));
     float matBL = getMaterialId(getNeighborBL(cellCoord));
     float matBR = getMaterialId(getNeighborBR(cellCoord));
+    
+    // Get material IDs for 4 orthogonal neighbors (at diamond vertices)
+    float matTop    = getMaterialId(getNeighborTop(cellCoord));
+    float matBottom = getMaterialId(getNeighborBottom(cellCoord));
+    float matLeft   = getMaterialId(getNeighborLeft(cellCoord));
+    float matRight  = getMaterialId(getNeighborRight(cellCoord));
     
     // Calculate UV based on mode
     float2 uv;
@@ -452,13 +544,20 @@ float4 main(PSIn inp): SV_Target0 {
     // Noise jitter
     float noiseJitter = (noiseVal - 0.5) * (1.0 - blend_sharpness) * 0.2;
     
-    // Edge blend factors
+    // Edge blend factors (diagonal neighbors)
     float bTL = 1.0 - smoothstep(0.0, edgeBlendWidth, distTL + noiseJitter);
     float bTR = 1.0 - smoothstep(0.0, edgeBlendWidth, distTR + noiseJitter);
     float bBL = 1.0 - smoothstep(0.0, edgeBlendWidth, distBL + noiseJitter);
     float bBR = 1.0 - smoothstep(0.0, edgeBlendWidth, distBR + noiseJitter);
     
-    // Sample materials
+    // Vertex blend factors (orthogonal neighbors at vertices)
+    float cornerBlendWidth = edgeBlendWidth * 1.2;
+    float bTop    = 1.0 - smoothstep(0.0, cornerBlendWidth, distToTop + noiseJitter);
+    float bRight  = 1.0 - smoothstep(0.0, cornerBlendWidth, distToRight + noiseJitter);
+    float bBottom = 1.0 - smoothstep(0.0, cornerBlendWidth, distToBottom + noiseJitter);
+    float bLeft   = 1.0 - smoothstep(0.0, cornerBlendWidth, distToLeft + noiseJitter);
+    
+    // Sample materials (diagonal neighbors)
     int slotC  = matIdToSlot(matC);
     int slotTL = matIdToSlot(matTL);
     int slotTR = matIdToSlot(matTR);
@@ -471,35 +570,65 @@ float4 main(PSIn inp): SV_Target0 {
     float4 colBL = sampleMaterial(slotBL, uv);
     float4 colBR = sampleMaterial(slotBR, uv);
     
+    // Sample materials (orthogonal neighbors)
+    int slotTop    = matIdToSlot(matTop);
+    int slotBottom = matIdToSlot(matBottom);
+    int slotLeft   = matIdToSlot(matLeft);
+    int slotRight  = matIdToSlot(matRight);
+    
+    float4 colTop    = sampleMaterial(slotTop, uv);
+    float4 colBottom = sampleMaterial(slotBottom, uv);
+    float4 colLeft   = sampleMaterial(slotLeft, uv);
+    float4 colRight  = sampleMaterial(slotRight, uv);
+    
     // Height proxy
     float hC  = dot(colC.rgb, float3(0.333, 0.333, 0.333));
     float hTL = dot(colTL.rgb, float3(0.333, 0.333, 0.333));
     float hTR = dot(colTR.rgb, float3(0.333, 0.333, 0.333));
     float hBL = dot(colBL.rgb, float3(0.333, 0.333, 0.333));
     float hBR = dot(colBR.rgb, float3(0.333, 0.333, 0.333));
+    float hTop    = dot(colTop.rgb, float3(0.333, 0.333, 0.333));
+    float hRight  = dot(colRight.rgb, float3(0.333, 0.333, 0.333));
+    float hBottom = dot(colBottom.rgb, float3(0.333, 0.333, 0.333));
+    float hLeft   = dot(colLeft.rgb, float3(0.333, 0.333, 0.333));
     
-    // Height-aware adjustment
+    // Height-aware adjustment (diagonal)
     bTL *= 1.0 + (hTL - hC) * height_influence;
     bTR *= 1.0 + (hTR - hC) * height_influence;
     bBL *= 1.0 + (hBL - hC) * height_influence;
     bBR *= 1.0 + (hBR - hC) * height_influence;
+    // Height-aware adjustment (orthogonal)
+    bTop    *= 1.0 + (hTop    - hC) * height_influence;
+    bRight  *= 1.0 + (hRight  - hC) * height_influence;
+    bBottom *= 1.0 + (hBottom - hC) * height_influence;
+    bLeft   *= 1.0 + (hLeft   - hC) * height_influence;
     
     // Clamp blend factors
     bTL = clamp(bTL, 0.0, 1.0);
     bTR = clamp(bTR, 0.0, 1.0);
     bBL = clamp(bBL, 0.0, 1.0);
     bBR = clamp(bBR, 0.0, 1.0);
+    bTop    = clamp(bTop, 0.0, 1.0);
+    bRight  = clamp(bRight, 0.0, 1.0);
+    bBottom = clamp(bBottom, 0.0, 1.0);
+    bLeft   = clamp(bLeft, 0.0, 1.0);
     
     // MATERIAL PRIORITY: Only blend with neighbors that have HIGHER material ID
     // This prevents the "mirror" effect at boundaries
+    // Diagonal neighbors
     if (matTL <= matC) bTL = 0.0;
     if (matTR <= matC) bTR = 0.0;
     if (matBL <= matC) bBL = 0.0;
     if (matBR <= matC) bBR = 0.0;
+    // Orthogonal neighbors
+    if (matTop    <= matC) bTop    = 0.0;
+    if (matRight  <= matC) bRight  = 0.0;
+    if (matBottom <= matC) bBottom = 0.0;
+    if (matLeft   <= matC) bLeft   = 0.0;
     
-    // WEIGHTED BLENDING
-    // Sum of neighbor blend factors
-    float sumNeighborBlend = bTL + bTR + bBL + bBR;
+    // WEIGHTED BLENDING with 8 neighbors
+    // Sum of all neighbor blend factors
+    float sumNeighborBlend = bTL + bTR + bBL + bBR + bTop + bRight + bBottom + bLeft;
     
     // Center weight
     float wC = max(0.0, 1.0 - sumNeighborBlend);
@@ -508,23 +637,34 @@ float4 main(PSIn inp): SV_Target0 {
     float wTR = bTR;
     float wBL = bBL;
     float wBR = bBR;
+    float wTop    = bTop;
+    float wRight  = bRight;
+    float wBottom = bBottom;
+    float wLeft   = bLeft;
     
     // Normalize weights
-    float totalWeight = wC + wTL + wTR + wBL + wBR;
+    float totalWeight = wC + wTL + wTR + wBL + wBR + wTop + wRight + wBottom + wLeft;
     if (totalWeight > 0.001) {
         float invTotal = 1.0 / totalWeight;
-        wC  *= invTotal;
-        wTL *= invTotal;
-        wTR *= invTotal;
-        wBL *= invTotal;
-        wBR *= invTotal;
+        wC      *= invTotal;
+        wTL     *= invTotal;
+        wTR     *= invTotal;
+        wBL     *= invTotal;
+        wBR     *= invTotal;
+        wTop    *= invTotal;
+        wRight  *= invTotal;
+        wBottom *= invTotal;
+        wLeft   *= invTotal;
     } else {
         wC = 1.0;
         wTL = wTR = wBL = wBR = 0.0;
+        wTop = wRight = wBottom = wLeft = 0.0;
     }
     
-    // Final weighted blend
-    float4 col = colC * wC + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR;
+    // Final weighted blend of all 9 materials
+    float4 col = colC * wC 
+               + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR
+               + colTop * wTop + colRight * wRight + colBottom * wBottom + colLeft * wLeft;
     
     // Edge darkening
     float blendAmount = 1.0 - wC;
