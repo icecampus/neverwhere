@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <filesystem>
+#include <cstdlib>
 #include <unordered_set>
 
 #include <spdlog/spdlog.h>
@@ -64,6 +65,7 @@ static AppState g_state;
 struct AppConfig {
     std::filesystem::path mapPath = "resources/chapters/Base/maps/map.json";
     std::filesystem::path assetsRoot = "resources/assets";
+    std::filesystem::path dataRoot; // optional override/root for resolving relative paths
 };
 
 static AppConfig g_cfg;
@@ -72,6 +74,43 @@ static topology_core::StaggeredIsometry g_iso;
 static topology_core::Camera2D g_camera;
 static render_core::LandscapeRenderer g_land;
 static std::vector<render_core::LandscapeTile> g_tiles;
+
+static bool looksLikeDataRoot(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const bool hasResources = fs::exists(dir / "resources", ec);
+    const bool hasAssets = fs::exists(dir / "resources" / "assets", ec);
+    const bool hasChapters = fs::exists(dir / "resources" / "chapters", ec);
+    return hasResources && hasAssets && hasChapters;
+}
+
+static std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    startDir = fs::weakly_canonical(startDir, ec);
+    if (startDir.empty()) startDir = fs::current_path(ec);
+    if (startDir.empty()) return {};
+
+    fs::path dir = startDir;
+    for (int i = 0; i < 16; i++) {
+        if (looksLikeDataRoot(dir)) return dir;
+        if (!dir.has_parent_path()) break;
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
+
+#if defined(_WIN32)
+#include <Windows.h>
+static std::filesystem::path getExecutableDir() {
+    wchar_t buf[MAX_PATH] = {0};
+    DWORD len = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return {};
+    return std::filesystem::path(buf).parent_path();
+}
+#endif
 
 static void init(void) {
     spdlog::set_level(spdlog::level::info);
@@ -91,6 +130,10 @@ static void init(void) {
     if (g_state.gfx_ok) {
         // Load map + assets (No-Qt)
         try {
+            spdlog::info("CWD: {}", std::filesystem::current_path().string());
+            spdlog::info("Resolved mapPath: {}", g_cfg.mapPath.string());
+            spdlog::info("Resolved assetsRoot: {}", g_cfg.assetsRoot.string());
+
             const game_data::Map map = game_data::Map::load(g_cfg.mapPath);
             const game_data::AssetIndex assetIndex = game_data::AssetIndex::load(g_cfg.assetsRoot);
 
@@ -273,14 +316,50 @@ int main(int argc, char* argv[]) {
     // Very small CLI:
     //   --map <path>
     //   --assets-root <path>
+    //   --data-root <path>
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
         if ((arg == "--map") && (i + 1 < argc)) {
             g_cfg.mapPath = argv[++i];
         } else if ((arg == "--assets-root") && (i + 1 < argc)) {
             g_cfg.assetsRoot = argv[++i];
+        } else if ((arg == "--data-root") && (i + 1 < argc)) {
+            g_cfg.dataRoot = argv[++i];
         }
     }
+
+    // Resolve data root:
+    // 1) explicit --data-root
+    // 2) env var NW_DATA_ROOT
+    // 3) auto-detect by walking upwards from CWD, and from exe dir (Windows)
+    if (g_cfg.dataRoot.empty()) {
+        if (const char* env = std::getenv("NW_DATA_ROOT"); env && *env) {
+            g_cfg.dataRoot = env;
+        }
+    }
+    if (g_cfg.dataRoot.empty()) {
+        g_cfg.dataRoot = findDataRootUpwards(std::filesystem::current_path());
+    }
+#if defined(_WIN32)
+    if (g_cfg.dataRoot.empty()) {
+        const auto exeDir = getExecutableDir();
+        if (!exeDir.empty()) {
+            g_cfg.dataRoot = findDataRootUpwards(exeDir);
+        }
+    }
+#endif
+
+    if (!g_cfg.dataRoot.empty()) {
+        if (g_cfg.mapPath.is_relative()) {
+            g_cfg.mapPath = g_cfg.dataRoot / g_cfg.mapPath;
+        }
+        if (g_cfg.assetsRoot.is_relative()) {
+            g_cfg.assetsRoot = g_cfg.dataRoot / g_cfg.assetsRoot;
+        }
+    }
+
+    spdlog::set_level(spdlog::level::info);
+    spdlog::info("EpicGameRuntime: dataRoot={}", g_cfg.dataRoot.empty() ? "<none>" : g_cfg.dataRoot.string());
 
     sapp_desc desc = {};
     desc.init_cb = init;
