@@ -1,0 +1,39 @@
+find_package(glm CONFIG REQUIRED)
+
+# Sokol headers (from vcpkg, header-only)
+find_path(SOKOL_INCLUDE_DIRS "sokol_gfx.h")
+if(NOT SOKOL_INCLUDE_DIRS)
+    message(FATAL_ERROR "Sokol headers not found (sokol_gfx.h). Make sure vcpkg dependency 'sokol' is installed.")
+endif()
+
+# stb headers (from vcpkg)
+find_path(STB_INCLUDE_DIRS "stb_image.h")
+if(NOT STB_INCLUDE_DIRS)
+    message(FATAL_ERROR "stb headers not found (stb_image.h). Make sure vcpkg dependency 'stb' is installed.")
+endif()
+
+nw_add_lib_sources(
+    NAME render_core
+    GROUP libs
+    SOURCES
+        pch.h
+        include/render_core/sokol_config.h
+        include/render_core/image_loader.h
+        src/image_loader.cpp
+        include/render_core/texture_atlas.h
+        src/texture_atlas.cpp
+        include/render_core/landscape_renderer.h
+        src/landscape_renderer.cpp
+    LIBS
+        glm::glm-header-only
+        topology_core
+)
+
+target_include_directories(render_core
+    PUBLIC
+        include
+    PRIVATE
+        ${SOKOL_INCLUDE_DIRS}
+        ${STB_INCLUDE_DIRS}
+)
+

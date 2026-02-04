@@ -22,6 +22,7 @@
     "gtest",
     "sokol",
     "imgui",
+    "stb",
     "glad"
   ]
 }

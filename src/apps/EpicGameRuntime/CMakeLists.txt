@@ -6,6 +6,9 @@ nw_add_console_app(
     LIBS
         spdlog::spdlog
         imgui::imgui
+        game_data
+        topology_core
+        render_core
 )
 
 # Sokol is header-only in this project (via vcpkg).
