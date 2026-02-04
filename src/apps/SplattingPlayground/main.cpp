@@ -97,25 +97,42 @@ static std::filesystem::path findDataRootUpwards(std::filesystem::path startDir)
     return {};
 }
 
-static void runSmokeTest() {
-    spdlog::info("=== SMOKE TEST START ===");
-
-    g_materialMap.init(16, 16, (MaterialId)MaterialType::Grass);
-    g_materialMap.fillRect(8, 0, 8, 8, (MaterialId)MaterialType::Sand);
-    g_materialMap.fillRect(0, 8, 16, 8, (MaterialId)MaterialType::Rock);
-
-    bool ok = true;
-    ok &= (g_materialMap.at(2, 2) == (MaterialId)MaterialType::Grass);
-    ok &= (g_materialMap.at(10, 2) == (MaterialId)MaterialType::Sand);
-    ok &= (g_materialMap.at(8, 12) == (MaterialId)MaterialType::Rock);
-
-    if (ok) {
-        spdlog::info("TEST PASS: Material map OK");
-    } else {
-        spdlog::error("TEST FAIL: Material map incorrect");
+// Build a demo map with two showcase areas:
+// Area A (left): Sand cells surrounded by grass (grass around sand)
+// Area B (right): Sand cells surrounded by rock (sand in rock ring)
+static void buildDemoMap() {
+    const int mapW = 20;
+    const int mapH = 16;
+    
+    // Fill entire map with grass as base
+    g_materialMap.init(mapW, mapH, (MaterialId)MaterialType::Grass);
+    
+    // === AREA A (left side): Grass surrounding sand ===
+    // Sand patch in the center-left area (rows 4-11, cols 2-7)
+    // With grass border around it
+    for (int y = 5; y <= 10; y++) {
+        for (int x = 3; x <= 6; x++) {
+            g_materialMap.set(x, y, (MaterialId)MaterialType::Sand);
+        }
     }
-
-    spdlog::info("=== SMOKE TEST END ===");
+    
+    // === AREA B (right side): Rock ring surrounding sand ===
+    // First fill area with rock (rows 4-11, cols 12-17)
+    for (int y = 4; y <= 11; y++) {
+        for (int x = 12; x <= 17; x++) {
+            g_materialMap.set(x, y, (MaterialId)MaterialType::Rock);
+        }
+    }
+    // Then carve out sand center (rows 6-9, cols 14-15)
+    for (int y = 6; y <= 9; y++) {
+        for (int x = 14; x <= 15; x++) {
+            g_materialMap.set(x, y, (MaterialId)MaterialType::Sand);
+        }
+    }
+    
+    spdlog::info("Built demo map {}x{} with two showcase areas", mapW, mapH);
+    spdlog::info("  Area A (left): Grass surrounding Sand");
+    spdlog::info("  Area B (right): Rock ring surrounding Sand");
 }
 
 static void init(void) {
@@ -148,7 +165,7 @@ static void init(void) {
     }
     spdlog::info("dataRoot={}", g_dataRoot.string());
 
-    // Load test textures (PPM disguised as .png is OK, stb checks file signature).
+    // Load test textures
     const auto texDir = g_dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials";
     g_renderer.loadMaterial(0, (texDir / "grass.png").string());
     g_renderer.loadMaterial(1, (texDir / "sand.png").string());
@@ -156,12 +173,18 @@ static void init(void) {
     g_renderer.loadMaterial(3, (texDir / "rock.png").string());
     g_renderer.loadNoiseTexture((texDir / "noise.png").string());
 
-    runSmokeTest();
+    // Build the demo map with showcase areas
+    buildDemoMap();
+    
+    // Center camera roughly on the map
+    const glm::vec2 cellSize = g_iso.dims.cellSize();
+    g_camera.offset.x = 200.0f;
+    g_camera.offset.y = 100.0f;
 }
 
 static void drawImGui(int w, int h) {
     ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(420.0f, 380.0f), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(420.0f, 420.0f), ImGuiCond_Once);
 
     const glm::vec2 screenPos(g_state.mouseX, g_state.mouseY);
     const glm::vec2 worldPos = g_camera.screenToWorld(screenPos);
@@ -171,6 +194,24 @@ static void drawImGui(int w, int h) {
     ImGui::Text("Frame: %d", g_state.frame_index);
     ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
     ImGui::Text("Size: %dx%d  DPI: %.2f", w, h, sapp_dpi_scale());
+    ImGui::Separator();
+    
+    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "Demo Areas:");
+    ImGui::Text("  Left:  Grass around Sand");
+    ImGui::Text("  Right: Rock ring around Sand");
+    ImGui::Separator();
+
+    // Debug Mode selection
+    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Debug Visualization:");
+    const char* debugModes[] = { "Normal", "Material ID", "UV Coords", "Blend Weights", "Center Only" };
+    ImGui::Combo("Debug Mode", &g_params.debugMode, debugModes, 5);
+    if (g_params.debugMode > 0) {
+        ImGui::TextWrapped("Hint: Mode %d - %s", g_params.debugMode, 
+            g_params.debugMode == 1 ? "Shows material IDs as colors" :
+            g_params.debugMode == 2 ? "Shows UV coords (RG gradient)" :
+            g_params.debugMode == 3 ? "Shows blend weights (RGB)" :
+            "Shows center texture only (no blending)");
+    }
     ImGui::Separator();
 
     // UV Mode selection
@@ -208,8 +249,12 @@ static void drawImGui(int w, int h) {
     ImGui::Text("Map: %dx%d", g_materialMap.width, g_materialMap.height);
 
     if (ImGui::Button("Reset Camera")) {
-        g_camera.offset = { 0.0f, 0.0f };
+        g_camera.offset = { 200.0f, 100.0f };
         g_camera.zoom = 1.0f;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rebuild Demo Map")) {
+        buildDemoMap();
     }
 
     ImGui::End();
@@ -345,7 +390,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "SplattingPlayground";
+    desc.window_title = "SplattingPlayground - Isometric Diamond Cells";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32_console_utf8 = true;

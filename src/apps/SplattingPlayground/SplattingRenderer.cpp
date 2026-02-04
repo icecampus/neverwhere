@@ -17,10 +17,17 @@ namespace {
 static const char* vs_src_glsl = R"(
 #version 330
 layout(location=0) in vec2 pos;
+layout(location=1) in vec2 cellCoord;
+layout(location=2) in vec2 localNorm;
+
 out vec2 v_worldPos;
+out vec2 v_cellCoord;
+out vec2 v_localNorm;
+
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
+
 void main() {
     vec2 screen = (pos * camera_zoom) + camera_offset;
     vec2 clip_pos = vec2(
@@ -29,15 +36,19 @@ void main() {
     );
     gl_Position = vec4(clip_pos, 0.0, 1.0);
     v_worldPos = pos;
+    v_cellCoord = cellCoord;
+    v_localNorm = localNorm;
 }
 )";
 
 static const char* fs_src_glsl = R"(
 #version 330
 in vec2 v_worldPos;
+in vec2 v_cellCoord;
+in vec2 v_localNorm;
 out vec4 frag_color;
 
-uniform sampler2D tex0;       // Material 0 (Empty/Grass)
+uniform sampler2D tex0;       // Material 0 (Grass)
 uniform sampler2D tex1;       // Material 1 (Sand)
 uniform sampler2D tex2;       // Material 2 (Rock)
 uniform sampler2D tex3;       // Material 3 (Reserved)
@@ -57,6 +68,7 @@ uniform float edge_width;
 uniform float world_uv_scale;
 uniform float random_uv_strength;
 uniform int uv_mode;
+uniform int debug_mode;
 
 // Pseudo-random hash for per-tile UV randomization
 float hash(vec2 p) {
@@ -89,17 +101,35 @@ vec4 sampleMaterial(int slot, vec2 uv) {
     return texture(tex3, uv);
 }
 
+// Get neighbor cell coords for staggered isometry
+// In staggered grid, 4 diagonal neighbors depend on row parity
+vec2 getNeighborTL(vec2 cell) {
+    float isOdd = mod(cell.y, 2.0);
+    return vec2(cell.x - 1.0 + isOdd, cell.y - 1.0);
+}
+vec2 getNeighborTR(vec2 cell) {
+    float isOdd = mod(cell.y, 2.0);
+    return vec2(cell.x + isOdd, cell.y - 1.0);
+}
+vec2 getNeighborBL(vec2 cell) {
+    float isOdd = mod(cell.y, 2.0);
+    return vec2(cell.x - 1.0 + isOdd, cell.y + 1.0);
+}
+vec2 getNeighborBR(vec2 cell) {
+    float isOdd = mod(cell.y, 2.0);
+    return vec2(cell.x + isOdd, cell.y + 1.0);
+}
+
 void main() {
-    // Calculate cell coordinates from world position
-    vec2 cellCoordF = v_worldPos / cell_size;
-    vec2 cellCoord = floor(cellCoordF);
-    vec2 localPos = fract(cellCoordF);  // 0..1 within cell
+    vec2 cellCoord = floor(v_cellCoord + 0.5); // round to nearest int
+    vec2 local = v_localNorm;
     
-    // Get material IDs for current cell and neighbors
+    // Get material IDs for current cell and 4 diagonal neighbors (staggered)
     float matC  = getMaterialId(cellCoord);
-    float matR  = getMaterialId(cellCoord + vec2(1.0, 0.0));
-    float matD  = getMaterialId(cellCoord + vec2(0.0, 1.0));
-    float matRD = getMaterialId(cellCoord + vec2(1.0, 1.0));
+    float matTL = getMaterialId(getNeighborTL(cellCoord));
+    float matTR = getMaterialId(getNeighborTR(cellCoord));
+    float matBL = getMaterialId(getNeighborBL(cellCoord));
+    float matBR = getMaterialId(getNeighborBR(cellCoord));
     
     // Calculate UV based on mode
     vec2 uv;
@@ -110,7 +140,7 @@ void main() {
         // RandomTileUV: per-tile randomized offset
         vec2 rnd = hash2(cellCoord) * 2.0 - 1.0;
         vec2 offset = rnd * random_uv_strength;
-        uv = localPos + offset;
+        uv = (local + 0.5) + offset;
     }
     
     // Apply macro variation (UV warp from noise)
@@ -119,78 +149,132 @@ void main() {
     uv = uv + (vec2(n0, n1) - 0.5) * macro_strength;
     uv *= tile_scale;
     
-    // Sample noise for blending
-    float noiseVal = texture(noise_tex, v_worldPos / cell_size * noise_scale * 0.1).r;
+    // Sample noise for blending variation
+    float noiseVal = texture(noise_tex, v_worldPos / cell_size.x * noise_scale * 0.1).r;
     
-    // Bilinear weights from local position within cell
-    float wx = localPos.x;
-    float wy = localPos.y;
+    // Diamond edge distances (boundary is |x|+|y|=0.5)
+    // Distance to each edge (positive inside, 0 at edge)
+    float distTL = 0.5 - (-local.x - local.y);  // top-left edge (toward top vertex)
+    float distTR = 0.5 - ( local.x - local.y);  // top-right edge (toward right vertex)
+    float distBL = 0.5 - (-local.x + local.y);  // bottom-left edge (toward left vertex)
+    float distBR = 0.5 - ( local.x + local.y);  // bottom-right edge (toward bottom vertex)
     
-    // Weight contributions from 4 corners
-    // TL = (1-wx)*(1-wy), TR = wx*(1-wy), BL = (1-wx)*wy, BR = wx*wy
-    float wTL = (1.0 - wx) * (1.0 - wy);
-    float wTR = wx * (1.0 - wy);
-    float wBL = (1.0 - wx) * wy;
-    float wBR = wx * wy;
+    // Corner proximity - distance to each diamond vertex
+    float distToTop    = length(local - vec2(0.0, -0.5));
+    float distToRight  = length(local - vec2(0.5, 0.0));
+    float distToBottom = length(local - vec2(0.0, 0.5));
+    float distToLeft   = length(local - vec2(-0.5, 0.0));
     
-    // Apply noise perturbation to blend zone
-    float noiseInfluence = (1.0 - blend_sharpness) * 0.5;
-    wTL += (noiseVal - 0.5) * noiseInfluence * wTL;
-    wTR += (noiseVal - 0.5) * noiseInfluence * wTR;
-    wBL += (noiseVal - 0.5) * noiseInfluence * wBL;
-    wBR += (noiseVal - 0.5) * noiseInfluence * wBR;
+    // Corner proximity factor (higher near vertices, enables smoother corner blending)
+    float minCornerDist = min(min(distToTop, distToBottom), min(distToLeft, distToRight));
+    float cornerProximity = 1.0 - smoothstep(0.0, 0.5, minCornerDist);
     
-    // Sharpening based on blend_sharpness (0=soft, 1=sharp)
-    float sharp = mix(0.5, 4.0, blend_sharpness);
-    wTL = pow(max(wTL, 0.001), sharp);
-    wTR = pow(max(wTR, 0.001), sharp);
-    wBL = pow(max(wBL, 0.001), sharp);
-    wBR = pow(max(wBR, 0.001), sharp);
+    // Adaptive blend width: wider near corners for smoother transitions
+    float baseBlendWidth = mix(0.35, 0.08, blend_sharpness);
+    float edgeBlendWidth = baseBlendWidth * (1.0 + cornerProximity * 0.6);
     
-    // Normalize corner weights
-    float cornerSum = wTL + wTR + wBL + wBR;
-    if (cornerSum > 0.001) {
-        wTL /= cornerSum; wTR /= cornerSum; wBL /= cornerSum; wBR /= cornerSum;
-    }
+    // Add noise jitter to blend threshold
+    float noiseJitter = (noiseVal - 0.5) * (1.0 - blend_sharpness) * 0.2;
     
-    // Sample materials for each corner's material ID
+    // Edge blend factors: how much each neighbor should contribute
+    // Using smoothstep for smooth falloff from edge toward center
+    float bTL = 1.0 - smoothstep(0.0, edgeBlendWidth, distTL + noiseJitter);
+    float bTR = 1.0 - smoothstep(0.0, edgeBlendWidth, distTR + noiseJitter);
+    float bBL = 1.0 - smoothstep(0.0, edgeBlendWidth, distBL + noiseJitter);
+    float bBR = 1.0 - smoothstep(0.0, edgeBlendWidth, distBR + noiseJitter);
+    
+    // Sample materials
     int slotC  = matIdToSlot(matC);
-    int slotR  = matIdToSlot(matR);
-    int slotD  = matIdToSlot(matD);
-    int slotRD = matIdToSlot(matRD);
+    int slotTL = matIdToSlot(matTL);
+    int slotTR = matIdToSlot(matTR);
+    int slotBL = matIdToSlot(matBL);
+    int slotBR = matIdToSlot(matBR);
     
     vec4 colC  = sampleMaterial(slotC, uv);
-    vec4 colR  = sampleMaterial(slotR, uv);
-    vec4 colD  = sampleMaterial(slotD, uv);
-    vec4 colRD = sampleMaterial(slotRD, uv);
+    vec4 colTL = sampleMaterial(slotTL, uv);
+    vec4 colTR = sampleMaterial(slotTR, uv);
+    vec4 colBL = sampleMaterial(slotBL, uv);
+    vec4 colBR = sampleMaterial(slotBR, uv);
     
-    // Height proxy from albedo luminance
+    // Height proxy from albedo luminance for height-aware blending
     float hC  = dot(colC.rgb, vec3(0.333));
-    float hR  = dot(colR.rgb, vec3(0.333));
-    float hD  = dot(colD.rgb, vec3(0.333));
-    float hRD = dot(colRD.rgb, vec3(0.333));
+    float hTL = dot(colTL.rgb, vec3(0.333));
+    float hTR = dot(colTR.rgb, vec3(0.333));
+    float hBL = dot(colBL.rgb, vec3(0.333));
+    float hBR = dot(colBR.rgb, vec3(0.333));
     
-    // Apply height-aware blending: boost weights for "higher" materials
-    wTL += (hC  - 0.5) * height_influence * wTL;
-    wTR += (hR  - 0.5) * height_influence * wTR;
-    wBL += (hD  - 0.5) * height_influence * wBL;
-    wBR += (hRD - 0.5) * height_influence * wBR;
+    // Height-aware adjustment: boost blend factor for "higher" neighbors
+    bTL *= 1.0 + (hTL - hC) * height_influence;
+    bTR *= 1.0 + (hTR - hC) * height_influence;
+    bBL *= 1.0 + (hBL - hC) * height_influence;
+    bBR *= 1.0 + (hBR - hC) * height_influence;
     
-    // Renormalize after height adjustment
-    cornerSum = wTL + wTR + wBL + wBR;
-    if (cornerSum > 0.001) {
-        wTL /= cornerSum; wTR /= cornerSum; wBL /= cornerSum; wBR /= cornerSum;
+    // Clamp blend factors
+    bTL = clamp(bTL, 0.0, 1.0);
+    bTR = clamp(bTR, 0.0, 1.0);
+    bBL = clamp(bBL, 0.0, 1.0);
+    bBR = clamp(bBR, 0.0, 1.0);
+    
+    // Zero out blend factors for neighbors with same material as center
+    if (slotTL == slotC) bTL = 0.0;
+    if (slotTR == slotC) bTR = 0.0;
+    if (slotBL == slotC) bBL = 0.0;
+    if (slotBR == slotC) bBR = 0.0;
+    
+    // WEIGHTED BLENDING
+    // Sum of neighbor blend factors determines how much we blend away from center
+    float sumNeighborBlend = bTL + bTR + bBL + bBR;
+    
+    // Center weight: 1 when no neighbors blend, decreases as neighbors contribute
+    // Clamp sumNeighborBlend to prevent center from going negative
+    float wC = max(0.0, 1.0 - sumNeighborBlend);
+    
+    // Neighbor weights are their blend factors
+    float wTL = bTL;
+    float wTR = bTR;
+    float wBL = bBL;
+    float wBR = bBR;
+    
+    // Normalize weights to sum to 1
+    float totalWeight = wC + wTL + wTR + wBL + wBR;
+    if (totalWeight > 0.001) {
+        float invTotal = 1.0 / totalWeight;
+        wC  *= invTotal;
+        wTL *= invTotal;
+        wTR *= invTotal;
+        wBL *= invTotal;
+        wBR *= invTotal;
+    } else {
+        // Fallback: just use center material
+        wC = 1.0;
+        wTL = wTR = wBL = wBR = 0.0;
     }
     
-    // Final color blend
-    vec4 col = colC * wTL + colR * wTR + colD * wBL + colRD * wBR;
+    // Final weighted blend of all 5 materials
+    vec4 col = colC * wC + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR;
     
     // Edge darkening (pseudo-AO at material boundaries)
-    float maxW = max(max(wTL, wTR), max(wBL, wBR));
-    float edgeFactor = smoothstep(0.0, edge_width, 1.0 - maxW);
+    float blendAmount = 1.0 - wC; // How much we're blending with neighbors
+    float edgeFactor = smoothstep(0.0, edge_width, blendAmount);
     col.rgb *= (1.0 - edge_darkness * edgeFactor);
     
-    frag_color = col;
+    // Debug output modes
+    if (debug_mode == 1) {
+        // Material ID visualization (different colors for different materials)
+        frag_color = vec4(matC / 4.0, float(slotC) / 3.0, 1.0 - matC / 4.0, 1.0);
+    } else if (debug_mode == 2) {
+        // UV visualization (RG = fract(uv))
+        frag_color = vec4(fract(uv), 0.5, 1.0);
+    } else if (debug_mode == 3) {
+        // Weight visualization (R=top weights, G=bottom weights, B=center)
+        frag_color = vec4(wTL + wTR, wBL + wBR, wC, 1.0);
+    } else if (debug_mode == 4) {
+        // Center material only (no blending) - tests texture loading
+        frag_color = colC;
+    } else {
+        // Normal render
+        frag_color = col;
+    }
 }
 )";
 
@@ -206,10 +290,14 @@ cbuffer vs_params: register(b0) {
 };
 struct VSIn {
     float2 pos: TEXCOORD0;
+    float2 cellCoord: TEXCOORD1;
+    float2 localNorm: TEXCOORD2;
 };
 struct VSOut {
     float4 pos: SV_Position;
     float2 worldPos: TEXCOORD0;
+    float2 cellCoord: TEXCOORD1;
+    float2 localNorm: TEXCOORD2;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -219,6 +307,8 @@ VSOut main(VSIn inp) {
     clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
     o.pos = float4(clip, 0.0, 1.0);
     o.worldPos = inp.pos;
+    o.cellCoord = inp.cellCoord;
+    o.localNorm = inp.localNorm;
     return o;
 }
 )";
@@ -247,12 +337,14 @@ cbuffer fs_params: register(b0) {
     float world_uv_scale;
     float random_uv_strength;
     int uv_mode;
-    float _pad0;
+    int debug_mode;
 };
 
 struct PSIn {
     float4 pos: SV_Position;
     float2 worldPos: TEXCOORD0;
+    float2 cellCoord: TEXCOORD1;
+    float2 localNorm: TEXCOORD2;
 };
 
 // Pseudo-random hash
@@ -286,105 +378,169 @@ float4 sampleMaterial(int slot, float2 uv) {
     return tex3.Sample(linear_smp, uv);
 }
 
+// Get neighbor cell coords for staggered isometry
+float2 getNeighborTL(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x - 1.0 + isOdd, cell.y - 1.0);
+}
+float2 getNeighborTR(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x + isOdd, cell.y - 1.0);
+}
+float2 getNeighborBL(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x - 1.0 + isOdd, cell.y + 1.0);
+}
+float2 getNeighborBR(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x + isOdd, cell.y + 1.0);
+}
+
 float4 main(PSIn inp): SV_Target0 {
-    // Calculate cell coordinates from world position
-    float2 cellCoordF = inp.worldPos / cell_size;
-    float2 cellCoord = floor(cellCoordF);
-    float2 localPos = frac(cellCoordF);  // 0..1 within cell
+    float2 cellCoord = floor(inp.cellCoord + 0.5);
+    float2 local = inp.localNorm;
     
-    // Get material IDs for current cell and neighbors
+    // Get material IDs for current cell and 4 diagonal neighbors (staggered)
     float matC  = getMaterialId(cellCoord);
-    float matR  = getMaterialId(cellCoord + float2(1.0, 0.0));
-    float matD  = getMaterialId(cellCoord + float2(0.0, 1.0));
-    float matRD = getMaterialId(cellCoord + float2(1.0, 1.0));
+    float matTL = getMaterialId(getNeighborTL(cellCoord));
+    float matTR = getMaterialId(getNeighborTR(cellCoord));
+    float matBL = getMaterialId(getNeighborBL(cellCoord));
+    float matBR = getMaterialId(getNeighborBR(cellCoord));
     
     // Calculate UV based on mode
     float2 uv;
     if (uv_mode == 0) {
-        // WorldUV: continuous world-space UV
         uv = inp.worldPos / world_uv_scale;
     } else {
-        // RandomTileUV: per-tile randomized offset
         float2 rnd = hash2(cellCoord) * 2.0 - 1.0;
         float2 offset = rnd * random_uv_strength;
-        uv = localPos + offset;
+        uv = (local + 0.5) + offset;
     }
     
-    // Apply macro variation (UV warp from noise)
+    // Apply macro variation
     float n0 = noise_tex.Sample(linear_smp, uv * macro_scale).r;
     float n1 = noise_tex.Sample(linear_smp, uv * (macro_scale * 0.77) + float2(13.1, 7.7)).r;
     uv = uv + (float2(n0, n1) - 0.5) * macro_strength;
     uv *= tile_scale;
     
-    // Sample noise for blending
-    float noiseVal = noise_tex.Sample(linear_smp, inp.worldPos / cell_size * noise_scale * 0.1).r;
+    // Sample noise for blending variation
+    float noiseVal = noise_tex.Sample(linear_smp, inp.worldPos / cell_size.x * noise_scale * 0.1).r;
     
-    // Bilinear weights from local position within cell
-    float wx = localPos.x;
-    float wy = localPos.y;
+    // Diamond edge distances (boundary is |x|+|y|=0.5)
+    float distTL = 0.5 - (-local.x - local.y);  // top-left edge
+    float distTR = 0.5 - ( local.x - local.y);  // top-right edge
+    float distBL = 0.5 - (-local.x + local.y);  // bottom-left edge
+    float distBR = 0.5 - ( local.x + local.y);  // bottom-right edge
     
-    // Weight contributions from 4 corners
-    float wTL = (1.0 - wx) * (1.0 - wy);
-    float wTR = wx * (1.0 - wy);
-    float wBL = (1.0 - wx) * wy;
-    float wBR = wx * wy;
+    // Corner proximity - distance to each diamond vertex
+    float distToTop    = length(local - float2(0.0, -0.5));
+    float distToRight  = length(local - float2(0.5, 0.0));
+    float distToBottom = length(local - float2(0.0, 0.5));
+    float distToLeft   = length(local - float2(-0.5, 0.0));
     
-    // Apply noise perturbation to blend zone
-    float noiseInfluence = (1.0 - blend_sharpness) * 0.5;
-    wTL += (noiseVal - 0.5) * noiseInfluence * wTL;
-    wTR += (noiseVal - 0.5) * noiseInfluence * wTR;
-    wBL += (noiseVal - 0.5) * noiseInfluence * wBL;
-    wBR += (noiseVal - 0.5) * noiseInfluence * wBR;
+    // Corner proximity factor (higher near vertices)
+    float minCornerDist = min(min(distToTop, distToBottom), min(distToLeft, distToRight));
+    float cornerProximity = 1.0 - smoothstep(0.0, 0.5, minCornerDist);
     
-    // Sharpening
-    float sharp = lerp(0.5, 4.0, blend_sharpness);
-    wTL = pow(max(wTL, 0.001), sharp);
-    wTR = pow(max(wTR, 0.001), sharp);
-    wBL = pow(max(wBL, 0.001), sharp);
-    wBR = pow(max(wBR, 0.001), sharp);
+    // Adaptive blend width: wider near corners
+    float baseBlendWidth = lerp(0.35, 0.08, blend_sharpness);
+    float edgeBlendWidth = baseBlendWidth * (1.0 + cornerProximity * 0.6);
     
-    // Normalize corner weights
-    float cornerSum = wTL + wTR + wBL + wBR;
-    if (cornerSum > 0.001) {
-        wTL /= cornerSum; wTR /= cornerSum; wBL /= cornerSum; wBR /= cornerSum;
-    }
+    // Noise jitter
+    float noiseJitter = (noiseVal - 0.5) * (1.0 - blend_sharpness) * 0.2;
+    
+    // Edge blend factors
+    float bTL = 1.0 - smoothstep(0.0, edgeBlendWidth, distTL + noiseJitter);
+    float bTR = 1.0 - smoothstep(0.0, edgeBlendWidth, distTR + noiseJitter);
+    float bBL = 1.0 - smoothstep(0.0, edgeBlendWidth, distBL + noiseJitter);
+    float bBR = 1.0 - smoothstep(0.0, edgeBlendWidth, distBR + noiseJitter);
     
     // Sample materials
     int slotC  = matIdToSlot(matC);
-    int slotR  = matIdToSlot(matR);
-    int slotD  = matIdToSlot(matD);
-    int slotRD = matIdToSlot(matRD);
+    int slotTL = matIdToSlot(matTL);
+    int slotTR = matIdToSlot(matTR);
+    int slotBL = matIdToSlot(matBL);
+    int slotBR = matIdToSlot(matBR);
     
     float4 colC  = sampleMaterial(slotC, uv);
-    float4 colR  = sampleMaterial(slotR, uv);
-    float4 colD  = sampleMaterial(slotD, uv);
-    float4 colRD = sampleMaterial(slotRD, uv);
+    float4 colTL = sampleMaterial(slotTL, uv);
+    float4 colTR = sampleMaterial(slotTR, uv);
+    float4 colBL = sampleMaterial(slotBL, uv);
+    float4 colBR = sampleMaterial(slotBR, uv);
     
     // Height proxy
     float hC  = dot(colC.rgb, float3(0.333, 0.333, 0.333));
-    float hR  = dot(colR.rgb, float3(0.333, 0.333, 0.333));
-    float hD  = dot(colD.rgb, float3(0.333, 0.333, 0.333));
-    float hRD = dot(colRD.rgb, float3(0.333, 0.333, 0.333));
+    float hTL = dot(colTL.rgb, float3(0.333, 0.333, 0.333));
+    float hTR = dot(colTR.rgb, float3(0.333, 0.333, 0.333));
+    float hBL = dot(colBL.rgb, float3(0.333, 0.333, 0.333));
+    float hBR = dot(colBR.rgb, float3(0.333, 0.333, 0.333));
     
-    // Height-aware blending
-    wTL += (hC  - 0.5) * height_influence * wTL;
-    wTR += (hR  - 0.5) * height_influence * wTR;
-    wBL += (hD  - 0.5) * height_influence * wBL;
-    wBR += (hRD - 0.5) * height_influence * wBR;
+    // Height-aware adjustment
+    bTL *= 1.0 + (hTL - hC) * height_influence;
+    bTR *= 1.0 + (hTR - hC) * height_influence;
+    bBL *= 1.0 + (hBL - hC) * height_influence;
+    bBR *= 1.0 + (hBR - hC) * height_influence;
     
-    // Renormalize
-    cornerSum = wTL + wTR + wBL + wBR;
-    if (cornerSum > 0.001) {
-        wTL /= cornerSum; wTR /= cornerSum; wBL /= cornerSum; wBR /= cornerSum;
+    // Clamp blend factors
+    bTL = clamp(bTL, 0.0, 1.0);
+    bTR = clamp(bTR, 0.0, 1.0);
+    bBL = clamp(bBL, 0.0, 1.0);
+    bBR = clamp(bBR, 0.0, 1.0);
+    
+    // Zero out blend factors for same material
+    if (slotTL == slotC) bTL = 0.0;
+    if (slotTR == slotC) bTR = 0.0;
+    if (slotBL == slotC) bBL = 0.0;
+    if (slotBR == slotC) bBR = 0.0;
+    
+    // WEIGHTED BLENDING
+    // Sum of neighbor blend factors
+    float sumNeighborBlend = bTL + bTR + bBL + bBR;
+    
+    // Center weight
+    float wC = max(0.0, 1.0 - sumNeighborBlend);
+    
+    float wTL = bTL;
+    float wTR = bTR;
+    float wBL = bBL;
+    float wBR = bBR;
+    
+    // Normalize weights
+    float totalWeight = wC + wTL + wTR + wBL + wBR;
+    if (totalWeight > 0.001) {
+        float invTotal = 1.0 / totalWeight;
+        wC  *= invTotal;
+        wTL *= invTotal;
+        wTR *= invTotal;
+        wBL *= invTotal;
+        wBR *= invTotal;
+    } else {
+        wC = 1.0;
+        wTL = wTR = wBL = wBR = 0.0;
     }
     
-    // Final blend
-    float4 col = colC * wTL + colR * wTR + colD * wBL + colRD * wBR;
+    // Final weighted blend
+    float4 col = colC * wC + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR;
     
     // Edge darkening
-    float maxW = max(max(wTL, wTR), max(wBL, wBR));
-    float edgeFactor = smoothstep(0.0, edge_width, 1.0 - maxW);
+    float blendAmount = 1.0 - wC;
+    float edgeFactor = smoothstep(0.0, edge_width, blendAmount);
     col.rgb *= (1.0 - edge_darkness * edgeFactor);
+    
+    // Debug output modes
+    if (debug_mode == 1) {
+        // Material ID visualization
+        return float4(matC / 4.0, (float)slotC / 3.0, 1.0 - matC / 4.0, 1.0);
+    } else if (debug_mode == 2) {
+        // UV visualization
+        return float4(frac(uv), 0.5, 1.0);
+    } else if (debug_mode == 3) {
+        // Weight visualization
+        return float4(wTL + wTR, wBL + wBR, wC, 1.0);
+    } else if (debug_mode == 4) {
+        // Center material only
+        return colC;
+    }
     
     return col;
 }
@@ -429,7 +585,7 @@ static sg_image loadImageRgba8(const std::string& path, const char* label) {
 void SplattingRenderer::init() {
     ensurePipeline();
 
-    // Dynamic vertex buffer
+    // Dynamic vertex buffer (6 verts per cell for 2 triangles)
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 6 * 65536 * (int)sizeof(Vertex);
     buf_desc.usage = SG_USAGE_DYNAMIC;
@@ -644,6 +800,7 @@ void SplattingRenderer::render(
     fs.worldUvScale = std::max(1.0f, params.worldUvScale);
     fs.randomUvStrength = std::max(0.0f, params.randomUvStrength);
     fs.uvMode = static_cast<int>(params.uvMode);
+    fs.debugMode = params.debugMode;
     sg_range fs_range = { &fs, sizeof(fs) };
     sg_apply_uniforms(SG_SHADERSTAGE_FS, 0, &fs_range);
 
@@ -668,6 +825,10 @@ void SplattingRenderer::ensurePipeline() {
     shd_desc.fs.source = fs_src_hlsl;
     shd_desc.attrs[0].sem_name = "TEXCOORD";
     shd_desc.attrs[0].sem_index = 0;
+    shd_desc.attrs[1].sem_name = "TEXCOORD";
+    shd_desc.attrs[1].sem_index = 1;
+    shd_desc.attrs[2].sem_name = "TEXCOORD";
+    shd_desc.attrs[2].sem_index = 2;
 #else
     shd_desc.vs.source = vs_src_glsl;
     shd_desc.fs.source = fs_src_glsl;
@@ -710,6 +871,8 @@ void SplattingRenderer::ensurePipeline() {
     shd_desc.fs.uniform_blocks[0].uniforms[11].type = SG_UNIFORMTYPE_FLOAT;
     shd_desc.fs.uniform_blocks[0].uniforms[12].name = "uv_mode";
     shd_desc.fs.uniform_blocks[0].uniforms[12].type = SG_UNIFORMTYPE_INT;
+    shd_desc.fs.uniform_blocks[0].uniforms[13].name = "debug_mode";
+    shd_desc.fs.uniform_blocks[0].uniforms[13].type = SG_UNIFORMTYPE_INT;
 
     // FS images (6: 4 materials + noise + materialIdMap)
     for (int i = 0; i < 6; i++) {
@@ -717,21 +880,18 @@ void SplattingRenderer::ensurePipeline() {
         shd_desc.fs.images[i].image_type = SG_IMAGETYPE_2D;
     }
 
-    // 2 samplers: linear (for materials/noise), nearest (for materialIdMap)
-    // Both use SG_SAMPLERTYPE_SAMPLE (filtering is controlled by sampler desc, not shader)
+    // 2 samplers
     shd_desc.fs.samplers[0].used = true;
     shd_desc.fs.samplers[0].sampler_type = SG_SAMPLERTYPE_SAMPLE;
     shd_desc.fs.samplers[1].used = true;
     shd_desc.fs.samplers[1].sampler_type = SG_SAMPLERTYPE_SAMPLE;
 
     // Image-sampler pairs
-    // tex0-tex4 use linear sampler (slot 0)
     for (int i = 0; i < 5; i++) {
         shd_desc.fs.image_sampler_pairs[i].used = true;
         shd_desc.fs.image_sampler_pairs[i].image_slot = i;
         shd_desc.fs.image_sampler_pairs[i].sampler_slot = 0;
     }
-    // materialIdMap uses nearest sampler (slot 1)
     shd_desc.fs.image_sampler_pairs[5].used = true;
     shd_desc.fs.image_sampler_pairs[5].image_slot = 5;
     shd_desc.fs.image_sampler_pairs[5].sampler_slot = 1;
@@ -740,7 +900,10 @@ void SplattingRenderer::ensurePipeline() {
 
     sg_pipeline_desc pip_desc = {};
     pip_desc.shader = shd;
-    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2; // pos only
+    // 3 vertex attributes: pos (float2), cellCoord (float2), localNorm (float2)
+    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
+    pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+    pip_desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT2;
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
@@ -764,7 +927,8 @@ void SplattingRenderer::buildMesh(const MaterialMap& map, const topology_core::S
     vertices.reserve((size_t)map.width * (size_t)map.height * 6);
 
     const glm::vec2 cellSize = iso.dims.cellSize();
-    const glm::vec2 half = cellSize * 0.5f;
+    const float halfW = cellSize.x * 0.5f;
+    const float halfH = cellSize.y * 0.5f;
 
     for (int y = 0; y < map.height; y++) {
         for (int x = 0; x < map.width; x++) {
@@ -774,19 +938,28 @@ void SplattingRenderer::buildMesh(const MaterialMap& map, const topology_core::S
             const glm::ivec2 cell(x, y);
             const glm::vec2 center = iso.mapToField(cell);
 
-            const glm::vec2 tl = center + glm::vec2(-half.x, -half.y);
-            const glm::vec2 tr = center + glm::vec2( half.x, -half.y);
-            const glm::vec2 bl = center + glm::vec2(-half.x,  half.y);
-            const glm::vec2 br = center + glm::vec2( half.x,  half.y);
+            // Diamond vertices (isometric cell)
+            // top: (0, -0.5), right: (0.5, 0), bottom: (0, 0.5), left: (-0.5, 0)
+            const glm::vec2 top    = center + glm::vec2(0.0f, -halfH);
+            const glm::vec2 right  = center + glm::vec2(halfW, 0.0f);
+            const glm::vec2 bottom = center + glm::vec2(0.0f, halfH);
+            const glm::vec2 left   = center + glm::vec2(-halfW, 0.0f);
 
-            // 2 triangles: TL, TR, BL / BL, TR, BR
-            vertices.push_back({ tl.x, tl.y });
-            vertices.push_back({ tr.x, tr.y });
-            vertices.push_back({ bl.x, bl.y });
+            const float cx = (float)x;
+            const float cy = (float)y;
 
-            vertices.push_back({ bl.x, bl.y });
-            vertices.push_back({ tr.x, tr.y });
-            vertices.push_back({ br.x, br.y });
+            // Local normalized coords for diamond vertices
+            // top: (0, -0.5), right: (0.5, 0), bottom: (0, 0.5), left: (-0.5, 0)
+            
+            // Triangle 1: top -> right -> bottom
+            vertices.push_back({ top.x, top.y, cx, cy, 0.0f, -0.5f });
+            vertices.push_back({ right.x, right.y, cx, cy, 0.5f, 0.0f });
+            vertices.push_back({ bottom.x, bottom.y, cx, cy, 0.0f, 0.5f });
+
+            // Triangle 2: bottom -> left -> top
+            vertices.push_back({ bottom.x, bottom.y, cx, cy, 0.0f, 0.5f });
+            vertices.push_back({ left.x, left.y, cx, cy, -0.5f, 0.0f });
+            vertices.push_back({ top.x, top.y, cx, cy, 0.0f, -0.5f });
         }
     }
 }

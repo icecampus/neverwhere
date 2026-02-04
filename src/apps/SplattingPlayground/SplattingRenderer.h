@@ -43,6 +43,9 @@ struct SplattingParams {
     UvMode uvMode = UvMode::WorldUV;
     float worldUvScale = 128.0f;       // World units per texture repeat
     float randomUvStrength = 0.25f;    // Randomization strength for RandomTileUV
+    
+    // Debug mode: 0=Normal, 1=MaterialID, 2=UV, 3=Weights, 4=CenterOnly
+    int debugMode = 0;
 };
 
 class SplattingRenderer {
@@ -64,9 +67,14 @@ public:
     );
 
 private:
-    // Vertex: world position only (UV computed in shader from world pos)
+    // Vertex for isometric diamond cells:
+    // - pos: world position
+    // - cellCoord: cell coordinates in material map (x,y)
+    // - localNorm: normalized position within diamond [-0.5..0.5], boundary is |x|+|y|=0.5
     struct Vertex {
-        float x, y;  // world position
+        float px, py;      // world position
+        float cellX, cellY; // cell coordinates (integer stored as float for shader)
+        float localX, localY; // normalized local position within diamond
     };
 
     struct VsParams {
@@ -90,7 +98,7 @@ private:
         float worldUvScale;
         float randomUvStrength;
         int uvMode;
-        float _pad0;
+        int debugMode;            // 0=Normal, 1=MaterialID, 2=UV, 3=Weights, 4=CenterOnly
     };
 
     void ensurePipeline();
