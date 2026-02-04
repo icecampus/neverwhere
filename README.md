@@ -1,52 +1,93 @@
-# Анализ и план развития Epic Map Editor
+# Neverwhere
 
-## 📋 План разработки функций
+Neverwhere — это **узкоспециализированный 2D engine/suite** под system-driven игры (life-sim и narrative casual). Репозиторий содержит **редактор** и **runtime-клиент**.
 
-### Приоритетная задача
-- [ ] **Система Отмены/Повтора (Undo/Redo)**
-  - *Цель:* Возможность отмены действий.
-  - *Подход:* Использование библиотеки `immer` для неизменяемых структур данных вместо паттерна Command.
-  - *См. Технический анализ ниже.*
+- **Epic Map Editor**: редактор игровых данных и контента
+- **EpicGameRuntime**: игровой клиент (runtime) для запуска/проверки результата
 
----
+## Apps
+- **Editor**: `src/apps/EpicMapEditor`
+- **Runtime (EpicGameRuntime)**: `src/apps/NeverwhereGame` *(текущее имя таргета/папки; переименование — отдельная задача)*
 
-## 🛠 Технический анализ: Undo/Redo с `immer`
+## High-level architecture
 
-### Обзор
-Вместо классического **паттерна Command** (хранение изменений/действий), мы будем использовать **Неизменяемые структуры данных** (Immutable Data Structures) через библиотеку [immer](https://github.com/arximboldi/immer). Это позволяет хранить историю как последовательность снимков состояния (snapshots) с эффективным переиспользованием структуры (минимизация использования памяти).
+```mermaid
+flowchart TB
+  subgraph DataLayer[DataLayer_NoQt]
+    gameData[game_data(JSON_Schema+LoadSave)]
+    balanceData[balance_tables(JSON)]
+    resourcesData[resources_manifest]
+  end
 
-### Оценка сложности
-**Трудоемкость:** Высокая (примерно 2-3 дня).
-**Влияние:** Рефакторинг архитектурного ядра.
+  subgraph RenderLayer[RenderLayer_Shared]
+    renderCore[graphics_core(Sokol_GFX_API)]
+  end
 
-### План реализации
+  subgraph EditorApp[EpicMapEditor(Qt)]
+    qmlUi[QML_UI]
+    qtAdapters[editor_qt_adapters]
+    qtShell[graphics_shell_qtquick]
+    playtestHost[playtest_host]
+  end
 
-#### 1. Разделение Данных и Представления (Data/View Separation)
-Рефакторинг `MapModel` и `LayerModel` для отделения состояния данных от QObject-оберток.
-- **Сейчас:** `GameObject` — это `QObject`, хранящий данные.
-- **Цель:** 
-  - `BaseData::GameObject` (Чистая структура) хранит данные.
-  - `GameObject` (QObject) — это view-обертка, которая наблюдает за неизменяемым состоянием.
+  subgraph RuntimeApp[EpicGameRuntime(Standalone)]
+    imguiUi[ImGui_UI]
+    runtimeShell[graphics_shell_sokolapp]
+    gameLoop[game_loop]
+  end
 
-#### 2. Внедрение состояния `immer`
-Определение иерархии неизменяемого состояния:
-```cpp
-#include <immer/vector.hpp>
-#include <immer/map.hpp>
+  gameData --> qtAdapters
+  gameData --> gameLoop
+  balanceData --> qtAdapters
+  balanceData --> gameLoop
+  resourcesData --> qtAdapters
+  resourcesData --> gameLoop
 
-using GameObjectsState = immer::vector<BaseData::GameObject>;
-using LayersState = immer::map<LayerTypes::Type, GameObjectsState>;
+  renderCore --> qtShell
+  renderCore --> runtimeShell
+
+  qtShell --> qmlUi
+  runtimeShell --> imguiUi
+
+  playtestHost -->|"launch_with_map+fixtures"| gameLoop
 ```
 
-#### 3. Diffing состояния и обновление модели
-Реализация механизма сравнения (diffing) в `LayerModel`. Когда неизменяемое состояние меняется (Undo/Redo или действие инструментом):
-1. Вычисляем разницу между `oldState` и `newState`.
-2. Обновляем внутренний список QObject (`_gameObjects`) для соответствия.
-3. Эмитим необходимые сигналы Qt (`beginInsertRows`, `dataChanged` и т.д.) для синхронизации QML UI без полного сброса (reset).
+## Data layer (без Qt)
+**Игровые данные** живут в JSON и должны быть доступны игре без Qt-зависимостей:
+- **chapters** (главы) и **maps** (карты)
+- **balance tables** (таблицы баланса, “excel-like” данные) в JSON
+- **resources** (ассеты/пакеты ресурсов и их метаданные)
 
-#### 4. Контроллер Истории
-Создание централизованного контроллера `History`:
-- `std::vector<LayersState> undoStack`
-- `std::vector<LayersState> redoStack`
-- Простая смена указателя/индекса для перемещения по истории.
-- **Потокобезопасность:** Неизменяемые снимки можно безопасно обрабатывать в фоновых потоках (например, для автосохранения).
+Редактор поверх этого добавляет **Qt/QML адаптеры** и инструменты редактирования, но базовые структуры и сериализация должны оставаться “чистыми”.
+
+## Rendering
+Рендер мира общий, но **разные shell/backend**:
+- **Editor**: Qt/QML overlay, рендер мира встраивается в Qt (QtQuick/FBO)
+- **Runtime**: standalone shell (сейчас `sokol_app`) + игровой UI на **Dear ImGui**
+
+## Play-Test в редакторе (концепт)
+Редактор должен уметь **запускать EpicGameRuntime на текущей редактируемой карте**.
+
+Если runtime-логике нужны данные, которых нет в карте (профиль игрока, прогресс, инвентарь, сейвы), редактор предоставляет их через **fixture-подобные провайдеры** (по аналогии с unit tests):\n- фиксированный “профиль по умолчанию”\n- тестовый инвентарь/прогресс\n- временное хранилище (in-memory) на время сессии плейтеста
+Если runtime-логике нужны данные, которых нет в карте (профиль игрока, прогресс, инвентарь, сейвы), редактор предоставляет их через **fixture-подобные провайдеры** (по аналогии с unit tests):
+- фиксированный “профиль по умолчанию”
+- тестовый инвентарь/прогресс
+- временное хранилище (in-memory) на время сессии плейтеста
+
+## Build (Windows, CMake + vcpkg)
+Сборка использует vcpkg (подключён как submodule). Мы **не патчим** `toolchain/vcpkg` напрямую.
+
+Если нужен фикс портов (пример: совместимость `sokol_imgui.h` с ImGui 1.91+), используем **overlay ports**:
+- `vcpkg_overlays/ports`
+- передать в CMake: `-DVCPKG_OVERLAY_PORTS=<abs_path>/vcpkg_overlays/ports`
+
+Пример (VS 2022):
+
+```bash
+cmake -S . -B "_intermediate_64" -DCMAKE_TOOLCHAIN_FILE=toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_OVERLAY_PORTS="D:/campus/neverwhere/vcpkg_overlays/ports" -G "Visual Studio 17 2022" -A x64
+cmake --build "_intermediate_64" --config Debug --target NeverwhereGame
+```
+
+## Roadmap (кратко)
+- **Undo/Redo**: перейти на неизменяемые снэпшоты через `immer` (см. `TECHNICAL_STACK.md`)
+- **Data/View separation**: отделить данные от QObject/QML представлений
