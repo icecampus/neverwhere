@@ -215,11 +215,14 @@ void main() {
     bBL = clamp(bBL, 0.0, 1.0);
     bBR = clamp(bBR, 0.0, 1.0);
     
-    // Zero out blend factors for neighbors with same material as center
-    if (slotTL == slotC) bTL = 0.0;
-    if (slotTR == slotC) bTR = 0.0;
-    if (slotBL == slotC) bBL = 0.0;
-    if (slotBR == slotC) bBR = 0.0;
+    // MATERIAL PRIORITY: Only blend with neighbors that have HIGHER material ID
+    // This prevents the "mirror" effect at boundaries
+    // Higher ID materials "invade" lower ID materials, not vice versa
+    // e.g., Sand(2) invades Grass(1), Rock(3) invades both
+    if (matTL <= matC) bTL = 0.0;
+    if (matTR <= matC) bTR = 0.0;
+    if (matBL <= matC) bBL = 0.0;
+    if (matBR <= matC) bBR = 0.0;
     
     // WEIGHTED BLENDING
     // Sum of neighbor blend factors determines how much we blend away from center
@@ -487,11 +490,12 @@ float4 main(PSIn inp): SV_Target0 {
     bBL = clamp(bBL, 0.0, 1.0);
     bBR = clamp(bBR, 0.0, 1.0);
     
-    // Zero out blend factors for same material
-    if (slotTL == slotC) bTL = 0.0;
-    if (slotTR == slotC) bTR = 0.0;
-    if (slotBL == slotC) bBL = 0.0;
-    if (slotBR == slotC) bBR = 0.0;
+    // MATERIAL PRIORITY: Only blend with neighbors that have HIGHER material ID
+    // This prevents the "mirror" effect at boundaries
+    if (matTL <= matC) bTL = 0.0;
+    if (matTR <= matC) bTR = 0.0;
+    if (matBL <= matC) bBL = 0.0;
+    if (matBR <= matC) bBR = 0.0;
     
     // WEIGHTED BLENDING
     // Sum of neighbor blend factors
