@@ -45,6 +45,7 @@ cd _b-em
     -DCMAKE_C_FLAGS="-gsource-map -O0" \
     -DCMAKE_EXE_LINKER_FLAGS="-gsource-map --emdebug" \
 	-DCMAKE_TOOLCHAIN_FILE=$vcpkg_path/scripts/buildsystems/vcpkg.cmake \
+    -DVCPKG_OVERLAY_PORTS=$root_path/vcpkg_overlays/ports \
 	-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$emsdk_path/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake \
 	-DVCPKG_TARGET_TRIPLET=wasm32-emscripten \
 	../ -G Ninja

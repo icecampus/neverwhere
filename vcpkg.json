@@ -21,6 +21,7 @@
     "libnoise",
     "gtest",
     "sokol",
+    "imgui",
     "glad"
   ]
 }
