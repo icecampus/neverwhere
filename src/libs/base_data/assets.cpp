@@ -7,6 +7,7 @@ namespace fs = std::filesystem;
 
 namespace BaseData
 {
+static constexpr const char* INDEX_FILENAME = "index.json";
 
 void to_json(nlohmann::json& j, const AssetData& obj)
 {
@@ -63,11 +64,25 @@ AssetData AssetData::load(const std::filesystem::path& path)
     std::ifstream file(indexPath);
     if (!file.is_open())
     {
-        //spdlog::error("Failed to open file: {}",  path.string());
+        // Invalid / non-asset directory. Return empty (caller should skip).
+        AssetData empty;
+        empty.indexPath = indexPath;
+        empty.name = path.filename().string();
+        return empty;
     }
 
     nlohmann::json j;
-    file >> j;
+    try
+    {
+        file >> j;
+    }
+    catch (const nlohmann::json::exception&)
+    {
+        AssetData empty;
+        empty.indexPath = indexPath;
+        empty.name = path.filename().string();
+        return empty;
+    }
 
     AssetData asset = j;
     asset.indexPath = indexPath;
@@ -113,6 +128,11 @@ AssetsPack AssetsPack::load(const std::filesystem::path& path)
     {
         if (entry.is_directory())
         {
+            // Skip non-asset helper directories (e.g. generated materials).
+            if (!fs::exists(entry.path() / INDEX_FILENAME))
+            {
+                continue;
+            }
             AssetData asset = AssetData::load(entry);
             pack.push_back(asset);
         }

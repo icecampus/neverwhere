@@ -6,6 +6,49 @@
 #include "core/lib.h"
 #include "ui/lib.h"
 #include <QQuickStyle>
+#include <QDateTime>
+#include <QFile>
+#include <QTextStream>
+#include <QtGlobal>
+
+static QFile* g_logFile = nullptr;
+
+static void qtMessageToFile(QtMsgType type, const QMessageLogContext& ctx, const QString& msg)
+{
+    QString typeStr;
+    switch (type)
+    {
+    case QtDebugMsg: typeStr = "DEBUG"; break;
+    case QtInfoMsg: typeStr = "INFO"; break;
+    case QtWarningMsg: typeStr = "WARN"; break;
+    case QtCriticalMsg: typeStr = "CRIT"; break;
+    case QtFatalMsg: typeStr = "FATAL"; break;
+    default: typeStr = "LOG"; break;
+    }
+
+    const QString line = QString("[%1] %2 %3 (%4:%5)\n")
+        .arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs))
+        .arg(typeStr)
+        .arg(msg)
+        .arg(QString(ctx.file ? ctx.file : "?"))
+        .arg(ctx.line);
+
+    // Best-effort file logging (won't crash if file can't open).
+    if (g_logFile && g_logFile->isOpen())
+    {
+        QTextStream ts(g_logFile);
+        ts << line;
+        ts.flush();
+    }
+
+    // Also print to stderr (useful when launched from terminal).
+    std::cerr << line.toStdString();
+
+    if (type == QtFatalMsg)
+    {
+        abort();
+    }
+}
 
 void registreTypes()
 {
@@ -106,6 +149,14 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
 
 int main(int argc, char* argv[])
 {
+    // Capture QML/Qt warnings into a local log file to debug early exits.
+    QFile logFile("EpicMapEditor.log");
+    if (logFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+    {
+        g_logFile = &logFile;
+    }
+    qInstallMessageHandler(qtMessageToFile);
+
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     
@@ -119,6 +170,15 @@ int main(int argc, char* argv[])
     QQmlApplicationEngine engine;
     registerGlobalObject(engine);
 
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &engine,
+        [](const QList<QQmlError>& warnings)
+        {
+            for (const auto& w : warnings)
+            {
+                qWarning().noquote() << w.toString();
+            }
+        });
+
     engine.addImportPath(engine.importPathList()[0] + "/qml");
     //qDebug() << engine.importPathList();
 
@@ -131,7 +191,10 @@ int main(int argc, char* argv[])
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
         &app, [url](QObject* obj, const QUrl& objUrl) {
             if (!obj && url == objUrl)
+            {
+                qCritical().noquote() << "Failed to create root object for:" << objUrl.toString();
                 QCoreApplication::exit(-1);
+            }
         }, Qt::QueuedConnection);
 
     

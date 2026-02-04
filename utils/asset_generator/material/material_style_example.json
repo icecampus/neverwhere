@@ -1,0 +1,32 @@
+{
+  "tile": {
+    "cols": 4,
+    "rows": 6,
+    "tile_w": 256,
+    "tile_h": 220,
+    "cy_base": 110,
+    "elevation": 26
+  },
+  "materials": {
+    "surface_albedo": "resources/assets/landscape/_materials/grass_albedo.png",
+    "side_soil_albedo": "resources/assets/landscape/_materials/soil_side.png",
+    "side_rock_albedo": "resources/assets/landscape/_materials/rock_side.png",
+    "edge_decals_sheet": "resources/assets/landscape/_materials/edge_decals.png",
+    "edge_decals_grid": { "cols": 4, "rows": 4 }
+  },
+  "style": {
+    "mode": "material",
+    "seed": 1337,
+    "edge_falloff_px": 10,
+    "edge_noise_amplitude_px": 4,
+    "edge_noise_scale": 0.08,
+    "decals_per_tile": 6,
+    "decals_scale_min": 0.55,
+    "decals_scale_max": 1.1,
+    "surface_uv_jitter_px": 32,
+    "side_uv_jitter_px": 16,
+    "side_mode": "mixed",
+    "outline_enabled": false
+  }
+}
+

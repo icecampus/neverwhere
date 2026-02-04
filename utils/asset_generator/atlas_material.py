@@ -4,8 +4,8 @@ import sys
 
 
 def main() -> int:
-    # Compatibility wrapper: keep old entrypoint working.
-    script = os.path.join(os.path.dirname(__file__), "technical", "generate_atlas.py")
+    # Compatibility wrapper: keep imports working for older experiments.
+    script = os.path.join(os.path.dirname(__file__), "material", "atlas_material.py")
     sys.argv[0] = script
     runpy.run_path(script, run_name="__main__")
     return 0
@@ -13,3 +13,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

@@ -25,13 +25,32 @@ void SliceAsset::load(const BaseData::AssetData& data)
         atlasImage.load(QString(atlasPath.c_str()));
     }
 
-    tiles = splitImageIntoTiles(atlasImage, 4, 6);
+    if (!atlasImage.isNull())
+    {
+        tiles = splitImageIntoTiles(atlasImage, 4, 6);
+    }
+    else
+    {
+        tiles.clear();
+    }
 }
 
 QImage SliceAsset::thumbnail()
 {
-    assert(tiles.size());
-    return tiles[0];
+    // Prefer first atlas tile (fast and consistent for landscape).
+    if (!tiles.empty() && !tiles[0].isNull())
+    {
+        return tiles[0];
+    }
+
+    // Fallback to explicit thumbnail if present.
+    if (!thumbnailImage.isNull())
+    {
+        return thumbnailImage;
+    }
+
+    // Keep editor stable even if asset data is incomplete.
+    return QImage();
 }
 
 QSize SliceAsset::getSize(StaggeredIsometry* iso)
@@ -40,6 +59,10 @@ QSize SliceAsset::getSize(StaggeredIsometry* iso)
     float mapSize = dimensions.getCellWidth();
 
     QSize imageRealSize = thumbnail().size();
+    if (mapSize <= 0.0f || imageRealSize.width() <= 0)
+    {
+        return QSize();
+    }
     float k = imageRealSize.width() / mapSize;
 
     return imageRealSize / k;
@@ -50,7 +73,10 @@ void SliceAsset::registerImages(RegistationHandle handle)
 {
     for(int i=0; i<tiles.size(); ++i)
     {
-        handle(i, tiles[i]);
+        if (!tiles[i].isNull())
+        {
+            handle(i, tiles[i]);
+        }
     }
 }
 
