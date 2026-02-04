@@ -1,6 +1,14 @@
+import argparse
 import math
+import os
 import sys
 from PIL import Image, ImageDraw
+
+# Shared helper (no package install required)
+_SHARED = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "_shared"))
+if _SHARED not in sys.path:
+    sys.path.append(_SHARED)
+from publish_utils import ensure_dir, now_run_id, publish_atlas_and_thumbnail  # noqa: E402
 
 def normalize(v):
     l = math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
@@ -42,7 +50,7 @@ def get_lighting_color(base_color, p1, p2, p3, light_dir):
         base_color[3]
     )
 
-def generate_png_atlas():
+def generate_png_atlas(output_path: str):
     COLS, ROWS = 4, 6
     TILE_W = 256
     TILE_H = 220 
@@ -196,13 +204,36 @@ def generate_png_atlas():
         draw.text((tx, ty - 8), f"ID: {i}", fill=text_color, anchor="mm")
         draw.text((tx, ty + 8), t_type, fill=text_color, anchor="mm")
 
-    output_path = 'technical_atlas_ridge.png'
-    if len(sys.argv) > 1:
-        output_path = sys.argv[1]
-
     img.save(output_path)
     print(f"Technical atlas (Ridge) saved to {output_path}")
 
 if __name__ == "__main__":
-    generate_png_atlas()
+    ap = argparse.ArgumentParser(description="Technical atlas generator (Ridge/Hybrid). Writes temp output and publishes to resources.")
+    ap.add_argument("output", nargs="?", default="", help="Optional explicit output PNG path. If omitted, writes to _intermediate_64/_asset_generator.")
+    ap.add_argument("--run-id", default="", help="Run id for temp output folder. If omitted, auto timestamp is used.")
+    ap.add_argument("--temp-root", default="_intermediate_64/_asset_generator", help="Temp root (ignored by git).")
+    ap.add_argument("--thumb-width", type=int, default=256, help="Thumbnail width in px (tile0, keep aspect).")
+    ap.add_argument("--no-publish", action="store_true", help="Do not publish into resources (temp only).")
+    args = ap.parse_args()
+
+    run_id = args.run_id or now_run_id()
+    if args.output:
+        out_path = args.output
+    else:
+        out_dir = os.path.join(args.temp_root, "technical", "ridge", run_id)
+        ensure_dir(out_dir)
+        out_path = os.path.join(out_dir, "atlas.png")
+
+    generate_png_atlas(out_path)
+
+    if not args.no_publish:
+        publish_atlas_and_thumbnail(
+            atlas_src_path=out_path,
+            pack_dir=os.path.join("resources", "assets", "landscape", "TechnicalGrassRidge"),
+            cols=4,
+            rows=6,
+            thumb_width=args.thumb_width,
+            ensure_index=False,
+        )
+        print("Published to resources/assets/landscape/TechnicalGrassRidge (atlas.png + thumbnail.png)")
 

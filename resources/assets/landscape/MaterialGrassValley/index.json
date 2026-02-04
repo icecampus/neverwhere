@@ -1,0 +1,12 @@
+{
+  "uuid": "f7cc1a21-b73e-4913-9aea-e5c67656bfdf",
+  "layerType": "BaseLandscape",
+  "pivot": {
+    "x": 0.0,
+    "y": 0.0
+  },
+  "slice": {
+    "thumbnail": "thumbnail.png",
+    "atlas": "atlas.png"
+  }
+}

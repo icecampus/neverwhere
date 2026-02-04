@@ -21,11 +21,23 @@
 pip install Pillow
 ```
 
-Примеры:
+## Новые правила (workflow)
+
+- **Временные файлы** и любые промежуточные результаты живут в `_intermediate_64/_asset_generator/...` (папка уже в `.gitignore`).
+- Каждый запуск **по умолчанию**:
+  - пишет результат в `_intermediate_64/_asset_generator/...`
+  - **публикует** его в `resources/assets/landscape/TechnicalGrassRidge|TechnicalGrassValley`
+  - и **перегенерирует** `thumbnail.png` из `tileIndex=0` (верхний левый тайл 4x6).
+- Если нужно получить только временный файл без публикации — используйте `--no-publish`.
+
+## Примеры
 
 ```bash
-python utils/asset_generator/technical/generate_atlas_ridge.py technical_atlas_ridge.png
-python utils/asset_generator/technical/generate_atlas_valley.py technical_atlas_valley.png
+python utils/asset_generator/technical/generate_atlas_ridge.py --run-id 20260204-1200_test
+python utils/asset_generator/technical/generate_atlas_valley.py --run-id 20260204-1200_test
+
+# temp-only (без обновления assets)
+python utils/asset_generator/technical/generate_atlas_ridge.py --no-publish
 ```
 
 ## Важно (что считается “техническим”)

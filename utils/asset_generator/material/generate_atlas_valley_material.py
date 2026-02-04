@@ -19,6 +19,13 @@ from atlas_material import (
     tile_pattern,
 )
 
+# Shared helper (no package install required)
+import sys
+_SHARED = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "_shared"))
+if _SHARED not in sys.path:
+    sys.path.append(_SHARED)
+from publish_utils import ensure_dir, now_run_id, publish_atlas_and_thumbnail  # noqa: E402
+
 
 def normalize(v):
     l = math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
@@ -232,14 +239,48 @@ def generate_png_atlas_material(output_path: str, style: MaterialStyle, repo_roo
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Generate material atlas (Valley variant).")
-    ap.add_argument("output", nargs="?", default="atlas_valley_material.png", help="Output PNG path.")
-    ap.add_argument("--config", default="", required=True, help="Path to JSON style config.")
+    ap = argparse.ArgumentParser(description="Generate material atlas (Valley variant). Writes temp output and publishes to resources.")
+    ap.add_argument("output", nargs="?", default="", help="Optional explicit output PNG path. If omitted, writes to _intermediate_64/_asset_generator.")
+    ap.add_argument("--config", default=os.path.join("utils", "asset_generator", "material", "material_style_example.json"), help="Path to JSON style config.")
     ap.add_argument("--repo-root", default=".", help="Repo root for resolving relative paths in config.")
+    ap.add_argument("--materials-dir", default="", help="If set, overrides texture inputs (expects grass_albedo.png, soil_side.png, rock_side.png, edge_decals.png).")
+    ap.add_argument("--run-id", default="", help="Run id for temp output folder. If omitted, auto timestamp is used.")
+    ap.add_argument("--temp-root", default="_intermediate_64/_asset_generator", help="Temp root (ignored by git).")
+    ap.add_argument("--thumb-width", type=int, default=256, help="Thumbnail width in px (tile0, keep aspect).")
+    ap.add_argument("--no-publish", action="store_true", help="Do not publish into resources (temp only).")
     args = ap.parse_args()
 
     style = MaterialStyle.from_json(args.config)
-    generate_png_atlas_material(args.output, style, repo_root=args.repo_root)
+
+    if args.materials_dir:
+        md = args.materials_dir
+        style.surface_albedo = os.path.join(md, "grass_albedo.png")
+        style.side_soil_albedo = os.path.join(md, "soil_side.png")
+        rock = os.path.join(md, "rock_side.png")
+        decals = os.path.join(md, "edge_decals.png")
+        style.side_rock_albedo = rock if os.path.exists(rock) else None
+        style.edge_decals_sheet = decals if os.path.exists(decals) else None
+
+    run_id = args.run_id or now_run_id()
+    if args.output:
+        out_path = args.output
+    else:
+        out_dir = os.path.join(args.temp_root, "material", "valley", run_id)
+        ensure_dir(out_dir)
+        out_path = os.path.join(out_dir, "atlas.png")
+
+    generate_png_atlas_material(out_path, style, repo_root=args.repo_root)
+
+    if not args.no_publish:
+        publish_atlas_and_thumbnail(
+            atlas_src_path=out_path,
+            pack_dir=os.path.join("resources", "assets", "landscape", "MaterialGrassValley"),
+            cols=4,
+            rows=6,
+            thumb_width=args.thumb_width,
+            ensure_index=True,
+        )
+        print("Published to resources/assets/landscape/MaterialGrassValley (atlas.png + thumbnail.png + index.json)")
     return 0
 
 
