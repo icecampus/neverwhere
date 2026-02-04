@@ -8,12 +8,14 @@ from PIL import Image
 from atlas_material import (
     MaterialStyle,
     apply_alpha,
+    alpha_bleed_rgba,
+    apply_lighting_mul,
     apply_edge_noise,
     edge_band_mask,
     load_rgba,
     overlay_solid,
     paste_with_mask,
-    polygon_mask,
+    polygon_mask_ssaa,
     scatter_decals,
     split_sheet,
     tile_pattern,
@@ -174,7 +176,7 @@ def generate_png_atlas_material(output_path: str, style: MaterialStyle, repo_roo
                 continue
 
             wall_poly = [pts_base[j], pts_base[nj], pts_surface[nj], pts_surface[j]]
-            wall_mask = polygon_mask((TILE_W, TILE_H), wall_poly)
+            wall_mask = polygon_mask_ssaa((TILE_W, TILE_H), wall_poly, ss=style.mask_ssaa)
 
             use_rock = False
             if style.side_mode == "rock":
@@ -212,16 +214,17 @@ def generate_png_atlas_material(output_path: str, style: MaterialStyle, repo_roo
             if heights[i1] == 0 and heights[i2] == 0 and heights[i3] == 0:
                 continue
             tri_poly = [pts_surface[i1], pts_surface[i2], pts_surface[i3]]
-            tri_mask = polygon_mask((TILE_W, TILE_H), tri_poly)
+            tri_mask = polygon_mask_ssaa((TILE_W, TILE_H), tri_poly, ss=style.mask_ssaa)
             bright = triangle_brightness(pts_3d[i1], pts_3d[i2], pts_3d[i3], light_dir)
-            if bright >= 1.0:
-                a = int(max(0.0, min(120.0, (bright - 1.0) * 90.0)))
-                overlay_solid(tile_surface, (255, 255, 255, a), tri_mask)
-            else:
-                a = int(max(0.0, min(160.0, (1.0 - bright) * 140.0)))
-                overlay_solid(tile_surface, (0, 0, 0, a), tri_mask)
+            # Convert brightness to a gentle multiplicative factor to avoid visible triangle artifacts.
+            factor = max(0.85, min(1.15, bright))
+            tile_surface = apply_lighting_mul(tile_surface, tri_mask, factor)
 
-        hard = polygon_mask((TILE_W, TILE_H), [pts_surface[0], pts_surface[1], pts_surface[2], pts_surface[3]])
+        hard = polygon_mask_ssaa(
+            (TILE_W, TILE_H),
+            [pts_surface[0], pts_surface[1], pts_surface[2], pts_surface[3]],
+            ss=style.mask_ssaa,
+        )
         soft, band = edge_band_mask(hard, style.edge_falloff_px)
         alpha = apply_edge_noise(soft, band, style.edge_noise_amplitude_px, style.edge_noise_scale, seed=style.seed + i * 17)
         tile_surface = apply_alpha(tile_surface, alpha)
@@ -238,6 +241,7 @@ def generate_png_atlas_material(output_path: str, style: MaterialStyle, repo_roo
 
         tile = tile_walls
         tile.alpha_composite(tile_surface)
+        tile = alpha_bleed_rgba(tile, radius_px=style.alpha_bleed_px)
         img.alpha_composite(tile, (x, y))
 
     img.save(output_path)

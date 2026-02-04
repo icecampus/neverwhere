@@ -90,6 +90,23 @@ def polygon_mask(size: Tuple[int, int], pts: List[Tuple[float, float]]) -> Image
     return m
 
 
+def polygon_mask_ssaa(size: Tuple[int, int], pts: List[Tuple[float, float]], ss: int = 4) -> Image.Image:
+    """
+    Supersampled polygon mask for smoother edges.
+    Renders at (w*ss, h*ss) then downsamples to (w,h).
+    """
+    w, h = size
+    ss = max(1, int(ss))
+    W, H = w * ss, h * ss
+    m = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(m)
+    pts2 = [(p[0] * ss, p[1] * ss) for p in pts]
+    d.polygon(pts2, fill=255)
+    if ss == 1:
+        return m
+    return m.resize((w, h), resample=Image.Resampling.LANCZOS)
+
+
 def apply_alpha(img: Image.Image, alpha: Image.Image) -> Image.Image:
     out = img.copy()
     r, g, b, a = out.split()
@@ -107,6 +124,59 @@ def paste_with_mask(dst: Image.Image, src: Image.Image, mask: Image.Image) -> No
 def overlay_solid(dst: Image.Image, color_rgba: Tuple[int, int, int, int], mask: Image.Image) -> None:
     solid = Image.new("RGBA", dst.size, color_rgba)
     paste_with_mask(dst, solid, mask)
+
+
+def apply_lighting_mul(img: Image.Image, mask: Image.Image, factor: float) -> Image.Image:
+    """
+    Apply gentle multiplicative lighting under `mask` (L image).
+    This avoids the obvious triangle artifacts produced by additive white/black overlays.
+    """
+    factor = float(factor)
+    if abs(factor - 1.0) < 1e-6:
+        return img
+    r, g, b, a = img.split()
+
+    def _mul_chan(ch: Image.Image) -> Image.Image:
+        return ch.point(lambda p: _clamp_int(int(p * factor + 0.5), 0, 255))
+
+    mod = Image.merge("RGBA", (_mul_chan(r), _mul_chan(g), _mul_chan(b), a))
+    return Image.composite(mod, img, mask)
+
+
+def alpha_bleed_rgba(img: Image.Image, radius_px: int = 2, alpha_threshold: int = 1) -> Image.Image:
+    """
+    Fill RGB under (near-)transparent pixels by dilating nearby opaque colors (alpha remains unchanged).
+    This prevents dark fringes when sampling straight-alpha textures with bilinear filtering.
+    """
+    radius_px = max(0, int(radius_px))
+    if radius_px <= 0:
+        return img
+
+    r, g, b, a = img.split()
+    # solid mask: 255 where alpha >= threshold, else 0
+    solid = a.point(lambda p: 255 if p >= alpha_threshold else 0)
+
+    # Iterative 1px dilation steps for better control
+    k = ImageFilter.MaxFilter(3)
+    r2, g2, b2 = r.copy(), g.copy(), b.copy()
+    solid2 = solid.copy()
+
+    for _ in range(radius_px):
+        solid_d = solid2.filter(k)
+        new = ImageChops.subtract(solid_d, solid2)  # newly covered pixels (0..255)
+        if new.getbbox() is None:
+            break
+
+        rd = r2.filter(k)
+        gd = g2.filter(k)
+        bd = b2.filter(k)
+
+        r2 = Image.composite(rd, r2, new)
+        g2 = Image.composite(gd, g2, new)
+        b2 = Image.composite(bd, b2, new)
+        solid2 = solid_d
+
+    return Image.merge("RGBA", (r2, g2, b2, a))
 
 
 def edge_band_mask(surface_mask: Image.Image, falloff_px: int) -> Tuple[Image.Image, Image.Image]:
@@ -206,6 +276,8 @@ class MaterialStyle:
     side_uv_jitter_px: int = 16
     side_mode: str = "mixed"  # soil|rock|mixed
     outline_enabled: bool = False
+    alpha_bleed_px: int = 2
+    mask_ssaa: int = 4
 
     @staticmethod
     def from_json(path: str) -> "MaterialStyle":
@@ -232,6 +304,8 @@ class MaterialStyle:
             side_uv_jitter_px=int(st.get("side_uv_jitter_px", 16)),
             side_mode=str(st.get("side_mode", "mixed")),
             outline_enabled=bool(st.get("outline_enabled", False)),
+            alpha_bleed_px=int(st.get("alpha_bleed_px", 2)),
+            mask_ssaa=int(st.get("mask_ssaa", 4)),
         )
 
     def resolve_paths(self, repo_root: str) -> None:
