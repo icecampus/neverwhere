@@ -7,7 +7,7 @@ Neverwhere — это **узкоспециализированный 2D engine/s
 
 ## Apps
 - **Editor**: `src/apps/EpicMapEditor`
-- **Runtime (EpicGameRuntime)**: `src/apps/NeverwhereGame` *(текущее имя таргета/папки; переименование — отдельная задача)*
+- **Runtime (EpicGameRuntime)**: `src/apps/EpicGameRuntime`
 
 ## High-level architecture
 
@@ -85,7 +85,7 @@ flowchart TB
 
 ```bash
 cmake -S . -B "_intermediate_64" -DCMAKE_TOOLCHAIN_FILE=toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_OVERLAY_PORTS="D:/campus/neverwhere/vcpkg_overlays/ports" -G "Visual Studio 17 2022" -A x64
-cmake --build "_intermediate_64" --config Debug --target NeverwhereGame
+cmake --build "_intermediate_64" --config Debug --target EpicGameRuntime
 ```
 
 ## Roadmap (кратко)

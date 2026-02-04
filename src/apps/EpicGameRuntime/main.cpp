@@ -43,7 +43,7 @@ static AppState g_state;
 
 static void init(void) {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("NeverwhereGame: init()");
+    spdlog::info("EpicGameRuntime: init()");
 
     stm_setup();
     g_state.last_time = stm_now();
@@ -54,13 +54,13 @@ static void init(void) {
     sg_setup(&desc);
     g_state.gfx_ok = sg_isvalid();
 
-    spdlog::info("NeverwhereGame: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
+    spdlog::info("EpicGameRuntime: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
 
     if (g_state.gfx_ok) {
         simgui_desc_t imgui_desc = {};
         simgui_setup(&imgui_desc);
         g_state.imgui_ok = true;
-        spdlog::info("NeverwhereGame: simgui_setup() OK");
+        spdlog::info("EpicGameRuntime: simgui_setup() OK");
     }
 }
 
@@ -90,8 +90,8 @@ static void frame(void) {
         simgui_new_frame(&fd);
 
         ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-        ImGui::SetNextWindowSize(ImVec2(380.0f, 160.0f), ImGuiCond_Once);
-        ImGui::Begin("NeverwhereGame (debug)");
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 170.0f), ImGuiCond_Once);
+        ImGui::Begin("EpicGameRuntime (debug)");
         ImGui::Text("Frame: %d", g_state.frame_index);
         ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
         ImGui::Text("Size: %dx%d  DPI: %.2f", w, h, sapp_dpi_scale());
@@ -114,7 +114,7 @@ static void frame(void) {
 }
 
 static void cleanup(void) {
-    spdlog::info("NeverwhereGame: cleanup()");
+    spdlog::info("EpicGameRuntime: cleanup()");
     if (g_state.imgui_ok) {
         simgui_shutdown();
         g_state.imgui_ok = false;
@@ -143,7 +143,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "NeverwhereGame";
+    desc.window_title = "EpicGameRuntime";
     desc.high_dpi = true;
 #if defined(_WIN32)
     // Ensure logs are visible when started from a console.

@@ -33,7 +33,7 @@
 - ImGui overlay;
 - прокидывание событий в UI/игру.
 
-Это ровно то, что делает `src/apps/NeverwhereGame` (будущий “production shell”).
+Это ровно то, что делает `src/apps/EpicGameRuntime` (будущий “production shell”).
 
 ### 3) `graphics_shell_qtquick` (editor)
 **Зависимости**: QtQuick (`QQuickFramebufferObject`), OpenGL (через Qt), `graphics_core`.
@@ -50,10 +50,10 @@
 - корректная стратегия `sg_commit()` (один раз на кадр на “верхнем” уровне).
 
 ## Миграция по шагам (без ломания)
-1. **Стабилизировать runtime shell** (`NeverwhereGame`) на sokol_app + ImGui (уже сделано как каркас).
+1. **Стабилизировать runtime shell** (`EpicGameRuntime`) на sokol_app + ImGui (уже сделано как каркас).
 2. Вытащить из текущего `src/libs/graphics/sokol_impl.cpp` минимальный “рендер квадов” в новый `graphics_core`.
 3. Переподключить:
-   - runtime: `NeverwhereGame` → использует `graphics_core`;
+   - runtime: `EpicGameRuntime` → использует `graphics_core`;
    - editor: `EcsPlayground/GameView` → вместо `Graphics::init()/draw_rects` зовёт `graphics_shell_qtquick` + `graphics_core`.
 4. Оставить старый `src/libs/graphics` как “compat layer” на 1-2 итерации (или удалить после перевода).
 
