@@ -6,7 +6,12 @@
 #include <spdlog/spdlog.h>
 
 // Dear ImGui
+// Define ImTextureID as void* for compatibility with sokol_imgui
+#define ImTextureID void*
 #include <imgui.h>
+
+// Runtime
+#include <game_runtime/lib.h>
 
 // Runtime data & rendering
 #include <game_data/assets.h>
@@ -42,6 +47,7 @@
 #include <sokol_time.h>
 #include <util/sokol_imgui.h>
 
+// Global state for Sokol callbacks
 struct AppState {
     uint64_t last_time = 0;
     float dt = 1.0f / 60.0f;
@@ -62,18 +68,15 @@ struct AppState {
 
 static AppState g_state;
 
-struct AppConfig {
-    std::filesystem::path mapPath = "resources/chapters/Base/maps/map.json";
-    std::filesystem::path assetsRoot = "resources/assets";
-    std::filesystem::path dataRoot; // optional override/root for resolving relative paths
-};
+// Game Runtime
+static std::unique_ptr<game_runtime::Runtime> g_runtime;
 
-static AppConfig g_cfg;
-
+// Rendering
 static topology_core::StaggeredIsometry g_iso;
 static topology_core::Camera2D g_camera;
 static render_core::LandscapeRenderer g_land;
 static std::vector<render_core::LandscapeTile> g_tiles;
+static game_data::AssetIndex g_assetIndex;
 
 static bool looksLikeDataRoot(const std::filesystem::path& dir) {
     namespace fs = std::filesystem;
@@ -112,6 +115,43 @@ static std::filesystem::path getExecutableDir() {
 }
 #endif
 
+static void updateTilesFromWorld() {
+    if (!g_runtime || !g_runtime->currentSession()) return;
+    
+    g_tiles.clear();
+    auto& world = g_runtime->currentSession()->world();
+    
+    // Получаем слой ландшафта из мира
+    const auto* layer = world.getLayer(game_data::LayerType::BaseLandscape);
+    if (!layer) return;
+    
+    for (const auto& obj : *layer) {
+        if (obj.type != game_data::GameObjectType::Landscape) continue;
+        if (!obj.landscapeData) continue;
+
+        render_core::LandscapeTile t;
+        t.cell = obj.position;
+        t.assetUuid = obj.assetUuid;
+        t.tileIndex = obj.landscapeData->tileIndex;
+        g_tiles.push_back(std::move(t));
+    }
+    
+    // Загружаем необходимые атласы
+    std::unordered_set<std::string> uniqueAtlases;
+    for (const auto& t : g_tiles) {
+        uniqueAtlases.insert(t.assetUuid);
+    }
+    
+    for (const auto& uuid : uniqueAtlases) {
+        const game_data::AssetIndexEntry* entry = g_assetIndex.find(uuid);
+        if (!entry) {
+            spdlog::warn("Atlas not found for assetUuid={}", uuid);
+            continue;
+        }
+        g_land.ensureAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
+    }
+}
+
 static void init(void) {
     spdlog::set_level(spdlog::level::info);
     spdlog::info("EpicGameRuntime: init()");
@@ -127,49 +167,17 @@ static void init(void) {
 
     spdlog::info("EpicGameRuntime: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
 
-    if (g_state.gfx_ok) {
-        // Load map + assets (No-Qt)
+    if (g_state.gfx_ok && g_runtime && g_runtime->currentSession()) {
         try {
-            spdlog::info("CWD: {}", std::filesystem::current_path().string());
-            spdlog::info("Resolved mapPath: {}", g_cfg.mapPath.string());
-            spdlog::info("Resolved assetsRoot: {}", g_cfg.assetsRoot.string());
-
-            const game_data::Map map = game_data::Map::load(g_cfg.mapPath);
-            const game_data::AssetIndex assetIndex = game_data::AssetIndex::load(g_cfg.assetsRoot);
-
-            g_tiles.clear();
-            for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
-                if (obj.type != game_data::GameObjectType::Landscape) continue;
-                if (!obj.landscapeData) continue;
-
-                render_core::LandscapeTile t;
-                t.cell = obj.position;
-                t.assetUuid = obj.assetUuid;
-                t.tileIndex = obj.landscapeData->tileIndex;
-                g_tiles.push_back(std::move(t));
-            }
-
-            // Setup renderer + upload atlases we need
+            // Инициализируем рендерер
             g_land.init();
-            std::unordered_set<std::string> uniqueAtlases;
-            uniqueAtlases.reserve(8);
-            for (const auto& t : g_tiles) {
-                uniqueAtlases.insert(t.assetUuid);
-            }
-
-            for (const auto& uuid : uniqueAtlases) {
-                const game_data::AssetIndexEntry* entry = assetIndex.find(uuid);
-                if (!entry) {
-                    spdlog::warn("Atlas not found for assetUuid={}", uuid);
-                    continue;
-                }
-                g_land.ensureAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
-                spdlog::info("Loaded atlas uuid={} path={}", uuid, entry->atlasPath.string());
-            }
-
+            
+            // Обновляем тайлы из игрового мира
+            updateTilesFromWorld();
+            
             spdlog::info("Loaded tiles: {}", g_tiles.size());
         } catch (const std::exception& e) {
-            spdlog::error("Init data failed: {}", e.what());
+            spdlog::error("Init renderer failed: {}", e.what());
         }
 
         simgui_desc_t imgui_desc = {};
@@ -185,8 +193,12 @@ static void frame(void) {
     g_state.last_time = now;
     g_state.frame_index++;
 
+    // Обновляем Runtime
+    if (g_runtime && g_runtime->currentSession()) {
+        g_runtime->update(g_state.dt);
+    }
+
     if (!g_state.gfx_ok) {
-        // Try again (e.g. if context wasn't ready for some reason)
         g_state.gfx_ok = sg_isvalid();
         if (!g_state.gfx_ok) {
             return;
@@ -219,6 +231,14 @@ static void frame(void) {
         ImGui::Text("Hovered cell: (%d, %d)", hoveredCell.x, hoveredCell.y);
         ImGui::Separator();
         ImGui::Text("Tiles (BaseLandscape): %d", (int)g_tiles.size());
+        if (g_runtime && g_runtime->currentSession()) {
+            auto* session = g_runtime->currentSession();
+            ImGui::Text("Session time: %.1f s", session->sessionTime());
+            ImGui::Text("World day: %d %02d:%02d", 
+                session->world().getDay(),
+                session->world().getHour(),
+                session->world().getMinute());
+        }
         ImGui::End();
     }
 
@@ -240,6 +260,10 @@ static void frame(void) {
 
 static void cleanup(void) {
     spdlog::info("EpicGameRuntime: cleanup()");
+    
+    // Cleanup Runtime
+    g_runtime.reset();
+    
     if (g_state.imgui_ok) {
         simgui_shutdown();
         g_state.imgui_ok = false;
@@ -313,54 +337,92 @@ static void event(const sapp_event* ev) {
 }
 
 int main(int argc, char* argv[]) {
-    // Very small CLI:
-    //   --map <path>
-    //   --assets-root <path>
-    //   --data-root <path>
+    // Parse CLI arguments
+    std::filesystem::path mapPath = "resources/chapters/Base/maps/map.json";
+    std::filesystem::path assetsRoot = "resources/assets";
+    std::filesystem::path dataRoot;
+    
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
         if ((arg == "--map") && (i + 1 < argc)) {
-            g_cfg.mapPath = argv[++i];
+            mapPath = argv[++i];
         } else if ((arg == "--assets-root") && (i + 1 < argc)) {
-            g_cfg.assetsRoot = argv[++i];
+            assetsRoot = argv[++i];
         } else if ((arg == "--data-root") && (i + 1 < argc)) {
-            g_cfg.dataRoot = argv[++i];
+            dataRoot = argv[++i];
         }
     }
 
-    // Resolve data root:
-    // 1) explicit --data-root
-    // 2) env var NW_DATA_ROOT
-    // 3) auto-detect by walking upwards from CWD, and from exe dir (Windows)
-    if (g_cfg.dataRoot.empty()) {
+    // Resolve data root
+    if (dataRoot.empty()) {
         if (const char* env = std::getenv("NW_DATA_ROOT"); env && *env) {
-            g_cfg.dataRoot = env;
+            dataRoot = env;
         }
     }
-    if (g_cfg.dataRoot.empty()) {
-        g_cfg.dataRoot = findDataRootUpwards(std::filesystem::current_path());
+    if (dataRoot.empty()) {
+        dataRoot = findDataRootUpwards(std::filesystem::current_path());
     }
 #if defined(_WIN32)
-    if (g_cfg.dataRoot.empty()) {
+    if (dataRoot.empty()) {
         const auto exeDir = getExecutableDir();
         if (!exeDir.empty()) {
-            g_cfg.dataRoot = findDataRootUpwards(exeDir);
+            dataRoot = findDataRootUpwards(exeDir);
         }
     }
 #endif
 
-    if (!g_cfg.dataRoot.empty()) {
-        if (g_cfg.mapPath.is_relative()) {
-            g_cfg.mapPath = g_cfg.dataRoot / g_cfg.mapPath;
+    if (!dataRoot.empty()) {
+        if (mapPath.is_relative()) {
+            mapPath = dataRoot / mapPath;
         }
-        if (g_cfg.assetsRoot.is_relative()) {
-            g_cfg.assetsRoot = g_cfg.dataRoot / g_cfg.assetsRoot;
+        if (assetsRoot.is_relative()) {
+            assetsRoot = dataRoot / assetsRoot;
         }
     }
 
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("EpicGameRuntime: dataRoot={}", g_cfg.dataRoot.empty() ? "<none>" : g_cfg.dataRoot.string());
+    spdlog::info("EpicGameRuntime: dataRoot={}", dataRoot.empty() ? "<none>" : dataRoot.string());
+    
+    // Load assets index
+    try {
+        g_assetIndex = game_data::AssetIndex::load(assetsRoot);
+        spdlog::info("Loaded {} assets", g_assetIndex.byUuid.size());
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to load asset index: {}", e.what());
+    }
 
+    // Create and initialize Runtime
+    game_runtime::RuntimeConfig config;
+    config.windowTitle = "EpicGameRuntime";
+    config.defaultMap = mapPath;
+    config.assetsRoot = assetsRoot;
+    config.dataRoot = dataRoot;
+    config.enableEditorExtensions = false; // Standalone player mode
+    
+    g_runtime = std::make_unique<game_runtime::Runtime>(config);
+    
+    if (!g_runtime->initialize()) {
+        spdlog::error("Failed to initialize Runtime");
+        return 1;
+    }
+    
+    // Create game session from fixture
+    auto fixture = game_runtime::Fixture::create()
+        .withName("Default Session")
+        .withMap(mapPath.string())
+        .newGame()
+        .build();
+    
+    auto* session = g_runtime->createSession(fixture);
+    
+    if (!session) {
+        spdlog::error("Failed to create game session");
+        return 1;
+    }
+    
+    spdlog::info("Game session created successfully");
+
+    // Run Sokol app
     sapp_desc desc = {};
     desc.init_cb = init;
     desc.frame_cb = frame;
@@ -372,14 +434,11 @@ int main(int argc, char* argv[]) {
     desc.window_title = "EpicGameRuntime";
     desc.high_dpi = true;
 #if defined(_WIN32)
-    // Ensure logs are visible when started from a console.
     desc.win32_console_utf8 = true;
     desc.win32_console_attach = true;
 #endif
-    // Enable sokol_app internal logging (default is NO LOGGING).
     desc.logger.func = slog_func;
 
     sapp_run(&desc);
     return 0;
 }
-

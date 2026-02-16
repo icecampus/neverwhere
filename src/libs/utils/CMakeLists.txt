@@ -3,5 +3,5 @@ nw_add_lib(
 		libs 
 	LIBS 
 		Qt6::Core
-		spdlog::spdlog
+		spdlog::spdlog_header_only
 		)

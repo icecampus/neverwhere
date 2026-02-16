@@ -32,6 +32,7 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 
+#define SPDLOG_HEADER_ONLY
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>

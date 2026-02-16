@@ -1,3 +1,5 @@
+find_package(imgui CONFIG REQUIRED)
+
 nw_add_qml_app(
     GROUP 
         _apps 
@@ -5,6 +7,10 @@ nw_add_qml_app(
         core
         ui
         generators
+        game_runtime
+        render_core
+        topology_core
+        imgui::imgui
         Qt6::Core 
         Qt6::Qml
         Qt6::Quick
@@ -13,6 +19,18 @@ nw_add_qml_app(
         Qt6::Core5Compat
         Qt6::QuickControls2
     )
+
+# Sokol is header-only
+find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")
+if(NOT SOKOL_INCLUDE_DIRS)
+    message(FATAL_ERROR "Sokol headers not found")
+endif()
+target_include_directories(${AppName} PRIVATE ${SOKOL_INCLUDE_DIRS})
+
+# OpenGL/Renderer libraries
+if(MSVC)
+    target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
+endif()
 
 accumulate_files_relative(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} png_resources png)
 # message(FATAL_ERROR "png_resources: ${png_resources}")

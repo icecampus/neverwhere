@@ -6,6 +6,6 @@ nw_add_lib(
 		magic_enum::magic_enum 
 		math
 		nlohmann_json::nlohmann_json
-		spdlog::spdlog
+		spdlog::spdlog_header_only
 		Qt6::Core
 		)

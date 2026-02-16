@@ -16,5 +16,6 @@
 #include <QMetaType>
 
 #include <fmt/format.h>
+#define SPDLOG_HEADER_ONLY
 #include <spdlog/spdlog.h>
 #include <boost/container_hash/hash.hpp>

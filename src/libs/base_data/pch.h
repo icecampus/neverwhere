@@ -19,6 +19,7 @@
 #include <glm/gtx/transform.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define SPDLOG_HEADER_ONLY
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <magic_enum/magic_enum.hpp>

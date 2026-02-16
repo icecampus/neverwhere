@@ -5,6 +5,7 @@
 #include <memory>
 #include "core/lib.h"
 #include "ui/lib.h"
+#include "src/runtime_map_view.h"
 #include <QQuickStyle>
 #include <QDateTime>
 #include <QFile>
@@ -92,6 +93,9 @@ void registreTypes()
 
     qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
     qmlRegisterType<StaggeredCursor>("Game", 1, 0, "StaggeredCursor");
+    
+    // RuntimeMapView - OpenGL rendering through Runtime
+    qmlRegisterType<RuntimeMapView>("Game", 1, 0, "RuntimeMapView");
 
     
     qmlRegisterType<PropertyContainersModel>("Game", 1, 0, "PropertyContainersModel");

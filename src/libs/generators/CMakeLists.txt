@@ -6,7 +6,7 @@ nw_add_lib(
 		Qt6::Core
 		Qt6::Gui
 		glm::glm-header-only
-		spdlog::spdlog
+		spdlog::spdlog_header_only
 
 		math
 		base_data

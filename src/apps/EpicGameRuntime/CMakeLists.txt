@@ -4,9 +4,10 @@ nw_add_console_app(
     GROUP
         _apps
     LIBS
-        spdlog::spdlog
+        spdlog::spdlog_header_only
         imgui::imgui
         game_data
+        game_runtime
         topology_core
         render_core
 )

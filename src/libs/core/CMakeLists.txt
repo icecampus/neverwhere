@@ -9,7 +9,7 @@ if(MSVC)
 			Qt6::Quick
 			glm::glm-header-only
 			nlohmann_json::nlohmann_json
-			spdlog::spdlog
+			spdlog::spdlog_header_only
 			unofficial::noise::noise
 			
 			math
@@ -28,7 +28,7 @@ else()
 			Qt6::Quick
 			glm::glm-header-only
 			nlohmann_json::nlohmann_json
-			spdlog::spdlog
+			spdlog::spdlog_header_only
 			unofficial::noise::noise-static
 			
 			math

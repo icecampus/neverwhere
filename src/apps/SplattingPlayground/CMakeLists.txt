@@ -4,7 +4,7 @@ nw_add_console_app(
     GROUP
         _apps
     LIBS
-        spdlog::spdlog
+        spdlog::spdlog_header_only
         imgui::imgui
         topology_core
 )

@@ -15,6 +15,7 @@
 #include <QObject>
 #include <QMetaType>
 
+#define SPDLOG_HEADER_ONLY
 #include <spdlog/spdlog.h>
 
 #include <filesystem>

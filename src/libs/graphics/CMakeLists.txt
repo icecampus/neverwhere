@@ -21,7 +21,7 @@ nw_add_lib_sources(
     LIBS
         Qt6::Core
         Qt6::Quick
-        spdlog::spdlog
+        spdlog::spdlog_header_only
         glad::glad
         ${GRAPHICS_LIBS}
 )
