@@ -1,33 +1,41 @@
 {
-    "version": 10,
-    "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 24,
-        "patch": 0
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Visual Studio 17 2022 x64",
+      "binaryDir": "${sourceDir}/_intermediate_64",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg_overlays/ports",
+        "VCPKG_INSTALL_OPTIONS": "--x-buildtrees-root=d:/_build"
+      }
     },
-    "configurePresets": [
-        {
-            "name": "default",
-            "displayName": "Emscripten",
-            "binaryDir": "_b-em",
-            "generator": "Ninja Multi-Config",
-            "toolchainFile": "toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
-            "cacheVariables": {
-                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchain/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
-                "VCPKG_TARGET_TRIPLET": "wasm32-emscripten"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "Debug",
-            "configurePreset": "default",
-            "configuration": "Debug"
-        },
-        {
-            "name": "Release",
-            "configurePreset": "default",
-            "configuration": "Release"
-        }
-    ]
+    {
+      "name": "vs2022",
+      "displayName": "Visual Studio 17 2022 x64",
+      "inherits": "default"
+    },
+    {
+      "name": "emscripten",
+      "displayName": "Emscripten",
+      "binaryDir": "${sourceDir}/_b-em",
+      "generator": "Ninja Multi-Config",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchain/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "VCPKG_TARGET_TRIPLET": "wasm32-emscripten"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "vs2022", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "vs2022", "configuration": "Release" },
+    { "name": "emscripten-debug", "configurePreset": "emscripten", "configuration": "Debug" },
+    { "name": "emscripten-release", "configurePreset": "emscripten", "configuration": "Release" }
+  ]
 }

@@ -77,16 +77,33 @@ flowchart TB
 ## Build (Windows, CMake + vcpkg)
 Сборка использует vcpkg (подключён как submodule). Мы **не патчим** `toolchain/vcpkg` напрямую.
 
+Основной Windows-flow строится вокруг CMake Presets и Visual Studio 2022:
+
+```bat
+generate_vs.bat
+```
+
+По умолчанию скрипт bootstrap'ит vcpkg при необходимости и генерирует solution через preset `vs2022`. После этого можно открыть:
+
+```text
+_intermediate_64\Neverwhere.sln
+```
+
+Можно явно выбрать CMake configure preset:
+
+```bat
+generate_vs.bat vs2022
+```
+
+Сборка после генерации выполняется из Visual Studio или явно через CMake/MSBuild:
+
+```bat
+cmake --build --preset debug --target EpicMapEditor
+```
+
 Если нужен фикс портов (пример: совместимость `sokol_imgui.h` с ImGui 1.91+), используем **overlay ports**:
 - `vcpkg_overlays/ports`
-- передать в CMake: `-DVCPKG_OVERLAY_PORTS=<abs_path>/vcpkg_overlays/ports`
-
-Пример (VS 2022):
-
-```bash
-cmake -S . -B "_intermediate_64" -DCMAKE_TOOLCHAIN_FILE=toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_OVERLAY_PORTS="D:/campus/neverwhere/vcpkg_overlays/ports" -G "Visual Studio 17 2022" -A x64
-cmake --build "_intermediate_64" --config Debug --target EpicGameRuntime
-```
+- путь уже подключён в `CMakePresets.json` через `VCPKG_OVERLAY_PORTS`
 
 ## Roadmap (кратко)
 - **Undo/Redo**: перейти на неизменяемые снэпшоты через `immer` (см. `TECHNICAL_STACK.md`)

@@ -3,7 +3,7 @@
     "boost-uuid",
     "boost-lexical-cast",
     "boost-container-hash",
-    {"name": "qtbase",            "platform": "!emscripten"},
+    {"name": "qtbase",            "platform": "!emscripten",  "features": [ "windeployqt" ]},
     {"name": "qtbase",            "platform": "emscripten",  "default-features":false, "features": [ "gles2", "opengl", "freetype", "gui", "jpeg", "png", "zstd", "widgets" ]},
 
     {"name": "qtdeclarative"},

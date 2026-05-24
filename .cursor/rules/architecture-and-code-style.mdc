@@ -1,0 +1,17 @@
+---
+description: Architecture and code style conventions for Neverwhere
+alwaysApply: true
+---
+
+# Architecture And Code Style
+
+- Keep this as a single monorepo: applications and libraries belong under the existing project structure.
+- Use shared CMake macros such as `nw_add_qml_app`, `nw_add_console_app`, and other `nw_add_...` helpers.
+- Project-specific CMake scripts and macros live in `cmake/utils.cmake`.
+- Do not create isolated projects with their own `project(...)` calls unless required for external tools.
+- The primary stack is C++20 for logic and Qt 6 / QML for UI.
+- Do not introduce heavy dependencies without approval.
+- Keep QML and C++ logic separated; connect UI and logic through Qt properties, signals, and slots.
+- For undo/redo, prefer immutable state snapshots with `immer`; avoid Command Pattern unless explicitly requested.
+- Keep pure serializable data in `BaseData` structs, and use `QObject` wrappers for view logic only.
+- Treat `src/libs/core` as core business logic and `src/apps/EpicMapEditor` as the editor UI/application layer.

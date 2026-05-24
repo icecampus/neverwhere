@@ -1,0 +1,12 @@
+---
+description: General agent behavior for Neverwhere
+alwaysApply: true
+---
+
+# General Behavior
+
+- Communicate in Russian unless explicitly asked otherwise.
+- Use English for code comments, variable names, function names, class names, and other code identifiers.
+- Documentation files can be written in Russian or English depending on surrounding context.
+- Before making architectural or product-facing changes, refer to `ROADMAP_VISION.md` and `TECHNICAL_STACK.md`.
+- Use Context7 MCP for library/API documentation, code generation, setup, or configuration steps without waiting for an explicit reminder.
