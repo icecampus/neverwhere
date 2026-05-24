@@ -22,6 +22,11 @@
 
 #include "TerrainScene.h"
 
+enum class Landscape3dTerrainMode : int {
+    CubesDebug = 0,
+    ValleyGeometry = 1,
+};
+
 struct Landscape3dCamera {
     glm::vec3 target{0.0f, 0.0f, 0.0f};
     float yawDeg = 45.0f;
@@ -39,11 +44,23 @@ struct Landscape3dCamera {
 
 struct Landscape3dRenderParams {
     float cubeSize = 1.0f;
+    float tileHeight = 0.5f;
     float lightYawDeg = 35.0f;
     float lightPitchDeg = 50.0f;
     bool useGrassTexture = true;
     bool showWireframe = true;
+    Landscape3dTerrainMode terrainMode = Landscape3dTerrainMode::ValleyGeometry;
+    int previewTileIndex = -1;
     int debugMode = 0; // 0=lit, 1=top texture, 2=earth sides, 3=height, 4=normals
+};
+
+struct Landscape3dTileStats {
+    int unknown = 0;
+    int full = 0;
+    int corners = 0;
+    int lacks = 0;
+    int lines = 0;
+    int opposites = 0;
 };
 
 class Landscape3dRenderer {
@@ -51,11 +68,12 @@ public:
     void init();
     void shutdown();
     bool loadGrassTexture(const std::filesystem::path& path);
-    void rebuildMesh(const TerrainScene& scene, float cubeSize);
+    void rebuildMesh(const TerrainScene& scene, const Landscape3dRenderParams& params);
     void render(const Landscape3dCamera& camera, const Landscape3dRenderParams& params, int width, int height);
 
     int triangleCount() const { return m_indexCount / 3; }
     int lineCount() const { return m_lineVertexCount / 2; }
+    const Landscape3dTileStats& tileStats() const { return m_tileStats; }
 
     struct TerrainVertex {
         glm::vec3 position;
@@ -91,6 +109,7 @@ private:
     sg_sampler m_grassSampler{SG_INVALID_ID};
     sg_bindings m_terrainBindings{};
     sg_bindings m_lineBindings{};
+    Landscape3dTileStats m_tileStats{};
     int m_indexCount = 0;
     int m_lineVertexCount = 0;
 };

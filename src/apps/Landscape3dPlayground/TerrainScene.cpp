@@ -1,6 +1,7 @@
 #include "TerrainScene.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace {
@@ -49,10 +50,28 @@ void TerrainScene::generate(const TerrainSceneSettings& settings) {
     m_gridSize = std::clamp(settings.gridSize, 4, 96);
     m_minHeight = std::clamp(settings.minHeight, 0, 32);
     m_maxHeight = std::clamp(settings.maxHeight, m_minHeight + 1, 48);
+    m_landNodeWidth = m_gridSize + 2;
+    m_landNodeHeight = m_gridSize + 2;
+    m_landNodeXOffset = 1;
     m_columnHeights.assign(m_gridSize * m_gridSize, m_minHeight);
     m_materials.assign(m_gridSize * m_gridSize, TerrainMaterial::Grass);
+    m_landNodes.assign(m_landNodeWidth * m_landNodeHeight, 0);
 
     const float half = (float)m_gridSize * 0.5f;
+    const float nodeThreshold = std::clamp(settings.nodeThreshold, 0.05f, 0.95f);
+
+    for (int z = 0; z < m_landNodeHeight; z++) {
+        for (int x = -m_landNodeXOffset; x < m_landNodeWidth - m_landNodeXOffset; x++) {
+            const float dx = ((float)x - half) / half;
+            const float dz = ((float)z - half) / half;
+            const float radial = std::sqrt(dx * dx + dz * dz);
+            const float ridge = std::sin(((float)x + settings.seed) * 0.31f) * std::cos(((float)z - settings.seed) * 0.23f);
+            float land = fbm((float)x + 37.0f, (float)z - 19.0f, settings.seed + 101);
+            land = land * 0.82f + ridge * 0.18f;
+            land -= std::max(0.0f, radial - 0.78f) * 0.75f;
+            m_landNodes[landNodeIndex(x, z)] = land >= nodeThreshold ? 1 : 0;
+        }
+    }
 
     for (int z = 0; z < m_gridSize; z++) {
         for (int x = 0; x < m_gridSize; x++) {
@@ -106,11 +125,45 @@ TerrainMaterial TerrainScene::materialAt(int x, int z) const {
     return m_materials[materialIndex(x, z)];
 }
 
+LandscapeTileType TerrainScene::tileTypeAt(int x, int z) const {
+    if (m_gridSize <= 0) return LandscapeTileType::Unknown;
+
+    const bool oddRow = (z & 1) != 0;
+    const std::array<bool, 4> mask = oddRow
+        ? std::array<bool, 4>{
+            landNodeAt(x, z + 1),
+            landNodeAt(x, z),
+            landNodeAt(x + 1, z + 1),
+            landNodeAt(x, z + 2),
+        }
+        : std::array<bool, 4>{
+            landNodeAt(x - 1, z + 1),
+            landNodeAt(x, z),
+            landNodeAt(x, z + 1),
+            landNodeAt(x, z + 2),
+        };
+
+    return nodeMaskToTileType(mask);
+}
+
+bool TerrainScene::landNodeAt(int x, int z) const {
+    if (m_landNodeWidth <= 0 || m_landNodeHeight <= 0) return false;
+    const int storageX = x + m_landNodeXOffset;
+    if (storageX < 0 || storageX >= m_landNodeWidth || z < 0 || z >= m_landNodeHeight) {
+        return false;
+    }
+    return m_landNodes[landNodeIndex(x, z)] != 0;
+}
+
 int TerrainScene::cellIndex(int x, int z) const {
     return z * m_gridSize + x;
 }
 
 int TerrainScene::materialIndex(int x, int z) const {
     return cellIndex(x, z);
+}
+
+int TerrainScene::landNodeIndex(int x, int z) const {
+    return z * m_landNodeWidth + (x + m_landNodeXOffset);
 }
 

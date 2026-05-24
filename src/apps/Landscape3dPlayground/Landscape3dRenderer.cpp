@@ -1,6 +1,7 @@
 #include "Landscape3dRenderer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -9,6 +10,7 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <spdlog/spdlog.h>
+#include <topology_core/staggered_isometry.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -94,6 +96,35 @@ void pushQuad(
     }
 }
 
+void pushTriangle(
+    std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    glm::vec3 a,
+    glm::vec3 b,
+    glm::vec3 c,
+    glm::vec2 uvA,
+    glm::vec2 uvB,
+    glm::vec2 uvC,
+    const glm::vec4& color,
+    FaceKind faceKind) {
+
+    glm::vec3 normal = glm::normalize(glm::cross(b - a, c - a));
+    if (normal.y < 0.0f) {
+        std::swap(b, c);
+        std::swap(uvB, uvC);
+        normal = glm::normalize(glm::cross(b - a, c - a));
+    }
+
+    const std::uint32_t base = (std::uint32_t)vertices.size();
+    const float kind = (float)(int)faceKind;
+    vertices.push_back({a, normal, color, uvA, kind});
+    vertices.push_back({b, normal, color, uvB, kind});
+    vertices.push_back({c, normal, color, uvC, kind});
+    indices.push_back(base + 0);
+    indices.push_back(base + 1);
+    indices.push_back(base + 2);
+}
+
 void pushLine(
     std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
     const glm::vec3& a,
@@ -130,6 +161,168 @@ void pushBoxWireframe(
     pushLine(vertices, p100, p101);
     pushLine(vertices, p010, p011);
     pushLine(vertices, p110, p111);
+}
+
+void addTileStat(Landscape3dTileStats& stats, LandscapeTileType type) {
+    switch (type) {
+    case LandscapeTileType::Full:
+        stats.full++;
+        break;
+    case LandscapeTileType::RightCorner:
+    case LandscapeTileType::LeftCorner:
+    case LandscapeTileType::UpCorner:
+    case LandscapeTileType::DownCorner:
+        stats.corners++;
+        break;
+    case LandscapeTileType::DownLack:
+    case LandscapeTileType::UpLack:
+    case LandscapeTileType::RightLack:
+    case LandscapeTileType::LeftLack:
+        stats.lacks++;
+        break;
+    case LandscapeTileType::RightDownLine:
+    case LandscapeTileType::LeftDownLine:
+    case LandscapeTileType::RightUpLine:
+    case LandscapeTileType::LeftUpLine:
+        stats.lines++;
+        break;
+    case LandscapeTileType::UpAndDownCorners:
+    case LandscapeTileType::LeftRightCorners:
+        stats.opposites++;
+        break;
+    case LandscapeTileType::Unknown:
+    default:
+        stats.unknown++;
+        break;
+    }
+}
+
+glm::vec4 tileDebugColor(LandscapeTileType type, TerrainMaterial material) {
+    switch (type) {
+    case LandscapeTileType::Full:
+        return materialTint(material);
+    case LandscapeTileType::RightCorner:
+    case LandscapeTileType::LeftCorner:
+    case LandscapeTileType::UpCorner:
+    case LandscapeTileType::DownCorner:
+        return {0.72f, 1.00f, 0.58f, 1.0f};
+    case LandscapeTileType::DownLack:
+    case LandscapeTileType::UpLack:
+    case LandscapeTileType::RightLack:
+    case LandscapeTileType::LeftLack:
+        return {0.98f, 0.94f, 0.55f, 1.0f};
+    case LandscapeTileType::RightDownLine:
+    case LandscapeTileType::LeftDownLine:
+    case LandscapeTileType::RightUpLine:
+    case LandscapeTileType::LeftUpLine:
+        return {0.56f, 0.84f, 1.0f, 1.0f};
+    case LandscapeTileType::UpAndDownCorners:
+    case LandscapeTileType::LeftRightCorners:
+        return {0.88f, 0.62f, 1.0f, 1.0f};
+    case LandscapeTileType::Unknown:
+    default:
+        return {0.22f, 0.22f, 0.22f, 1.0f};
+    }
+}
+
+void pushTileWireframe(
+    std::vector<Landscape3dRenderer::TerrainVertex>& lineVertices,
+    const std::array<glm::vec3, 5>& points) {
+
+    pushLine(lineVertices, points[0], points[1]);
+    pushLine(lineVertices, points[1], points[2]);
+    pushLine(lineVertices, points[2], points[3]);
+    pushLine(lineVertices, points[3], points[0]);
+    pushLine(lineVertices, points[4], points[0]);
+    pushLine(lineVertices, points[4], points[1]);
+    pushLine(lineVertices, points[4], points[2]);
+    pushLine(lineVertices, points[4], points[3]);
+}
+
+glm::vec3 horizontalNormalFromCenter(const glm::vec3& center, const glm::vec3& a, const glm::vec3& b) {
+    glm::vec3 normal = ((a + b) * 0.5f) - center;
+    normal.y = 0.0f;
+    const float len = glm::length(normal);
+    return len > 0.0001f ? normal / len : glm::vec3{0.0f, 0.0f, 1.0f};
+}
+
+void addValleyTileObject(
+    std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    std::vector<Landscape3dRenderer::TerrainVertex>& lineVertices,
+    int x,
+    int z,
+    int grid,
+    const TerrainScene& scene,
+    const Landscape3dRenderParams& params,
+    LandscapeTileType type) {
+
+    const LandscapeValleyGeometry geometry = valleyGeometryForTile(type);
+    if (geometry.triangleCount <= 0) return;
+
+    topology_core::StaggeredIsometry iso;
+    iso.dims.cellWidth = std::max(0.1f, params.cubeSize);
+    iso.dims.aspectRatio = 2.0f;
+
+    const float cellWidth = iso.dims.cellSize().x;
+    const float cellDepth = iso.dims.cellSize().y;
+    const glm::vec2 origin = iso.mapToField({grid / 2, grid / 2});
+    const glm::vec2 center2 = iso.mapToField({x, z}) - origin;
+    const float heightScale = std::max(0.01f, params.tileHeight) * cellWidth;
+
+    const std::array<glm::vec2, 5> offsets{
+        glm::vec2{-cellWidth * 0.5f, 0.0f},
+        glm::vec2{0.0f, -cellDepth * 0.5f},
+        glm::vec2{cellWidth * 0.5f, 0.0f},
+        glm::vec2{0.0f, cellDepth * 0.5f},
+        glm::vec2{0.0f, 0.0f},
+    };
+    const std::array<glm::vec2, 5> uvs{
+        glm::vec2{0.0f, 0.5f},
+        glm::vec2{0.5f, 0.0f},
+        glm::vec2{1.0f, 0.5f},
+        glm::vec2{0.5f, 1.0f},
+        glm::vec2{0.5f, 0.5f},
+    };
+
+    std::array<glm::vec3, 5> points{};
+    for (int i = 0; i < 5; i++) {
+        const glm::vec2 p = center2 + offsets[i];
+        points[i] = {p.x, geometry.heights[i] * heightScale, p.y};
+    }
+
+    const glm::vec4 topColor = tileDebugColor(type, scene.materialAt(x, z));
+    for (int i = 0; i < geometry.triangleCount; i++) {
+        const std::array<std::uint8_t, 3>& tri = geometry.triangles[i];
+        pushTriangle(
+            vertices,
+            indices,
+            points[tri[0]],
+            points[tri[1]],
+            points[tri[2]],
+            uvs[tri[0]],
+            uvs[tri[1]],
+            uvs[tri[2]],
+            topColor,
+            FaceKind::Top);
+    }
+
+    const glm::vec4 sideColor = earthColorForLevel(scene.columnHeightAt(x, z), std::max(1, scene.maxHeight()));
+    for (int i = 0; i < 4; i++) {
+        const int next = (i + 1) % 4;
+        if (geometry.heights[i] <= 0.0f && geometry.heights[next] <= 0.0f) {
+            continue;
+        }
+
+        glm::vec3 baseA = points[i];
+        glm::vec3 baseB = points[next];
+        baseA.y = 0.0f;
+        baseB.y = 0.0f;
+        const glm::vec3 normal = horizontalNormalFromCenter(points[4], points[i], points[next]);
+        pushQuad(vertices, indices, baseA, baseB, points[i], points[next], normal, sideColor, FaceKind::Side, true);
+    }
+
+    pushTileWireframe(lineVertices, points);
 }
 
 const char* vs_src_glsl = R"(
@@ -374,8 +567,9 @@ bool Landscape3dRenderer::loadGrassTexture(const std::filesystem::path& path) {
     return loadedFromFile && m_grassView.id != SG_INVALID_ID && m_grassSampler.id != SG_INVALID_ID;
 }
 
-void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, float cubeSize) {
+void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape3dRenderParams& params) {
     destroyMeshBuffers();
+    m_tileStats = {};
 
     if (scene.gridSize() <= 0) return;
 
@@ -385,7 +579,7 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, float cubeSize)
 
     const int grid = scene.gridSize();
     const int maxHeight = std::max(1, scene.maxHeight());
-    const float cellSize = std::max(0.1f, cubeSize);
+    const float cellSize = std::max(0.1f, params.cubeSize);
     vertices.reserve((std::size_t)grid * (std::size_t)grid * 24);
     indices.reserve((std::size_t)grid * (std::size_t)grid * 36);
     lineVertices.reserve((std::size_t)grid * (std::size_t)grid * 24);
@@ -395,46 +589,65 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, float cubeSize)
         return scene.columnHeightAt(x, z);
     };
 
-    for (int z = 0; z < grid; z++) {
-        for (int x = 0; x < grid; x++) {
-            const int height = scene.columnHeightAt(x, z);
-            if (height <= 0) continue;
+    if (params.terrainMode == Landscape3dTerrainMode::CubesDebug) {
+        for (int z = 0; z < grid; z++) {
+            for (int x = 0; x < grid; x++) {
+                const int height = scene.columnHeightAt(x, z);
+                if (height <= 0) continue;
 
-            const glm::vec4 topColor = materialTint(scene.materialAt(x, z));
+                const glm::vec4 topColor = materialTint(scene.materialAt(x, z));
 
-            for (int level = 0; level < height; level++) {
-                const bool isTop = level == (height - 1);
-                const glm::vec4 sideColor = earthColorForLevel(level, maxHeight);
+                for (int level = 0; level < height; level++) {
+                    const bool isTop = level == (height - 1);
+                    const glm::vec4 sideColor = earthColorForLevel(level, maxHeight);
 
-                const glm::vec3 p000 = cubeCorner(x, level, z, cellSize, grid);
-                const glm::vec3 p100 = cubeCorner(x + 1, level, z, cellSize, grid);
-                const glm::vec3 p010 = cubeCorner(x, level + 1, z, cellSize, grid);
-                const glm::vec3 p110 = cubeCorner(x + 1, level + 1, z, cellSize, grid);
-                const glm::vec3 p001 = cubeCorner(x, level, z + 1, cellSize, grid);
-                const glm::vec3 p101 = cubeCorner(x + 1, level, z + 1, cellSize, grid);
-                const glm::vec3 p011 = cubeCorner(x, level + 1, z + 1, cellSize, grid);
-                const glm::vec3 p111 = cubeCorner(x + 1, level + 1, z + 1, cellSize, grid);
+                    const glm::vec3 p000 = cubeCorner(x, level, z, cellSize, grid);
+                    const glm::vec3 p100 = cubeCorner(x + 1, level, z, cellSize, grid);
+                    const glm::vec3 p010 = cubeCorner(x, level + 1, z, cellSize, grid);
+                    const glm::vec3 p110 = cubeCorner(x + 1, level + 1, z, cellSize, grid);
+                    const glm::vec3 p001 = cubeCorner(x, level, z + 1, cellSize, grid);
+                    const glm::vec3 p101 = cubeCorner(x + 1, level, z + 1, cellSize, grid);
+                    const glm::vec3 p011 = cubeCorner(x, level + 1, z + 1, cellSize, grid);
+                    const glm::vec3 p111 = cubeCorner(x + 1, level + 1, z + 1, cellSize, grid);
 
-                if (isTop) {
-                    pushQuad(vertices, indices, p010, p110, p011, p111, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+                    if (isTop) {
+                        pushQuad(vertices, indices, p010, p110, p011, p111, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+                    }
+
+                    if (heightAtOrZero(x, z - 1) <= level) {
+                        pushQuad(vertices, indices, p000, p100, p010, p110, {0.0f, 0.0f, -1.0f}, sideColor, FaceKind::Side, true);
+                    }
+                    if (heightAtOrZero(x + 1, z) <= level) {
+                        pushQuad(vertices, indices, p100, p101, p110, p111, {1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side, true);
+                    }
+                    if (heightAtOrZero(x, z + 1) <= level) {
+                        pushQuad(vertices, indices, p101, p001, p111, p011, {0.0f, 0.0f, 1.0f}, sideColor, FaceKind::Side, true);
+                    }
+                    if (heightAtOrZero(x - 1, z) <= level) {
+                        pushQuad(vertices, indices, p001, p000, p011, p010, {-1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side, true);
+                    }
+
+                    pushBoxWireframe(lineVertices, p000, p100, p010, p110, p001, p101, p011, p111);
                 }
-
-                if (heightAtOrZero(x, z - 1) <= level) {
-                    pushQuad(vertices, indices, p000, p100, p010, p110, {0.0f, 0.0f, -1.0f}, sideColor, FaceKind::Side, true);
-                }
-                if (heightAtOrZero(x + 1, z) <= level) {
-                    pushQuad(vertices, indices, p100, p101, p110, p111, {1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side, true);
-                }
-                if (heightAtOrZero(x, z + 1) <= level) {
-                    pushQuad(vertices, indices, p101, p001, p111, p011, {0.0f, 0.0f, 1.0f}, sideColor, FaceKind::Side, true);
-                }
-                if (heightAtOrZero(x - 1, z) <= level) {
-                    pushQuad(vertices, indices, p001, p000, p011, p010, {-1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side, true);
-                }
-
-                pushBoxWireframe(lineVertices, p000, p100, p010, p110, p001, p101, p011, p111);
             }
         }
+    } else {
+        for (int z = 0; z < grid; z++) {
+            for (int x = 0; x < grid; x++) {
+                const LandscapeTileType type = params.previewTileIndex >= 0
+                    ? tileTypeFromAtlasIndex(params.previewTileIndex)
+                    : scene.tileTypeAt(x, z);
+                addTileStat(m_tileStats, type);
+                if (!tileTypeHasSurface(type)) {
+                    continue;
+                }
+                addValleyTileObject(vertices, indices, lineVertices, x, z, grid, scene, params, type);
+            }
+        }
+    }
+
+    if (vertices.empty() || indices.empty()) {
+        return;
     }
 
     sg_buffer_desc vbuf = {};

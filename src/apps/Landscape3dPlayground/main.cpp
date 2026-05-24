@@ -122,8 +122,38 @@ void drawUi() {
         regenerateScene();
     }
 
+    float nodeThreshold = g_sceneSettings.nodeThreshold;
+    if (ImGui::SliderFloat("Node Threshold", &nodeThreshold, 0.15f, 0.85f)) {
+        g_sceneSettings.nodeThreshold = nodeThreshold;
+        regenerateScene();
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Terrain Geometry");
+    const char* terrainModes[] = {"Cubes Debug", "Valley Geometry"};
+    int terrainMode = (int)g_renderParams.terrainMode;
+    if (ImGui::Combo("Terrain Mode", &terrainMode, terrainModes, 2)) {
+        g_renderParams.terrainMode = (Landscape3dTerrainMode)terrainMode;
+        g_needsMeshRebuild = true;
+    }
+
     if (ImGui::SliderFloat("Cube Size", &g_renderParams.cubeSize, 0.35f, 2.5f)) {
         g_needsMeshRebuild = true;
+    }
+
+    if (ImGui::SliderFloat("Tile Height", &g_renderParams.tileHeight, 0.05f, 1.25f)) {
+        g_needsMeshRebuild = true;
+    }
+
+    int previewTileIndex = g_renderParams.previewTileIndex;
+    if (ImGui::SliderInt("Preview Tile Index", &previewTileIndex, -1, 23)) {
+        g_renderParams.previewTileIndex = previewTileIndex;
+        g_needsMeshRebuild = true;
+    }
+    if (g_renderParams.previewTileIndex >= 0) {
+        ImGui::Text("Preview Type: %s", tileTypeName(tileTypeFromAtlasIndex(g_renderParams.previewTileIndex)));
+    } else {
+        ImGui::Text("Preview Type: Generated nodes");
     }
 
     ImGui::Separator();
@@ -152,6 +182,14 @@ void drawUi() {
     ImGui::Separator();
     ImGui::Text("Triangles: %d", g_renderer.triangleCount());
     ImGui::Text("Lines: %d", g_renderer.lineCount());
+    const Landscape3dTileStats& stats = g_renderer.tileStats();
+    ImGui::Text("Tiles U/F/C/Lk/Ln/O: %d / %d / %d / %d / %d / %d",
+        stats.unknown,
+        stats.full,
+        stats.corners,
+        stats.lacks,
+        stats.lines,
+        stats.opposites);
     ImGui::Text("Grass texture: %s", g_grassTextureLoaded ? "loaded" : "fallback");
     ImGui::Text("Controls: RMB orbit, MMB pan, wheel zoom");
     ImGui::End();
@@ -196,7 +234,7 @@ void frame() {
     const int h = sapp_height();
 
     if (g_needsMeshRebuild) {
-        g_renderer.rebuildMesh(g_scene, g_renderParams.cubeSize);
+        g_renderer.rebuildMesh(g_scene, g_renderParams);
         g_needsMeshRebuild = false;
     }
 
