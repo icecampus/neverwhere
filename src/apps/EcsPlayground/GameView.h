@@ -9,11 +9,16 @@
 #if defined(__EMSCRIPTEN__)
 #define SOKOL_GLES3
 #elif defined(_WIN32)
-#define SOKOL_GLCORE33
+#define SOKOL_GLCORE
 #elif defined(__APPLE__)
-#define SOKOL_GLCORE33
+#define SOKOL_GLCORE
 #else
-#define SOKOL_GLCORE33
+#define SOKOL_GLCORE
+#endif
+
+// Qt's `slots` macro breaks Sokol internals which use a field with that name.
+#ifdef slots
+#undef slots
 #endif
 
 #include <sokol_gfx.h>

@@ -68,7 +68,7 @@ void LandscapeRenderer::init() {
     // Dynamic vertex buffer for many quads (6 vertices per tile)
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 6 * 65536 * (int)sizeof(Vertex);
-    buf_desc.usage = SG_USAGE_DYNAMIC;
+    buf_desc.usage.dynamic_update = true;
     buf_desc.label = "landscape-verts";
     vbuf = sg_make_buffer(&buf_desc);
 
@@ -93,31 +93,46 @@ void LandscapeRenderer::ensurePipeline() {
 
     sg_shader_desc shd_desc = {};
 #if defined(SOKOL_D3D11)
-    shd_desc.vs.source = vs_src_hlsl;
-    shd_desc.fs.source = fs_src_hlsl;
+    shd_desc.vertex_func.source = vs_src_hlsl;
+    shd_desc.fragment_func.source = fs_src_hlsl;
     // semantics for D3D11
-    shd_desc.attrs[0].sem_name = "TEXCOORD";
-    shd_desc.attrs[0].sem_index = 0;
-    shd_desc.attrs[1].sem_name = "TEXCOORD";
-    shd_desc.attrs[1].sem_index = 1;
-    shd_desc.attrs[2].sem_name = "TEXCOORD";
-    shd_desc.attrs[2].sem_index = 2;
+    shd_desc.attrs[0].hlsl_sem_name = "TEXCOORD";
+    shd_desc.attrs[0].hlsl_sem_index = 0;
+    shd_desc.attrs[1].hlsl_sem_name = "TEXCOORD";
+    shd_desc.attrs[1].hlsl_sem_index = 1;
+    shd_desc.attrs[2].hlsl_sem_name = "TEXCOORD";
+    shd_desc.attrs[2].hlsl_sem_index = 2;
 #else
-    shd_desc.vs.source = vs_src_glsl;
-    shd_desc.fs.source = fs_src_glsl;
+    shd_desc.vertex_func.source = vs_src_glsl;
+    shd_desc.fragment_func.source = fs_src_glsl;
 #endif
 
-    shd_desc.vs.uniform_blocks[0].size = sizeof(float) * 2;
-    shd_desc.vs.uniform_blocks[0].uniforms[0].name = "view_size";
-    shd_desc.vs.uniform_blocks[0].uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+    shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
+    shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[0].msl_buffer_n = 0;
+    shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
+    shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
 
-    shd_desc.fs.images[0].used = true;
-    shd_desc.fs.images[0].image_type = SG_IMAGETYPE_2D;
-    shd_desc.fs.samplers[0].used = true;
-    shd_desc.fs.samplers[0].sampler_type = SG_SAMPLERTYPE_SAMPLE;
-    shd_desc.fs.image_sampler_pairs[0].used = true;
-    shd_desc.fs.image_sampler_pairs[0].image_slot = 0;
-    shd_desc.fs.image_sampler_pairs[0].sampler_slot = 0;
+    shd_desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.views[0].texture.image_type = SG_IMAGETYPE_2D;
+    shd_desc.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd_desc.views[0].texture.hlsl_register_t_n = 0;
+    shd_desc.views[0].texture.msl_texture_n = 0;
+    shd_desc.views[0].texture.wgsl_group1_binding_n = 0;
+    shd_desc.views[0].texture.spirv_set1_binding_n = 0;
+    shd_desc.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[0].hlsl_register_s_n = 0;
+    shd_desc.samplers[0].msl_sampler_n = 0;
+    shd_desc.samplers[0].wgsl_group1_binding_n = 1;
+    shd_desc.samplers[0].spirv_set1_binding_n = 1;
+    shd_desc.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.texture_sampler_pairs[0].view_slot = 0;
+    shd_desc.texture_sampler_pairs[0].sampler_slot = 0;
+    shd_desc.texture_sampler_pairs[0].glsl_name = "tex";
 
     sg_shader shd = sg_make_shader(&shd_desc);
 
@@ -185,7 +200,7 @@ void LandscapeRenderer::render(
     sg_apply_pipeline(pip);
     float vs_params[2] = {(float)viewWidth, (float)viewHeight};
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
-    sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, &uniform_range);
+    sg_apply_uniforms(0, &uniform_range);
 
     for (auto& [uuid, group] : groups) {
         auto it = atlases.find(uuid);
@@ -231,8 +246,8 @@ void LandscapeRenderer::render(
         sg_range range = { scratchVerts.data(), scratchVerts.size() * sizeof(Vertex) };
         sg_update_buffer(vbuf, &range);
 
-        bind.fs.images[0] = atlas.atlas.sgImage();
-        bind.fs.samplers[0] = atlas.atlas.sgSampler();
+        bind.views[0] = atlas.atlas.sgView();
+        bind.samplers[0] = atlas.atlas.sgSampler();
         sg_apply_bindings(&bind);
 
         sg_draw(0, (int)scratchVerts.size(), 1);

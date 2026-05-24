@@ -49,10 +49,10 @@ public:
     {
         // We don't shutdown Sokol here because it might be used by other views.
         // sg_shutdown(); 
-        // If we want to manage resources per view, we should destroy pass/images here.
-        if (m_pass.id != SG_INVALID_ID) 
+        // If we want to manage resources per view, we should destroy attachment views/images here.
+        if (m_color_att_view.id != SG_INVALID_ID) 
         {
-            sg_destroy_pass(m_pass);
+            sg_destroy_view(m_color_att_view);
         }
 
         if (m_pass_img.id != SG_INVALID_ID) 
@@ -133,11 +133,11 @@ public:
         }
 
         QSize size = fbo->size();
-        if (m_width != size.width() || m_height != size.height() || m_pass.id == SG_INVALID_ID) {
+        if (m_width != size.width() || m_height != size.height() || m_color_att_view.id == SG_INVALID_ID) {
             spdlog::debug("Updating pass for frame #{}: size {}x{}", m_frameCount, size.width(), size.height());
             updatePass(fbo);
-            if (m_pass.id == SG_INVALID_ID) {
-                spdlog::error("Failed to create pass for frame #{}", m_frameCount);
+            if (m_color_att_view.id == SG_INVALID_ID) {
+                spdlog::error("Failed to create attachment view for frame #{}", m_frameCount);
                 return;
             }
         }
@@ -147,7 +147,10 @@ public:
         action.colors[0].clear_value = { 0.2f, 0.2f, 0.2f, 1.0f };
 
         spdlog::trace("Frame #{}: begin_pass, {} vertices", m_frameCount, m_vertices.size());
-        sg_begin_pass(m_pass, &action);
+        sg_pass pass = {};
+        pass.action = action;
+        pass.attachments.colors[0] = m_color_att_view;
+        sg_begin_pass(&pass);
         Graphics::draw_rects(m_vertices, m_width, m_height);
         sg_end_pass();
         
@@ -179,9 +182,9 @@ public:
 private:
     void updatePass(QOpenGLFramebufferObject* fbo) 
     {
-        if (m_pass.id != SG_INVALID_ID) {
-            sg_destroy_pass(m_pass);
-            m_pass.id = SG_INVALID_ID;
+        if (m_color_att_view.id != SG_INVALID_ID) {
+            sg_destroy_view(m_color_att_view);
+            m_color_att_view.id = SG_INVALID_ID;
         }
         if (m_pass_img.id != SG_INVALID_ID) {
             sg_destroy_image(m_pass_img);
@@ -197,7 +200,7 @@ private:
         
         // Create wrapper image for Color Attachment
         sg_image_desc color_desc = {};
-        color_desc.render_target = true;
+        color_desc.usage.color_attachment = true;
         color_desc.width = m_width;
         color_desc.height = m_height;
         // Qt usually uses GL_RGBA8
@@ -222,15 +225,13 @@ private:
         // Let's assume no depth buffer wrapper for now, or check if we need it.
         // If we don't provide depth attachment to pass, Sokol won't clear/use it.
         
-        sg_pass_desc pass_desc = {};
-        pass_desc.color_attachments[0].image = m_pass_img;
-        // pass_desc.depth_stencil_attachment.image = ...; // Skip for 2D
+        sg_view_desc view_desc = {};
+        view_desc.color_attachment.image = m_pass_img;
+        m_color_att_view = sg_make_view(&view_desc);
         
-        m_pass = sg_make_pass(&pass_desc);
-        
-        if (m_pass.id == SG_INVALID_ID) 
+        if (m_color_att_view.id == SG_INVALID_ID) 
         {
-             spdlog::error("Failed to create Sokol pass");
+             spdlog::error("Failed to create Sokol color attachment view");
              return;
         }
         
@@ -239,7 +240,7 @@ private:
 
     std::vector<Graphics::Vertex> m_vertices;
     QQuickWindow* m_window = nullptr;
-    sg_pass m_pass = { SG_INVALID_ID };
+    sg_view m_color_att_view = { SG_INVALID_ID };
     sg_image m_pass_img = { SG_INVALID_ID };
     sg_image m_depth_img = { SG_INVALID_ID };
     int m_width = 0;

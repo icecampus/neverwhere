@@ -1,19 +1,16 @@
 # header-only library (overlay port)
 #
 # Overlay rationale:
-# - vcpkg imgui >= 1.91 defaults ImTextureID to ImU64
-# - sokol (2023-10-07) util/sokol_imgui.h assigns a void* return value to TexID
-#   which fails to compile with ImTextureID=ImU64 on MSVC
-# This overlay applies a tiny compatibility patch.
+# - keep Sokol current enough for the Dear ImGui version installed by vcpkg
+# - upstream Sokol carries util/sokol_imgui.h compatibility fixes that are
+#   preferable to maintaining local patches for ImGui internals.
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO floooh/sokol
-    REF d98c8b92c25070f13d0491f5fade1d9d2ca885ad
-    SHA512 bb49dc3da366e70c7b6b16ebd490f9b2c88c496b278f1b9651321b3aab0977db92707d3955c2cb2654d8032647429ac90aa585de36644380112d988eac877cd0
+    REF 082152c1f36fda5fe5aa3de8de47af55c17101b9
+    SHA512 ce0a94ce27baa19254b63a8281462bf278b0556f51ed297141fa115b715ce936da108d616ca643ddc9f5e21601fdeabe59c938e3e49ed75adf25f5e622abfbef
     HEAD_REF master
-    PATCHES
-        fix-imgui-imtextureid-u64.patch
 )
 
 file(GLOB SOKOL_INCLUDE_FILES "${SOURCE_PATH}/*.h")

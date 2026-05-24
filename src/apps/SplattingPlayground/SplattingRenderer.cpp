@@ -696,8 +696,8 @@ static sg_image make1x1Rgba8(std::uint8_t r, std::uint8_t g, std::uint8_t b, std
     desc.width = 1;
     desc.height = 1;
     desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    desc.data.subimage[0][0].ptr = px;
-    desc.data.subimage[0][0].size = sizeof(px);
+    desc.data.mip_levels[0].ptr = px;
+    desc.data.mip_levels[0].size = sizeof(px);
     desc.label = "fallback-1x1";
     return sg_make_image(&desc);
 }
@@ -715,13 +715,21 @@ static sg_image loadImageRgba8(const std::string& path, const char* label) {
     desc.width = w;
     desc.height = h;
     desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    desc.data.subimage[0][0].ptr = pixels;
-    desc.data.subimage[0][0].size = (size_t)w * (size_t)h * 4;
+    desc.data.mip_levels[0].ptr = pixels;
+    desc.data.mip_levels[0].size = (size_t)w * (size_t)h * 4;
     desc.label = label;
     sg_image img = sg_make_image(&desc);
 
     stbi_image_free(pixels);
     return img;
+}
+
+static sg_view makeTextureView(sg_image image) {
+    if (image.id == SG_INVALID_ID) return { SG_INVALID_ID };
+
+    sg_view_desc desc = {};
+    desc.texture.image = image;
+    return sg_make_view(&desc);
 }
 
 } // namespace
@@ -732,7 +740,7 @@ void SplattingRenderer::init() {
     // Dynamic vertex buffer (6 verts per cell for 2 triangles)
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 6 * 65536 * (int)sizeof(Vertex);
-    buf_desc.usage = SG_USAGE_DYNAMIC;
+    buf_desc.usage.dynamic_update = true;
     buf_desc.label = "splatting-verts";
     vbuf = sg_make_buffer(&buf_desc);
     bind.vertex_buffers[0] = vbuf;
@@ -763,8 +771,10 @@ void SplattingRenderer::init() {
 
     for (int i = 0; i < 4; i++) {
         materials[i] = fallbackWhite;
+        materialViews[i] = fallbackWhiteView;
     }
     noiseTexture = fallbackNoise;
+    noiseTextureView = fallbackNoiseView;
 }
 
 void SplattingRenderer::shutdown() {
@@ -784,23 +794,43 @@ void SplattingRenderer::shutdown() {
     }
     for (int i = 0; i < 4; i++) {
         if (materials[i].id != SG_INVALID_ID && materials[i].id != fallbackWhite.id) {
+            if (materialViews[i].id != SG_INVALID_ID) {
+                sg_destroy_view(materialViews[i]);
+            }
             sg_destroy_image(materials[i]);
         }
         materials[i].id = SG_INVALID_ID;
+        materialViews[i].id = SG_INVALID_ID;
     }
     if (noiseTexture.id != SG_INVALID_ID && noiseTexture.id != fallbackNoise.id) {
+        if (noiseTextureView.id != SG_INVALID_ID) {
+            sg_destroy_view(noiseTextureView);
+        }
         sg_destroy_image(noiseTexture);
     }
     noiseTexture.id = SG_INVALID_ID;
+    noiseTextureView.id = SG_INVALID_ID;
 
+    if (materialIdMapView.id != SG_INVALID_ID) {
+        sg_destroy_view(materialIdMapView);
+        materialIdMapView.id = SG_INVALID_ID;
+    }
     if (materialIdMap.id != SG_INVALID_ID) {
         sg_destroy_image(materialIdMap);
         materialIdMap.id = SG_INVALID_ID;
     }
 
+    if (fallbackWhiteView.id != SG_INVALID_ID) {
+        sg_destroy_view(fallbackWhiteView);
+        fallbackWhiteView.id = SG_INVALID_ID;
+    }
     if (fallbackWhite.id != SG_INVALID_ID) {
         sg_destroy_image(fallbackWhite);
         fallbackWhite.id = SG_INVALID_ID;
+    }
+    if (fallbackNoiseView.id != SG_INVALID_ID) {
+        sg_destroy_view(fallbackNoiseView);
+        fallbackNoiseView.id = SG_INVALID_ID;
     }
     if (fallbackNoise.id != SG_INVALID_ID) {
         sg_destroy_image(fallbackNoise);
@@ -811,28 +841,38 @@ void SplattingRenderer::shutdown() {
 bool SplattingRenderer::loadMaterial(int slot, const std::string& path) {
     if (slot < 0 || slot >= 4) return false;
     if (materials[slot].id != SG_INVALID_ID && materials[slot].id != fallbackWhite.id) {
+        if (materialViews[slot].id != SG_INVALID_ID) {
+            sg_destroy_view(materialViews[slot]);
+        }
         sg_destroy_image(materials[slot]);
     }
     const std::string label = "material-" + std::to_string(slot);
     sg_image img = loadImageRgba8(path, label.c_str());
     if (img.id == SG_INVALID_ID) {
         materials[slot] = fallbackWhite;
+        materialViews[slot] = fallbackWhiteView;
         return false;
     }
     materials[slot] = img;
+    materialViews[slot] = makeTextureView(img);
     return true;
 }
 
 bool SplattingRenderer::loadNoiseTexture(const std::string& path) {
     if (noiseTexture.id != SG_INVALID_ID && noiseTexture.id != fallbackNoise.id) {
+        if (noiseTextureView.id != SG_INVALID_ID) {
+            sg_destroy_view(noiseTextureView);
+        }
         sg_destroy_image(noiseTexture);
     }
     sg_image img = loadImageRgba8(path, "noise");
     if (img.id == SG_INVALID_ID) {
         noiseTexture = fallbackNoise;
+        noiseTextureView = fallbackNoiseView;
         return false;
     }
     noiseTexture = img;
+    noiseTextureView = makeTextureView(img);
     return true;
 }
 
@@ -844,8 +884,13 @@ void SplattingRenderer::updateMaterialIdMap(const MaterialMap& map) {
                                 materialIdMapHeight != map.height);
 
     if (needRecreate) {
+        if (materialIdMapView.id != SG_INVALID_ID) {
+            sg_destroy_view(materialIdMapView);
+            materialIdMapView.id = SG_INVALID_ID;
+        }
         if (materialIdMap.id != SG_INVALID_ID) {
             sg_destroy_image(materialIdMap);
+            materialIdMap.id = SG_INVALID_ID;
         }
 
         // Create R8 texture (material IDs 0-255)
@@ -856,9 +901,10 @@ void SplattingRenderer::updateMaterialIdMap(const MaterialMap& map) {
         desc.width = map.width;
         desc.height = map.height;
         desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        desc.usage = SG_USAGE_DYNAMIC;
+        desc.usage.dynamic_update = true;
         desc.label = "material-id-map";
         materialIdMap = sg_make_image(&desc);
+        materialIdMapView = makeTextureView(materialIdMap);
 
         materialIdMapWidth = map.width;
         materialIdMapHeight = map.height;
@@ -879,8 +925,8 @@ void SplattingRenderer::updateMaterialIdMap(const MaterialMap& map) {
     }
 
     sg_image_data data = {};
-    data.subimage[0][0].ptr = materialIdData.data();
-    data.subimage[0][0].size = materialIdData.size();
+    data.mip_levels[0].ptr = materialIdData.data();
+    data.mip_levels[0].size = materialIdData.size();
     sg_update_image(materialIdMap, &data);
 }
 
@@ -905,14 +951,14 @@ void SplattingRenderer::render(
     sg_update_buffer(vbuf, &range);
 
     // Bind textures
-    bind.fs.images[0] = materials[0].id != SG_INVALID_ID ? materials[0] : fallbackWhite;
-    bind.fs.images[1] = materials[1].id != SG_INVALID_ID ? materials[1] : fallbackWhite;
-    bind.fs.images[2] = materials[2].id != SG_INVALID_ID ? materials[2] : fallbackWhite;
-    bind.fs.images[3] = materials[3].id != SG_INVALID_ID ? materials[3] : fallbackWhite;
-    bind.fs.images[4] = noiseTexture.id != SG_INVALID_ID ? noiseTexture : fallbackNoise;
-    bind.fs.images[5] = materialIdMap.id != SG_INVALID_ID ? materialIdMap : fallbackWhite;
-    bind.fs.samplers[0] = linearSampler;
-    bind.fs.samplers[1] = nearestSampler;
+    bind.views[0] = materialViews[0].id != SG_INVALID_ID ? materialViews[0] : fallbackWhiteView;
+    bind.views[1] = materialViews[1].id != SG_INVALID_ID ? materialViews[1] : fallbackWhiteView;
+    bind.views[2] = materialViews[2].id != SG_INVALID_ID ? materialViews[2] : fallbackWhiteView;
+    bind.views[3] = materialViews[3].id != SG_INVALID_ID ? materialViews[3] : fallbackWhiteView;
+    bind.views[4] = noiseTextureView.id != SG_INVALID_ID ? noiseTextureView : fallbackNoiseView;
+    bind.views[5] = materialIdMapView.id != SG_INVALID_ID ? materialIdMapView : fallbackWhiteView;
+    bind.samplers[0] = linearSampler;
+    bind.samplers[1] = nearestSampler;
 
     sg_apply_pipeline(pip);
     sg_apply_bindings(&bind);
@@ -924,7 +970,7 @@ void SplattingRenderer::render(
     vs.cameraOffset[1] = camera.offset.y;
     vs.cameraZoom = camera.zoom;
     sg_range vs_range = { &vs, sizeof(vs) };
-    sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, &vs_range);
+    sg_apply_uniforms(0, &vs_range);
 
     const glm::vec2 cellSize = iso.dims.cellSize();
 
@@ -946,7 +992,7 @@ void SplattingRenderer::render(
     fs.uvMode = static_cast<int>(params.uvMode);
     fs.debugMode = params.debugMode;
     sg_range fs_range = { &fs, sizeof(fs) };
-    sg_apply_uniforms(SG_SHADERSTAGE_FS, 0, &fs_range);
+    sg_apply_uniforms(1, &fs_range);
 
     sg_draw(0, (int)vertices.size(), 1);
 }
@@ -954,9 +1000,11 @@ void SplattingRenderer::render(
 void SplattingRenderer::ensureFallbackTextures() {
     if (fallbackWhite.id == SG_INVALID_ID) {
         fallbackWhite = make1x1Rgba8(255, 255, 255, 255);
+        fallbackWhiteView = makeTextureView(fallbackWhite);
     }
     if (fallbackNoise.id == SG_INVALID_ID) {
         fallbackNoise = make1x1Rgba8(128, 128, 128, 255);
+        fallbackNoiseView = makeTextureView(fallbackNoise);
     }
 }
 
@@ -965,80 +1013,98 @@ void SplattingRenderer::ensurePipeline() {
 
     sg_shader_desc shd_desc = {};
 #if defined(SOKOL_D3D11)
-    shd_desc.vs.source = vs_src_hlsl;
-    shd_desc.fs.source = fs_src_hlsl;
-    shd_desc.attrs[0].sem_name = "TEXCOORD";
-    shd_desc.attrs[0].sem_index = 0;
-    shd_desc.attrs[1].sem_name = "TEXCOORD";
-    shd_desc.attrs[1].sem_index = 1;
-    shd_desc.attrs[2].sem_name = "TEXCOORD";
-    shd_desc.attrs[2].sem_index = 2;
+    shd_desc.vertex_func.source = vs_src_hlsl;
+    shd_desc.fragment_func.source = fs_src_hlsl;
+    shd_desc.attrs[0].hlsl_sem_name = "TEXCOORD";
+    shd_desc.attrs[0].hlsl_sem_index = 0;
+    shd_desc.attrs[1].hlsl_sem_name = "TEXCOORD";
+    shd_desc.attrs[1].hlsl_sem_index = 1;
+    shd_desc.attrs[2].hlsl_sem_name = "TEXCOORD";
+    shd_desc.attrs[2].hlsl_sem_index = 2;
 #else
-    shd_desc.vs.source = vs_src_glsl;
-    shd_desc.fs.source = fs_src_glsl;
+    shd_desc.vertex_func.source = vs_src_glsl;
+    shd_desc.fragment_func.source = fs_src_glsl;
 #endif
 
     // VS uniforms
-    shd_desc.vs.uniform_blocks[0].size = sizeof(VsParams);
-    shd_desc.vs.uniform_blocks[0].uniforms[0].name = "view_size";
-    shd_desc.vs.uniform_blocks[0].uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
-    shd_desc.vs.uniform_blocks[0].uniforms[1].name = "camera_offset";
-    shd_desc.vs.uniform_blocks[0].uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
-    shd_desc.vs.uniform_blocks[0].uniforms[2].name = "camera_zoom";
-    shd_desc.vs.uniform_blocks[0].uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+    shd_desc.uniform_blocks[0].size = sizeof(VsParams);
+    shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[0].msl_buffer_n = 0;
+    shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
+    shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].glsl_uniforms[1].glsl_name = "camera_offset";
+    shd_desc.uniform_blocks[0].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].glsl_uniforms[2].glsl_name = "camera_zoom";
+    shd_desc.uniform_blocks[0].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
 
     // FS uniforms
-    shd_desc.fs.uniform_blocks[0].size = sizeof(FsParams);
-    shd_desc.fs.uniform_blocks[0].uniforms[0].name = "cell_size";
-    shd_desc.fs.uniform_blocks[0].uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
-    shd_desc.fs.uniform_blocks[0].uniforms[1].name = "map_size";
-    shd_desc.fs.uniform_blocks[0].uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
-    shd_desc.fs.uniform_blocks[0].uniforms[2].name = "blend_sharpness";
-    shd_desc.fs.uniform_blocks[0].uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[3].name = "noise_scale";
-    shd_desc.fs.uniform_blocks[0].uniforms[3].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[4].name = "tile_scale";
-    shd_desc.fs.uniform_blocks[0].uniforms[4].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[5].name = "macro_scale";
-    shd_desc.fs.uniform_blocks[0].uniforms[5].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[6].name = "macro_strength";
-    shd_desc.fs.uniform_blocks[0].uniforms[6].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[7].name = "height_influence";
-    shd_desc.fs.uniform_blocks[0].uniforms[7].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[8].name = "edge_darkness";
-    shd_desc.fs.uniform_blocks[0].uniforms[8].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[9].name = "edge_width";
-    shd_desc.fs.uniform_blocks[0].uniforms[9].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[10].name = "world_uv_scale";
-    shd_desc.fs.uniform_blocks[0].uniforms[10].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[11].name = "random_uv_strength";
-    shd_desc.fs.uniform_blocks[0].uniforms[11].type = SG_UNIFORMTYPE_FLOAT;
-    shd_desc.fs.uniform_blocks[0].uniforms[12].name = "uv_mode";
-    shd_desc.fs.uniform_blocks[0].uniforms[12].type = SG_UNIFORMTYPE_INT;
-    shd_desc.fs.uniform_blocks[0].uniforms[13].name = "debug_mode";
-    shd_desc.fs.uniform_blocks[0].uniforms[13].type = SG_UNIFORMTYPE_INT;
+    shd_desc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.uniform_blocks[1].size = sizeof(FsParams);
+    shd_desc.uniform_blocks[1].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[1].msl_buffer_n = 1;
+    shd_desc.uniform_blocks[1].wgsl_group0_binding_n = 1;
+    shd_desc.uniform_blocks[1].spirv_set0_binding_n = 1;
+    shd_desc.uniform_blocks[1].glsl_uniforms[0].glsl_name = "cell_size";
+    shd_desc.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[1].glsl_uniforms[1].glsl_name = "map_size";
+    shd_desc.uniform_blocks[1].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[1].glsl_uniforms[2].glsl_name = "blend_sharpness";
+    shd_desc.uniform_blocks[1].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[3].glsl_name = "noise_scale";
+    shd_desc.uniform_blocks[1].glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[4].glsl_name = "tile_scale";
+    shd_desc.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[5].glsl_name = "macro_scale";
+    shd_desc.uniform_blocks[1].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[6].glsl_name = "macro_strength";
+    shd_desc.uniform_blocks[1].glsl_uniforms[6].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[7].glsl_name = "height_influence";
+    shd_desc.uniform_blocks[1].glsl_uniforms[7].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[8].glsl_name = "edge_darkness";
+    shd_desc.uniform_blocks[1].glsl_uniforms[8].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[9].glsl_name = "edge_width";
+    shd_desc.uniform_blocks[1].glsl_uniforms[9].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[10].glsl_name = "world_uv_scale";
+    shd_desc.uniform_blocks[1].glsl_uniforms[10].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[11].glsl_name = "random_uv_strength";
+    shd_desc.uniform_blocks[1].glsl_uniforms[11].type = SG_UNIFORMTYPE_FLOAT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[12].glsl_name = "uv_mode";
+    shd_desc.uniform_blocks[1].glsl_uniforms[12].type = SG_UNIFORMTYPE_INT;
+    shd_desc.uniform_blocks[1].glsl_uniforms[13].glsl_name = "debug_mode";
+    shd_desc.uniform_blocks[1].glsl_uniforms[13].type = SG_UNIFORMTYPE_INT;
 
     // FS images (6: 4 materials + noise + materialIdMap)
+    const char* glslNames[] = {"tex0", "tex1", "tex2", "tex3", "noise_tex", "material_id_map"};
     for (int i = 0; i < 6; i++) {
-        shd_desc.fs.images[i].used = true;
-        shd_desc.fs.images[i].image_type = SG_IMAGETYPE_2D;
+        shd_desc.views[i].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        shd_desc.views[i].texture.image_type = SG_IMAGETYPE_2D;
+        shd_desc.views[i].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        shd_desc.views[i].texture.hlsl_register_t_n = (uint8_t)i;
+        shd_desc.views[i].texture.msl_texture_n = (uint8_t)i;
+        shd_desc.views[i].texture.wgsl_group1_binding_n = (uint8_t)i;
+        shd_desc.views[i].texture.spirv_set1_binding_n = (uint8_t)i;
+        shd_desc.texture_sampler_pairs[i].stage = SG_SHADERSTAGE_FRAGMENT;
+        shd_desc.texture_sampler_pairs[i].view_slot = i;
+        shd_desc.texture_sampler_pairs[i].sampler_slot = (i < 5) ? 0 : 1;
+        shd_desc.texture_sampler_pairs[i].glsl_name = glslNames[i];
     }
 
     // 2 samplers
-    shd_desc.fs.samplers[0].used = true;
-    shd_desc.fs.samplers[0].sampler_type = SG_SAMPLERTYPE_SAMPLE;
-    shd_desc.fs.samplers[1].used = true;
-    shd_desc.fs.samplers[1].sampler_type = SG_SAMPLERTYPE_SAMPLE;
-
-    // Image-sampler pairs
-    for (int i = 0; i < 5; i++) {
-        shd_desc.fs.image_sampler_pairs[i].used = true;
-        shd_desc.fs.image_sampler_pairs[i].image_slot = i;
-        shd_desc.fs.image_sampler_pairs[i].sampler_slot = 0;
-    }
-    shd_desc.fs.image_sampler_pairs[5].used = true;
-    shd_desc.fs.image_sampler_pairs[5].image_slot = 5;
-    shd_desc.fs.image_sampler_pairs[5].sampler_slot = 1;
+    shd_desc.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[0].hlsl_register_s_n = 0;
+    shd_desc.samplers[0].msl_sampler_n = 0;
+    shd_desc.samplers[0].wgsl_group1_binding_n = 6;
+    shd_desc.samplers[0].spirv_set1_binding_n = 6;
+    shd_desc.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[1].hlsl_register_s_n = 1;
+    shd_desc.samplers[1].msl_sampler_n = 1;
+    shd_desc.samplers[1].wgsl_group1_binding_n = 7;
+    shd_desc.samplers[1].spirv_set1_binding_n = 7;
 
     sg_shader shd = sg_make_shader(&shd_desc);
 

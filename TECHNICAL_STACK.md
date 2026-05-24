@@ -53,7 +53,7 @@
         *   **Принудительный графический API:** для совместимости Sokol + QtQuick требуется OpenGL: `QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL)`.
         *   **Инициализация строго при активном контексте:** `sg_setup()`/`Graphics::init()` вызываются только тогда, когда GL контекст уже активен (в Qt это render-thread). Практика: lazy-init внутри `QQuickFramebufferObject::Renderer::render()`.
         *   **GL state “грязный”:** перед рисованием сбрасываем кеш состояний Sokol: `sg_reset_state_cache()` (Qt меняет GL-state между кадрами).
-        *   **Рендер в FBO:** текстуру `QOpenGLFramebufferObject` нужно обернуть в `sg_image` с корректными параметрами (важно указать `gl_texture_target = GL_TEXTURE_2D`), затем создать `sg_pass` с color attachment.
+        *   **Рендер в FBO:** текстуру `QOpenGLFramebufferObject` нужно обернуть в `sg_image` с корректными параметрами (важно указать `gl_texture_target = GL_TEXTURE_2D`), затем создать `sg_view` для color attachment и передать его в `sg_pass.attachments`.
         *   **Depth/stencil:** если depth не оборачиваем в pass, в pipeline нужно отключить ожидание depth: `pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE`.
         *   **Коммит кадра:** `sg_commit()` обязателен **ровно один раз на кадр** на верхнем уровне рендера (в прототипе — после `sg_end_pass()` в рендерере view). Не стоит прятать `sg_commit()` внутри общих функций `end_frame()`, если часть рендеринга идёт в offscreen pass.
         *   **Shutdown:** не вызывать `sg_shutdown()` в деструкторах view/renderer (возможны несколько вьюх). Делать shutdown на `QGuiApplication::aboutToQuit`, и только если Sokol реально инициализирован.

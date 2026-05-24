@@ -29,7 +29,7 @@
 
 **Ответственность**:
 - окно + main loop (dt/input);
-- swapchain/default-pass (`sg_begin_default_pass`/`sg_commit`);
+- swapchain pass (`sg_begin_pass` + `sglue_swapchain()` + `sg_commit`);
 - ImGui overlay;
 - прокидывание событий в UI/игру.
 
@@ -40,7 +40,7 @@
 
 **Ответственность**:
 - получение/управление FBO от Qt;
-- оборачивание `QOpenGLFramebufferObject::texture()` в `sg_image` + создание `sg_pass`;
+- оборачивание `QOpenGLFramebufferObject::texture()` в `sg_image`, создание `sg_view` для color attachment и передача его в `sg_pass.attachments`;
 - восстановление GL-state после рендера (Qt “грязнит” state);
 - взаимодействие по `Project/Unproject` (если нужно для overlay-гизмо).
 
@@ -62,5 +62,5 @@
 - **Синхронизация `sg_commit()`**:
   - runtime: commit в `frame()`;
   - QtQuick: commit в конце рендера FBO-прохода, но ровно один раз на кадр на верхнем уровне.
-- **TextureId/ImGui**: sokol util `sokol_imgui.h` должен быть совместим с текущей версией Dear ImGui (особенно `ImTextureID`).
+- **Sokol overlay**: `vcpkg_overlays/ports/sokol` держит Sokol достаточно свежим для текущего Dear ImGui; локальные патчи `sokol_imgui.h` лучше избегать, если upstream уже содержит совместимость.
 

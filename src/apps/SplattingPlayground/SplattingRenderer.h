@@ -7,7 +7,7 @@
 #include <topology_core/staggered_isometry.h>
 
 // Ensure a backend is selected everywhere we include sokol_gfx.h
-#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE33)
+#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE)
     #if defined(_WIN32)
         #define SOKOL_D3D11
     #elif defined(__APPLE__)
@@ -15,7 +15,7 @@
     #elif defined(__EMSCRIPTEN__)
         #define SOKOL_GLES3
     #else
-        #define SOKOL_GLCORE33
+        #define SOKOL_GLCORE
     #endif
 #endif
 
@@ -116,6 +116,11 @@ private:
     sg_image materialIdMap = {};
     sg_image fallbackWhite = {};
     sg_image fallbackNoise = {};
+    sg_view materialViews[4] = {};
+    sg_view noiseTextureView = {};
+    sg_view materialIdMapView = {};
+    sg_view fallbackWhiteView = {};
+    sg_view fallbackNoiseView = {};
     sg_sampler linearSampler = {};
     sg_sampler nearestSampler = {};
 

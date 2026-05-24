@@ -6,8 +6,6 @@
 #include <spdlog/spdlog.h>
 
 // Dear ImGui
-// Define ImTextureID as void* for compatibility with sokol_imgui
-#define ImTextureID void*
 #include <imgui.h>
 
 // Runtime
@@ -28,7 +26,7 @@
 #define SOKOL_NO_ENTRY
 
 // We rely on render_core/sokol_config.h for backend selection in other TUs.
-#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE33)
+#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE)
     #if defined(_WIN32)
         #define SOKOL_D3D11
     #elif defined(__APPLE__)
@@ -36,7 +34,7 @@
     #elif defined(__EMSCRIPTEN__)
         #define SOKOL_GLES3
     #else
-        #define SOKOL_GLCORE33
+        #define SOKOL_GLCORE
     #endif
 #endif
 
@@ -160,7 +158,7 @@ static void init(void) {
     g_state.last_time = stm_now();
 
     sg_desc desc = {};
-    desc.context = sapp_sgcontext();
+    desc.environment = sglue_environment();
     desc.logger.func = slog_func;
     sg_setup(&desc);
     g_state.gfx_ok = sg_isvalid();
@@ -246,7 +244,10 @@ static void frame(void) {
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
     action.colors[0].clear_value = { 0.07f, 0.08f, 0.10f, 1.0f };
 
-    sg_begin_default_pass(&action, w, h);
+    sg_pass pass = {};
+    pass.action = action;
+    pass.swapchain = sglue_swapchain();
+    sg_begin_pass(&pass);
     // World rendering (MVP: landscape)
     if (!g_tiles.empty()) {
         g_land.render(g_tiles, g_iso, g_camera, w, h);
@@ -434,8 +435,8 @@ int main(int argc, char* argv[]) {
     desc.window_title = "EpicGameRuntime";
     desc.high_dpi = true;
 #if defined(_WIN32)
-    desc.win32_console_utf8 = true;
-    desc.win32_console_attach = true;
+    desc.win32.console_utf8 = true;
+    desc.win32.console_attach = true;
 #endif
     desc.logger.func = slog_func;
 

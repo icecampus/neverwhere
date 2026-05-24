@@ -101,7 +101,7 @@ generate_vs.bat vs2022
 cmake --build --preset debug --target EpicMapEditor
 ```
 
-Если нужен фикс портов (пример: совместимость `sokol_imgui.h` с ImGui 1.91+), используем **overlay ports**:
+Sokol подключён через **overlay port**, чтобы держать `util/sokol_imgui.h` совместимым с актуальным Dear ImGui из vcpkg:
 - `vcpkg_overlays/ports`
 - путь уже подключён в `CMakePresets.json` через `VCPKG_OVERLAY_PORTS`
 

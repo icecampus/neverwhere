@@ -16,20 +16,6 @@
 
 #include <math/vec.h>
 
-// Sokol
-#define SOKOL_IMPL
-#define SOKOL_NO_ENTRY
-#if defined(_WIN32)
-    #define SOKOL_D3D11
-#elif defined(__APPLE__)
-    #define SOKOL_METAL
-#else
-    #define SOKOL_GLCORE33
-#endif
-#include <sokol_gfx.h>
-#include <sokol_glue.h>
-#include <sokol_log.h>
-
 RuntimeMapView::RuntimeMapView(QQuickItem* parent)
     : QQuickItem(parent)
 {

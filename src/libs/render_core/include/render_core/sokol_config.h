@@ -1,7 +1,7 @@
 #pragma once
 
 // Ensure a backend is selected everywhere we include sokol_gfx.h
-#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE33)
+#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE)
     #if defined(_WIN32)
         #define SOKOL_D3D11
     #elif defined(__APPLE__)
@@ -9,7 +9,7 @@
     #elif defined(__EMSCRIPTEN__)
         #define SOKOL_GLES3
     #else
-        #define SOKOL_GLCORE33
+        #define SOKOL_GLCORE
     #endif
 #endif
 

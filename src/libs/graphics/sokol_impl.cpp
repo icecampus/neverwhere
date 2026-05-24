@@ -7,14 +7,19 @@
 #if defined(__EMSCRIPTEN__)
     #define SOKOL_GLES3
 #elif defined(_WIN32)
-    #define SOKOL_GLCORE33
+    #define SOKOL_GLCORE
     #include <glad/glad.h>
 #elif defined(__APPLE__)
-    #define SOKOL_GLCORE33
+    #define SOKOL_GLCORE
     #include <glad/glad.h>
 #else
-    #define SOKOL_GLCORE33
+    #define SOKOL_GLCORE
     #include <glad/glad.h>
+#endif
+
+// Qt's `slots` macro breaks Sokol internals which use a field with that name.
+#ifdef slots
+#undef slots
 #endif
 
 #include <sokol_gfx.h>
@@ -79,11 +84,16 @@ void init() {
 
     // Create shader
     sg_shader_desc shd_desc = {};
-    shd_desc.vs.source = vs_src;
-    shd_desc.fs.source = fs_src;
-    shd_desc.vs.uniform_blocks[0].size = sizeof(float) * 2;
-    shd_desc.vs.uniform_blocks[0].uniforms[0].name = "view_size";
-    shd_desc.vs.uniform_blocks[0].uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.vertex_func.source = vs_src;
+    shd_desc.fragment_func.source = fs_src;
+    shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+    shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
+    shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[0].msl_buffer_n = 0;
+    shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
+    shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
     sg_shader shd = sg_make_shader(&shd_desc);
 
     // Create pipeline
@@ -106,7 +116,7 @@ void init() {
     // Create dynamic vertex buffer (max 10000 quads = 60000 verts)
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 60000 * sizeof(Vertex);
-    buf_desc.usage = SG_USAGE_DYNAMIC;
+    buf_desc.usage.dynamic_update = true;
     buf_desc.label = "quad-vertices";
     vbuf = sg_make_buffer(&buf_desc);
 
@@ -133,8 +143,16 @@ void begin_frame(int width, int height) {
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_LOAD; 
     
-    // We use the default pass (FBO 0) which is usually the window surface in Qt OpenGL
-    sg_begin_default_pass(&action, width, height);
+    // We use the default framebuffer (0), which is usually the window surface in Qt OpenGL.
+    sg_pass pass = {};
+    pass.action = action;
+    pass.swapchain.width = width;
+    pass.swapchain.height = height;
+    pass.swapchain.sample_count = 1;
+    pass.swapchain.color_format = SG_PIXELFORMAT_RGBA8;
+    pass.swapchain.depth_format = SG_PIXELFORMAT_NONE;
+    pass.swapchain.gl.framebuffer = 0;
+    sg_begin_pass(&pass);
 }
 
 void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_height) {
@@ -151,7 +169,7 @@ void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_he
 
     float vs_params[2] = { (float)view_width, (float)view_height };
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
-    sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, uniform_range);
+    sg_apply_uniforms(0, uniform_range);
 
     // Draw
     sg_draw(0, (int)vertices.size(), 1);

@@ -21,13 +21,21 @@ void TextureAtlas::createFromFile(const fs::path& atlasPath, int cols_, int rows
     img_desc.width = width;
     img_desc.height = height;
     img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    img_desc.data.subimage[0][0].ptr = img.pixels.data();
-    img_desc.data.subimage[0][0].size = img.pixels.size();
+    img_desc.data.mip_levels[0].ptr = img.pixels.data();
+    img_desc.data.mip_levels[0].size = img.pixels.size();
     img_desc.label = "atlas-image";
     image = sg_make_image(&img_desc);
 
     if (image.id == SG_INVALID_ID) {
         throw std::runtime_error("sg_make_image failed for atlas");
+    }
+
+    sg_view_desc view_desc = {};
+    view_desc.texture.image = image;
+    view = sg_make_view(&view_desc);
+
+    if (view.id == SG_INVALID_ID) {
+        throw std::runtime_error("sg_make_view failed for atlas");
     }
 
     sg_sampler_desc smp_desc = {};
@@ -43,6 +51,10 @@ void TextureAtlas::destroy() {
     if (sampler.id != SG_INVALID_ID) {
         sg_destroy_sampler(sampler);
         sampler.id = SG_INVALID_ID;
+    }
+    if (view.id != SG_INVALID_ID) {
+        sg_destroy_view(view);
+        view.id = SG_INVALID_ID;
     }
     if (image.id != SG_INVALID_ID) {
         sg_destroy_image(image);
