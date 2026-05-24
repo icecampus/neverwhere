@@ -83,6 +83,7 @@ public:
     void init();
     void shutdown();
     bool loadGrassTexture(const std::filesystem::path& path);
+    bool loadRockTexture(const std::filesystem::path& path);
     void rebuildMesh(const TerrainScene& scene, const Landscape3dRenderParams& params);
     void render(const Landscape3dCamera& camera, const Landscape3dRenderParams& params, int width, int height);
 
@@ -95,7 +96,7 @@ public:
         glm::vec3 normal;
         glm::vec4 color;
         glm::vec2 uv;
-        float faceKind; // 0=top grass, 1=earth side, 2=wire line
+        float faceKind; // 0=top grass, 1=rock side, 2=wire line
     };
 
 private:
@@ -112,6 +113,7 @@ private:
     void destroyPipelines();
     void destroyMeshBuffers();
     void destroyGrassTexture();
+    void destroyRockTexture();
 
     sg_pipeline m_terrainPipeline{SG_INVALID_ID};
     sg_pipeline m_linePipeline{SG_INVALID_ID};
@@ -122,6 +124,9 @@ private:
     sg_image m_grassImage{SG_INVALID_ID};
     sg_view m_grassView{SG_INVALID_ID};
     sg_sampler m_grassSampler{SG_INVALID_ID};
+    sg_image m_rockImage{SG_INVALID_ID};
+    sg_view m_rockView{SG_INVALID_ID};
+    sg_sampler m_rockSampler{SG_INVALID_ID};
     sg_bindings m_terrainBindings{};
     sg_bindings m_lineBindings{};
     Landscape3dTileStats m_tileStats{};

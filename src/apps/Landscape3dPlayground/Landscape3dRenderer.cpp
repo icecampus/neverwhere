@@ -129,6 +129,21 @@ glm::vec4 materialTint(TerrainMaterial material) {
     }
 }
 
+glm::vec2 sideSurfaceUv(const glm::vec3& position, const glm::vec3& normal) {
+    constexpr float kSideUvHorizontalScale = 10.0f;
+    constexpr float kSideUvVerticalScale = 14.0f;
+
+    const glm::vec3 up{0.0f, 1.0f, 0.0f};
+    glm::vec3 tangent = glm::cross(up, normal);
+    tangent.y = 0.0f;
+    if (glm::length(tangent) <= 0.0001f) {
+        return {position.x * kSideUvHorizontalScale, position.z * kSideUvHorizontalScale};
+    }
+
+    tangent = glm::normalize(tangent);
+    return {glm::dot(position, tangent) * kSideUvHorizontalScale, position.y * kSideUvVerticalScale};
+}
+
 glm::vec3 cubeCorner(int x, int y, int z, float cubeSize, int gridSize) {
     const float half = (float)gridSize * cubeSize * 0.5f;
     return {
@@ -152,10 +167,11 @@ void pushQuad(
 
     const std::uint32_t base = (std::uint32_t)vertices.size();
     const float kind = (float)(int)faceKind;
-    vertices.push_back({a, normal, color, {0.0f, 0.0f}, kind});
-    vertices.push_back({b, normal, color, {1.0f, 0.0f}, kind});
-    vertices.push_back({c, normal, color, {0.0f, 1.0f}, kind});
-    vertices.push_back({d, normal, color, {1.0f, 1.0f}, kind});
+    const bool sideFace = faceKind == FaceKind::Side;
+    vertices.push_back({a, normal, color, sideFace ? sideSurfaceUv(a, normal) : glm::vec2{0.0f, 0.0f}, kind});
+    vertices.push_back({b, normal, color, sideFace ? sideSurfaceUv(b, normal) : glm::vec2{1.0f, 0.0f}, kind});
+    vertices.push_back({c, normal, color, sideFace ? sideSurfaceUv(c, normal) : glm::vec2{0.0f, 1.0f}, kind});
+    vertices.push_back({d, normal, color, sideFace ? sideSurfaceUv(d, normal) : glm::vec2{1.0f, 1.0f}, kind});
 
     if (!flip) {
         indices.push_back(base + 0);
@@ -358,9 +374,13 @@ void addZeroLayerFill(
     const glm::vec3 up{center2.x, y, center2.y - cellDepth * 0.5f};
     const glm::vec3 right{center2.x + cellWidth * 0.5f, y, center2.y};
     const glm::vec3 down{center2.x, y, center2.y + cellDepth * 0.5f};
-    const glm::vec4 baseColor{0.30f, 0.23f, 0.16f, 1.0f};
-
-    pushQuad(vertices, indices, left, up, down, right, {0.0f, 1.0f, 0.0f}, baseColor, FaceKind::Side);
+    const glm::vec4 topColor = variedGrassTint(TerrainMaterial::Grass, x, z, params.grassVariation, -0.25f);
+    const std::uint32_t base = (std::uint32_t)vertices.size();
+    pushQuad(vertices, indices, left, up, down, right, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+    vertices[base + 0].uv = variedUv({0.0f, 0.0f}, x, z, params.grassVariation);
+    vertices[base + 1].uv = variedUv({0.5f, 0.0f}, x, z, params.grassVariation);
+    vertices[base + 2].uv = variedUv({0.0f, 0.5f}, x, z, params.grassVariation);
+    vertices[base + 3].uv = variedUv({0.5f, 0.5f}, x, z, params.grassVariation);
 }
 
 std::array<glm::vec3, 5> cellValleyPoints(
@@ -880,17 +900,22 @@ in float v_faceKind;
 in float v_height;
 out vec4 frag_color;
 uniform sampler2D grass_tex;
+uniform sampler2D rock_tex;
 uniform vec4 light_dir;
-uniform vec4 options; // x debug, y useGrassTexture, z AO strength
+uniform vec4 options; // x debug, y useTerrainTextures, z AO strength
 void main() {
     int debugMode = int(options.x + 0.5);
-    bool useGrassTexture = options.y > 0.5;
+    bool useTerrainTextures = options.y > 0.5;
     bool isTop = v_faceKind < 0.5;
+    bool isSide = v_faceKind > 0.5 && v_faceKind < 1.5;
     vec3 n = normalize(v_normal);
 
     vec4 base = v_color;
-    if (isTop && useGrassTexture) {
+    if (isTop && useTerrainTextures) {
         base = texture(grass_tex, v_uv) * v_color;
+    } else if (isSide && useTerrainTextures) {
+        vec4 rock = texture(rock_tex, v_uv);
+        base = vec4(rock.rgb, rock.a * v_color.a);
     }
 
     if (debugMode == 1) {
@@ -956,7 +981,9 @@ VSOut main(VSIn inp) {
 
 const char* fs_src_hlsl = R"(
 Texture2D grass_tex: register(t0);
+Texture2D rock_tex: register(t1);
 SamplerState grass_smp: register(s0);
+SamplerState rock_smp: register(s1);
 cbuffer fs_params: register(b0) { float4 light_dir; float4 options; };
 struct PSIn {
     float4 pos: SV_Position;
@@ -968,13 +995,17 @@ struct PSIn {
 };
 float4 main(PSIn inp): SV_Target0 {
     int debugMode = (int)(options.x + 0.5);
-    bool useGrassTexture = options.y > 0.5;
+    bool useTerrainTextures = options.y > 0.5;
     bool isTop = inp.faceKind0 < 0.5;
+    bool isSide = inp.faceKind0 > 0.5 && inp.faceKind0 < 1.5;
     float3 n = normalize(inp.normal0);
 
     float4 base = inp.color0;
-    if (isTop && useGrassTexture) {
+    if (isTop && useTerrainTextures) {
         base = grass_tex.Sample(grass_smp, inp.uv0) * inp.color0;
+    } else if (isSide && useTerrainTextures) {
+        float4 rock = rock_tex.Sample(rock_smp, inp.uv0);
+        base = float4(rock.rgb, rock.a * inp.color0.a);
     }
 
     if (debugMode == 1) {
@@ -1006,6 +1037,66 @@ float4 main(PSIn inp): SV_Target0 {
 }
 )";
 
+bool loadTextureFromFile(
+    const std::filesystem::path& path,
+    const std::uint8_t* fallbackPixels,
+    int fallbackWidth,
+    int fallbackHeight,
+    const char* textureName,
+    const char* imageLabel,
+    const char* samplerLabel,
+    sg_filter filter,
+    sg_image& image,
+    sg_view& view,
+    sg_sampler& sampler) {
+
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &channels, 4);
+    const bool loadedFromFile = pixels && width > 0 && height > 0;
+
+    if (!loadedFromFile) {
+        spdlog::warn("Landscape3dRenderer: failed to load {} texture '{}', using fallback", textureName, path.string());
+        if (pixels) {
+            stbi_image_free(pixels);
+            pixels = nullptr;
+        }
+        width = fallbackWidth;
+        height = fallbackHeight;
+    }
+
+    sg_image_desc imgDesc = {};
+    imgDesc.width = width;
+    imgDesc.height = height;
+    imgDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imgDesc.data.mip_levels[0].ptr = loadedFromFile ? pixels : fallbackPixels;
+    imgDesc.data.mip_levels[0].size = (std::size_t)width * (std::size_t)height * 4;
+    imgDesc.label = imageLabel;
+    image = sg_make_image(&imgDesc);
+    if (pixels) {
+        stbi_image_free(pixels);
+    }
+
+    if (image.id == SG_INVALID_ID) {
+        return false;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = image;
+    view = sg_make_view(&viewDesc);
+
+    sg_sampler_desc samplerDesc = {};
+    samplerDesc.min_filter = filter;
+    samplerDesc.mag_filter = filter;
+    samplerDesc.wrap_u = SG_WRAP_REPEAT;
+    samplerDesc.wrap_v = SG_WRAP_REPEAT;
+    samplerDesc.label = samplerLabel;
+    sampler = sg_make_sampler(&samplerDesc);
+
+    return loadedFromFile && view.id != SG_INVALID_ID && sampler.id != SG_INVALID_ID;
+}
+
 } // namespace
 
 glm::vec3 Landscape3dCamera::position() const {
@@ -1036,7 +1127,7 @@ glm::mat4 Landscape3dCamera::projectionMatrix(float aspect) const {
         return glm::perspectiveRH_ZO(radians(38.0f), aspect, 0.1f, 300.0f);
     }
 
-    const float y = std::max(1.0f, orthoScale);
+    const float y = std::max(0.35f, orthoScale);
     const float x = y * std::max(0.1f, aspect);
     return glm::orthoRH_ZO(-x, x, -y, y, -200.0f, 300.0f);
 }
@@ -1047,18 +1138,13 @@ void Landscape3dRenderer::init() {
 
 void Landscape3dRenderer::shutdown() {
     destroyMeshBuffers();
+    destroyRockTexture();
     destroyGrassTexture();
     destroyPipelines();
 }
 
 bool Landscape3dRenderer::loadGrassTexture(const std::filesystem::path& path) {
     destroyGrassTexture();
-
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &channels, 4);
-    const bool loadedFromFile = pixels && width > 0 && height > 0;
     const std::uint8_t fallbackPixels[] = {
         72, 145, 48, 255,
         58, 120, 39, 255,
@@ -1066,45 +1152,41 @@ bool Landscape3dRenderer::loadGrassTexture(const std::filesystem::path& path) {
         66, 132, 44, 255,
     };
 
-    if (!loadedFromFile) {
-        spdlog::warn("Landscape3dRenderer: failed to load grass texture '{}', using fallback", path.string());
-        if (pixels) {
-            stbi_image_free(pixels);
-            pixels = nullptr;
-        }
-        width = 2;
-        height = 2;
-    }
+    return loadTextureFromFile(
+        path,
+        fallbackPixels,
+        2,
+        2,
+        "grass",
+        "landscape3d-grass",
+        "landscape3d-grass-sampler",
+        SG_FILTER_NEAREST,
+        m_grassImage,
+        m_grassView,
+        m_grassSampler);
+}
 
-    sg_image_desc imgDesc = {};
-    imgDesc.width = width;
-    imgDesc.height = height;
-    imgDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    imgDesc.data.mip_levels[0].ptr = loadedFromFile ? pixels : fallbackPixels;
-    imgDesc.data.mip_levels[0].size = (std::size_t)width * (std::size_t)height * 4;
-    imgDesc.label = "landscape3d-grass";
-    m_grassImage = sg_make_image(&imgDesc);
-    if (pixels) {
-        stbi_image_free(pixels);
-    }
+bool Landscape3dRenderer::loadRockTexture(const std::filesystem::path& path) {
+    destroyRockTexture();
+    const std::uint8_t fallbackPixels[] = {
+        112, 108, 100, 255,
+        142, 136, 124, 255,
+        86, 82, 76, 255,
+        164, 158, 144, 255,
+    };
 
-    if (m_grassImage.id == SG_INVALID_ID) {
-        return false;
-    }
-
-    sg_view_desc viewDesc = {};
-    viewDesc.texture.image = m_grassImage;
-    m_grassView = sg_make_view(&viewDesc);
-
-    sg_sampler_desc samplerDesc = {};
-    samplerDesc.min_filter = SG_FILTER_NEAREST;
-    samplerDesc.mag_filter = SG_FILTER_NEAREST;
-    samplerDesc.wrap_u = SG_WRAP_REPEAT;
-    samplerDesc.wrap_v = SG_WRAP_REPEAT;
-    samplerDesc.label = "landscape3d-grass-sampler";
-    m_grassSampler = sg_make_sampler(&samplerDesc);
-
-    return loadedFromFile && m_grassView.id != SG_INVALID_ID && m_grassSampler.id != SG_INVALID_ID;
+    return loadTextureFromFile(
+        path,
+        fallbackPixels,
+        2,
+        2,
+        "rock",
+        "landscape3d-rock",
+        "landscape3d-rock-sampler",
+        SG_FILTER_LINEAR,
+        m_rockImage,
+        m_rockView,
+        m_rockSampler);
 }
 
 void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape3dRenderParams& params) {
@@ -1275,6 +1357,10 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape
         m_terrainBindings.views[0] = m_grassView;
         m_terrainBindings.samplers[0] = m_grassSampler;
     }
+    if (m_rockView.id != SG_INVALID_ID && m_rockSampler.id != SG_INVALID_ID) {
+        m_terrainBindings.views[1] = m_rockView;
+        m_terrainBindings.samplers[1] = m_rockSampler;
+    }
     m_lineBindings = {};
     if (m_lineVertexBuffer.id != SG_INVALID_ID) {
         m_lineBindings.vertex_buffers[0] = m_lineVertexBuffer;
@@ -1282,6 +1368,10 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape
     if (m_grassView.id != SG_INVALID_ID && m_grassSampler.id != SG_INVALID_ID) {
         m_lineBindings.views[0] = m_grassView;
         m_lineBindings.samplers[0] = m_grassSampler;
+    }
+    if (m_rockView.id != SG_INVALID_ID && m_rockSampler.id != SG_INVALID_ID) {
+        m_lineBindings.views[1] = m_rockView;
+        m_lineBindings.samplers[1] = m_rockSampler;
     }
     m_indexCount = (int)indices.size();
     m_lineVertexCount = (int)lineVertices.size();
@@ -1393,6 +1483,23 @@ void Landscape3dRenderer::ensurePipelines() {
     shd.texture_sampler_pairs[0].view_slot = 0;
     shd.texture_sampler_pairs[0].sampler_slot = 0;
     shd.texture_sampler_pairs[0].glsl_name = "grass_tex";
+    shd.views[1].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd.views[1].texture.image_type = SG_IMAGETYPE_2D;
+    shd.views[1].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd.views[1].texture.hlsl_register_t_n = 1;
+    shd.views[1].texture.msl_texture_n = 1;
+    shd.views[1].texture.wgsl_group1_binding_n = 2;
+    shd.views[1].texture.spirv_set1_binding_n = 2;
+    shd.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd.samplers[1].hlsl_register_s_n = 1;
+    shd.samplers[1].msl_sampler_n = 1;
+    shd.samplers[1].wgsl_group1_binding_n = 3;
+    shd.samplers[1].spirv_set1_binding_n = 3;
+    shd.texture_sampler_pairs[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd.texture_sampler_pairs[1].view_slot = 1;
+    shd.texture_sampler_pairs[1].sampler_slot = 1;
+    shd.texture_sampler_pairs[1].glsl_name = "rock_tex";
 
     shd.label = "landscape3d-cube-shader";
     m_shader = sg_make_shader(&shd);
@@ -1467,6 +1574,21 @@ void Landscape3dRenderer::destroyGrassTexture() {
     if (m_grassImage.id != SG_INVALID_ID) {
         sg_destroy_image(m_grassImage);
         m_grassImage.id = SG_INVALID_ID;
+    }
+}
+
+void Landscape3dRenderer::destroyRockTexture() {
+    if (m_rockSampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(m_rockSampler);
+        m_rockSampler.id = SG_INVALID_ID;
+    }
+    if (m_rockView.id != SG_INVALID_ID) {
+        sg_destroy_view(m_rockView);
+        m_rockView.id = SG_INVALID_ID;
+    }
+    if (m_rockImage.id != SG_INVALID_ID) {
+        sg_destroy_image(m_rockImage);
+        m_rockImage.id = SG_INVALID_ID;
     }
 }
 

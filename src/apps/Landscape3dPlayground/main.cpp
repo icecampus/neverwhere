@@ -70,11 +70,14 @@ Landscape3dCamera g_camera;
 Landscape3dRenderer g_renderer;
 bool g_needsMeshRebuild = true;
 bool g_grassTextureLoaded = false;
+bool g_rockTextureLoaded = false;
 
 constexpr float kFixedIsoYawDeg = Landscape3dCamera::fixedYawDeg;
 constexpr float kFixedIsoPitchDeg = Landscape3dCamera::fixedPitchDeg;
 constexpr float kFixedIsoDistance = Landscape3dCamera::fixedDistance;
 constexpr float kDefaultOrthoScale = Landscape3dCamera::defaultOrthoScale;
+constexpr float kMinOrthoScale = 0.5f;
+constexpr float kMaxOrthoScale = 120.0f;
 
 bool looksLikeDataRoot(const std::filesystem::path& dir) {
     namespace fs = std::filesystem;
@@ -324,7 +327,7 @@ void drawUi() {
     ImGui::Text("Debug");
     const char* debugModes[] = {"Lit", "Top Texture", "Earth Sides", "Height", "Normals"};
     ImGui::Combo("Debug Mode", &g_renderParams.debugMode, debugModes, 5);
-    ImGui::Checkbox("Use Grass Texture", &g_renderParams.useGrassTexture);
+    ImGui::Checkbox("Use Terrain Textures", &g_renderParams.useGrassTexture);
 
     ImGui::Separator();
     ImGui::Text("Visual Polish");
@@ -362,7 +365,7 @@ void drawUi() {
     if (targetChanged) {
         g_camera.target.y = 0.0f;
     }
-    ImGui::SliderFloat("Ortho Scale", &g_camera.orthoScale, 4.0f, 80.0f);
+    ImGui::SliderFloat("Ortho Scale", &g_camera.orthoScale, kMinOrthoScale, kMaxOrthoScale);
     if (ImGui::Button("Reset View")) {
         resetIsoCameraView();
     }
@@ -384,6 +387,7 @@ void drawUi() {
         stats.contourCliffEdges,
         stats.contourCliffChains);
     ImGui::Text("Grass texture: %s", g_grassTextureLoaded ? "loaded" : "fallback");
+    ImGui::Text("Rock texture: %s", g_rockTextureLoaded ? "loaded" : "fallback");
     ImGui::Text("Controls: RMB drag pan, MMB pan, wheel zoom");
     ImGui::End();
 }
@@ -412,7 +416,9 @@ void init() {
     resetIsoCameraView();
     const std::filesystem::path dataRoot = findDataRootUpwards(std::filesystem::current_path());
     const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
+    const std::filesystem::path rockPath = dataRoot / "resources" / "textures" / "rock.jpg";
     g_grassTextureLoaded = g_renderer.loadGrassTexture(grassPath);
+    g_rockTextureLoaded = g_renderer.loadRockTexture(rockPath);
     regenerateScene();
 }
 
@@ -578,7 +584,7 @@ void event(const sapp_event* ev) {
         const bool hasBefore = pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, beforeWorld);
 
         const float zoom = (ev->scroll_y > 0.0f) ? 0.90f : 1.10f;
-        g_camera.orthoScale = std::clamp(g_camera.orthoScale * zoom, 4.0f, 90.0f);
+        g_camera.orthoScale = std::clamp(g_camera.orthoScale * zoom, kMinOrthoScale, kMaxOrthoScale);
         applyFixedIsoCameraAngles();
 
         glm::vec3 afterWorld{0.0f};
