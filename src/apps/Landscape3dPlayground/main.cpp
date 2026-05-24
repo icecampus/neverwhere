@@ -1,9 +1,12 @@
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <filesystem>
 
 #include <imgui.h>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <spdlog/spdlog.h>
+#include <topology_core/staggered_isometry.h>
 
 #include "Landscape3dRenderer.h"
 #include "TerrainScene.h"
@@ -41,11 +44,21 @@ struct AppState {
 
     bool orbiting = false;
     bool panning = false;
+    bool brushEnabled = true;
+    bool brushPainting = false;
+    bool brushErasing = false;
+    bool brushHoverValid = false;
     float dragStartX = 0.0f;
     float dragStartY = 0.0f;
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
     float startYaw = 45.0f;
     float startPitch = 35.0f;
     glm::vec3 startTarget{0.0f};
+    glm::vec3 brushWorld{0.0f};
+    glm::vec2 brushField{0.0f};
+    glm::ivec2 hoveredCell{-1, -1};
+    glm::ivec2 hoveredNode{-1, -1};
 };
 
 AppState g_state;
@@ -81,6 +94,69 @@ std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
     return {};
 }
 
+topology_core::StaggeredIsometry makeBrushIsometry() {
+    topology_core::StaggeredIsometry iso;
+    iso.dims.cellWidth = std::max(0.1f, g_renderParams.cubeSize);
+    iso.dims.aspectRatio = 2.0f;
+    return iso;
+}
+
+bool pickGroundAt(float screenX, float screenY, glm::vec3& world, glm::vec2& field, glm::ivec2& cell, glm::ivec2& node) {
+    const int width = sapp_width();
+    const int height = sapp_height();
+    if (width <= 0 || height <= 0 || g_scene.gridSize() <= 0) return false;
+
+    const float aspect = (float)width / (float)height;
+    const glm::mat4 invMvp = glm::inverse(g_camera.projectionMatrix(aspect) * g_camera.viewMatrix());
+    const float ndcX = (screenX / (float)width) * 2.0f - 1.0f;
+    const float ndcY = 1.0f - (screenY / (float)height) * 2.0f;
+
+    glm::vec4 nearPoint = invMvp * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+    glm::vec4 farPoint = invMvp * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+    if (nearPoint.w == 0.0f || farPoint.w == 0.0f) return false;
+
+    nearPoint /= nearPoint.w;
+    farPoint /= farPoint.w;
+
+    const glm::vec3 rayStart = glm::vec3(nearPoint);
+    const glm::vec3 rayEnd = glm::vec3(farPoint);
+    const glm::vec3 ray = rayEnd - rayStart;
+    if (std::abs(ray.y) < 0.0001f) return false;
+
+    const float t = -rayStart.y / ray.y;
+    if (t < 0.0f) return false;
+
+    world = rayStart + ray * t;
+
+    topology_core::StaggeredIsometry iso = makeBrushIsometry();
+    const glm::vec2 origin = iso.mapToField({g_scene.gridSize() / 2, g_scene.gridSize() / 2});
+    field = glm::vec2(world.x, world.z) + origin;
+    cell = iso.fieldToMap(field);
+    node = iso.fieldToMap(field + glm::vec2(0.0f, iso.dims.cellSize().y * 0.5f));
+
+    return node.x >= -1 && node.y >= 0 && node.x <= g_scene.gridSize() && node.y <= g_scene.gridSize() + 1;
+}
+
+void updateBrushHover(float screenX, float screenY) {
+    g_state.mouseX = screenX;
+    g_state.mouseY = screenY;
+    g_state.brushHoverValid = pickGroundAt(
+        screenX,
+        screenY,
+        g_state.brushWorld,
+        g_state.brushField,
+        g_state.hoveredCell,
+        g_state.hoveredNode);
+}
+
+void applyBrushToHoveredNode(bool enabled) {
+    if (!g_state.brushEnabled || !g_state.brushHoverValid) return;
+
+    if (g_scene.setLandNode(g_state.hoveredNode.x, g_state.hoveredNode.y, enabled)) {
+        g_needsMeshRebuild = true;
+    }
+}
+
 void regenerateScene() {
     g_scene.generate(g_sceneSettings);
     g_needsMeshRebuild = true;
@@ -88,7 +164,7 @@ void regenerateScene() {
 
 void drawUi() {
     ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(390.0f, 430.0f), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(430.0f, 620.0f), ImGuiCond_Once);
 
     ImGui::Begin("Landscape3dPlayground");
     ImGui::Text("Frame: %d", g_state.frameIndex);
@@ -154,6 +230,37 @@ void drawUi() {
         ImGui::Text("Preview Type: %s", tileTypeName(tileTypeFromAtlasIndex(g_renderParams.previewTileIndex)));
     } else {
         ImGui::Text("Preview Type: Generated nodes");
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Brush");
+    ImGui::Checkbox("Brush Enabled", &g_state.brushEnabled);
+    if (ImGui::Button("Clear Nodes")) {
+        g_scene.clearLandNodes();
+        g_needsMeshRebuild = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Regenerate Nodes")) {
+        regenerateScene();
+    }
+    if (g_state.brushHoverValid) {
+        ImGui::Text("Hovered Cell: %d, %d", g_state.hoveredCell.x, g_state.hoveredCell.y);
+        ImGui::Text("Hovered Node: %d, %d [%s]",
+            g_state.hoveredNode.x,
+            g_state.hoveredNode.y,
+            g_scene.landNodeAt(g_state.hoveredNode.x, g_state.hoveredNode.y) ? "on" : "off");
+        const auto affectedCells = TerrainScene::nodeNeighboursCells(g_state.hoveredNode);
+        ImGui::Text("Affects: (%d,%d) (%d,%d) (%d,%d) (%d,%d)",
+            affectedCells[0].x, affectedCells[0].y,
+            affectedCells[1].x, affectedCells[1].y,
+            affectedCells[2].x, affectedCells[2].y,
+            affectedCells[3].x, affectedCells[3].y);
+    } else {
+        ImGui::Text("Hovered Node: none");
+    }
+    ImGui::Text("Controls: LMB paint, Ctrl+LMB/Ctrl+RMB erase");
+    if (g_renderParams.previewTileIndex >= 0) {
+        ImGui::Text("Preview mode ignores painted nodes");
     }
 
     ImGui::Separator();
@@ -290,12 +397,32 @@ void event(const sapp_event* ev) {
     if (g_state.imguiOk) {
         const ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) {
+            if (ev->type == SAPP_EVENTTYPE_MOUSE_UP) {
+                g_state.brushPainting = false;
+                g_state.brushErasing = false;
+                g_state.orbiting = false;
+                g_state.panning = false;
+            }
             return;
         }
     }
 
     switch (ev->type) {
-    case SAPP_EVENTTYPE_MOUSE_DOWN:
+    case SAPP_EVENTTYPE_MOUSE_DOWN: {
+        updateBrushHover(ev->mouse_x, ev->mouse_y);
+        const bool ctrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
+        const bool wantsBrush = g_state.brushEnabled &&
+            g_renderParams.terrainMode == Landscape3dTerrainMode::ValleyGeometry &&
+            (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT ||
+             (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT && ctrl));
+
+        if (wantsBrush) {
+            g_state.brushPainting = true;
+            g_state.brushErasing = ctrl || ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT;
+            applyBrushToHoveredNode(!g_state.brushErasing);
+            break;
+        }
+
         if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT || ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
             g_state.orbiting = ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT;
             g_state.panning = ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE;
@@ -306,7 +433,12 @@ void event(const sapp_event* ev) {
             g_state.startTarget = g_camera.target;
         }
         break;
+    }
     case SAPP_EVENTTYPE_MOUSE_UP:
+        if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT || ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
+            g_state.brushPainting = false;
+            g_state.brushErasing = false;
+        }
         if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.orbiting = false;
         }
@@ -315,6 +447,12 @@ void event(const sapp_event* ev) {
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_MOVE: {
+        updateBrushHover(ev->mouse_x, ev->mouse_y);
+        if (g_state.brushPainting) {
+            applyBrushToHoveredNode(!g_state.brushErasing);
+            break;
+        }
+
         const float dx = ev->mouse_x - g_state.dragStartX;
         const float dy = ev->mouse_y - g_state.dragStartY;
         if (g_state.orbiting) {

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
+
+#include <glm/glm.hpp>
 
 #include "LandscapeTileRules.h"
 
@@ -31,6 +34,11 @@ public:
     TerrainMaterial materialAt(int x, int z) const;
     LandscapeTileType tileTypeAt(int x, int z) const;
     bool landNodeAt(int x, int z) const;
+    bool setLandNode(int x, int z, bool enabled);
+    bool toggleLandNode(int x, int z);
+    void clearLandNodes();
+
+    static std::array<glm::ivec2, 4> nodeNeighboursCells(const glm::ivec2& nodePosition);
 
 private:
     int m_gridSize = 0;

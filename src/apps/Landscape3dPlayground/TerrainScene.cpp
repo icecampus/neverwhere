@@ -155,6 +155,53 @@ bool TerrainScene::landNodeAt(int x, int z) const {
     return m_landNodes[landNodeIndex(x, z)] != 0;
 }
 
+bool TerrainScene::setLandNode(int x, int z, bool enabled) {
+    if (m_landNodeWidth <= 0 || m_landNodeHeight <= 0) return false;
+    const int storageX = x + m_landNodeXOffset;
+    if (storageX < 0 || storageX >= m_landNodeWidth || z < 0 || z >= m_landNodeHeight) {
+        return false;
+    }
+
+    std::uint8_t& value = m_landNodes[landNodeIndex(x, z)];
+    const std::uint8_t newValue = enabled ? 1 : 0;
+    if (value == newValue) {
+        return false;
+    }
+
+    value = newValue;
+    return true;
+}
+
+bool TerrainScene::toggleLandNode(int x, int z) {
+    return setLandNode(x, z, !landNodeAt(x, z));
+}
+
+void TerrainScene::clearLandNodes() {
+    std::fill(m_landNodes.begin(), m_landNodes.end(), 0);
+}
+
+std::array<glm::ivec2, 4> TerrainScene::nodeNeighboursCells(const glm::ivec2& nodePosition) {
+    const std::array<glm::ivec2, 4> oddMask{
+        glm::ivec2{0, 0},
+        glm::ivec2{0, -2},
+        glm::ivec2{0, -1},
+        glm::ivec2{1, -1},
+    };
+    const std::array<glm::ivec2, 4> evenMask{
+        glm::ivec2{0, 0},
+        glm::ivec2{0, -2},
+        glm::ivec2{-1, -1},
+        glm::ivec2{0, -1},
+    };
+
+    const std::array<glm::ivec2, 4>& mask = (nodePosition.y & 1) ? oddMask : evenMask;
+    std::array<glm::ivec2, 4> result{};
+    for (std::size_t i = 0; i < result.size(); i++) {
+        result[i] = nodePosition + mask[i];
+    }
+    return result;
+}
+
 int TerrainScene::cellIndex(int x, int z) const {
     return z * m_gridSize + x;
 }
