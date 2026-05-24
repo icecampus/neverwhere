@@ -47,42 +47,39 @@ float fbm(float x, float z, int seed) {
 
 void TerrainScene::generate(const TerrainSceneSettings& settings) {
     m_gridSize = std::clamp(settings.gridSize, 4, 96);
-    m_heights.assign((m_gridSize + 1) * (m_gridSize + 1), 0.0f);
+    m_minHeight = std::clamp(settings.minHeight, 0, 32);
+    m_maxHeight = std::clamp(settings.maxHeight, m_minHeight + 1, 48);
+    m_columnHeights.assign(m_gridSize * m_gridSize, m_minHeight);
     m_materials.assign(m_gridSize * m_gridSize, TerrainMaterial::Grass);
 
     const float half = (float)m_gridSize * 0.5f;
 
-    for (int z = 0; z <= m_gridSize; z++) {
-        for (int x = 0; x <= m_gridSize; x++) {
+    for (int z = 0; z < m_gridSize; z++) {
+        for (int x = 0; x < m_gridSize; x++) {
             const float dx = ((float)x - half) / half;
             const float dz = ((float)z - half) / half;
             const float radial = std::sqrt(dx * dx + dz * dz);
             const float ridge = std::sin(((float)x + settings.seed) * 0.37f) * std::cos(((float)z - settings.seed) * 0.29f);
             float h = fbm((float)x, (float)z, settings.seed);
-            h = (h - 0.45f) * 2.2f + ridge * 0.18f;
-            h -= std::max(0.0f, radial - 0.65f) * 1.4f;
-            m_heights[heightIndex(x, z)] = h;
-        }
-    }
+            h = (h - 0.35f) * 1.25f + ridge * 0.18f;
+            h -= std::max(0.0f, radial - 0.72f) * 0.95f;
+            h = std::clamp(h, 0.0f, 1.0f);
 
-    for (int z = 0; z < m_gridSize; z++) {
-        for (int x = 0; x < m_gridSize; x++) {
-            const float h = 0.25f * (
-                heightAt(x, z) +
-                heightAt(x + 1, z) +
-                heightAt(x, z + 1) +
-                heightAt(x + 1, z + 1));
+            const int heightRange = std::max(1, m_maxHeight - m_minHeight);
+            const int columnHeight = std::clamp(
+                m_minHeight + (int)std::round(h * (float)heightRange),
+                m_minHeight,
+                m_maxHeight);
+            m_columnHeights[cellIndex(x, z)] = columnHeight;
 
             TerrainMaterial material = TerrainMaterial::Grass;
-            if (h < -0.18f) {
+            if (columnHeight <= m_minHeight + 1) {
                 material = TerrainMaterial::Sand;
-            } else if (h > 0.42f) {
+            } else if (columnHeight >= m_maxHeight - 1) {
                 material = TerrainMaterial::Rock;
             }
 
-            const float dx = ((float)x - half) / half;
-            const float dz = ((float)z - half) / half;
-            if ((dx * dx + dz * dz) < 0.12f && h < 0.28f) {
+            if ((dx * dx + dz * dz) < 0.10f && columnHeight <= m_minHeight + 3) {
                 material = TerrainMaterial::Sand;
             }
 
@@ -92,10 +89,14 @@ void TerrainScene::generate(const TerrainSceneSettings& settings) {
 }
 
 float TerrainScene::heightAt(int x, int z) const {
-    if (m_gridSize <= 0) return 0.0f;
-    x = std::clamp(x, 0, m_gridSize);
-    z = std::clamp(z, 0, m_gridSize);
-    return m_heights[heightIndex(x, z)];
+    return (float)columnHeightAt(x, z);
+}
+
+int TerrainScene::columnHeightAt(int x, int z) const {
+    if (m_gridSize <= 0) return 0;
+    x = std::clamp(x, 0, m_gridSize - 1);
+    z = std::clamp(z, 0, m_gridSize - 1);
+    return m_columnHeights[cellIndex(x, z)];
 }
 
 TerrainMaterial TerrainScene::materialAt(int x, int z) const {
@@ -105,11 +106,11 @@ TerrainMaterial TerrainScene::materialAt(int x, int z) const {
     return m_materials[materialIndex(x, z)];
 }
 
-int TerrainScene::heightIndex(int x, int z) const {
-    return z * (m_gridSize + 1) + x;
+int TerrainScene::cellIndex(int x, int z) const {
+    return z * m_gridSize + x;
 }
 
 int TerrainScene::materialIndex(int x, int z) const {
-    return z * m_gridSize + x;
+    return cellIndex(x, z);
 }
 

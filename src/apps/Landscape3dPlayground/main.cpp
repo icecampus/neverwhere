@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 
 #include <imgui.h>
 #include <spdlog/spdlog.h>
@@ -54,6 +55,31 @@ Landscape3dRenderParams g_renderParams;
 Landscape3dCamera g_camera;
 Landscape3dRenderer g_renderer;
 bool g_needsMeshRebuild = true;
+bool g_grassTextureLoaded = false;
+
+bool looksLikeDataRoot(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    return fs::exists(dir / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png", ec);
+}
+
+std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    startDir = fs::weakly_canonical(startDir, ec);
+    if (startDir.empty()) startDir = fs::current_path(ec);
+    if (startDir.empty()) return {};
+
+    fs::path dir = startDir;
+    for (int i = 0; i < 16; i++) {
+        if (looksLikeDataRoot(dir)) return dir;
+        if (!dir.has_parent_path()) break;
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
 
 void regenerateScene() {
     g_scene.generate(g_sceneSettings);
@@ -75,6 +101,18 @@ void drawUi() {
         regenerateScene();
     }
 
+    int minHeight = g_sceneSettings.minHeight;
+    if (ImGui::SliderInt("Min Cubes", &minHeight, 0, 12)) {
+        g_sceneSettings.minHeight = std::min(minHeight, g_sceneSettings.maxHeight - 1);
+        regenerateScene();
+    }
+
+    int maxHeight = g_sceneSettings.maxHeight;
+    if (ImGui::SliderInt("Max Cubes", &maxHeight, 2, 32)) {
+        g_sceneSettings.maxHeight = std::max(maxHeight, g_sceneSettings.minHeight + 1);
+        regenerateScene();
+    }
+
     if (ImGui::InputInt("Seed", &g_sceneSettings.seed)) {
         regenerateScene();
     }
@@ -84,7 +122,7 @@ void drawUi() {
         regenerateScene();
     }
 
-    if (ImGui::SliderFloat("Height Scale", &g_renderParams.heightScale, 0.0f, 12.0f)) {
+    if (ImGui::SliderFloat("Cube Size", &g_renderParams.cubeSize, 0.35f, 2.5f)) {
         g_needsMeshRebuild = true;
     }
 
@@ -95,8 +133,9 @@ void drawUi() {
 
     ImGui::Separator();
     ImGui::Text("Debug");
-    const char* debugModes[] = {"Lit", "Material", "Normals", "Height"};
-    ImGui::Combo("Debug Mode", &g_renderParams.debugMode, debugModes, 4);
+    const char* debugModes[] = {"Lit", "Top Texture", "Earth Sides", "Height", "Normals"};
+    ImGui::Combo("Debug Mode", &g_renderParams.debugMode, debugModes, 5);
+    ImGui::Checkbox("Use Grass Texture", &g_renderParams.useGrassTexture);
     ImGui::Checkbox("Wireframe Overlay", &g_renderParams.showWireframe);
 
     ImGui::Separator();
@@ -113,6 +152,7 @@ void drawUi() {
     ImGui::Separator();
     ImGui::Text("Triangles: %d", g_renderer.triangleCount());
     ImGui::Text("Lines: %d", g_renderer.lineCount());
+    ImGui::Text("Grass texture: %s", g_grassTextureLoaded ? "loaded" : "fallback");
     ImGui::Text("Controls: RMB orbit, MMB pan, wheel zoom");
     ImGui::End();
 }
@@ -138,6 +178,9 @@ void init() {
     g_state.imguiOk = true;
 
     g_renderer.init();
+    const std::filesystem::path dataRoot = findDataRootUpwards(std::filesystem::current_path());
+    const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
+    g_grassTextureLoaded = g_renderer.loadGrassTexture(grassPath);
     regenerateScene();
 }
 
@@ -153,7 +196,7 @@ void frame() {
     const int h = sapp_height();
 
     if (g_needsMeshRebuild) {
-        g_renderer.rebuildMesh(g_scene, g_renderParams.heightScale);
+        g_renderer.rebuildMesh(g_scene, g_renderParams.cubeSize);
         g_needsMeshRebuild = false;
     }
 

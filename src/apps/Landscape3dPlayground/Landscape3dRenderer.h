@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -37,30 +38,34 @@ struct Landscape3dCamera {
 };
 
 struct Landscape3dRenderParams {
-    float heightScale = 3.0f;
+    float cubeSize = 1.0f;
     float lightYawDeg = 35.0f;
     float lightPitchDeg = 50.0f;
+    bool useGrassTexture = true;
     bool showWireframe = true;
-    int debugMode = 0; // 0=lit, 1=material, 2=normal, 3=height
+    int debugMode = 0; // 0=lit, 1=top texture, 2=earth sides, 3=height, 4=normals
 };
 
 class Landscape3dRenderer {
 public:
     void init();
     void shutdown();
-    void rebuildMesh(const TerrainScene& scene, float heightScale);
+    bool loadGrassTexture(const std::filesystem::path& path);
+    void rebuildMesh(const TerrainScene& scene, float cubeSize);
     void render(const Landscape3dCamera& camera, const Landscape3dRenderParams& params, int width, int height);
 
     int triangleCount() const { return m_indexCount / 3; }
     int lineCount() const { return m_lineVertexCount / 2; }
 
-private:
     struct TerrainVertex {
         glm::vec3 position;
         glm::vec3 normal;
         glm::vec4 color;
+        glm::vec2 uv;
+        float faceKind; // 0=top grass, 1=earth side, 2=wire line
     };
 
+private:
     struct VsParams {
         float mvp[16];
     };
@@ -73,6 +78,7 @@ private:
     void ensurePipelines();
     void destroyPipelines();
     void destroyMeshBuffers();
+    void destroyGrassTexture();
 
     sg_pipeline m_terrainPipeline{SG_INVALID_ID};
     sg_pipeline m_linePipeline{SG_INVALID_ID};
@@ -80,6 +86,9 @@ private:
     sg_buffer m_vertexBuffer{SG_INVALID_ID};
     sg_buffer m_indexBuffer{SG_INVALID_ID};
     sg_buffer m_lineVertexBuffer{SG_INVALID_ID};
+    sg_image m_grassImage{SG_INVALID_ID};
+    sg_view m_grassView{SG_INVALID_ID};
+    sg_sampler m_grassSampler{SG_INVALID_ID};
     sg_bindings m_terrainBindings{};
     sg_bindings m_lineBindings{};
     int m_indexCount = 0;
