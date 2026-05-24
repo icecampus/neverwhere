@@ -25,6 +25,7 @@
 enum class Landscape3dTerrainMode : int {
     CubesDebug = 0,
     ValleyGeometry = 1,
+    ContourGeometry = 2,
 };
 
 struct Landscape3dCamera {
@@ -51,11 +52,15 @@ struct Landscape3dCamera {
 struct Landscape3dRenderParams {
     float cubeSize = 1.0f;
     float heightStepInCubes = 0.5f;
-    float lightYawDeg = 35.0f;
-    float lightPitchDeg = 50.0f;
+    float lightYawDeg = -35.0f;
+    float lightPitchDeg = 48.0f;
+    float ambientOcclusionStrength = 0.85f;
     bool useGrassTexture = true;
-    bool showWireframe = true;
-    Landscape3dTerrainMode terrainMode = Landscape3dTerrainMode::ValleyGeometry;
+    bool showWireframe = false;
+    bool showEdgeAccents = true;
+    bool grassVariation = true;
+    bool sideGradient = true;
+    Landscape3dTerrainMode terrainMode = Landscape3dTerrainMode::ContourGeometry;
     int previewTileIndex = -1;
     int debugMode = 0; // 0=lit, 1=top texture, 2=earth sides, 3=height, 4=normals
 };
@@ -67,6 +72,10 @@ struct Landscape3dTileStats {
     int lacks = 0;
     int lines = 0;
     int opposites = 0;
+    int contourHighCells = 0;
+    int contourSmoothEdges = 0;
+    int contourCliffEdges = 0;
+    int contourCliffChains = 0;
 };
 
 class Landscape3dRenderer {

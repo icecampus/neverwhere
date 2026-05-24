@@ -256,9 +256,9 @@ void drawUi() {
 
     ImGui::Separator();
     ImGui::Text("Terrain Geometry");
-    const char* terrainModes[] = {"Cubes Debug", "Valley Geometry"};
+    const char* terrainModes[] = {"Cubes Debug", "Valley Geometry", "Contour Geometry"};
     int terrainMode = (int)g_renderParams.terrainMode;
-    if (ImGui::Combo("Terrain Mode", &terrainMode, terrainModes, 2)) {
+    if (ImGui::Combo("Terrain Mode", &terrainMode, terrainModes, 3)) {
         g_renderParams.terrainMode = (Landscape3dTerrainMode)terrainMode;
         g_needsMeshRebuild = true;
     }
@@ -325,7 +325,32 @@ void drawUi() {
     const char* debugModes[] = {"Lit", "Top Texture", "Earth Sides", "Height", "Normals"};
     ImGui::Combo("Debug Mode", &g_renderParams.debugMode, debugModes, 5);
     ImGui::Checkbox("Use Grass Texture", &g_renderParams.useGrassTexture);
-    ImGui::Checkbox("Wireframe Overlay", &g_renderParams.showWireframe);
+
+    ImGui::Separator();
+    ImGui::Text("Visual Polish");
+    if (ImGui::Checkbox("Soft Edge Accents", &g_renderParams.showEdgeAccents)) {
+        g_needsMeshRebuild = true;
+    }
+    if (ImGui::Checkbox("Debug Wireframe", &g_renderParams.showWireframe)) {
+        g_needsMeshRebuild = true;
+    }
+    if (ImGui::Checkbox("Grass Variation", &g_renderParams.grassVariation)) {
+        g_needsMeshRebuild = true;
+    }
+    if (ImGui::Checkbox("Side Gradient", &g_renderParams.sideGradient)) {
+        g_needsMeshRebuild = true;
+    }
+    ImGui::SliderFloat("AO Strength", &g_renderParams.ambientOcclusionStrength, 0.0f, 1.0f);
+    if (ImGui::Button("Reset Visual Defaults")) {
+        g_renderParams.showEdgeAccents = true;
+        g_renderParams.showWireframe = false;
+        g_renderParams.grassVariation = true;
+        g_renderParams.sideGradient = true;
+        g_renderParams.ambientOcclusionStrength = 0.85f;
+        g_renderParams.lightYawDeg = -35.0f;
+        g_renderParams.lightPitchDeg = 48.0f;
+        g_needsMeshRebuild = true;
+    }
 
     ImGui::Separator();
     applyFixedIsoCameraAngles();
@@ -353,6 +378,11 @@ void drawUi() {
         stats.lacks,
         stats.lines,
         stats.opposites);
+    ImGui::Text("Contour High/Smooth/Cliff/Chains: %d / %d / %d / %d",
+        stats.contourHighCells,
+        stats.contourSmoothEdges,
+        stats.contourCliffEdges,
+        stats.contourCliffChains);
     ImGui::Text("Grass texture: %s", g_grassTextureLoaded ? "loaded" : "fallback");
     ImGui::Text("Controls: RMB drag pan, MMB pan, wheel zoom");
     ImGui::End();
@@ -469,8 +499,11 @@ void event(const sapp_event* ev) {
     case SAPP_EVENTTYPE_MOUSE_DOWN: {
         updateBrushHover(ev->mouse_x, ev->mouse_y);
         const bool ctrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
+        const bool editableTerrain =
+            g_renderParams.terrainMode == Landscape3dTerrainMode::ValleyGeometry ||
+            g_renderParams.terrainMode == Landscape3dTerrainMode::ContourGeometry;
         const bool wantsBrush = g_state.brushEnabled &&
-            g_renderParams.terrainMode == Landscape3dTerrainMode::ValleyGeometry &&
+            editableTerrain &&
             (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT ||
              (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT && ctrl));
 
