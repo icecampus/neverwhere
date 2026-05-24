@@ -246,6 +246,37 @@ glm::vec3 horizontalNormalFromCenter(const glm::vec3& center, const glm::vec3& a
     return len > 0.0001f ? normal / len : glm::vec3{0.0f, 0.0f, 1.0f};
 }
 
+float valleyHeightScale(float cellWidth, const Landscape3dRenderParams& params) {
+    return std::max(0.01f, params.maxTileHeightInCubes) * cellWidth;
+}
+
+void addZeroLayerFill(
+    std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    int x,
+    int z,
+    int grid,
+    const Landscape3dRenderParams& params) {
+
+    topology_core::StaggeredIsometry iso;
+    iso.dims.cellWidth = std::max(0.1f, params.cubeSize);
+    iso.dims.aspectRatio = Landscape3dCamera::editorGroundAspectRatio;
+
+    const float cellWidth = iso.dims.cellSize().x;
+    const float cellDepth = iso.dims.cellSize().y;
+    const glm::vec2 origin = iso.mapToField({grid / 2, grid / 2});
+    const glm::vec2 center2 = iso.mapToField({x, z}) - origin;
+    const float y = -0.002f * cellWidth;
+
+    const glm::vec3 left{center2.x - cellWidth * 0.5f, y, center2.y};
+    const glm::vec3 up{center2.x, y, center2.y - cellDepth * 0.5f};
+    const glm::vec3 right{center2.x + cellWidth * 0.5f, y, center2.y};
+    const glm::vec3 down{center2.x, y, center2.y + cellDepth * 0.5f};
+    const glm::vec4 baseColor{0.30f, 0.23f, 0.16f, 1.0f};
+
+    pushQuad(vertices, indices, left, up, down, right, {0.0f, 1.0f, 0.0f}, baseColor, FaceKind::Side);
+}
+
 void addValleyTileObject(
     std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -262,13 +293,13 @@ void addValleyTileObject(
 
     topology_core::StaggeredIsometry iso;
     iso.dims.cellWidth = std::max(0.1f, params.cubeSize);
-    iso.dims.aspectRatio = 2.0f;
+    iso.dims.aspectRatio = Landscape3dCamera::editorGroundAspectRatio;
 
     const float cellWidth = iso.dims.cellSize().x;
     const float cellDepth = iso.dims.cellSize().y;
     const glm::vec2 origin = iso.mapToField({grid / 2, grid / 2});
     const glm::vec2 center2 = iso.mapToField({x, z}) - origin;
-    const float heightScale = std::max(0.01f, params.tileHeight) * cellWidth;
+    const float heightScale = valleyHeightScale(cellWidth, params);
 
     const std::array<glm::vec2, 5> offsets{
         glm::vec2{-cellWidth * 0.5f, 0.0f},
@@ -638,6 +669,7 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape
                     ? tileTypeFromAtlasIndex(params.previewTileIndex)
                     : scene.tileTypeAt(x, z);
                 addTileStat(m_tileStats, type);
+                addZeroLayerFill(vertices, indices, x, z, grid, params);
                 if (!tileTypeHasSurface(type)) {
                     continue;
                 }

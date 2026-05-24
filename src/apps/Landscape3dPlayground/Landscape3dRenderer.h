@@ -28,11 +28,17 @@ enum class Landscape3dTerrainMode : int {
 };
 
 struct Landscape3dCamera {
+    static constexpr float fixedYawDeg = 0.0f;
+    static constexpr float fixedPitchDeg = 60.0f;
+    static constexpr float fixedDistance = 42.0f;
+    static constexpr float defaultOrthoScale = 22.0f;
+    static constexpr float editorGroundAspectRatio = 1.7320508f; // 2.0 * sin(60deg)
+
     glm::vec3 target{0.0f, 0.0f, 0.0f};
-    float yawDeg = 45.0f;
-    float pitchDeg = 35.0f;
-    float distance = 42.0f;
-    float orthoScale = 22.0f;
+    float yawDeg = fixedYawDeg;
+    float pitchDeg = fixedPitchDeg;
+    float distance = fixedDistance;
+    float orthoScale = defaultOrthoScale;
     bool perspective = false;
 
     glm::vec3 position() const;
@@ -44,7 +50,7 @@ struct Landscape3dCamera {
 
 struct Landscape3dRenderParams {
     float cubeSize = 1.0f;
-    float tileHeight = 0.5f;
+    float maxTileHeightInCubes = 0.5f;
     float lightYawDeg = 35.0f;
     float lightPitchDeg = 50.0f;
     bool useGrassTexture = true;

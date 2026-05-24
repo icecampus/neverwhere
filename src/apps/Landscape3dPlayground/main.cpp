@@ -42,7 +42,6 @@ struct AppState {
     bool gfxOk = false;
     bool imguiOk = false;
 
-    bool orbiting = false;
     bool panning = false;
     bool brushEnabled = true;
     bool brushPainting = false;
@@ -52,9 +51,9 @@ struct AppState {
     float dragStartY = 0.0f;
     float mouseX = 0.0f;
     float mouseY = 0.0f;
-    float startYaw = 45.0f;
-    float startPitch = 35.0f;
     glm::vec3 startTarget{0.0f};
+    glm::vec3 panAnchorWorld{0.0f};
+    bool panHasAnchor = false;
     glm::vec3 brushWorld{0.0f};
     glm::vec2 brushField{0.0f};
     glm::ivec2 hoveredCell{-1, -1};
@@ -69,6 +68,11 @@ Landscape3dCamera g_camera;
 Landscape3dRenderer g_renderer;
 bool g_needsMeshRebuild = true;
 bool g_grassTextureLoaded = false;
+
+constexpr float kFixedIsoYawDeg = Landscape3dCamera::fixedYawDeg;
+constexpr float kFixedIsoPitchDeg = Landscape3dCamera::fixedPitchDeg;
+constexpr float kFixedIsoDistance = Landscape3dCamera::fixedDistance;
+constexpr float kDefaultOrthoScale = Landscape3dCamera::defaultOrthoScale;
 
 bool looksLikeDataRoot(const std::filesystem::path& dir) {
     namespace fs = std::filesystem;
@@ -94,17 +98,30 @@ std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
     return {};
 }
 
+void applyFixedIsoCameraAngles() {
+    g_camera.yawDeg = kFixedIsoYawDeg;
+    g_camera.pitchDeg = kFixedIsoPitchDeg;
+    g_camera.distance = kFixedIsoDistance;
+    g_camera.perspective = false;
+}
+
+void resetIsoCameraView() {
+    applyFixedIsoCameraAngles();
+    g_camera.target = {0.0f, 0.0f, 0.0f};
+    g_camera.orthoScale = kDefaultOrthoScale;
+}
+
 topology_core::StaggeredIsometry makeBrushIsometry() {
     topology_core::StaggeredIsometry iso;
     iso.dims.cellWidth = std::max(0.1f, g_renderParams.cubeSize);
-    iso.dims.aspectRatio = 2.0f;
+    iso.dims.aspectRatio = Landscape3dCamera::editorGroundAspectRatio;
     return iso;
 }
 
-bool pickGroundAt(float screenX, float screenY, glm::vec3& world, glm::vec2& field, glm::ivec2& cell, glm::ivec2& node) {
+bool pickGroundPlaneAt(float screenX, float screenY, glm::vec3& world) {
     const int width = sapp_width();
     const int height = sapp_height();
-    if (width <= 0 || height <= 0 || g_scene.gridSize() <= 0) return false;
+    if (width <= 0 || height <= 0) return false;
 
     const float aspect = (float)width / (float)height;
     const glm::mat4 invMvp = glm::inverse(g_camera.projectionMatrix(aspect) * g_camera.viewMatrix());
@@ -127,6 +144,11 @@ bool pickGroundAt(float screenX, float screenY, glm::vec3& world, glm::vec2& fie
     if (t < 0.0f) return false;
 
     world = rayStart + ray * t;
+    return true;
+}
+
+bool pickGroundAt(float screenX, float screenY, glm::vec3& world, glm::vec2& field, glm::ivec2& cell, glm::ivec2& node) {
+    if (g_scene.gridSize() <= 0 || !pickGroundPlaneAt(screenX, screenY, world)) return false;
 
     topology_core::StaggeredIsometry iso = makeBrushIsometry();
     const glm::vec2 origin = iso.mapToField({g_scene.gridSize() / 2, g_scene.gridSize() / 2});
@@ -217,9 +239,10 @@ void drawUi() {
         g_needsMeshRebuild = true;
     }
 
-    if (ImGui::SliderFloat("Tile Height", &g_renderParams.tileHeight, 0.05f, 1.25f)) {
+    if (ImGui::SliderFloat("Max Height (cubes)", &g_renderParams.maxTileHeightInCubes, 0.10f, 1.0f)) {
         g_needsMeshRebuild = true;
     }
+    ImGui::Text("Mask 1.0 = %.2f cube height", g_renderParams.maxTileHeightInCubes);
 
     int previewTileIndex = g_renderParams.previewTileIndex;
     if (ImGui::SliderInt("Preview Tile Index", &previewTileIndex, -1, 23)) {
@@ -258,7 +281,8 @@ void drawUi() {
     } else {
         ImGui::Text("Hovered Node: none");
     }
-    ImGui::Text("Controls: LMB paint, Ctrl+LMB/Ctrl+RMB erase");
+    ImGui::Text("Controls: RMB drag pan, wheel zoom, LMB paint");
+    ImGui::Text("Erase: Ctrl+LMB or Ctrl+RMB");
     if (g_renderParams.previewTileIndex >= 0) {
         ImGui::Text("Preview mode ignores painted nodes");
     }
@@ -276,14 +300,18 @@ void drawUi() {
     ImGui::Checkbox("Wireframe Overlay", &g_renderParams.showWireframe);
 
     ImGui::Separator();
-    ImGui::Text("Camera");
-    ImGui::Checkbox("Perspective", &g_camera.perspective);
-    ImGui::SliderFloat("Yaw", &g_camera.yawDeg, -180.0f, 180.0f);
-    ImGui::SliderFloat("Pitch", &g_camera.pitchDeg, 10.0f, 80.0f);
-    ImGui::SliderFloat("Distance", &g_camera.distance, 8.0f, 120.0f);
+    applyFixedIsoCameraAngles();
+    ImGui::Text("Iso Camera");
+    ImGui::Text("Yaw/Pitch: %.1f / %.1f fixed", g_camera.yawDeg, g_camera.pitchDeg);
+    bool targetChanged = false;
+    targetChanged |= ImGui::DragFloat("Target X", &g_camera.target.x, 0.1f);
+    targetChanged |= ImGui::DragFloat("Target Z", &g_camera.target.z, 0.1f);
+    if (targetChanged) {
+        g_camera.target.y = 0.0f;
+    }
     ImGui::SliderFloat("Ortho Scale", &g_camera.orthoScale, 4.0f, 80.0f);
-    if (ImGui::Button("Reset Camera")) {
-        g_camera = {};
+    if (ImGui::Button("Reset View")) {
+        resetIsoCameraView();
     }
 
     ImGui::Separator();
@@ -298,7 +326,7 @@ void drawUi() {
         stats.lines,
         stats.opposites);
     ImGui::Text("Grass texture: %s", g_grassTextureLoaded ? "loaded" : "fallback");
-    ImGui::Text("Controls: RMB orbit, MMB pan, wheel zoom");
+    ImGui::Text("Controls: RMB drag pan, MMB pan, wheel zoom");
     ImGui::End();
 }
 
@@ -323,6 +351,7 @@ void init() {
     g_state.imguiOk = true;
 
     g_renderer.init();
+    resetIsoCameraView();
     const std::filesystem::path dataRoot = findDataRootUpwards(std::filesystem::current_path());
     const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
     g_grassTextureLoaded = g_renderer.loadGrassTexture(grassPath);
@@ -400,8 +429,8 @@ void event(const sapp_event* ev) {
             if (ev->type == SAPP_EVENTTYPE_MOUSE_UP) {
                 g_state.brushPainting = false;
                 g_state.brushErasing = false;
-                g_state.orbiting = false;
                 g_state.panning = false;
+                g_state.panHasAnchor = false;
             }
             return;
         }
@@ -424,13 +453,11 @@ void event(const sapp_event* ev) {
         }
 
         if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT || ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
-            g_state.orbiting = ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT;
-            g_state.panning = ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE;
+            g_state.panning = true;
             g_state.dragStartX = ev->mouse_x;
             g_state.dragStartY = ev->mouse_y;
-            g_state.startYaw = g_camera.yawDeg;
-            g_state.startPitch = g_camera.pitchDeg;
             g_state.startTarget = g_camera.target;
+            g_state.panHasAnchor = pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, g_state.panAnchorWorld);
         }
         break;
     }
@@ -440,10 +467,12 @@ void event(const sapp_event* ev) {
             g_state.brushErasing = false;
         }
         if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
-            g_state.orbiting = false;
+            g_state.panning = false;
+            g_state.panHasAnchor = false;
         }
         if (ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
             g_state.panning = false;
+            g_state.panHasAnchor = false;
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_MOVE: {
@@ -455,20 +484,45 @@ void event(const sapp_event* ev) {
 
         const float dx = ev->mouse_x - g_state.dragStartX;
         const float dy = ev->mouse_y - g_state.dragStartY;
-        if (g_state.orbiting) {
-            g_camera.yawDeg = g_state.startYaw + dx * 0.25f;
-            g_camera.pitchDeg = std::clamp(g_state.startPitch + dy * 0.18f, 10.0f, 80.0f);
-        } else if (g_state.panning) {
-            const float scale = g_camera.orthoScale / std::max(1.0f, (float)sapp_height());
-            g_camera.target = g_state.startTarget + (-g_camera.right() * dx + g_camera.up() * dy) * scale * 2.0f;
+        if (g_state.panning) {
+            glm::vec3 currentWorld{0.0f};
+            g_camera.target = g_state.startTarget;
+            if (g_state.panHasAnchor && pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, currentWorld)) {
+                g_camera.target = g_state.startTarget + (g_state.panAnchorWorld - currentWorld);
+                g_camera.target.y = 0.0f;
+            } else {
+                const float scale = g_camera.orthoScale / std::max(1.0f, (float)sapp_height());
+                glm::vec3 groundRight = g_camera.right();
+                glm::vec3 groundUp = g_camera.up();
+                groundRight.y = 0.0f;
+                groundUp.y = 0.0f;
+                if (glm::length(groundRight) > 0.0001f) {
+                    groundRight = glm::normalize(groundRight);
+                }
+                if (glm::length(groundUp) > 0.0001f) {
+                    groundUp = glm::normalize(groundUp);
+                }
+                g_camera.target = g_state.startTarget + (-groundRight * dx + groundUp * dy) * scale * 2.0f;
+            }
+            updateBrushHover(ev->mouse_x, ev->mouse_y);
         }
         break;
     }
     case SAPP_EVENTTYPE_MOUSE_SCROLL: {
         if (ev->scroll_y == 0.0f) break;
+        glm::vec3 beforeWorld{0.0f};
+        const bool hasBefore = pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, beforeWorld);
+
         const float zoom = (ev->scroll_y > 0.0f) ? 0.90f : 1.10f;
-        g_camera.distance = std::clamp(g_camera.distance * zoom, 8.0f, 140.0f);
         g_camera.orthoScale = std::clamp(g_camera.orthoScale * zoom, 4.0f, 90.0f);
+        applyFixedIsoCameraAngles();
+
+        glm::vec3 afterWorld{0.0f};
+        if (hasBefore && pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, afterWorld)) {
+            g_camera.target += beforeWorld - afterWorld;
+            g_camera.target.y = 0.0f;
+        }
+        updateBrushHover(ev->mouse_x, ev->mouse_y);
         break;
     }
     default:
