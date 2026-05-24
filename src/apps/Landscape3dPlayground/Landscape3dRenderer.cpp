@@ -27,6 +27,11 @@ enum class FaceKind {
     Line,
 };
 
+enum class QuadWinding {
+    Forward,
+    Reverse,
+};
+
 struct CliffBoundaryEdge {
     glm::vec3 topA{0.0f};
     glm::vec3 topB{0.0f};
@@ -153,6 +158,35 @@ glm::vec3 cubeCorner(int x, int y, int z, float cubeSize, int gridSize) {
     };
 }
 
+glm::vec3 safeNormalize(const glm::vec3& value, const glm::vec3& fallback) {
+    const float len = glm::length(value);
+    return len > 0.0001f ? value / len : fallback;
+}
+
+glm::vec3 quadNormalForWinding(
+    const glm::vec3& a,
+    const glm::vec3& b,
+    const glm::vec3& c,
+    QuadWinding winding,
+    const glm::vec3& fallback) {
+
+    const glm::vec3 normal = winding == QuadWinding::Forward
+        ? glm::cross(b - a, c - a)
+        : glm::cross(c - a, b - a);
+    return safeNormalize(normal, fallback);
+}
+
+QuadWinding windingForExpectedNormal(
+    const glm::vec3& a,
+    const glm::vec3& b,
+    const glm::vec3& c,
+    const glm::vec3& expectedNormal) {
+
+    const glm::vec3 expected = safeNormalize(expectedNormal, {0.0f, 1.0f, 0.0f});
+    const glm::vec3 forward = quadNormalForWinding(a, b, c, QuadWinding::Forward, expected);
+    return glm::dot(forward, expected) >= 0.0f ? QuadWinding::Forward : QuadWinding::Reverse;
+}
+
 void pushQuad(
     std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
     std::vector<std::uint32_t>& indices,
@@ -160,12 +194,13 @@ void pushQuad(
     const glm::vec3& b,
     const glm::vec3& c,
     const glm::vec3& d,
-    const glm::vec3& normal,
     const glm::vec4& color,
     FaceKind faceKind,
-    bool flip = false) {
+    QuadWinding winding = QuadWinding::Forward) {
 
     const std::uint32_t base = (std::uint32_t)vertices.size();
+    const glm::vec3 fallbackNormal = faceKind == FaceKind::Top ? glm::vec3{0.0f, 1.0f, 0.0f} : glm::vec3{0.0f, 0.0f, 1.0f};
+    const glm::vec3 normal = quadNormalForWinding(a, b, c, winding, fallbackNormal);
     const float kind = (float)(int)faceKind;
     const bool sideFace = faceKind == FaceKind::Side;
     vertices.push_back({a, normal, color, sideFace ? sideSurfaceUv(a, normal) : glm::vec2{0.0f, 0.0f}, kind});
@@ -173,21 +208,35 @@ void pushQuad(
     vertices.push_back({c, normal, color, sideFace ? sideSurfaceUv(c, normal) : glm::vec2{0.0f, 1.0f}, kind});
     vertices.push_back({d, normal, color, sideFace ? sideSurfaceUv(d, normal) : glm::vec2{1.0f, 1.0f}, kind});
 
-    if (!flip) {
+    if (winding == QuadWinding::Forward) {
         indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 1);
         indices.push_back(base + 1);
         indices.push_back(base + 2);
+        indices.push_back(base + 1);
         indices.push_back(base + 3);
+        indices.push_back(base + 2);
     } else {
         indices.push_back(base + 0);
-        indices.push_back(base + 1);
         indices.push_back(base + 2);
         indices.push_back(base + 1);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
         indices.push_back(base + 3);
-        indices.push_back(base + 2);
     }
+}
+
+void pushQuadOriented(
+    std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    const glm::vec3& a,
+    const glm::vec3& b,
+    const glm::vec3& c,
+    const glm::vec3& d,
+    const glm::vec3& expectedNormal,
+    const glm::vec4& color,
+    FaceKind faceKind) {
+
+    pushQuad(vertices, indices, a, b, c, d, color, faceKind, windingForExpectedNormal(a, b, c, expectedNormal));
 }
 
 void pushTriangle(
@@ -376,7 +425,7 @@ void addZeroLayerFill(
     const glm::vec3 down{center2.x, y, center2.y + cellDepth * 0.5f};
     const glm::vec4 topColor = variedGrassTint(TerrainMaterial::Grass, x, z, params.grassVariation, -0.25f);
     const std::uint32_t base = (std::uint32_t)vertices.size();
-    pushQuad(vertices, indices, left, up, down, right, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+    pushQuadOriented(vertices, indices, left, up, down, right, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
     vertices[base + 0].uv = variedUv({0.0f, 0.0f}, x, z, params.grassVariation);
     vertices[base + 1].uv = variedUv({0.5f, 0.0f}, x, z, params.grassVariation);
     vertices[base + 2].uv = variedUv({0.0f, 0.5f}, x, z, params.grassVariation);
@@ -481,7 +530,7 @@ void addValleyTileObject(
             baseB.y = baseHeight;
             const glm::vec3 normal = horizontalNormalFromCenter(points[4], points[i], points[next]);
             const std::uint32_t base = (std::uint32_t)vertices.size();
-            pushQuad(vertices, indices, baseA, baseB, points[i], points[next], normal, sideColor, FaceKind::Side, true);
+            pushQuadOriented(vertices, indices, baseA, baseB, points[i], points[next], normal, sideColor, FaceKind::Side);
             vertices[base + 0].color = earthVertexColor(scene.columnHeightAt(x, z), std::max(1, scene.maxHeight()), baseA, baseHeight + heightStep, params.sideGradient);
             vertices[base + 1].color = earthVertexColor(scene.columnHeightAt(x, z), std::max(1, scene.maxHeight()), baseB, baseHeight + heightStep, params.sideGradient);
             vertices[base + 2].color = earthVertexColor(scene.columnHeightAt(x, z), std::max(1, scene.maxHeight()), points[i], baseHeight + heightStep, params.sideGradient);
@@ -668,7 +717,7 @@ void addContourPlateauTop(
     const std::array<glm::vec3, 4> points = cellDiamondPoints(x, z, grid, params, topHeight);
     const glm::vec4 topColor = materialTint(scene.materialAt(x, z)) * glm::vec4{1.05f, 1.06f, 0.98f, 1.0f};
     const std::uint32_t topBase = (std::uint32_t)vertices.size();
-    pushQuad(vertices, indices, points[0], points[1], points[3], points[2], {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+    pushQuadOriented(vertices, indices, points[0], points[1], points[3], points[2], {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
     const float uvScale = 1.0f / std::max(0.1f, params.cubeSize);
     vertices[topBase + 0].uv = {points[0].x * uvScale, points[0].z * uvScale};
     vertices[topBase + 1].uv = {points[1].x * uvScale, points[1].z * uvScale};
@@ -701,7 +750,7 @@ void pushCliffBandSegment(
     lipB.y += 0.003f;
     lipTopA.y += 0.003f;
     lipTopB.y += 0.003f;
-    pushQuad(vertices, indices, lipA, lipB, lipTopA, lipTopB, {0.0f, 1.0f, 0.0f}, lipColor, FaceKind::Side);
+    pushQuadOriented(vertices, indices, lipA, lipB, lipTopA, lipTopB, edge.normal, lipColor, FaceKind::Side);
 
     auto contourPoint = [&](const glm::vec3& bottom, const glm::vec3& top, float heightT, float edgeT) {
         const float edgeFade = std::sin(edgeT * kPi);
@@ -718,7 +767,7 @@ void pushCliffBandSegment(
         glm::vec3 d = contourPoint(edge.bottomB, edge.topB, bands[i + 1], 1.0f);
         const glm::vec4 sideColor = earthColorForLevel(colorLevel + i, maxLevel + 2);
         const std::uint32_t base = (std::uint32_t)vertices.size();
-        pushQuad(vertices, indices, a, b, c, d, edge.normal, sideColor, FaceKind::Side, true);
+        pushQuadOriented(vertices, indices, a, b, c, d, edge.normal, sideColor, FaceKind::Side);
         vertices[base + 0].color = earthVertexColor(colorLevel, maxLevel, a, topHeight, sideGradient);
         vertices[base + 1].color = earthVertexColor(colorLevel, maxLevel, b, topHeight, sideGradient);
         vertices[base + 2].color = earthVertexColor(colorLevel, maxLevel, c, topHeight, sideGradient);
@@ -826,7 +875,7 @@ void addHighPlateauTile(
 
     const glm::vec4 topColor = variedGrassTint(scene.materialAt(x, z), x, z, params.grassVariation, 0.45f);
     const std::uint32_t topBase = (std::uint32_t)vertices.size();
-    pushQuad(vertices, indices, points[0], points[1], points[3], points[2], {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+    pushQuadOriented(vertices, indices, points[0], points[1], points[3], points[2], {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
     vertices[topBase + 0].uv = variedUv({0.0f, 0.0f}, x, z, params.grassVariation);
     vertices[topBase + 1].uv = variedUv({1.0f, 0.0f}, x, z, params.grassVariation);
     vertices[topBase + 2].uv = variedUv({0.0f, 1.0f}, x, z, params.grassVariation);
@@ -856,7 +905,7 @@ void addHighPlateauTile(
         const glm::vec3 center{center2.x, topHeight, center2.y};
         const glm::vec3 normal = horizontalNormalFromCenter(center, points[edge], points[next]);
         const std::uint32_t base = (std::uint32_t)vertices.size();
-        pushQuad(vertices, indices, baseA, baseB, points[edge], points[next], normal, sideColor, FaceKind::Side, true);
+        pushQuadOriented(vertices, indices, baseA, baseB, points[edge], points[next], normal, sideColor, FaceKind::Side);
         vertices[base + 0].color = earthVertexColor(scene.columnHeightAt(x, z) + 1, std::max(1, scene.maxHeight()), baseA, topHeight, params.sideGradient);
         vertices[base + 1].color = earthVertexColor(scene.columnHeightAt(x, z) + 1, std::max(1, scene.maxHeight()), baseB, topHeight, params.sideGradient);
         vertices[base + 2].color = earthVertexColor(scene.columnHeightAt(x, z) + 1, std::max(1, scene.maxHeight()), points[edge], topHeight, params.sideGradient);
@@ -1234,20 +1283,20 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape
                     const glm::vec3 p111 = cubeCorner(x + 1, level + 1, z + 1, cellSize, grid);
 
                     if (isTop) {
-                        pushQuad(vertices, indices, p010, p110, p011, p111, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+                        pushQuadOriented(vertices, indices, p010, p110, p011, p111, {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
                     }
 
                     if (heightAtOrZero(x, z - 1) <= level) {
-                        pushQuad(vertices, indices, p000, p100, p010, p110, {0.0f, 0.0f, -1.0f}, sideColor, FaceKind::Side, true);
+                        pushQuadOriented(vertices, indices, p000, p100, p010, p110, {0.0f, 0.0f, -1.0f}, sideColor, FaceKind::Side);
                     }
                     if (heightAtOrZero(x + 1, z) <= level) {
-                        pushQuad(vertices, indices, p100, p101, p110, p111, {1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side, true);
+                        pushQuadOriented(vertices, indices, p100, p101, p110, p111, {1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side);
                     }
                     if (heightAtOrZero(x, z + 1) <= level) {
-                        pushQuad(vertices, indices, p101, p001, p111, p011, {0.0f, 0.0f, 1.0f}, sideColor, FaceKind::Side, true);
+                        pushQuadOriented(vertices, indices, p101, p001, p111, p011, {0.0f, 0.0f, 1.0f}, sideColor, FaceKind::Side);
                     }
                     if (heightAtOrZero(x - 1, z) <= level) {
-                        pushQuad(vertices, indices, p001, p000, p011, p010, {-1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side, true);
+                        pushQuadOriented(vertices, indices, p001, p000, p011, p010, {-1.0f, 0.0f, 0.0f}, sideColor, FaceKind::Side);
                     }
 
                     if (params.showWireframe) {
