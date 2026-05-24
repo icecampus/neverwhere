@@ -126,36 +126,48 @@ TerrainMaterial TerrainScene::materialAt(int x, int z) const {
 }
 
 LandscapeTileType TerrainScene::tileTypeAt(int x, int z) const {
+    return tileTypeAtLevel(x, z, 1);
+}
+
+LandscapeTileType TerrainScene::tileTypeAtLevel(int x, int z, std::uint8_t minLevel) const {
     if (m_gridSize <= 0) return LandscapeTileType::Unknown;
 
     const bool oddRow = (z & 1) != 0;
     const std::array<bool, 4> mask = oddRow
         ? std::array<bool, 4>{
-            landNodeAt(x, z + 1),
-            landNodeAt(x, z),
-            landNodeAt(x + 1, z + 1),
-            landNodeAt(x, z + 2),
+            landNodeLevelAt(x, z + 1) >= minLevel,
+            landNodeLevelAt(x, z) >= minLevel,
+            landNodeLevelAt(x + 1, z + 1) >= minLevel,
+            landNodeLevelAt(x, z + 2) >= minLevel,
         }
         : std::array<bool, 4>{
-            landNodeAt(x - 1, z + 1),
-            landNodeAt(x, z),
-            landNodeAt(x, z + 1),
-            landNodeAt(x, z + 2),
+            landNodeLevelAt(x - 1, z + 1) >= minLevel,
+            landNodeLevelAt(x, z) >= minLevel,
+            landNodeLevelAt(x, z + 1) >= minLevel,
+            landNodeLevelAt(x, z + 2) >= minLevel,
         };
 
     return nodeMaskToTileType(mask);
 }
 
 bool TerrainScene::landNodeAt(int x, int z) const {
-    if (m_landNodeWidth <= 0 || m_landNodeHeight <= 0) return false;
+    return landNodeLevelAt(x, z) > 0;
+}
+
+std::uint8_t TerrainScene::landNodeLevelAt(int x, int z) const {
+    if (m_landNodeWidth <= 0 || m_landNodeHeight <= 0) return 0;
     const int storageX = x + m_landNodeXOffset;
     if (storageX < 0 || storageX >= m_landNodeWidth || z < 0 || z >= m_landNodeHeight) {
-        return false;
+        return 0;
     }
-    return m_landNodes[landNodeIndex(x, z)] != 0;
+    return std::min<std::uint8_t>(m_landNodes[landNodeIndex(x, z)], 2);
 }
 
 bool TerrainScene::setLandNode(int x, int z, bool enabled) {
+    return setLandNodeLevel(x, z, enabled ? 1 : 0);
+}
+
+bool TerrainScene::setLandNodeLevel(int x, int z, std::uint8_t level) {
     if (m_landNodeWidth <= 0 || m_landNodeHeight <= 0) return false;
     const int storageX = x + m_landNodeXOffset;
     if (storageX < 0 || storageX >= m_landNodeWidth || z < 0 || z >= m_landNodeHeight) {
@@ -163,7 +175,7 @@ bool TerrainScene::setLandNode(int x, int z, bool enabled) {
     }
 
     std::uint8_t& value = m_landNodes[landNodeIndex(x, z)];
-    const std::uint8_t newValue = enabled ? 1 : 0;
+    const std::uint8_t newValue = std::min<std::uint8_t>(level, 2);
     if (value == newValue) {
         return false;
     }
@@ -174,6 +186,11 @@ bool TerrainScene::setLandNode(int x, int z, bool enabled) {
 
 bool TerrainScene::toggleLandNode(int x, int z) {
     return setLandNode(x, z, !landNodeAt(x, z));
+}
+
+bool TerrainScene::cycleLandNodeLevel(int x, int z) {
+    const std::uint8_t current = landNodeLevelAt(x, z);
+    return setLandNodeLevel(x, z, (current >= 2) ? 2 : (std::uint8_t)(current + 1));
 }
 
 void TerrainScene::clearLandNodes() {

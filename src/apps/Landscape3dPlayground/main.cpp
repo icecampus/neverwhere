@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cmath>
 #include <filesystem>
+#include <vector>
 
 #include <imgui.h>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -58,6 +59,7 @@ struct AppState {
     glm::vec2 brushField{0.0f};
     glm::ivec2 hoveredCell{-1, -1};
     glm::ivec2 hoveredNode{-1, -1};
+    std::vector<glm::ivec2> brushTouchedNodes;
 };
 
 AppState g_state;
@@ -171,10 +173,36 @@ void updateBrushHover(float screenX, float screenY) {
         g_state.hoveredNode);
 }
 
+bool brushTouchedNode(const glm::ivec2& node) {
+    return std::find(g_state.brushTouchedNodes.begin(), g_state.brushTouchedNodes.end(), node) !=
+        g_state.brushTouchedNodes.end();
+}
+
+void markBrushTouchedNode(const glm::ivec2& node) {
+    if (!brushTouchedNode(node)) {
+        g_state.brushTouchedNodes.push_back(node);
+    }
+}
+
 void applyBrushToHoveredNode(bool enabled) {
     if (!g_state.brushEnabled || !g_state.brushHoverValid) return;
 
-    if (g_scene.setLandNode(g_state.hoveredNode.x, g_state.hoveredNode.y, enabled)) {
+    const glm::ivec2 node = g_state.hoveredNode;
+    if (!enabled) {
+        if (g_scene.setLandNodeLevel(node.x, node.y, 0)) {
+            g_needsMeshRebuild = true;
+        }
+        return;
+    }
+
+    if (brushTouchedNode(node)) {
+        return;
+    }
+
+    const std::uint8_t currentLevel = g_scene.landNodeLevelAt(node.x, node.y);
+    const std::uint8_t nextLevel = std::min<std::uint8_t>((std::uint8_t)(currentLevel + 1), 2);
+    markBrushTouchedNode(node);
+    if (g_scene.setLandNodeLevel(node.x, node.y, nextLevel)) {
         g_needsMeshRebuild = true;
     }
 }
@@ -239,10 +267,10 @@ void drawUi() {
         g_needsMeshRebuild = true;
     }
 
-    if (ImGui::SliderFloat("Max Height (cubes)", &g_renderParams.maxTileHeightInCubes, 0.10f, 1.0f)) {
+    if (ImGui::SliderFloat("Height Step (cubes)", &g_renderParams.heightStepInCubes, 0.10f, 1.0f)) {
         g_needsMeshRebuild = true;
     }
-    ImGui::Text("Mask 1.0 = %.2f cube height", g_renderParams.maxTileHeightInCubes);
+    ImGui::Text("Level 2 max = %.2f cube height", g_renderParams.heightStepInCubes * 2.0f);
 
     int previewTileIndex = g_renderParams.previewTileIndex;
     if (ImGui::SliderInt("Preview Tile Index", &previewTileIndex, -1, 23)) {
@@ -268,10 +296,10 @@ void drawUi() {
     }
     if (g_state.brushHoverValid) {
         ImGui::Text("Hovered Cell: %d, %d", g_state.hoveredCell.x, g_state.hoveredCell.y);
-        ImGui::Text("Hovered Node: %d, %d [%s]",
+        ImGui::Text("Hovered Node: %d, %d [level %u]",
             g_state.hoveredNode.x,
             g_state.hoveredNode.y,
-            g_scene.landNodeAt(g_state.hoveredNode.x, g_state.hoveredNode.y) ? "on" : "off");
+            (unsigned)g_scene.landNodeLevelAt(g_state.hoveredNode.x, g_state.hoveredNode.y));
         const auto affectedCells = TerrainScene::nodeNeighboursCells(g_state.hoveredNode);
         ImGui::Text("Affects: (%d,%d) (%d,%d) (%d,%d) (%d,%d)",
             affectedCells[0].x, affectedCells[0].y,
@@ -281,7 +309,7 @@ void drawUi() {
     } else {
         ImGui::Text("Hovered Node: none");
     }
-    ImGui::Text("Controls: RMB drag pan, wheel zoom, LMB paint");
+    ImGui::Text("Controls: RMB drag pan, wheel zoom, LMB paint/raise");
     ImGui::Text("Erase: Ctrl+LMB or Ctrl+RMB");
     if (g_renderParams.previewTileIndex >= 0) {
         ImGui::Text("Preview mode ignores painted nodes");
@@ -431,6 +459,7 @@ void event(const sapp_event* ev) {
                 g_state.brushErasing = false;
                 g_state.panning = false;
                 g_state.panHasAnchor = false;
+                g_state.brushTouchedNodes.clear();
             }
             return;
         }
@@ -448,6 +477,7 @@ void event(const sapp_event* ev) {
         if (wantsBrush) {
             g_state.brushPainting = true;
             g_state.brushErasing = ctrl || ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT;
+            g_state.brushTouchedNodes.clear();
             applyBrushToHoveredNode(!g_state.brushErasing);
             break;
         }
@@ -465,6 +495,7 @@ void event(const sapp_event* ev) {
         if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT || ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.brushPainting = false;
             g_state.brushErasing = false;
+            g_state.brushTouchedNodes.clear();
         }
         if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.panning = false;

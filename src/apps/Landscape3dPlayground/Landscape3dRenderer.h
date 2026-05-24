@@ -50,7 +50,7 @@ struct Landscape3dCamera {
 
 struct Landscape3dRenderParams {
     float cubeSize = 1.0f;
-    float maxTileHeightInCubes = 0.5f;
+    float heightStepInCubes = 0.5f;
     float lightYawDeg = 35.0f;
     float lightPitchDeg = 50.0f;
     bool useGrassTexture = true;

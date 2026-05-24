@@ -33,9 +33,13 @@ public:
     int columnHeightAt(int x, int z) const;
     TerrainMaterial materialAt(int x, int z) const;
     LandscapeTileType tileTypeAt(int x, int z) const;
+    LandscapeTileType tileTypeAtLevel(int x, int z, std::uint8_t minLevel) const;
     bool landNodeAt(int x, int z) const;
+    std::uint8_t landNodeLevelAt(int x, int z) const;
     bool setLandNode(int x, int z, bool enabled);
+    bool setLandNodeLevel(int x, int z, std::uint8_t level);
     bool toggleLandNode(int x, int z);
+    bool cycleLandNodeLevel(int x, int z);
     void clearLandNodes();
 
     static std::array<glm::ivec2, 4> nodeNeighboursCells(const glm::ivec2& nodePosition);

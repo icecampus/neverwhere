@@ -246,8 +246,8 @@ glm::vec3 horizontalNormalFromCenter(const glm::vec3& center, const glm::vec3& a
     return len > 0.0001f ? normal / len : glm::vec3{0.0f, 0.0f, 1.0f};
 }
 
-float valleyHeightScale(float cellWidth, const Landscape3dRenderParams& params) {
-    return std::max(0.01f, params.maxTileHeightInCubes) * cellWidth;
+float valleyHeightStep(float cellWidth, const Landscape3dRenderParams& params) {
+    return std::max(0.01f, params.heightStepInCubes) * cellWidth;
 }
 
 void addZeroLayerFill(
@@ -286,7 +286,10 @@ void addValleyTileObject(
     int grid,
     const TerrainScene& scene,
     const Landscape3dRenderParams& params,
-    LandscapeTileType type) {
+    LandscapeTileType type,
+    float baseHeight,
+    float heightStep,
+    bool addSides) {
 
     const LandscapeValleyGeometry geometry = valleyGeometryForTile(type);
     if (geometry.triangleCount <= 0) return;
@@ -299,7 +302,6 @@ void addValleyTileObject(
     const float cellDepth = iso.dims.cellSize().y;
     const glm::vec2 origin = iso.mapToField({grid / 2, grid / 2});
     const glm::vec2 center2 = iso.mapToField({x, z}) - origin;
-    const float heightScale = valleyHeightScale(cellWidth, params);
 
     const std::array<glm::vec2, 5> offsets{
         glm::vec2{-cellWidth * 0.5f, 0.0f},
@@ -319,7 +321,7 @@ void addValleyTileObject(
     std::array<glm::vec3, 5> points{};
     for (int i = 0; i < 5; i++) {
         const glm::vec2 p = center2 + offsets[i];
-        points[i] = {p.x, geometry.heights[i] * heightScale, p.y};
+        points[i] = {p.x, baseHeight + geometry.heights[i] * heightStep, p.y};
     }
 
     const glm::vec4 topColor = tileDebugColor(type, scene.materialAt(x, z));
@@ -338,22 +340,103 @@ void addValleyTileObject(
             FaceKind::Top);
     }
 
-    const glm::vec4 sideColor = earthColorForLevel(scene.columnHeightAt(x, z), std::max(1, scene.maxHeight()));
-    for (int i = 0; i < 4; i++) {
-        const int next = (i + 1) % 4;
-        if (geometry.heights[i] <= 0.0f && geometry.heights[next] <= 0.0f) {
-            continue;
-        }
+    if (addSides) {
+        const glm::vec4 sideColor = earthColorForLevel(scene.columnHeightAt(x, z), std::max(1, scene.maxHeight()));
+        for (int i = 0; i < 4; i++) {
+            const int next = (i + 1) % 4;
+            if (geometry.heights[i] <= 0.0f && geometry.heights[next] <= 0.0f) {
+                continue;
+            }
 
-        glm::vec3 baseA = points[i];
-        glm::vec3 baseB = points[next];
-        baseA.y = 0.0f;
-        baseB.y = 0.0f;
-        const glm::vec3 normal = horizontalNormalFromCenter(points[4], points[i], points[next]);
-        pushQuad(vertices, indices, baseA, baseB, points[i], points[next], normal, sideColor, FaceKind::Side, true);
+            glm::vec3 baseA = points[i];
+            glm::vec3 baseB = points[next];
+            baseA.y = baseHeight;
+            baseB.y = baseHeight;
+            const glm::vec3 normal = horizontalNormalFromCenter(points[4], points[i], points[next]);
+            pushQuad(vertices, indices, baseA, baseB, points[i], points[next], normal, sideColor, FaceKind::Side, true);
+        }
     }
 
     pushTileWireframe(lineVertices, points);
+}
+
+glm::ivec2 neighbourCellForEdge(int x, int z, int edge) {
+    const bool oddRow = (z & 1) != 0;
+    if (oddRow) {
+        switch (edge) {
+        case 0: return {x, z - 1};
+        case 1: return {x + 1, z - 1};
+        case 2: return {x + 1, z + 1};
+        case 3: return {x, z + 1};
+        default: return {x, z};
+        }
+    }
+
+    switch (edge) {
+    case 0: return {x - 1, z - 1};
+    case 1: return {x, z - 1};
+    case 2: return {x, z + 1};
+    case 3: return {x - 1, z + 1};
+    default: return {x, z};
+    }
+}
+
+void addHighPlateauTile(
+    std::vector<Landscape3dRenderer::TerrainVertex>& vertices,
+    std::vector<std::uint32_t>& indices,
+    std::vector<Landscape3dRenderer::TerrainVertex>& lineVertices,
+    int x,
+    int z,
+    int grid,
+    const TerrainScene& scene,
+    const Landscape3dRenderParams& params,
+    LandscapeTileType highType,
+    float topHeight) {
+
+    if (!tileTypeHasSurface(highType)) return;
+
+    topology_core::StaggeredIsometry iso;
+    iso.dims.cellWidth = std::max(0.1f, params.cubeSize);
+    iso.dims.aspectRatio = Landscape3dCamera::editorGroundAspectRatio;
+
+    const float cellWidth = iso.dims.cellSize().x;
+    const float cellDepth = iso.dims.cellSize().y;
+    const glm::vec2 origin = iso.mapToField({grid / 2, grid / 2});
+    const glm::vec2 center2 = iso.mapToField({x, z}) - origin;
+    const std::array<glm::vec3, 4> points{
+        glm::vec3{center2.x - cellWidth * 0.5f, topHeight, center2.y},
+        glm::vec3{center2.x, topHeight, center2.y - cellDepth * 0.5f},
+        glm::vec3{center2.x + cellWidth * 0.5f, topHeight, center2.y},
+        glm::vec3{center2.x, topHeight, center2.y + cellDepth * 0.5f},
+    };
+
+    const glm::vec4 topColor = tileDebugColor(highType, scene.materialAt(x, z));
+    pushQuad(vertices, indices, points[0], points[1], points[3], points[2], {0.0f, 1.0f, 0.0f}, topColor, FaceKind::Top);
+    pushTileWireframe(lineVertices, {points[0], points[1], points[2], points[3], (points[0] + points[1] + points[2] + points[3]) * 0.25f});
+
+    const glm::vec4 sideColor = earthColorForLevel(scene.columnHeightAt(x, z) + 1, std::max(1, scene.maxHeight()));
+    for (int edge = 0; edge < 4; edge++) {
+        const glm::ivec2 neighbour = neighbourCellForEdge(x, z, edge);
+        const bool neighbourHigh = neighbour.x >= 0 &&
+            neighbour.y >= 0 &&
+            neighbour.x < grid &&
+            neighbour.y < grid &&
+            tileTypeHasSurface(scene.tileTypeAtLevel(neighbour.x, neighbour.y, 2));
+        if (neighbourHigh) {
+            continue;
+        }
+
+        const int next = (edge + 1) % 4;
+        glm::vec3 baseA = points[edge];
+        glm::vec3 baseB = points[next];
+        baseA.y = 0.0f;
+        baseB.y = 0.0f;
+        const glm::vec3 center{center2.x, topHeight, center2.y};
+        const glm::vec3 normal = horizontalNormalFromCenter(center, points[edge], points[next]);
+        pushQuad(vertices, indices, baseA, baseB, points[edge], points[next], normal, sideColor, FaceKind::Side, true);
+        pushLine(lineVertices, points[edge], points[next]);
+        pushLine(lineVertices, baseA, baseB);
+    }
 }
 
 const char* vs_src_glsl = R"(
@@ -611,6 +694,7 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape
     const int grid = scene.gridSize();
     const int maxHeight = std::max(1, scene.maxHeight());
     const float cellSize = std::max(0.1f, params.cubeSize);
+    const float heightStep = valleyHeightStep(cellSize, params);
     vertices.reserve((std::size_t)grid * (std::size_t)grid * 24);
     indices.reserve((std::size_t)grid * (std::size_t)grid * 36);
     lineVertices.reserve((std::size_t)grid * (std::size_t)grid * 24);
@@ -665,15 +749,20 @@ void Landscape3dRenderer::rebuildMesh(const TerrainScene& scene, const Landscape
     } else {
         for (int z = 0; z < grid; z++) {
             for (int x = 0; x < grid; x++) {
-                const LandscapeTileType type = params.previewTileIndex >= 0
+                const LandscapeTileType lowType = params.previewTileIndex >= 0
                     ? tileTypeFromAtlasIndex(params.previewTileIndex)
-                    : scene.tileTypeAt(x, z);
-                addTileStat(m_tileStats, type);
+                    : scene.tileTypeAtLevel(x, z, 1);
+                const LandscapeTileType highType = params.previewTileIndex >= 0
+                    ? LandscapeTileType::Unknown
+                    : scene.tileTypeAtLevel(x, z, 2);
+                addTileStat(m_tileStats, lowType);
                 addZeroLayerFill(vertices, indices, x, z, grid, params);
-                if (!tileTypeHasSurface(type)) {
-                    continue;
+                if (tileTypeHasSurface(lowType) && !tileTypeHasSurface(highType)) {
+                    addValleyTileObject(vertices, indices, lineVertices, x, z, grid, scene, params, lowType, 0.0f, heightStep, true);
                 }
-                addValleyTileObject(vertices, indices, lineVertices, x, z, grid, scene, params, type);
+                if (tileTypeHasSurface(highType)) {
+                    addHighPlateauTile(vertices, indices, lineVertices, x, z, grid, scene, params, highType, heightStep * 2.0f);
+                }
             }
         }
     }
