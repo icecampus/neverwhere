@@ -884,7 +884,7 @@ void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCl
         std::lock_guard<std::mutex> lock(g_stateMutex);
         if (hovered && io.MouseWheel != 0.0f) {
             const float previousZoom = g_meshCamera.zoom;
-            const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.35f, 4.0f);
+            const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.35f, 12.0f);
             if (nextZoom != previousZoom) {
                 const ImVec2 anchor = meshProjectionAnchor(origin, viewportSize, g_meshCamera);
                 const ImVec2 mouseLocal{
@@ -1001,7 +1001,7 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         g_productionLightDirection = normalize(g_productionLightDirection);
         if (hovered && io.MouseWheel != 0.0f) {
             const float previousZoom = g_landscapeCamera.zoom;
-            const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.28f, 4.0f);
+            const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.28f, 12.0f);
             if (nextZoom != previousZoom) {
                 const ImVec2 anchor = meshProjectionAnchor(origin, viewportSize, g_landscapeCamera);
                 const ImVec2 mouseLocal{
