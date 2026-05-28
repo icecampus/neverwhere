@@ -92,7 +92,10 @@ void main() {
     float debugMode = options2.z;
 
     bool wall = v_face_kind > 0.5;
-    vec2 uv = macroWarp(v_uv * textureScale, v_world_pos);
+    vec2 uv = v_uv * textureScale;
+    if (!wall) {
+        uv = macroWarp(uv, v_world_pos);
+    }
     vec4 albedo = wall ? texture(rock_tex, uv) : texture(grass_tex, uv);
     albedo *= v_color;
 
@@ -229,7 +232,10 @@ float4 main(PSIn inp): SV_Target0 {
     float debugMode = options2.z;
 
     bool wall = inp.faceKind0 > 0.5;
-    float2 uv = macroWarp(inp.uv0 * textureScale, inp.worldPos);
+    float2 uv = inp.uv0 * textureScale;
+    if (!wall) {
+        uv = macroWarp(uv, inp.worldPos);
+    }
     float4 albedo = wall ? rock_tex.Sample(material_smp, uv) : grass_tex.Sample(material_smp, uv);
     albedo *= inp.color0;
 
