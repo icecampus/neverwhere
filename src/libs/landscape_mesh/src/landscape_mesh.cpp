@@ -58,6 +58,36 @@ Vec3 normalize(const Vec3& value, const Vec3& fallback) {
     return {value.x / length, value.y / length, value.z / length};
 }
 
+float dot3(const Vec3& a, const Vec3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+Vec3 cross3(const Vec3& a, const Vec3& b) {
+    return {
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    };
+}
+
+// True surface normal of a displaced wall quad. Built from the quad edges so the
+// rock displacement micro-relief is preserved, then oriented deterministically
+// against a known outward hint so winding can never flip it (no checkerboard).
+Vec3 displacedFaceNormal(
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d,
+    const Vec3& outwardHint) {
+    const Vec3 along = scale(add(subtract(b, a), subtract(c, d)), 0.5f);
+    const Vec3 down = scale(add(subtract(d, a), subtract(c, b)), 0.5f);
+    Vec3 normal = normalize(cross3(along, down), outwardHint);
+    if (dot3(normal, outwardHint) < 0.0f) {
+        normal = scale(normal, -1.0f);
+    }
+    return normal;
+}
+
 bool samePoint(const Int2& a, const Int2& b) {
     return a.x == b.x && a.y == b.y;
 }
@@ -1000,7 +1030,7 @@ TileMesh TileMeshCatalog::buildWallMesh(const LandscapeTileKey& key) const {
             quad.b = displaceWallPoint(m_settings, p10, normal, y0, n10, true);
             quad.c = displaceWallPoint(m_settings, p11, normal, y1, n11, true);
             quad.d = displaceWallPoint(m_settings, p01, normal, y1, n01, true);
-            quad.normal = normal;
+            quad.normal = displacedFaceNormal(quad.a, quad.b, quad.c, quad.d, normal);
             quad.color = wallColor(key.side, (y0 + y1) * 0.5f, (n00 + n10 + n11 + n01) * 0.25f);
             quad.cliffWall = true;
             mesh.quads.push_back(quad);
@@ -1112,9 +1142,7 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom);
                 wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom);
                 wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom);
-                wall.normal = normalize(
-                    add(add(wallNormals[i00], wallNormals[i10]), add(wallNormals[i11], wallNormals[i01])),
-                    segment.normal);
+                wall.normal = displacedFaceNormal(wall.a, wall.b, wall.c, wall.d, segment.normal);
                 const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
                 wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
                 wall.cliffWall = true;
