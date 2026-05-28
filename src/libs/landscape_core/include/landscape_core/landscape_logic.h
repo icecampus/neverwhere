@@ -69,6 +69,7 @@ struct BowlGenerationStats {
     int clearingCellCount = 0;
     int highGroundCellCount = 0;
     int hillCellCount = 0;
+    int maxAdjacentLevelDelta = 0;
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
 };

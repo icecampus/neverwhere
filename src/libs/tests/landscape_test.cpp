@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <QUuid>
 #include "topology/staggered_tiled_landscape.h"
 #include "game_objects/landscape.h"
@@ -46,6 +47,31 @@ protected:
     StaggeredIsometryView* isoView;
     MockSliceAsset* mockAsset;
 };
+
+int maxAdjacentLevelDelta(const landscape_core::LandscapeLevelGrid& grid) {
+    int maxDelta = 0;
+    for (int y = 0; y < grid.height; y++) {
+        for (int x = 0; x < grid.width; x++) {
+            const int level = (int)grid.cellLevelAt(x, y);
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) {
+                        continue;
+                    }
+                    const int nx = x + dx;
+                    const int ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+                        continue;
+                    }
+                    const int otherLevel = (int)grid.cellLevelAt(nx, ny);
+                    const int delta = level > otherLevel ? level - otherLevel : otherLevel - level;
+                    maxDelta = std::max(maxDelta, delta);
+                }
+            }
+        }
+    }
+    return maxDelta;
+}
 
 TEST_F(LandscapeTest, NodeDrawingLogic) {
     math::ivec2 nodePos(10, 10);
@@ -138,6 +164,51 @@ TEST(LandscapePipelineTest, BowlGeneratorKeepsClearingLowAndUsesDiscreteLevels) 
     EXPECT_EQ(grid.cellLevelAt(settings.gridWidth / 2, settings.gridHeight / 2), 0);
     for (std::uint8_t level : grid.cellLevels) {
         EXPECT_LT(level, settings.heightLevels);
+    }
+    EXPECT_LE(stats.maxAdjacentLevelDelta, 1);
+    EXPECT_LE(maxAdjacentLevelDelta(grid), 1);
+}
+
+TEST(LandscapePipelineTest, BowlGeneratorStacksHighGroundAsPyramid) {
+    landscape_core::LandscapeBowlSettings settings;
+    settings.gridWidth = 36;
+    settings.gridHeight = 28;
+    settings.heightLevels = 5;
+    settings.clearingRadius = 4.5f;
+    settings.highGroundRadius = 8.5f;
+    settings.highGroundWidth = 2.2f;
+    settings.hillCount = 8;
+    settings.hillHeight = 2.8f;
+
+    landscape_core::BowlGenerationStats stats;
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(settings, &stats);
+
+    ASSERT_FALSE(grid.empty());
+    EXPECT_LE(stats.maxAdjacentLevelDelta, 1);
+    EXPECT_LE(maxAdjacentLevelDelta(grid), 1);
+
+    for (int y = 0; y < grid.height; y++) {
+        for (int x = 0; x < grid.width; x++) {
+            const int level = (int)grid.cellLevelAt(x, y);
+            if (level < 2) {
+                continue;
+            }
+
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) {
+                        continue;
+                    }
+                    const int nx = x + dx;
+                    const int ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+                        continue;
+                    }
+                    EXPECT_GT(grid.cellLevelAt(nx, ny), 0)
+                        << "High ground level " << level << " must have at least one logical cell of slope before level 0";
+                }
+            }
+        }
     }
 }
 

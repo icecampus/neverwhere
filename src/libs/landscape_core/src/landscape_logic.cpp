@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <queue>
 
 namespace landscape_core {
 namespace {
@@ -116,6 +117,155 @@ std::uint8_t levelForSample(const LandscapeBowlSettings& settings, float px, flo
         *outZone = zone;
     }
     return (std::uint8_t)level;
+}
+
+std::vector<int> computeClearingDistances(const LandscapeLevelGrid& grid) {
+    constexpr int unreachable = 1000000;
+    std::vector<int> distances(grid.cellLevels.size(), unreachable);
+    std::queue<int> pending;
+
+    for (int y = 0; y < grid.height; y++) {
+        for (int x = 0; x < grid.width; x++) {
+            const int index = grid.cellIndex(x, y);
+            if (grid.zones[(std::size_t)index] != LandscapeZone::Clearing) {
+                continue;
+            }
+            distances[(std::size_t)index] = 0;
+            pending.push(index);
+        }
+    }
+
+    while (!pending.empty()) {
+        const int index = pending.front();
+        pending.pop();
+        const int x = index % grid.width;
+        const int y = index / grid.width;
+        const int nextDistance = distances[(std::size_t)index] + 1;
+
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) {
+                    continue;
+                }
+                const int nx = x + dx;
+                const int ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+                    continue;
+                }
+                const int neighborIndex = grid.cellIndex(nx, ny);
+                if (nextDistance >= distances[(std::size_t)neighborIndex]) {
+                    continue;
+                }
+                distances[(std::size_t)neighborIndex] = nextDistance;
+                pending.push(neighborIndex);
+            }
+        }
+    }
+
+    return distances;
+}
+
+void enforcePyramidLevelSpacing(LandscapeLevelGrid& grid) {
+    if (grid.empty()) {
+        return;
+    }
+
+    const int maxLevel = std::max(0, grid.levelCount - 1);
+    const std::vector<int> clearingDistances = computeClearingDistances(grid);
+
+    for (int y = 0; y < grid.height; y++) {
+        for (int x = 0; x < grid.width; x++) {
+            const int index = grid.cellIndex(x, y);
+            std::uint8_t& level = grid.cellLevels[(std::size_t)index];
+            if (grid.zones[(std::size_t)index] == LandscapeZone::Clearing) {
+                level = 0;
+                continue;
+            }
+            if (clearingDistances[(std::size_t)index] < 1000000) {
+                level = (std::uint8_t)std::min<int>(level, clearingDistances[(std::size_t)index]);
+            }
+        }
+    }
+
+    for (int level = maxLevel; level >= 2; level--) {
+        for (int y = 0; y < grid.height; y++) {
+            for (int x = 0; x < grid.width; x++) {
+                if ((int)grid.cellLevelAt(x, y) < level) {
+                    continue;
+                }
+
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        if (dx == 0 && dy == 0) {
+                            continue;
+                        }
+                        const int nx = x + dx;
+                        const int ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+                            continue;
+                        }
+                        const int neighborIndex = grid.cellIndex(nx, ny);
+                        if (grid.zones[(std::size_t)neighborIndex] == LandscapeZone::Clearing) {
+                            continue;
+                        }
+
+                        int targetLevel = level - 1;
+                        if (clearingDistances[(std::size_t)neighborIndex] < 1000000) {
+                            targetLevel = std::min(targetLevel, clearingDistances[(std::size_t)neighborIndex]);
+                        }
+
+                        std::uint8_t& neighborLevel = grid.cellLevels[(std::size_t)neighborIndex];
+                        if ((int)neighborLevel < targetLevel) {
+                            neighborLevel = (std::uint8_t)std::clamp(targetLevel, 0, maxLevel);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void deriveNodeLevelsFromCells(LandscapeLevelGrid& grid) {
+    grid.nodeLevels.assign((std::size_t)(grid.width + 1) * (std::size_t)(grid.height + 1), 0);
+    for (int y = 0; y <= grid.height; y++) {
+        for (int x = 0; x <= grid.width; x++) {
+            std::uint8_t level = 0;
+            for (int cellY = y - 1; cellY <= y; cellY++) {
+                for (int cellX = x - 1; cellX <= x; cellX++) {
+                    if (cellX < 0 || cellY < 0 || cellX >= grid.width || cellY >= grid.height) {
+                        continue;
+                    }
+                    level = std::max(level, grid.cellLevelAt(cellX, cellY));
+                }
+            }
+            grid.nodeLevels[(std::size_t)grid.nodeIndex(x, y)] = level;
+        }
+    }
+}
+
+int maxAdjacentLevelDelta(const LandscapeLevelGrid& grid) {
+    int maxDelta = 0;
+    for (int y = 0; y < grid.height; y++) {
+        for (int x = 0; x < grid.width; x++) {
+            const int level = (int)grid.cellLevelAt(x, y);
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) {
+                        continue;
+                    }
+                    const int nx = x + dx;
+                    const int ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+                        continue;
+                    }
+                    const int neighborLevel = (int)grid.cellLevelAt(nx, ny);
+                    const int delta = level > neighborLevel ? level - neighborLevel : neighborLevel - level;
+                    maxDelta = std::max(maxDelta, delta);
+                }
+            }
+        }
+    }
+    return maxDelta;
 }
 
 } // namespace
@@ -280,32 +430,29 @@ LandscapeLevelGrid generateLandscapeBowl(const LandscapeBowlSettings& inputSetti
     grid.nodeLevels.assign((std::size_t)(grid.width + 1) * (std::size_t)(grid.height + 1), 0);
     grid.zones.assign(grid.cellLevels.size(), LandscapeZone::Lowland);
 
-    for (int y = 0; y <= grid.height; y++) {
-        for (int x = 0; x <= grid.width; x++) {
-            grid.nodeLevels[(std::size_t)grid.nodeIndex(x, y)] = levelForSample(settings, (float)x, (float)y, nullptr);
+    for (int y = 0; y < grid.height; y++) {
+        for (int x = 0; x < grid.width; x++) {
+            LandscapeZone zone = LandscapeZone::Lowland;
+            const std::uint8_t level = levelForSample(settings, (float)x + 0.5f, (float)y + 0.5f, &zone);
+            const std::size_t index = (std::size_t)grid.cellIndex(x, y);
+            grid.cellLevels[index] = level;
+            grid.zones[index] = zone;
         }
     }
+
+    enforcePyramidLevelSpacing(grid);
+    deriveNodeLevelsFromCells(grid);
 
     BowlGenerationStats localStats;
     localStats.levelCellCounts.assign((std::size_t)settings.heightLevels, 0);
     localStats.minHeight = std::numeric_limits<float>::max();
     localStats.maxHeight = -std::numeric_limits<float>::max();
+    localStats.maxAdjacentLevelDelta = maxAdjacentLevelDelta(grid);
 
     for (int y = 0; y < grid.height; y++) {
         for (int x = 0; x < grid.width; x++) {
-            LandscapeZone zone = LandscapeZone::Lowland;
-            const std::uint8_t centerLevel = levelForSample(settings, (float)x + 0.5f, (float)y + 0.5f, &zone);
-            const std::uint8_t nodeMax = std::max({
-                grid.nodeLevelAt(x, y),
-                grid.nodeLevelAt(x + 1, y),
-                grid.nodeLevelAt(x, y + 1),
-                grid.nodeLevelAt(x + 1, y + 1),
-            });
-            const std::uint8_t level = (zone == LandscapeZone::Clearing) ? 0 : std::max(centerLevel, nodeMax);
-            const std::size_t index = (std::size_t)grid.cellIndex(x, y);
-            grid.cellLevels[index] = level;
-            grid.zones[index] = zone;
-
+            const std::uint8_t level = grid.cellLevelAt(x, y);
+            const LandscapeZone zone = grid.zoneAt(x, y);
             if (level < localStats.levelCellCounts.size()) {
                 localStats.levelCellCounts[(std::size_t)level]++;
             }

@@ -197,6 +197,7 @@ struct LandscapeBowlModel {
     float seamMaxGap = 0.0f;
     int beveledSegmentCount = 0;
     int cornerCapCount = 0;
+    int maxAdjacentLevelDelta = 0;
 };
 
 struct AppState {
@@ -637,6 +638,7 @@ void rebuildLandscapeBowlModel() {
     model.hillCellCount = generationStats.hillCellCount;
     model.minHeight = generationStats.minHeight;
     model.maxHeight = generationStats.maxHeight;
+    model.maxAdjacentLevelDelta = generationStats.maxAdjacentLevelDelta;
 
     for (int y = 0; y < settings.gridHeight; y++) {
         for (int x = 0; x < settings.gridWidth; x++) {
@@ -668,11 +670,12 @@ void rebuildLandscapeBowlModel() {
         g_landscapeModel = std::move(model);
     }
 
-    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, cells clearing/high/hill={}/{}/{}, meshQuality hSub/vSub/rockAmp={}/{}/{:.2f}, tiles surface/walls/unique={}/{}/{}, bevelSegments/caps={}/{}, seams checked/mismatch/gap={}/{}/{:.4f}, quads top/walls/total={}/{}/{}",
+    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, maxAdjacentDelta={}, cells clearing/high/hill={}/{}/{}, meshQuality hSub/vSub/rockAmp={}/{}/{:.2f}, tiles surface/walls/unique={}/{}/{}, bevelSegments/caps={}/{}, seams checked/mismatch/gap={}/{}/{:.4f}, quads top/walls/total={}/{}/{}",
         settings.gridWidth,
         settings.gridHeight,
         g_landscapeModel.minHeight,
         g_landscapeModel.maxHeight,
+        g_landscapeModel.maxAdjacentLevelDelta,
         g_landscapeModel.clearingCellCount,
         g_landscapeModel.highGroundCellCount,
         g_landscapeModel.hillCellCount,
@@ -1179,6 +1182,8 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::Text("Shared bevel segments/caps: %d / %d",
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount);
+        ImGui::Text("Pyramid max adjacent level delta: %d",
+            g_landscapeModel.maxAdjacentLevelDelta);
         ImGui::Text("Seams checked/mismatches/max gap: %d / %d / %.4f",
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
@@ -1405,13 +1410,14 @@ bool runTestScenario() {
         g_landscapeModel.wallTileCount > 0 &&
         g_landscapeModel.uniqueTileMeshCount > 0 &&
         g_landscapeModel.seamMismatchCount == 0 &&
+        g_landscapeModel.maxAdjacentLevelDelta <= 1 &&
         g_landscapeModel.topQuadCount > 0 &&
         g_landscapeModel.cliffWallQuadCount > 0 &&
         g_landscapeModel.beveledSegmentCount > 0;
 
     if (rectangleOk && landscapeOk) {
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, pyramid maxAdjacentDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             g_rectModel.beveledSegmentCount,
@@ -1421,6 +1427,7 @@ bool runTestScenario() {
             g_landscapeModel.uniqueTileMeshCount,
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount,
+            g_landscapeModel.maxAdjacentLevelDelta,
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
             g_landscapeModel.seamMaxGap);
@@ -1428,7 +1435,7 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, pyramid maxAdjacentDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
         g_rectModel.topQuadCount,
@@ -1440,6 +1447,7 @@ bool runTestScenario() {
         g_landscapeModel.uniqueTileMeshCount,
         g_landscapeModel.beveledSegmentCount,
         g_landscapeModel.cornerCapCount,
+        g_landscapeModel.maxAdjacentLevelDelta,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,
         g_landscapeModel.seamMaxGap);
