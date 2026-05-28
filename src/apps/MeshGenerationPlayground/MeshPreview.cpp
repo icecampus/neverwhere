@@ -356,7 +356,7 @@ ImU32 productionLitColor(const MeshQuad& quad, const Vec3& lightDirection) {
 }
 
 ImVec2 grassUv(const Vec3& point) {
-    constexpr float kGrassUvScale = 0.18f;
+    constexpr float kGrassUvScale = 0.5f;
     return {point.x * kGrassUvScale, point.z * kGrassUvScale};
 }
 
