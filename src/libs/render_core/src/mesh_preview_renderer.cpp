@@ -80,6 +80,12 @@ vec2 macroWarp(vec2 uv, vec3 worldPos) {
     return uv + (vec2(n0, n1) - 0.5) * macroStrength;
 }
 
+float fineWallGrain(vec3 worldPos) {
+    float fine = sin(worldPos.x * 71.0 + worldPos.y * 37.0 + worldPos.z * 43.0);
+    float cross = sin(worldPos.x * 23.0 - worldPos.y * 19.0 + worldPos.z * 29.0);
+    return clamp(0.96 + fine * 0.025 + cross * 0.015, 0.91, 1.02);
+}
+
 void main() {
     float ambient = options0.x;
     float diffuseStrength = options0.y;
@@ -96,11 +102,11 @@ void main() {
     if (!wall) {
         uv = macroWarp(uv, v_world_pos);
     }
-    vec4 albedo = wall ? texture(rock_tex, uv) : texture(grass_tex, uv);
-    albedo *= v_color;
+    vec4 wallAlbedo = vec4(v_color.rgb * fineWallGrain(v_world_pos), v_color.a);
+    vec4 albedo = wall ? wallAlbedo : texture(grass_tex, uv) * v_color;
 
     vec3 n = normalize(v_normal);
-    if (n.y < 0.0) {
+    if (!wall && n.y < 0.0) {
         n = -n;
     }
     vec3 l = normalize(light_dir.xyz);
@@ -118,11 +124,11 @@ void main() {
 
     vec4 lit = vec4(albedo.rgb * lighting, albedo.a);
 
-    if (debugMode > 4.5) {
+    if (debugMode > 6.5) {
         frag_color = v_color;
-    } else if (debugMode > 3.5) {
+    } else if (debugMode > 5.5) {
         frag_color = vec4(vec3(cliffProximity), 1.0);
-    } else if (debugMode > 2.5) {
+    } else if (debugMode > 4.5) {
         frag_color = vec4(fract(uv), 0.35, 1.0);
     } else if (debugMode > 1.5) {
         frag_color = vec4(n * 0.5 + 0.5, 1.0);
@@ -220,6 +226,12 @@ float2 macroWarp(float2 uv, float3 worldPos) {
     return uv + (float2(n0, n1) - 0.5) * macroStrength;
 }
 
+float fineWallGrain(float3 worldPos) {
+    float fine = sin(worldPos.x * 71.0 + worldPos.y * 37.0 + worldPos.z * 43.0);
+    float cross = sin(worldPos.x * 23.0 - worldPos.y * 19.0 + worldPos.z * 29.0);
+    return clamp(0.96 + fine * 0.025 + cross * 0.015, 0.91, 1.02);
+}
+
 float4 main(PSIn inp): SV_Target0 {
     float ambient = options0.x;
     float diffuseStrength = options0.y;
@@ -236,11 +248,11 @@ float4 main(PSIn inp): SV_Target0 {
     if (!wall) {
         uv = macroWarp(uv, inp.worldPos);
     }
-    float4 albedo = wall ? rock_tex.Sample(material_smp, uv) : grass_tex.Sample(material_smp, uv);
-    albedo *= inp.color0;
+    float4 wallAlbedo = float4(inp.color0.rgb * fineWallGrain(inp.worldPos), inp.color0.a);
+    float4 albedo = wall ? wallAlbedo : grass_tex.Sample(material_smp, uv) * inp.color0;
 
     float3 n = normalize(inp.normal0);
-    if (n.y < 0.0) {
+    if (!wall && n.y < 0.0) {
         n = -n;
     }
     float3 l = normalize(light_dir.xyz);
@@ -258,11 +270,11 @@ float4 main(PSIn inp): SV_Target0 {
 
     float4 lit = float4(albedo.rgb * lighting, albedo.a);
 
-    if (debugMode > 4.5) {
+    if (debugMode > 6.5) {
         return inp.color0;
-    } else if (debugMode > 3.5) {
+    } else if (debugMode > 5.5) {
         return float4(cliffProximity, cliffProximity, cliffProximity, 1.0);
-    } else if (debugMode > 2.5) {
+    } else if (debugMode > 4.5) {
         return float4(frac(uv), 0.35, 1.0);
     } else if (debugMode > 1.5) {
         return float4(n * 0.5 + 0.5, 1.0);

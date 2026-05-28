@@ -50,6 +50,14 @@ Vec3 normalizeHorizontal(const Vec3& value, const Vec3& fallback) {
     return {value.x / length, 0.0f, value.z / length};
 }
 
+Vec3 normalize(const Vec3& value, const Vec3& fallback) {
+    const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+    if (length < 0.0001f) {
+        return fallback;
+    }
+    return {value.x / length, value.y / length, value.z / length};
+}
+
 bool samePoint(const Int2& a, const Int2& b) {
     return a.x == b.x && a.y == b.y;
 }
@@ -992,6 +1000,7 @@ TileMesh TileMeshCatalog::buildWallMesh(const LandscapeTileKey& key) const {
             quad.b = displaceWallPoint(m_settings, p10, normal, y0, n10, true);
             quad.c = displaceWallPoint(m_settings, p11, normal, y1, n11, true);
             quad.d = displaceWallPoint(m_settings, p01, normal, y1, n01, true);
+            quad.normal = normal;
             quad.color = wallColor(key.side, (y0 + y1) * 0.5f, (n00 + n10 + n11 + n01) * 0.25f);
             quad.cliffWall = true;
             mesh.quads.push_back(quad);
@@ -1103,6 +1112,9 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom);
                 wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom);
                 wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom);
+                wall.normal = normalize(
+                    add(add(wallNormals[i00], wallNormals[i10]), add(wallNormals[i11], wallNormals[i01])),
+                    segment.normal);
                 const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
                 wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
                 wall.cliffWall = true;

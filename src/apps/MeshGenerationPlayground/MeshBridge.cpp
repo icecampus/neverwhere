@@ -46,6 +46,7 @@ MeshQuad toAppMeshQuad(const landscape_mesh::MeshQuad& quad) {
     result.b = {quad.b.x, quad.b.y, quad.b.z};
     result.c = {quad.c.x, quad.c.y, quad.c.z};
     result.d = {quad.d.x, quad.d.y, quad.d.z};
+    result.normal = {quad.normal.x, quad.normal.y, quad.normal.z};
     result.color = IM_COL32(quad.color.r, quad.color.g, quad.color.b, quad.color.a);
     result.cliffWall = quad.cliffWall;
     return result;

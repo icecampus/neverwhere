@@ -310,14 +310,11 @@ Vec3 topNormal(const MeshQuad& quad) {
 Vec3 wallNormal(const MeshQuad& quad) {
     const Vec3 along = scale(add(subtract(quad.b, quad.a), subtract(quad.c, quad.d)), 0.5f);
     const Vec3 down = scale(add(subtract(quad.d, quad.a), subtract(quad.c, quad.b)), 0.5f);
-    Vec3 normal = normalize(cross(along, down));
+    return normalize(cross(along, down));
+}
 
-    const Vec3 polygonNormal = areaWeightedFaceNormal(quad);
-    if (dot(normal, polygonNormal) < 0.0f) {
-        normal = scale(normal, -1.0f);
-    }
-
-    return normal;
+Vec3 generatedNormal(const MeshQuad& quad) {
+    return normalize(quad.normal);
 }
 
 ImU32 shadeColor(ImU32 color, float factor) {
@@ -347,6 +344,27 @@ ImU32 blendTowardWhite(ImU32 color, float amount) {
         a);
 }
 
+ImU32 blendTowardColor(ImU32 color, ImU32 target, float amount) {
+    amount = clampFloat(amount, 0.0f, 1.0f);
+    const int r = (color >> IM_COL32_R_SHIFT) & 0xff;
+    const int g = (color >> IM_COL32_G_SHIFT) & 0xff;
+    const int b = (color >> IM_COL32_B_SHIFT) & 0xff;
+    const int a = (color >> IM_COL32_A_SHIFT) & 0xff;
+    const int targetR = (target >> IM_COL32_R_SHIFT) & 0xff;
+    const int targetG = (target >> IM_COL32_G_SHIFT) & 0xff;
+    const int targetB = (target >> IM_COL32_B_SHIFT) & 0xff;
+
+    return IM_COL32(
+        clampInt((int)((float)r + ((float)targetR - (float)r) * amount), 0, 255),
+        clampInt((int)((float)g + ((float)targetG - (float)g) * amount), 0, 255),
+        clampInt((int)((float)b + ((float)targetB - (float)b) * amount), 0, 255),
+        a);
+}
+
+ImU32 previewWallColor(ImU32 color) {
+    return blendTowardColor(color, IM_COL32(118, 110, 96, 255), 0.68f);
+}
+
 glm::vec4 colorToVec4(ImU32 color) {
     return {
         (float)((color >> IM_COL32_R_SHIFT) & 0xff) / 255.0f,
@@ -372,17 +390,72 @@ float cliffProximity(const MeshQuad& quad, const ProductionPreviewSettings& prev
     return clampFloat(1.0f - quad.cliffDistance / radius, 0.0f, 1.0f);
 }
 
+Vec3 wallAlongDirection(const MeshQuad& quad);
+
+Vec3 stableWallNormal(const MeshQuad& quad) {
+    const Vec3 raw = generatedNormal(quad);
+    const Vec3 along = wallAlongDirection(quad);
+    Vec3 normal{-along.z, 0.0f, along.x};
+    if (dot(normal, raw) < 0.0f) {
+        normal = scale(normal, -1.0f);
+    }
+
+    const float length = std::sqrt(normal.x * normal.x + normal.z * normal.z);
+    if (length <= 0.0001f) {
+        return {0.0f, 0.0f, 1.0f};
+    }
+
+    return {
+        normal.x / length,
+        0.0f,
+        normal.z / length,
+    };
+}
+
+Vec3 blendedWallNormal(const MeshQuad& quad) {
+    const Vec3 stable = generatedNormal(quad);
+    Vec3 detailed = wallNormal(quad);
+    if (dot(stable, detailed) < 0.0f) {
+        detailed = scale(detailed, -1.0f);
+    }
+    detailed.y = clampFloat(detailed.y, -0.35f, 0.35f);
+
+    constexpr float kDetailInfluence = 0.18f;
+    return normalize(add(scale(stable, 1.0f - kDetailInfluence), scale(detailed, kDetailInfluence)));
+}
+
+Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings& previewSettings) {
+    const ProductionPreviewDebugMode debugMode = (ProductionPreviewDebugMode)previewSettings.debugMode;
+    if (debugMode == ProductionPreviewDebugMode::RawNormals) {
+        return generatedNormal(quad);
+    }
+
+    if (!quad.cliffWall) {
+        return topNormal(quad);
+    }
+
+    if (debugMode == ProductionPreviewDebugMode::StableNormals) {
+        return stableWallNormal(quad);
+    }
+    if (debugMode == ProductionPreviewDebugMode::BlendedNormals) {
+        return blendedWallNormal(quad);
+    }
+    return generatedNormal(quad);
+}
+
 ImU32 productionLitColor(
     const MeshQuad& quad,
     const Vec3& lightDirection,
     const ProductionPreviewSettings& previewSettings) {
-    const Vec3 normal = quad.cliffWall ? wallNormal(quad) : topNormal(quad);
+    const Vec3 normal = previewNormalForQuad(quad, previewSettings);
 
     const ProductionPreviewDebugMode debugMode = (ProductionPreviewDebugMode)previewSettings.debugMode;
     if (debugMode == ProductionPreviewDebugMode::Albedo) {
-        return quad.cliffWall ? IM_COL32(235, 235, 235, 255) : blendTowardWhite(quad.color, 0.48f);
+        return quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.48f);
     }
-    if (debugMode == ProductionPreviewDebugMode::Normals) {
+    if (debugMode == ProductionPreviewDebugMode::RawNormals ||
+        debugMode == ProductionPreviewDebugMode::StableNormals ||
+        debugMode == ProductionPreviewDebugMode::BlendedNormals) {
         return normalDebugColor(normal);
     }
     if (debugMode == ProductionPreviewDebugMode::CliffProximity) {
@@ -402,7 +475,7 @@ ImU32 productionLitColor(
         const float wrappedLambert = clampFloat(dot(normal, lightDirection) * 0.5f + 0.5f, 0.0f, 1.0f);
         const float lighting = previewSettings.wallBrightness *
             (previewSettings.ambient + previewSettings.diffuseStrength * wrappedLambert);
-        return shadeColor(IM_COL32(235, 235, 235, 255), lighting);
+        return shadeColor(previewWallColor(quad.color), lighting);
     }
 
     const float lambert = std::max(0.0f, dot(normal, lightDirection));
@@ -456,8 +529,8 @@ render_core::MeshPreviewQuad toRenderQuad(const MeshQuad& quad, const Production
     result.b = toGlm(quad.b);
     result.c = toGlm(quad.c);
     result.d = toGlm(quad.d);
-    result.normal = toGlm(quad.cliffWall ? wallNormal(quad) : topNormal(quad));
-    result.color = colorToVec4(quad.cliffWall ? IM_COL32(235, 235, 235, 255) : blendTowardWhite(quad.color, 0.50f));
+    result.normal = toGlm(previewNormalForQuad(quad, previewSettings));
+    result.color = colorToVec4(quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.50f));
     result.uvA = toGlm(quad.cliffWall ? wallUv(quad, quad.a) : grassUv(quad.a));
     result.uvB = toGlm(quad.cliffWall ? wallUv(quad, quad.b) : grassUv(quad.b));
     result.uvC = toGlm(quad.cliffWall ? wallUv(quad, quad.c) : grassUv(quad.c));
@@ -595,6 +668,10 @@ void drawLandscapeProjectedQuad(
 
     const PreviewTexture& texture = quad.cliffWall ? g_textures.rock : g_textures.grass;
     const ImU32 tint = productionLitColor(quad, lightDirection, previewSettings);
+    if (quad.cliffWall) {
+        drawList->AddQuadFilled(a, b, c, d, tint);
+        return;
+    }
     if (!validTexture(texture)) {
         drawList->AddQuadFilled(a, b, c, d, tint);
         return;

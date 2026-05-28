@@ -130,7 +130,16 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::SliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
         ImGui::SliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
         ImGui::SliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
-        const char* debugModes[] = {"Lit", "Albedo", "Normals", "UV", "Cliff Proximity", "Depth Order"};
+        const char* debugModes[] = {
+            "Lit",
+            "Albedo",
+            "Raw Normals",
+            "Stable Normals",
+            "Blended Normals",
+            "UV",
+            "Cliff Proximity",
+            "Depth Order",
+        };
         ImGui::Combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
     }
     if (changed) {

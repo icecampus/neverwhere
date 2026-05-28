@@ -42,6 +42,7 @@ struct MeshQuad {
     Vec3 b;
     Vec3 c;
     Vec3 d;
+    Vec3 normal{0.0f, 1.0f, 0.0f};
     ColorRgba color;
     bool cliffWall = false;
 };

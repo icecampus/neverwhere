@@ -51,6 +51,7 @@ struct MeshQuad {
     Vec3 b;
     Vec3 c;
     Vec3 d;
+    Vec3 normal{0.0f, 1.0f, 0.0f};
     ImU32 color = IM_COL32(255, 255, 255, 255);
     bool cliffWall = false;
     float depth = 0.0f;
@@ -73,10 +74,12 @@ struct MeshPreviewCamera {
 enum class ProductionPreviewDebugMode : int {
     Lit = 0,
     Albedo = 1,
-    Normals = 2,
-    Uv = 3,
-    CliffProximity = 4,
-    DepthOrder = 5,
+    RawNormals = 2,
+    StableNormals = 3,
+    BlendedNormals = 4,
+    Uv = 5,
+    CliffProximity = 6,
+    DepthOrder = 7,
 };
 
 struct ProductionPreviewSettings {
