@@ -144,6 +144,9 @@ void drawLandscapeScenarioControls(float panelWidth) {
             g_rectSettings.wallVerticalSubdivisions,
             g_rectSettings.rockAmplitude,
             g_rectSettings.terraceSteps);
+        ImGui::Text("Production textures grass/rock: %s / %s",
+            productionGrassTextureLoaded() ? "loaded" : "fallback",
+            productionRockTextureLoaded() ? "loaded" : "fallback");
         ImGui::Text("Shared bevel segments/caps: %d / %d",
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount);

@@ -5,12 +5,168 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
+#include <filesystem>
 #include <mutex>
+#include <string>
+#include <system_error>
 #include <vector>
+
+#include <sokol_app.h>
+#include <sokol_gfx.h>
+#include <util/sokol_imgui.h>
+#include <spdlog/spdlog.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 namespace meshgen_playground {
 
 namespace {
+
+struct PreviewTexture {
+    sg_image image{SG_INVALID_ID};
+    sg_view view{SG_INVALID_ID};
+    sg_sampler sampler{SG_INVALID_ID};
+    bool loadedFromFile = false;
+};
+
+struct ProductionTextureState {
+    PreviewTexture grass;
+    PreviewTexture rock;
+};
+
+ProductionTextureState g_textures;
+
+bool validTexture(const PreviewTexture& texture) {
+    return texture.view.id != SG_INVALID_ID && texture.sampler.id != SG_INVALID_ID;
+}
+
+bool looksLikeDataRoot(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    return fs::exists(dir / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png", ec) &&
+        fs::exists(dir / "resources" / "textures" / "rock_3.jpg", ec);
+}
+
+std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    startDir = fs::weakly_canonical(startDir, ec);
+    if (startDir.empty()) {
+        startDir = fs::current_path(ec);
+    }
+    if (startDir.empty()) {
+        return {};
+    }
+
+    fs::path dir = startDir;
+    for (int i = 0; i < 16; i++) {
+        if (looksLikeDataRoot(dir)) {
+            return dir;
+        }
+        if (!dir.has_parent_path()) {
+            break;
+        }
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) {
+            break;
+        }
+        dir = parent;
+    }
+
+    return {};
+}
+
+void destroyTexture(PreviewTexture& texture) {
+    if (texture.sampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(texture.sampler);
+    }
+    if (texture.view.id != SG_INVALID_ID) {
+        sg_destroy_view(texture.view);
+    }
+    if (texture.image.id != SG_INVALID_ID) {
+        sg_destroy_image(texture.image);
+    }
+    texture = {};
+}
+
+bool loadPreviewTexture(
+    const std::filesystem::path& path,
+    const std::uint8_t* fallbackPixels,
+    int fallbackWidth,
+    int fallbackHeight,
+    const char* textureName,
+    const char* imageLabel,
+    const char* samplerLabel,
+    PreviewTexture& texture) {
+
+    destroyTexture(texture);
+
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &channels, 4);
+    const bool loadedFromFile = pixels != nullptr && width > 0 && height > 0;
+
+    if (!loadedFromFile) {
+        spdlog::warn("MeshPreview: failed to load {} texture '{}', using fallback", textureName, path.string());
+        if (pixels != nullptr) {
+            stbi_image_free(pixels);
+            pixels = nullptr;
+        }
+        width = fallbackWidth;
+        height = fallbackHeight;
+    }
+
+    sg_image_desc imageDesc = {};
+    imageDesc.width = width;
+    imageDesc.height = height;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.data.mip_levels[0].ptr = loadedFromFile ? pixels : fallbackPixels;
+    imageDesc.data.mip_levels[0].size = (std::size_t)width * (std::size_t)height * 4;
+    imageDesc.label = imageLabel;
+    texture.image = sg_make_image(&imageDesc);
+
+    if (pixels != nullptr) {
+        stbi_image_free(pixels);
+    }
+
+    if (texture.image.id == SG_INVALID_ID) {
+        spdlog::error("MeshPreview: sg_make_image failed for {} texture", textureName);
+        texture = {};
+        return false;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = texture.image;
+    texture.view = sg_make_view(&viewDesc);
+
+    sg_sampler_desc samplerDesc = {};
+    samplerDesc.min_filter = SG_FILTER_LINEAR;
+    samplerDesc.mag_filter = SG_FILTER_LINEAR;
+    samplerDesc.wrap_u = SG_WRAP_REPEAT;
+    samplerDesc.wrap_v = SG_WRAP_REPEAT;
+    samplerDesc.label = samplerLabel;
+    texture.sampler = sg_make_sampler(&samplerDesc);
+    texture.loadedFromFile = loadedFromFile && validTexture(texture);
+
+    if (!validTexture(texture)) {
+        spdlog::error("MeshPreview: failed to create {} texture view or sampler", textureName);
+        destroyTexture(texture);
+        return false;
+    }
+
+    spdlog::info("MeshPreview: {} texture {} '{}'",
+        textureName,
+        texture.loadedFromFile ? "loaded from" : "using fallback for",
+        path.string());
+    return texture.loadedFromFile;
+}
+
+ImTextureID textureId(const PreviewTexture& texture) {
+    return (ImTextureID)simgui_imtextureid_with_sampler(texture.view, texture.sampler);
+}
 
 ImU32 colorForVertex(VertexKind kind) {
     switch (kind) {
@@ -171,19 +327,55 @@ ImU32 shadeColor(ImU32 color, float factor) {
         a);
 }
 
+ImU32 blendTowardWhite(ImU32 color, float amount) {
+    amount = clampFloat(amount, 0.0f, 1.0f);
+    const int r = (color >> IM_COL32_R_SHIFT) & 0xff;
+    const int g = (color >> IM_COL32_G_SHIFT) & 0xff;
+    const int b = (color >> IM_COL32_B_SHIFT) & 0xff;
+    const int a = (color >> IM_COL32_A_SHIFT) & 0xff;
+
+    return IM_COL32(
+        clampInt((int)((float)r + (255.0f - (float)r) * amount), 0, 255),
+        clampInt((int)((float)g + (255.0f - (float)g) * amount), 0, 255),
+        clampInt((int)((float)b + (255.0f - (float)b) * amount), 0, 255),
+        a);
+}
+
 ImU32 productionLitColor(const MeshQuad& quad, const Vec3& lightDirection) {
     const Vec3 normal = quad.cliffWall ? wallNormal(quad) : topNormal(quad);
-    float lighting = 1.0f;
 
     if (quad.cliffWall) {
         const float wrappedLambert = clampFloat(dot(normal, lightDirection) * 0.5f + 0.5f, 0.0f, 1.0f);
-        lighting = 0.42f + 0.58f * wrappedLambert;
-    } else {
-        const float lambert = std::max(0.0f, dot(normal, lightDirection));
-        lighting = 0.78f + 0.24f * lambert;
+        const float lighting = 0.98f + 0.32f * wrappedLambert;
+        return shadeColor(IM_COL32(235, 235, 235, 255), lighting);
     }
 
-    return shadeColor(quad.color, lighting);
+    const float lambert = std::max(0.0f, dot(normal, lightDirection));
+    const float lighting = 1.05f + 0.25f * lambert;
+    return shadeColor(blendTowardWhite(quad.color, 0.58f), lighting);
+}
+
+ImVec2 grassUv(const Vec3& point) {
+    constexpr float kGrassUvScale = 0.18f;
+    return {point.x * kGrassUvScale, point.z * kGrassUvScale};
+}
+
+Vec3 wallAlongDirection(const MeshQuad& quad) {
+    const Vec3 along = scale(add(subtract(quad.b, quad.a), subtract(quad.c, quad.d)), 0.5f);
+    const float horizontalLength = std::sqrt(along.x * along.x + along.z * along.z);
+    if (horizontalLength <= 0.0001f) {
+        return {1.0f, 0.0f, 0.0f};
+    }
+
+    return {along.x / horizontalLength, 0.0f, along.z / horizontalLength};
+}
+
+ImVec2 wallUv(const MeshQuad& quad, const Vec3& point) {
+    constexpr float kRockAlongScale = 0.35f;
+    constexpr float kRockHeightScale = 0.42f;
+    const Vec3 along = wallAlongDirection(quad);
+    const float u = (point.x * along.x + point.z * along.z) * kRockAlongScale;
+    return {u, -point.y * kRockHeightScale};
 }
 
 ImVec2 projectMeshPoint(
@@ -255,8 +447,18 @@ void drawLandscapeProjectedQuad(
     const ImVec2 c = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.c);
     const ImVec2 d = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.d);
 
-    (void)settings;
-    drawList->AddQuadFilled(a, b, c, d, productionLitColor(quad, lightDirection));
+    const PreviewTexture& texture = quad.cliffWall ? g_textures.rock : g_textures.grass;
+    const ImU32 tint = productionLitColor(quad, lightDirection);
+    if (!validTexture(texture)) {
+        drawList->AddQuadFilled(a, b, c, d, tint);
+        return;
+    }
+
+    const ImVec2 uvA = quad.cliffWall ? wallUv(quad, quad.a) : grassUv(quad.a);
+    const ImVec2 uvB = quad.cliffWall ? wallUv(quad, quad.b) : grassUv(quad.b);
+    const ImVec2 uvC = quad.cliffWall ? wallUv(quad, quad.c) : grassUv(quad.c);
+    const ImVec2 uvD = quad.cliffWall ? wallUv(quad, quad.d) : grassUv(quad.d);
+    drawList->AddImageQuad(textureId(texture), a, b, c, d, uvA, uvB, uvC, uvD, tint);
 }
 
 ImU32 colorForLandscapeZone(LandscapeZone zone, float height, float minHeight, float maxHeight) {
@@ -281,6 +483,43 @@ ImU32 colorForLandscapeZone(LandscapeZone zone, float height, float minHeight, f
 }
 
 } // namespace
+
+void initProductionPreviewTextures() {
+    static constexpr std::uint8_t grassFallback[] = {
+        88, 137, 73, 255, 108, 158, 86, 255,
+        99, 151, 80, 255, 76, 125, 68, 255,
+    };
+    static constexpr std::uint8_t rockFallback[] = {
+        104, 99, 88, 255, 126, 119, 104, 255,
+        82, 78, 72, 255, 112, 106, 96, 255,
+    };
+
+    std::error_code ec;
+    std::filesystem::path dataRoot = findDataRootUpwards(std::filesystem::current_path(ec));
+    if (dataRoot.empty()) {
+        spdlog::warn("MeshPreview: failed to auto-detect data root, using current directory");
+        dataRoot = std::filesystem::current_path(ec);
+    }
+
+    const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
+    const std::filesystem::path rockPath = dataRoot / "resources" / "textures" / "rock_3.jpg";
+
+    loadPreviewTexture(grassPath, grassFallback, 2, 2, "grass", "meshgen-grass", "meshgen-grass-sampler", g_textures.grass);
+    loadPreviewTexture(rockPath, rockFallback, 2, 2, "rock", "meshgen-rock", "meshgen-rock-sampler", g_textures.rock);
+}
+
+void shutdownProductionPreviewTextures() {
+    destroyTexture(g_textures.grass);
+    destroyTexture(g_textures.rock);
+}
+
+bool productionGrassTextureLoaded() {
+    return g_textures.grass.loadedFromFile;
+}
+
+bool productionRockTextureLoaded() {
+    return g_textures.rock.loadedFromFile;
+}
 
 void drawRectangleCliffDebugView(const RectangleCliffSettings& settings, const RectangleCliffModel& model, const ImVec2& viewportSize) {
     const float cellSize = 34.0f;
@@ -516,9 +755,12 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         return model.meshQuads[(std::size_t)lhs].depth < model.meshQuads[(std::size_t)rhs].depth;
     });
 
+    const ImDrawListFlags previousFlags = drawList->Flags;
+    drawList->Flags &= ~ImDrawListFlags_AntiAliasedFill;
     for (int index : drawOrder) {
         drawLandscapeProjectedQuad(drawList, settings, g_landscapeCamera, origin, viewportSize, model.meshQuads[(std::size_t)index], lightDirection);
     }
+    drawList->Flags = previousFlags;
 
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Production Preview: shaded landscape mesh");
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, Ctrl+LMB drag: rotate sun, mouse wheel: zoom");

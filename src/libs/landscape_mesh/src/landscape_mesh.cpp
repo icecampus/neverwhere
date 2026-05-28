@@ -510,12 +510,17 @@ void addTopCell(
     }
 }
 
+LandscapeZone cornerSolidZone(const SolidMaskGrid& mask, const Int2& corner);
+LandscapeZone cornerNonSolidZone(const SolidMaskGrid& mask, const Int2& corner);
+
 void addInnerCornerBevelCaps(
     CompositionResult& result,
     const SolidMaskGrid& mask,
     const std::vector<BoundarySegment>& boundarySegments,
     const MeshBuildSettings& settings,
-    float height) {
+    float height,
+    std::uint8_t level,
+    std::uint8_t maxLevel) {
 
     struct CornerEndpoint {
         Int2 corner;
@@ -586,7 +591,119 @@ void addInnerCornerBevelCaps(
         cap.b = a.point;
         cap.c = mid;
         cap.d = b.point;
-        cap.color = rockTopColor(0.0f);
+        cap.color = surfaceColor(cornerSolidZone(mask, a.corner), level, maxLevel);
+        cap.cliffWall = false;
+        addQuad(result, cap);
+        result.stats.cornerCapCount++;
+    }
+}
+
+LandscapeZone cornerSolidZone(const SolidMaskGrid& mask, const Int2& corner) {
+    for (int y = corner.y - 1; y <= corner.y; y++) {
+        for (int x = corner.x - 1; x <= corner.x; x++) {
+            if (mask.isSolid(x, y)) {
+                return mask.zoneAt(x, y);
+            }
+        }
+    }
+
+    return LandscapeZone::Lowland;
+}
+
+LandscapeZone cornerNonSolidZone(const SolidMaskGrid& mask, const Int2& corner) {
+    for (int y = corner.y - 1; y <= corner.y; y++) {
+        for (int x = corner.x - 1; x <= corner.x; x++) {
+            if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) {
+                continue;
+            }
+            if (!mask.isSolid(x, y)) {
+                return mask.zoneAt(x, y);
+            }
+        }
+    }
+
+    return cornerSolidZone(mask, corner);
+}
+
+void addOuterCornerFootCaps(
+    CompositionResult& result,
+    const SolidMaskGrid& mask,
+    const std::vector<BoundarySegment>& boundarySegments,
+    const MeshBuildSettings& settings,
+    float height,
+    std::uint8_t lowerLevel,
+    std::uint8_t maxLevel) {
+
+    struct CornerEndpoint {
+        Int2 corner;
+        Vec3 point;
+        BoundarySide side = BoundarySide::Top;
+    };
+
+    const float bevel = std::clamp(settings.cornerBevel, 0.0f, 0.45f);
+    if (bevel <= 0.0f) {
+        return;
+    }
+
+    std::vector<CornerEndpoint> endpoints;
+    endpoints.reserve(boundarySegments.size() * 2);
+    for (const BoundarySegment& segment : boundarySegments) {
+        const Vec3 a = gridPointToVec3(segment.a, height);
+        const Vec3 b = gridPointToVec3(segment.b, height);
+        const Vec3 delta = subtract(b, a);
+        const float length = horizontalLength(delta);
+        if (length < 0.0001f) {
+            continue;
+        }
+
+        const Vec3 direction = scale(delta, 1.0f / length);
+        const float trim = std::min(bevel, length * 0.45f);
+        if (isBoundaryCorner(boundarySegments, segment.a)) {
+            endpoints.push_back({segment.a, add(a, scale(direction, trim)), segment.side});
+        }
+        if (isBoundaryCorner(boundarySegments, segment.b)) {
+            endpoints.push_back({segment.b, add(b, scale(direction, -trim)), segment.side});
+        }
+    }
+
+    std::vector<std::uint8_t> consumed(endpoints.size(), 0);
+    for (std::size_t i = 0; i < endpoints.size(); i++) {
+        if (consumed[i]) {
+            continue;
+        }
+
+        std::vector<std::size_t> group;
+        for (std::size_t j = i; j < endpoints.size(); j++) {
+            if (!consumed[j] && samePoint(endpoints[i].corner, endpoints[j].corner)) {
+                group.push_back(j);
+                consumed[j] = 1;
+            }
+        }
+
+        if (group.size() != 2) {
+            continue;
+        }
+
+        const VertexKind kind = classifyVertex(mask, endpoints[i].corner.x, endpoints[i].corner.y);
+        if (kind != VertexKind::OuterCorner) {
+            continue;
+        }
+
+        const CornerEndpoint& a = endpoints[group[0]];
+        const CornerEndpoint& b = endpoints[group[1]];
+        if (a.side == b.side) {
+            continue;
+        }
+
+        const Vec3 corner = gridPointToVec3(a.corner, height);
+        const Vec3 mid = scale(add(a.point, b.point), 0.5f);
+
+        MeshQuad cap;
+        cap.a = corner;
+        cap.b = a.point;
+        cap.c = mid;
+        cap.d = b.point;
+        cap.color = surfaceColor(cornerNonSolidZone(mask, a.corner), lowerLevel, maxLevel);
         cap.cliffWall = false;
         addQuad(result, cap);
         result.stats.cornerCapCount++;
@@ -913,12 +1030,29 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
         }
     }
 
-    if (settings.rockEnabled) {
-        addInnerCornerBevelCaps(result, request.mask, boundary.boundarySegments, settings, request.topHeight);
-    }
+    addInnerCornerBevelCaps(
+        result,
+        request.mask,
+        boundary.boundarySegments,
+        settings,
+        request.topHeight,
+        request.level,
+        request.maxLevel);
 
     if (!request.includeWalls) {
         return result;
+    }
+
+    if (request.fadeWallDisplacementAtBottom) {
+        const std::uint8_t lowerLevel = request.level > 0 ? (std::uint8_t)(request.level - 1) : 0;
+        addOuterCornerFootCaps(
+            result,
+            request.mask,
+            boundary.boundarySegments,
+            settings,
+            request.baseHeight,
+            lowerLevel,
+            request.maxLevel);
     }
 
     for (const MeshBoundarySegment& segment : boundary.beveledSegments) {
@@ -1017,7 +1151,7 @@ CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid&
             for (int x = 0; x < grid.width; x++) {
                 const std::uint8_t cellLevel = grid.cellLevelAt(x, y);
                 const std::size_t index = (std::size_t)mask.cellIndex(x, y);
-                const bool solid = level == 0 ? cellLevel == 0 : cellLevel >= level;
+                const bool solid = level == 0 ? true : cellLevel >= level;
                 const bool top = cellLevel == level;
                 mask.solidCells[index] = solid ? 1 : 0;
                 mask.topCells[index] = top ? 1 : 0;

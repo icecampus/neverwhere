@@ -232,6 +232,86 @@ TEST(LandscapePipelineTest, MeshComposerUsesReusableTilesAndPassesSeamContract) 
     EXPECT_EQ(result.seams.mismatches, 0);
 }
 
+TEST(LandscapePipelineTest, BaseLevelSurfaceReachesHigherLevelCliffFoot) {
+    landscape_core::LandscapeLevelGrid grid;
+    grid.width = 2;
+    grid.height = 1;
+    grid.levelCount = 2;
+    grid.levelHeight = 1.0f;
+    grid.cellLevels = {0, 1};
+    grid.nodeLevels.assign(6, 0);
+    grid.zones.assign(2, landscape_core::LandscapeZone::Lowland);
+
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.cornerBevel = 0.3f;
+    meshSettings.wallHorizontalSubdivisions = 4;
+    meshSettings.wallVerticalSubdivisions = 3;
+
+    const landscape_mesh::CompositionResult result = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
+
+    bool baseTopTouchesCliffFoot = false;
+    for (const landscape_mesh::MeshQuad& quad : result.quads) {
+        if (quad.cliffWall || quad.a.y != 0.0f || quad.b.y != 0.0f || quad.c.y != 0.0f || quad.d.y != 0.0f) {
+            continue;
+        }
+
+        const float maxX = std::max({quad.a.x, quad.b.x, quad.c.x, quad.d.x});
+        if (maxX >= 0.999f) {
+            baseTopTouchesCliffFoot = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(baseTopTouchesCliffFoot)
+        << "Base level top must not bevel away from the foot of a higher-level cliff";
+}
+
+TEST(LandscapePipelineTest, LowerLevelSurfaceFillsBeveledHigherLevelOuterCorner) {
+    landscape_core::LandscapeLevelGrid grid;
+    grid.width = 2;
+    grid.height = 2;
+    grid.levelCount = 2;
+    grid.levelHeight = 1.0f;
+    grid.cellLevels = {
+        0, 0,
+        0, 1,
+    };
+    grid.nodeLevels.assign(9, 0);
+    grid.zones.assign(4, landscape_core::LandscapeZone::Lowland);
+
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.cornerBevel = 0.3f;
+    meshSettings.rockEnabled = false;
+    meshSettings.wallHorizontalSubdivisions = 4;
+    meshSettings.wallVerticalSubdivisions = 3;
+
+    const landscape_mesh::CompositionResult result = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
+
+    auto isBasePointInsideHighCellCorner = [](const landscape_mesh::Vec3& point) {
+        return point.y >= -0.0001f && point.y <= 0.0001f &&
+            point.x >= 0.999f && point.x <= 1.451f &&
+            point.z >= 0.999f && point.z <= 1.451f;
+    };
+
+    bool foundFootCap = false;
+    for (const landscape_mesh::MeshQuad& quad : result.quads) {
+        if (quad.cliffWall) {
+            continue;
+        }
+
+        if (isBasePointInsideHighCellCorner(quad.a) &&
+            isBasePointInsideHighCellCorner(quad.b) &&
+            isBasePointInsideHighCellCorner(quad.c) &&
+            isBasePointInsideHighCellCorner(quad.d)) {
+            foundFootCap = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(foundFootCap)
+        << "Lower level surface must fill the triangular foot gap created by a beveled higher-level outer corner";
+}
+
 TEST(LandscapePipelineTest, SharedSolidMaskBuilderCreatesBevelCapsForCutout) {
     landscape_mesh::SolidMaskGrid mask;
     mask.width = 8;

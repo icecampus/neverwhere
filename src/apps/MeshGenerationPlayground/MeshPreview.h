@@ -7,6 +7,11 @@
 
 namespace meshgen_playground {
 
+void initProductionPreviewTextures();
+void shutdownProductionPreviewTextures();
+bool productionGrassTextureLoaded();
+bool productionRockTextureLoaded();
+
 void drawRectangleCliffDebugView(const RectangleCliffSettings& settings, const RectangleCliffModel& model, const ImVec2& viewportSize);
 void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCliffModel& model, const ImVec2& viewportSize);
 void drawLandscapeBowlDebugView(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model, const ImVec2& viewportSize);

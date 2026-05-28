@@ -1,4 +1,5 @@
 #include "LandscapeBowlScenario.h"
+#include "MeshPreview.h"
 #include "PlaygroundLog.h"
 #include "PlaygroundSmokeTest.h"
 #include "PlaygroundState.h"
@@ -108,6 +109,8 @@ void init() {
     }
     spdlog::info("init: simgui_setup() done, imguiOk=true");
 
+    initProductionPreviewTextures();
+
     spdlog::info("init: calling rebuildRectangleCliffModel()");
     rebuildRectangleCliffModel();
     spdlog::info("init: calling rebuildLandscapeBowlModel()");
@@ -201,6 +204,7 @@ void cleanup() {
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
         if (g_state.imguiOk) {
+            shutdownProductionPreviewTextures();
             spdlog::info("cleanup: calling simgui_shutdown()");
             simgui_shutdown();
             g_state.imguiOk = false;
