@@ -76,6 +76,15 @@ struct BoundarySegment {
     BoundarySide side = BoundarySide::Top;
 };
 
+struct MeshBoundarySegment {
+    Vec3 a;
+    Vec3 b;
+    Vec3 normal;
+    Vec3 startNormal;
+    Vec3 endNormal;
+    BoundarySide side = BoundarySide::Top;
+};
+
 struct VertexMarker {
     Int2 position;
     VertexKind kind = VertexKind::Empty;
@@ -104,6 +113,7 @@ struct RectangleCliffSettings {
     int cutoutWidth = 4;
     int cutoutHeight = 3;
     float cliffHeight = 2.5f;
+    float cornerBevel = 0.3f;
     bool rockEnabled = true;
     int rockSeed = 1337;
     float rockScale = 2.75f;
@@ -197,6 +207,7 @@ void sanitizeSettings(RectangleCliffSettings& settings) {
     settings.cutoutX = clampInt(settings.cutoutX, 0, settings.gridWidth - settings.cutoutWidth);
     settings.cutoutY = clampInt(settings.cutoutY, 0, settings.gridHeight - settings.cutoutHeight);
     settings.cliffHeight = clampFloat(settings.cliffHeight, 0.25f, 8.0f);
+    settings.cornerBevel = clampFloat(settings.cornerBevel, 0.0f, 0.45f);
     settings.rockScale = clampFloat(settings.rockScale, 0.25f, 24.0f);
     settings.rockAmplitude = clampFloat(settings.rockAmplitude, 0.0f, 1.25f);
     settings.wallHorizontalSubdivisions = clampInt(settings.wallHorizontalSubdivisions, 1, 16);
@@ -312,8 +323,9 @@ Vec3 normalizeHorizontal(const Vec3& value, const Vec3& fallback) {
     return {value.x / length, 0.0f, value.z / length};
 }
 
-Vec3 boundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, const Vec3& fallback) {
+bool tryBoundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, Vec3& outNormal) {
     Vec3 sum{};
+    bool found = false;
     for (const BoundarySegment& segment : model.boundarySegments) {
         if (!samePoint(segment.a, vertex) && !samePoint(segment.b, vertex)) {
             continue;
@@ -322,9 +334,145 @@ Vec3 boundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, 
         const Vec3 normal = outwardNormalForBoundarySide(segment.side);
         sum.x += normal.x;
         sum.z += normal.z;
+        found = true;
     }
 
-    return normalizeHorizontal(sum, fallback);
+    if (!found) {
+        return false;
+    }
+
+    outNormal = normalizeHorizontal(sum, {0.0f, 0.0f, 1.0f});
+    return true;
+}
+
+Vec3 boundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, const Vec3& fallback) {
+    Vec3 normal;
+    if (tryBoundaryVertexNormal(model, vertex, normal)) {
+        return normal;
+    }
+
+    return fallback;
+}
+
+bool isBoundaryCorner(const RectangleCliffModel& model, const Int2& vertex) {
+    int firstSide = -1;
+    for (const BoundarySegment& segment : model.boundarySegments) {
+        if (!samePoint(segment.a, vertex) && !samePoint(segment.b, vertex)) {
+            continue;
+        }
+
+        const int side = (int)segment.side;
+        if (firstSide < 0) {
+            firstSide = side;
+        } else if (firstSide != side) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Vec3 subtractVec3(const Vec3& a, const Vec3& b) {
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+Vec3 addVec3(const Vec3& a, const Vec3& b) {
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+Vec3 scaleVec3(const Vec3& value, float scale) {
+    return {value.x * scale, value.y * scale, value.z * scale};
+}
+
+float horizontalLength(const Vec3& value) {
+    return std::sqrt(value.x * value.x + value.z * value.z);
+}
+
+Vec3 gridPointToVec3(const Int2& point, float y) {
+    return {(float)point.x, y, (float)point.y};
+}
+
+std::vector<MeshBoundarySegment> buildBeveledBoundarySegments(const RectangleCliffModel& model, const RectangleCliffSettings& settings) {
+    struct TrimmedEndpoint {
+        Int2 corner;
+        Vec3 point;
+        BoundarySide side = BoundarySide::Top;
+        Vec3 sideNormal;
+        Vec3 bevelNormal;
+    };
+
+    std::vector<MeshBoundarySegment> segments;
+    std::vector<TrimmedEndpoint> endpoints;
+    const float bevel = clampFloat(settings.cornerBevel, 0.0f, 0.45f);
+
+    for (const BoundarySegment& segment : model.boundarySegments) {
+        const Vec3 a = gridPointToVec3(segment.a, 0.0f);
+        const Vec3 b = gridPointToVec3(segment.b, 0.0f);
+        const Vec3 delta = subtractVec3(b, a);
+        const float length = horizontalLength(delta);
+        if (length < 0.0001f) {
+            continue;
+        }
+
+        const Vec3 direction = scaleVec3(delta, 1.0f / length);
+        const bool trimStart = bevel > 0.0f && isBoundaryCorner(model, segment.a);
+        const bool trimEnd = bevel > 0.0f && isBoundaryCorner(model, segment.b);
+        const float trim = std::min(bevel, length * 0.45f);
+        const Vec3 start = trimStart ? addVec3(a, scaleVec3(direction, trim)) : a;
+        const Vec3 end = trimEnd ? addVec3(b, scaleVec3(direction, -trim)) : b;
+        const Vec3 sideNormal = outwardNormalForBoundarySide(segment.side);
+        const Vec3 startBevelNormal = trimStart ? boundaryVertexNormal(model, segment.a, sideNormal) : sideNormal;
+        const Vec3 endBevelNormal = trimEnd ? boundaryVertexNormal(model, segment.b, sideNormal) : sideNormal;
+        const Vec3 startNormal = trimStart ? normalizeHorizontal(addVec3(sideNormal, startBevelNormal), sideNormal) : sideNormal;
+        const Vec3 endNormal = trimEnd ? normalizeHorizontal(addVec3(sideNormal, endBevelNormal), sideNormal) : sideNormal;
+
+        if (horizontalLength(subtractVec3(end, start)) > 0.0001f) {
+            segments.push_back({start, end, sideNormal, startNormal, endNormal, segment.side});
+        }
+
+        if (trimStart) {
+            endpoints.push_back({segment.a, start, segment.side, sideNormal, startBevelNormal});
+        }
+        if (trimEnd) {
+            endpoints.push_back({segment.b, end, segment.side, sideNormal, endBevelNormal});
+        }
+    }
+
+    std::vector<std::uint8_t> consumed(endpoints.size(), 0);
+    for (std::size_t i = 0; i < endpoints.size(); i++) {
+        if (consumed[i]) {
+            continue;
+        }
+
+        std::vector<std::size_t> group;
+        for (std::size_t j = i; j < endpoints.size(); j++) {
+            if (!consumed[j] && samePoint(endpoints[i].corner, endpoints[j].corner)) {
+                group.push_back(j);
+                consumed[j] = 1;
+            }
+        }
+
+        if (group.size() != 2) {
+            continue;
+        }
+
+        const TrimmedEndpoint& a = endpoints[group[0]];
+        const TrimmedEndpoint& b = endpoints[group[1]];
+        if (a.side == b.side) {
+            continue;
+        }
+
+        const Vec3 normal = normalizeHorizontal(
+            addVec3(outwardNormalForBoundarySide(a.side), outwardNormalForBoundarySide(b.side)),
+            outwardNormalForBoundarySide(a.side));
+        const Vec3 startNormal = normalizeHorizontal(addVec3(normal, a.sideNormal), normal);
+        const Vec3 endNormal = normalizeHorizontal(addVec3(normal, b.sideNormal), normal);
+        if (horizontalLength(subtractVec3(b.point, a.point)) > 0.0001f) {
+            segments.push_back({a.point, b.point, normal, startNormal, endNormal, a.side});
+        }
+    }
+
+    return segments;
 }
 
 Vec3 lerpVec3(const Vec3& a, const Vec3& b, float t) {
@@ -436,6 +584,303 @@ ImU32 rockWallColor(BoundarySide side, float heightT, float noiseValue) {
     return IM_COL32(r, g, b, 255);
 }
 
+ImU32 rockTopColor(float noiseValue) {
+    const int shade = (int)(noiseValue * 10.0f);
+    const int r = clampInt(88 + shade, 58, 122);
+    const int g = clampInt(143 + shade, 104, 172);
+    const int b = clampInt(82 + shade, 52, 116);
+    return IM_COL32(r, g, b, 255);
+}
+
+bool applyTopCornerBevel(
+    const RectangleCliffModel& model,
+    const RectangleCliffSettings& settings,
+    int cellX,
+    int cellY,
+    Vec3& point,
+    Vec3& outNormal) {
+
+    struct CornerRule {
+        Int2 vertex;
+        bool enabled = false;
+        float axisAX = 0.0f;
+        float axisAZ = 0.0f;
+        float axisBX = 0.0f;
+        float axisBZ = 0.0f;
+    };
+
+    const float bevel = settings.cornerBevel;
+    if (bevel <= 0.0f) {
+        return false;
+    }
+
+    const CornerRule rules[] = {
+        {{cellX, cellY},
+            !isSolidCell(model, settings, cellX, cellY - 1) && !isSolidCell(model, settings, cellX - 1, cellY),
+            1.0f, 0.0f, 0.0f, 1.0f},
+        {{cellX + 1, cellY},
+            !isSolidCell(model, settings, cellX, cellY - 1) && !isSolidCell(model, settings, cellX + 1, cellY),
+            -1.0f, 0.0f, 0.0f, 1.0f},
+        {{cellX + 1, cellY + 1},
+            !isSolidCell(model, settings, cellX + 1, cellY) && !isSolidCell(model, settings, cellX, cellY + 1),
+            -1.0f, 0.0f, 0.0f, -1.0f},
+        {{cellX, cellY + 1},
+            !isSolidCell(model, settings, cellX - 1, cellY) && !isSolidCell(model, settings, cellX, cellY + 1),
+            1.0f, 0.0f, 0.0f, -1.0f},
+    };
+
+    for (const CornerRule& rule : rules) {
+        if (!rule.enabled) {
+            continue;
+        }
+
+        const float fromCornerX = point.x - (float)rule.vertex.x;
+        const float fromCornerZ = point.z - (float)rule.vertex.y;
+        float distanceA = fromCornerX * rule.axisAX + fromCornerZ * rule.axisAZ;
+        float distanceB = fromCornerX * rule.axisBX + fromCornerZ * rule.axisBZ;
+        if (distanceA < -0.0001f || distanceB < -0.0001f || distanceA > bevel || distanceB > bevel) {
+            continue;
+        }
+
+        const float sum = distanceA + distanceB;
+        if (sum >= bevel) {
+            continue;
+        }
+
+        if (sum < 0.0001f) {
+            distanceA = bevel * 0.5f;
+            distanceB = bevel * 0.5f;
+        } else {
+            const float scale = bevel / sum;
+            distanceA *= scale;
+            distanceB *= scale;
+        }
+
+        point.x = (float)rule.vertex.x + rule.axisAX * distanceA + rule.axisBX * distanceB;
+        point.z = (float)rule.vertex.y + rule.axisAZ * distanceA + rule.axisBZ * distanceB;
+        outNormal = boundaryVertexNormal(model, rule.vertex, {0.0f, 0.0f, 1.0f});
+        return true;
+    }
+
+    return false;
+}
+
+bool topBoundaryNormalForCellPoint(
+    const RectangleCliffModel& model,
+    const RectangleCliffSettings& settings,
+    int cellX,
+    int cellY,
+    int subX,
+    int subY,
+    int subdivisions,
+    Vec3& outNormal) {
+
+    const bool onLeft = subX == 0;
+    const bool onRight = subX == subdivisions;
+    const bool onTop = subY == 0;
+    const bool onBottom = subY == subdivisions;
+
+    if ((onLeft || onRight) && (onTop || onBottom)) {
+        const Int2 vertex{
+            cellX + (onRight ? 1 : 0),
+            cellY + (onBottom ? 1 : 0),
+        };
+        if (tryBoundaryVertexNormal(model, vertex, outNormal)) {
+            return true;
+        }
+    }
+
+    Vec3 sum{};
+    bool found = false;
+    if (onTop && !isSolidCell(model, settings, cellX, cellY - 1)) {
+        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Top);
+        sum.x += normal.x;
+        sum.z += normal.z;
+        found = true;
+    }
+    if (onRight && !isSolidCell(model, settings, cellX + 1, cellY)) {
+        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Right);
+        sum.x += normal.x;
+        sum.z += normal.z;
+        found = true;
+    }
+    if (onBottom && !isSolidCell(model, settings, cellX, cellY + 1)) {
+        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Bottom);
+        sum.x += normal.x;
+        sum.z += normal.z;
+        found = true;
+    }
+    if (onLeft && !isSolidCell(model, settings, cellX - 1, cellY)) {
+        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Left);
+        sum.x += normal.x;
+        sum.z += normal.z;
+        found = true;
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    outNormal = normalizeHorizontal(sum, {0.0f, 0.0f, 1.0f});
+    return true;
+}
+
+Vec3 displaceRockTopPoint(
+    const RectangleCliffSettings& settings,
+    const Vec3& point,
+    const Vec3& normal,
+    bool boundaryPoint,
+    float rawNoise) {
+
+    if (!boundaryPoint) {
+        return point;
+    }
+
+    return displaceRockPoint(settings, point, normal, 1.0f, rawNoise);
+}
+
+void addRockTopCell(
+    RectangleCliffModel& model,
+    const RectangleCliffSettings& settings,
+    const FastNoise::SmartNode<>& rockNoise,
+    int cellX,
+    int cellY) {
+
+    const float h = settings.cliffHeight;
+    const int subdivisions = settings.wallHorizontalSubdivisions;
+    const int vertexColumns = subdivisions + 1;
+    std::vector<Vec3> points((std::size_t)vertexColumns * (std::size_t)vertexColumns);
+    std::vector<Vec3> normals(points.size());
+    std::vector<std::uint8_t> boundaryFlags(points.size(), 0);
+    std::vector<float> noise;
+
+    for (int y = 0; y <= subdivisions; y++) {
+        const float v = (float)y / (float)subdivisions;
+        for (int x = 0; x <= subdivisions; x++) {
+            const float u = (float)x / (float)subdivisions;
+            const std::size_t index = (std::size_t)y * (std::size_t)vertexColumns + (std::size_t)x;
+            points[index] = {(float)cellX + u, h, (float)cellY + v};
+            if (applyTopCornerBevel(model, settings, cellX, cellY, points[index], normals[index])) {
+                boundaryFlags[index] = 1;
+            } else {
+                boundaryFlags[index] = topBoundaryNormalForCellPoint(
+                    model,
+                    settings,
+                    cellX,
+                    cellY,
+                    x,
+                    y,
+                    subdivisions,
+                    normals[index]) ? 1 : 0;
+            }
+        }
+    }
+
+    sampleRockNoiseBatch(rockNoise, settings, points, noise);
+
+    for (int y = 0; y < subdivisions; y++) {
+        for (int x = 0; x < subdivisions; x++) {
+            const std::size_t i00 = (std::size_t)y * (std::size_t)vertexColumns + (std::size_t)x;
+            const std::size_t i10 = i00 + 1;
+            const std::size_t i01 = (std::size_t)(y + 1) * (std::size_t)vertexColumns + (std::size_t)x;
+            const std::size_t i11 = i01 + 1;
+
+            MeshQuad top;
+            top.a = displaceRockTopPoint(settings, points[i00], normals[i00], boundaryFlags[i00] != 0, noise[i00]);
+            top.b = displaceRockTopPoint(settings, points[i10], normals[i10], boundaryFlags[i10] != 0, noise[i10]);
+            top.c = displaceRockTopPoint(settings, points[i11], normals[i11], boundaryFlags[i11] != 0, noise[i11]);
+            top.d = displaceRockTopPoint(settings, points[i01], normals[i01], boundaryFlags[i01] != 0, noise[i01]);
+
+            const float panelNoise = (noise[i00] + noise[i10] + noise[i11] + noise[i01]) * 0.25f;
+            top.color = rockTopColor(panelNoise);
+            top.cliffWall = false;
+            addMeshQuad(model, top);
+        }
+    }
+}
+
+void addInnerCornerBevelCaps(RectangleCliffModel& model, const RectangleCliffSettings& settings) {
+    struct CornerEndpoint {
+        Int2 corner;
+        Vec3 point;
+        BoundarySide side = BoundarySide::Top;
+    };
+
+    const float bevel = clampFloat(settings.cornerBevel, 0.0f, 0.45f);
+    if (bevel <= 0.0f) {
+        return;
+    }
+
+    std::vector<CornerEndpoint> endpoints;
+    endpoints.reserve(model.boundarySegments.size() * 2);
+    for (const BoundarySegment& segment : model.boundarySegments) {
+        const Vec3 a = gridPointToVec3(segment.a, settings.cliffHeight);
+        const Vec3 b = gridPointToVec3(segment.b, settings.cliffHeight);
+        const Vec3 delta = subtractVec3(b, a);
+        const float length = horizontalLength(delta);
+        if (length < 0.0001f) {
+            continue;
+        }
+
+        const Vec3 direction = scaleVec3(delta, 1.0f / length);
+        const float trim = std::min(bevel, length * 0.45f);
+        if (isBoundaryCorner(model, segment.a)) {
+            endpoints.push_back({segment.a, addVec3(a, scaleVec3(direction, trim)), segment.side});
+        }
+        if (isBoundaryCorner(model, segment.b)) {
+            endpoints.push_back({segment.b, addVec3(b, scaleVec3(direction, -trim)), segment.side});
+        }
+    }
+
+    std::vector<std::uint8_t> consumed(endpoints.size(), 0);
+    int capCount = 0;
+    for (std::size_t i = 0; i < endpoints.size(); i++) {
+        if (consumed[i]) {
+            continue;
+        }
+
+        std::vector<std::size_t> group;
+        for (std::size_t j = i; j < endpoints.size(); j++) {
+            if (!consumed[j] && samePoint(endpoints[i].corner, endpoints[j].corner)) {
+                group.push_back(j);
+                consumed[j] = 1;
+            }
+        }
+
+        if (group.size() != 2) {
+            continue;
+        }
+
+        const VertexKind kind = classifyVertex(model, settings, endpoints[i].corner.x, endpoints[i].corner.y);
+        if (kind != VertexKind::InnerCorner) {
+            continue;
+        }
+
+        const CornerEndpoint& a = endpoints[group[0]];
+        const CornerEndpoint& b = endpoints[group[1]];
+        if (a.side == b.side) {
+            continue;
+        }
+
+        const Vec3 corner = gridPointToVec3(a.corner, settings.cliffHeight);
+        const Vec3 mid = scaleVec3(addVec3(a.point, b.point), 0.5f);
+
+        MeshQuad cap;
+        cap.a = corner;
+        cap.b = a.point;
+        cap.c = mid;
+        cap.d = b.point;
+        cap.color = rockTopColor(0.0f);
+        cap.cliffWall = false;
+        addMeshQuad(model, cap);
+        capCount++;
+    }
+
+    if (capCount > 0) {
+        spdlog::info("addInnerCornerBevelCaps: added {} concave top bevel caps", capCount);
+    }
+}
+
 void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSettings& settings) {
     const float h = settings.cliffHeight;
     const FastNoise::SmartNode<> rockNoise = settings.rockEnabled ? makeRockNoiseNode(settings) : nullptr;
@@ -446,6 +891,11 @@ void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSet
     for (int y = 0; y < settings.gridHeight; y++) {
         for (int x = 0; x < settings.gridWidth; x++) {
             if (!isSolidCell(model, settings, x, y)) {
+                continue;
+            }
+
+            if (settings.rockEnabled) {
+                addRockTopCell(model, settings, rockNoise, x, y);
                 continue;
             }
 
@@ -460,26 +910,29 @@ void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSet
         }
     }
 
-    for (const BoundarySegment& segment : model.boundarySegments) {
+    if (settings.rockEnabled) {
+        addInnerCornerBevelCaps(model, settings);
+    }
+
+    const std::vector<MeshBoundarySegment> meshBoundarySegments = buildBeveledBoundarySegments(model, settings);
+
+    for (const MeshBoundarySegment& segment : meshBoundarySegments) {
         if (!settings.rockEnabled) {
             MeshQuad wall;
-            wall.a = {(float)segment.a.x, h, (float)segment.a.y};
-            wall.b = {(float)segment.b.x, h, (float)segment.b.y};
-            wall.c = {(float)segment.b.x, 0.0f, (float)segment.b.y};
-            wall.d = {(float)segment.a.x, 0.0f, (float)segment.a.y};
+            wall.a = {segment.a.x, h, segment.a.z};
+            wall.b = {segment.b.x, h, segment.b.z};
+            wall.c = {segment.b.x, 0.0f, segment.b.z};
+            wall.d = {segment.a.x, 0.0f, segment.a.z};
             wall.color = colorForBoundarySide(segment.side);
             wall.cliffWall = true;
             addMeshQuad(model, wall);
             continue;
         }
 
-        const Vec3 topA{(float)segment.a.x, h, (float)segment.a.y};
-        const Vec3 topB{(float)segment.b.x, h, (float)segment.b.y};
-        const Vec3 bottomA{(float)segment.a.x, 0.0f, (float)segment.a.y};
-        const Vec3 bottomB{(float)segment.b.x, 0.0f, (float)segment.b.y};
-        const Vec3 outwardNormal = outwardNormalForBoundarySide(segment.side);
-        const Vec3 startNormal = boundaryVertexNormal(model, segment.a, outwardNormal);
-        const Vec3 endNormal = boundaryVertexNormal(model, segment.b, outwardNormal);
+        const Vec3 topA{segment.a.x, h, segment.a.z};
+        const Vec3 topB{segment.b.x, h, segment.b.z};
+        const Vec3 bottomA{segment.a.x, 0.0f, segment.a.z};
+        const Vec3 bottomB{segment.b.x, 0.0f, segment.b.z};
         const int vertexColumns = settings.wallHorizontalSubdivisions + 1;
         const int vertexRows = settings.wallVerticalSubdivisions + 1;
         std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
@@ -497,11 +950,11 @@ void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSet
                 const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
                 wallPoints[index] = lerpVec3(rowA, rowB, u);
                 if (column == 0) {
-                    wallNormals[index] = startNormal;
+                    wallNormals[index] = segment.startNormal;
                 } else if (column == vertexColumns - 1) {
-                    wallNormals[index] = endNormal;
+                    wallNormals[index] = segment.endNormal;
                 } else {
-                    wallNormals[index] = outwardNormal;
+                    wallNormals[index] = segment.normal;
                 }
             }
         }
@@ -901,6 +1354,7 @@ void drawUi() {
         changed |= ImGui::SliderInt("Cutout Width", &g_rectSettings.cutoutWidth, 1, g_rectSettings.gridWidth);
         changed |= ImGui::SliderInt("Cutout Height", &g_rectSettings.cutoutHeight, 1, g_rectSettings.gridHeight);
         changed |= ImGui::SliderFloat("Cliff Height", &g_rectSettings.cliffHeight, 0.25f, 8.0f);
+        changed |= ImGui::SliderFloat("Corner Bevel", &g_rectSettings.cornerBevel, 0.0f, 0.45f);
         changed |= ImGui::Checkbox("Rock Noise Enabled", &g_rectSettings.rockEnabled);
         changed |= ImGui::InputInt("Rock Seed", &g_rectSettings.rockSeed);
         changed |= ImGui::SliderFloat("Rock Scale", &g_rectSettings.rockScale, 0.25f, 24.0f);
