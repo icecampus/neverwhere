@@ -27,5 +27,6 @@ extern MeshPreviewCamera g_meshCamera;
 extern LandscapeBowlSettings g_landscapeSettings;
 extern LandscapeBowlModel g_landscapeModel;
 extern MeshPreviewCamera g_landscapeCamera;
+extern Vec3 g_productionLightDirection;
 
 } // namespace meshgen_playground

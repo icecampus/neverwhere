@@ -24,7 +24,7 @@ struct LandscapeBowlSettings {
     float hillRadius = 2.6f;
     bool showTopFaces = true;
     bool showCliffWalls = true;
-    bool showMeshWireframe = true;
+    bool showMeshWireframe = false;
     bool showHeightValues = false;
 };
 

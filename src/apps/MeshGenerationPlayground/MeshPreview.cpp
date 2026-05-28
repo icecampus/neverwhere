@@ -3,6 +3,7 @@
 #include "PlaygroundState.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <mutex>
 #include <vector>
@@ -54,6 +55,135 @@ ImVec2 meshProjectionAnchor(const ImVec2& origin, const ImVec2& canvasSize, cons
         origin.x + canvasSize.x * 0.5f + camera.pan.x,
         origin.y + 130.0f + camera.pan.y,
     };
+}
+
+Vec3 subtract(const Vec3& lhs, const Vec3& rhs) {
+    return {
+        lhs.x - rhs.x,
+        lhs.y - rhs.y,
+        lhs.z - rhs.z,
+    };
+}
+
+Vec3 add(const Vec3& lhs, const Vec3& rhs) {
+    return {
+        lhs.x + rhs.x,
+        lhs.y + rhs.y,
+        lhs.z + rhs.z,
+    };
+}
+
+Vec3 scale(const Vec3& value, float factor) {
+    return {
+        value.x * factor,
+        value.y * factor,
+        value.z * factor,
+    };
+}
+
+float dot(const Vec3& lhs, const Vec3& rhs) {
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+Vec3 cross(const Vec3& lhs, const Vec3& rhs) {
+    return {
+        lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.x * rhs.y - lhs.y * rhs.x,
+    };
+}
+
+Vec3 normalize(const Vec3& value) {
+    const float length = std::sqrt(dot(value, value));
+    if (length <= 0.0001f) {
+        return {0.0f, 1.0f, 0.0f};
+    }
+
+    return {
+        value.x / length,
+        value.y / length,
+        value.z / length,
+    };
+}
+
+Vec3 defaultProductionLightDirection() {
+    return normalize({-0.35f, 0.82f, -0.45f});
+}
+
+Vec3 rotateLightDirectionFromDrag(const Vec3& direction, const ImVec2& mouseDelta) {
+    constexpr float kDragSensitivity = 0.012f;
+    constexpr float kMinElevation = 0.12f;
+    constexpr float kMaxElevation = 1.35f;
+
+    const Vec3 current = normalize(direction);
+    const float horizontalLength = std::max(0.0001f, std::sqrt(current.x * current.x + current.z * current.z));
+    float azimuth = std::atan2(current.z, current.x);
+    float elevation = std::atan2(current.y, horizontalLength);
+
+    azimuth += mouseDelta.x * kDragSensitivity;
+    elevation = clampFloat(elevation - mouseDelta.y * kDragSensitivity, kMinElevation, kMaxElevation);
+
+    const float horizontal = std::cos(elevation);
+    return normalize({
+        horizontal * std::cos(azimuth),
+        std::sin(elevation),
+        horizontal * std::sin(azimuth),
+    });
+}
+
+Vec3 areaWeightedFaceNormal(const MeshQuad& quad) {
+    const Vec3 firstTriangle = cross(subtract(quad.b, quad.a), subtract(quad.c, quad.a));
+    const Vec3 secondTriangle = cross(subtract(quad.c, quad.a), subtract(quad.d, quad.a));
+    return normalize(add(firstTriangle, secondTriangle));
+}
+
+Vec3 topNormal(const MeshQuad& quad) {
+    Vec3 normal = areaWeightedFaceNormal(quad);
+    if (normal.y < 0.0f) {
+        normal = scale(normal, -1.0f);
+    }
+    return normal;
+}
+
+Vec3 wallNormal(const MeshQuad& quad) {
+    const Vec3 along = scale(add(subtract(quad.b, quad.a), subtract(quad.c, quad.d)), 0.5f);
+    const Vec3 down = scale(add(subtract(quad.d, quad.a), subtract(quad.c, quad.b)), 0.5f);
+    Vec3 normal = normalize(cross(along, down));
+
+    const Vec3 polygonNormal = areaWeightedFaceNormal(quad);
+    if (dot(normal, polygonNormal) < 0.0f) {
+        normal = scale(normal, -1.0f);
+    }
+
+    return normal;
+}
+
+ImU32 shadeColor(ImU32 color, float factor) {
+    const int r = (color >> IM_COL32_R_SHIFT) & 0xff;
+    const int g = (color >> IM_COL32_G_SHIFT) & 0xff;
+    const int b = (color >> IM_COL32_B_SHIFT) & 0xff;
+    const int a = (color >> IM_COL32_A_SHIFT) & 0xff;
+
+    return IM_COL32(
+        clampInt((int)((float)r * factor), 0, 255),
+        clampInt((int)((float)g * factor), 0, 255),
+        clampInt((int)((float)b * factor), 0, 255),
+        a);
+}
+
+ImU32 productionLitColor(const MeshQuad& quad, const Vec3& lightDirection) {
+    const Vec3 normal = quad.cliffWall ? wallNormal(quad) : topNormal(quad);
+    float lighting = 1.0f;
+
+    if (quad.cliffWall) {
+        const float wrappedLambert = clampFloat(dot(normal, lightDirection) * 0.5f + 0.5f, 0.0f, 1.0f);
+        lighting = 0.42f + 0.58f * wrappedLambert;
+    } else {
+        const float lambert = std::max(0.0f, dot(normal, lightDirection));
+        lighting = 0.78f + 0.24f * lambert;
+    }
+
+    return shadeColor(quad.color, lighting);
 }
 
 ImVec2 projectMeshPoint(
@@ -117,17 +247,16 @@ void drawLandscapeProjectedQuad(
     const MeshPreviewCamera& camera,
     const ImVec2& origin,
     const ImVec2& canvasSize,
-    const MeshQuad& quad) {
+    const MeshQuad& quad,
+    const Vec3& lightDirection) {
 
     const ImVec2 a = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.a);
     const ImVec2 b = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.b);
     const ImVec2 c = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.c);
     const ImVec2 d = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.d);
 
-    drawList->AddQuadFilled(a, b, c, d, quad.color);
-    if (settings.showMeshWireframe) {
-        drawList->AddQuad(a, b, c, d, IM_COL32(24, 24, 24, 190), 1.0f);
-    }
+    (void)settings;
+    drawList->AddQuadFilled(a, b, c, d, productionLitColor(quad, lightDirection));
 }
 
 ImU32 colorForLandscapeZone(LandscapeZone zone, float height, float minHeight, float maxHeight) {
@@ -321,9 +450,11 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
     const bool hovered = ImGui::IsItemHovered();
     const bool dragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left);
     ImGuiIO& io = ImGui::GetIO();
+    Vec3 lightDirection;
 
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
+        g_productionLightDirection = normalize(g_productionLightDirection);
         if (hovered && io.MouseWheel != 0.0f) {
             const float previousZoom = g_landscapeCamera.zoom;
             const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.28f, 4.0f);
@@ -341,14 +472,23 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         }
 
         if (dragging) {
-            g_landscapeCamera.pan.x += io.MouseDelta.x;
-            g_landscapeCamera.pan.y += io.MouseDelta.y;
+            if (io.KeyCtrl) {
+                g_productionLightDirection = rotateLightDirectionFromDrag(g_productionLightDirection, io.MouseDelta);
+            } else {
+                g_landscapeCamera.pan.x += io.MouseDelta.x;
+                g_landscapeCamera.pan.y += io.MouseDelta.y;
+            }
         }
 
         if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            g_landscapeCamera.zoom = 1.0f;
-            g_landscapeCamera.pan = {0.0f, 0.0f};
+            if (io.KeyCtrl) {
+                g_productionLightDirection = defaultProductionLightDirection();
+            } else {
+                g_landscapeCamera.zoom = 1.0f;
+                g_landscapeCamera.pan = {0.0f, 0.0f};
+            }
         }
+        lightDirection = g_productionLightDirection;
     }
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -377,14 +517,17 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
     });
 
     for (int index : drawOrder) {
-        drawLandscapeProjectedQuad(drawList, settings, g_landscapeCamera, origin, viewportSize, model.meshQuads[(std::size_t)index]);
+        drawLandscapeProjectedQuad(drawList, settings, g_landscapeCamera, origin, viewportSize, model.meshQuads[(std::size_t)index], lightDirection);
     }
 
-    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Landscape Bowl 3D preview: composed from reusable surface/wall tile meshes");
-    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, mouse wheel: zoom, double click: reset");
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Production Preview: shaded landscape mesh");
+    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, Ctrl+LMB drag: rotate sun, mouse wheel: zoom");
     char cameraText[96];
     snprintf(cameraText, sizeof(cameraText), "Camera zoom: %.2fx, pan: %.0f %.0f", g_landscapeCamera.zoom, g_landscapeCamera.pan.x, g_landscapeCamera.pan.y);
     drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), cameraText);
+    char lightText[128];
+    snprintf(lightText, sizeof(lightText), "Sun dir: %.2f %.2f %.2f", lightDirection.x, lightDirection.y, lightDirection.z);
+    drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(150, 162, 180, 255), lightText);
     drawList->PopClipRect();
 }
 

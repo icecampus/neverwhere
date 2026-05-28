@@ -26,7 +26,7 @@ void drawRectangleScenarioControls(float panelWidth) {
     drawFrameStats();
     ImGui::Separator();
 
-    ImGui::Text("Rectangle Cliff Debug");
+    ImGui::Text("Debug Scene");
     ImGui::TextWrapped("Debug scenario for boundary vertices, cutouts, bevels and rocky wall stitching.");
 
     bool changed = false;
@@ -94,8 +94,8 @@ void drawLandscapeScenarioControls(float panelWidth) {
     drawFrameStats();
     ImGui::Separator();
 
-    ImGui::Text("Landscape Bowl Preview");
-    ImGui::TextWrapped("Heightmap-to-logical scenario: flat clearing, terraced high-ground arc and hills composed from the same 3D tile quality profile as Rectangle Debug.");
+    ImGui::Text("Production Preview");
+    ImGui::TextWrapped("Clean landscape preview for visual iteration: flat clearing, terraced high-ground arc and hills with production-style lighting.");
 
     bool changed = false;
     {
@@ -116,7 +116,6 @@ void drawLandscapeScenarioControls(float panelWidth) {
         changed |= ImGui::SliderFloat("Hill Radius", &g_landscapeSettings.hillRadius, 0.75f, 8.0f);
         ImGui::Checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
         ImGui::Checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
-        ImGui::Checkbox("Show Mesh Wireframe", &g_landscapeSettings.showMeshWireframe);
         ImGui::Checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
     }
     if (changed) {
@@ -243,7 +242,7 @@ void drawUi() {
     ImGui::Begin("MeshGenerationPlayground", nullptr, rootFlags);
 
     if (ImGui::BeginTabBar("ScenarioTabs", ImGuiTabBarFlags_None)) {
-        if (ImGui::BeginTabItem("Rectangle Debug")) {
+        if (ImGui::BeginTabItem("Debug Scene")) {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             if (!layoutLogged) {
@@ -261,7 +260,7 @@ void drawUi() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Landscape Bowl")) {
+        if (ImGui::BeginTabItem("Production Preview")) {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawLandscapeScenarioTab(layoutOrigin, layoutSize);
