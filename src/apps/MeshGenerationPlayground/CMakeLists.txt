@@ -1,4 +1,5 @@
 find_package(imgui CONFIG REQUIRED)
+find_package(FastNoise2 CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
@@ -6,6 +7,7 @@ nw_add_console_app(
     LIBS
         spdlog::spdlog_header_only
         imgui::imgui
+        FastNoise2::FastNoise
 )
 
 # Sokol is header-only in this project (via vcpkg overlay).

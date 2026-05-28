@@ -18,6 +18,7 @@
     {"name":     "spdlog",            "platform": "!emscripten"},
     "entt",
     "rttr",
+    "fastnoise2",
     "libnoise",
     "gtest",
     "sokol",
