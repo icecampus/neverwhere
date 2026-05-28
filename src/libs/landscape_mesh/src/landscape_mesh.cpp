@@ -50,14 +50,6 @@ Vec3 normalizeHorizontal(const Vec3& value, const Vec3& fallback) {
     return {value.x / length, 0.0f, value.z / length};
 }
 
-Vec3 normalize(const Vec3& value, const Vec3& fallback) {
-    const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
-    if (length < 0.0001f) {
-        return fallback;
-    }
-    return {value.x / length, value.y / length, value.z / length};
-}
-
 float dot3(const Vec3& a, const Vec3& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
@@ -70,19 +62,39 @@ Vec3 cross3(const Vec3& a, const Vec3& b) {
     };
 }
 
-// True surface normal of a displaced wall quad. Built from the quad edges so the
-// rock displacement micro-relief is preserved, then oriented deterministically
-// against a known outward hint so winding can never flip it (no checkerboard).
+Vec3 quadAreaNormal(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d) {
+    // Area-weighted sum of the two triangles the renderer actually draws (a,b,c)+(a,c,d),
+    // so the shaded facet and its normal always agree. Averaged-edge cross products
+    // misbehave on the twisted, non-planar quads that displacement produces.
+    return add(
+        cross3(subtract(b, a), subtract(c, a)),
+        cross3(subtract(c, a), subtract(d, a)));
+}
+
+// Surface normal of a displaced wall quad, oriented outward. Orientation is taken from
+// the UNDISPLACED base quad, whose normal is exactly +/-outwardHint, so the sign is
+// unambiguous and identical for every quad of a segment. The displaced quad shares the
+// same winding, so applying that sign orients it outward without the threshold-splitting
+// a per-quad hint dot causes on facets that are near-perpendicular to the hint.
 Vec3 displacedFaceNormal(
     const Vec3& a,
     const Vec3& b,
     const Vec3& c,
     const Vec3& d,
+    const Vec3& baseA,
+    const Vec3& baseB,
+    const Vec3& baseC,
+    const Vec3& baseD,
     const Vec3& outwardHint) {
-    const Vec3 along = scale(add(subtract(b, a), subtract(c, d)), 0.5f);
-    const Vec3 down = scale(add(subtract(d, a), subtract(c, b)), 0.5f);
-    Vec3 normal = normalize(cross3(along, down), outwardHint);
-    if (dot3(normal, outwardHint) < 0.0f) {
+    Vec3 normal = quadAreaNormal(a, b, c, d);
+    const float length = std::sqrt(dot3(normal, normal));
+    if (length < 0.0001f) {
+        return outwardHint;
+    }
+    normal = scale(normal, 1.0f / length);
+
+    const Vec3 baseNormal = quadAreaNormal(baseA, baseB, baseC, baseD);
+    if (dot3(baseNormal, outwardHint) < 0.0f) {
         normal = scale(normal, -1.0f);
     }
     return normal;
@@ -1030,7 +1042,7 @@ TileMesh TileMeshCatalog::buildWallMesh(const LandscapeTileKey& key) const {
             quad.b = displaceWallPoint(m_settings, p10, normal, y0, n10, true);
             quad.c = displaceWallPoint(m_settings, p11, normal, y1, n11, true);
             quad.d = displaceWallPoint(m_settings, p01, normal, y1, n01, true);
-            quad.normal = displacedFaceNormal(quad.a, quad.b, quad.c, quad.d, normal);
+            quad.normal = displacedFaceNormal(quad.a, quad.b, quad.c, quad.d, p00, p10, p11, p01, normal);
             quad.relief = std::clamp((n00 + n10 + n11 + n01) * 0.25f, -1.0f, 1.0f);
             quad.heightFraction = std::clamp((y0 + y1) * 0.5f, 0.0f, 1.0f);
             quad.color = wallColor(key.side, (y0 + y1) * 0.5f, (n00 + n10 + n11 + n01) * 0.25f);
@@ -1144,7 +1156,10 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom);
                 wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom);
                 wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom);
-                wall.normal = displacedFaceNormal(wall.a, wall.b, wall.c, wall.d, segment.normal);
+                wall.normal = displacedFaceNormal(
+                    wall.a, wall.b, wall.c, wall.d,
+                    wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],
+                    segment.normal);
                 const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
                 wall.relief = std::clamp(panelNoise, -1.0f, 1.0f);
                 wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
