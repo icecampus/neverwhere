@@ -10,6 +10,15 @@ nw_add_console_app(
         FastNoise2::FastNoise
 )
 
+if(WIN32)
+    add_custom_command(TARGET ${AppName} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:FastNoise2::FastNoise>
+            $<TARGET_FILE_DIR:${AppName}>/$<TARGET_FILE_NAME:FastNoise2::FastNoise>
+        VERBATIM
+    )
+endif()
+
 # Sokol is header-only in this project (via vcpkg overlay).
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")
 if(NOT SOKOL_INCLUDE_DIRS)
