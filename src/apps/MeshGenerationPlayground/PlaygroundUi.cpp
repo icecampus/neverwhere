@@ -130,6 +130,12 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::SliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
         ImGui::SliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
         ImGui::SliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
+        ImGui::Text("Cliff Surface");
+        ImGui::SliderFloat("Wall Detail Normal", &g_productionPreviewSettings.wallDetailNormal, 0.0f, 1.0f);
+        ImGui::SliderFloat("Wall AO", &g_productionPreviewSettings.wallAoStrength, 0.0f, 0.85f);
+        ImGui::SliderFloat("Edge Wear", &g_productionPreviewSettings.wallEdgeWearStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("Crevice Darken", &g_productionPreviewSettings.wallCreviceStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("Wall Grain", &g_productionPreviewSettings.wallGrainStrength, 0.0f, 0.6f);
         const char* debugModes[] = {
             "Lit",
             "Albedo",

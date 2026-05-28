@@ -21,6 +21,8 @@ struct MeshPreviewQuad {
     glm::vec2 uvD{0.0f, 1.0f};
     float faceKind = 0.0f; // 0=top grass, 1=rock wall.
     float cliffDistance = 1000.0f;
+    float relief = 0.0f;        // signed wall displacement: >0 ridge, <0 crevice.
+    float heightFraction = 1.0f; // wall vertical position: 0 base, 1 top.
     float depth = 0.0f;
 };
 
@@ -44,6 +46,10 @@ struct MeshPreviewRenderParams {
     float macroScale = 0.35f;
     float macroStrength = 0.08f;
     int debugMode = 0; // 0=lit, 1=albedo, 2=normal, 3=uv, 4=cliff proximity.
+    float wallAoStrength = 0.35f;     // A3: darken wall base and crevices.
+    float wallEdgeWearStrength = 0.4f; // C1: lighten/desaturate protruding facet ridges.
+    float wallCreviceStrength = 0.45f; // C2: darken recessed facets (dirt/moss).
+    float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
 };
 
 class MeshPreviewRenderer {
@@ -55,6 +61,7 @@ public:
         float color[4];
         float faceKind;
         float cliffDistance;
+        float wallDetail[2]; // x=relief, y=heightFraction.
     };
 
     void init();
@@ -90,6 +97,7 @@ private:
         float options0[4]; // ambient, diffuse, wallBrightness, textureScale.
         float options1[4]; // cliffRadius, cliffStrength, minTopBrightness, edgeDarkness.
         float options2[4]; // macroScale, macroStrength, debugMode, unused.
+        float options3[4]; // wallAoStrength, wallEdgeWearStrength, wallCreviceStrength, unused.
     };
 
     void ensurePipeline();

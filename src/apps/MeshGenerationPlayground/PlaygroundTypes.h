@@ -54,6 +54,8 @@ struct MeshQuad {
     Vec3 normal{0.0f, 1.0f, 0.0f};
     ImU32 color = IM_COL32(255, 255, 255, 255);
     bool cliffWall = false;
+    float relief = 0.0f;
+    float heightFraction = 1.0f;
     float depth = 0.0f;
     float cliffDistance = 1000.0f;
 };
@@ -93,6 +95,11 @@ struct ProductionPreviewSettings {
     float textureScale = 1.0f;
     float macroScale = 0.35f;
     float macroStrength = 0.08f;
+    float wallDetailNormal = 1.0f;     // A1: 0 = flat cliff plane, 1 = full faceted relief.
+    float wallAoStrength = 0.35f;      // A3: darken wall base and crevices.
+    float wallEdgeWearStrength = 0.4f; // C1: lighten/desaturate protruding facet ridges.
+    float wallCreviceStrength = 0.45f; // C2: darken recessed facets (dirt/moss).
+    float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
     int debugMode = (int)ProductionPreviewDebugMode::Lit;
     bool useGpuRenderer = true;
 };

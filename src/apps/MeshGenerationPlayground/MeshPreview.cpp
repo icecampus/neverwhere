@@ -424,6 +424,27 @@ Vec3 blendedWallNormal(const MeshQuad& quad) {
     return normalize(add(scale(stable, 1.0f - kDetailInfluence), scale(detailed, kDetailInfluence)));
 }
 
+Vec3 wallPlaneNormal(const MeshQuad& quad) {
+    const Vec3 n = generatedNormal(quad);
+    const float length = std::sqrt(n.x * n.x + n.z * n.z);
+    if (length < 0.0001f) {
+        return n;
+    }
+    return {n.x / length, 0.0f, n.z / length};
+}
+
+// A1: interpolate the wall normal between the flat cliff plane (detail = 0)
+// and the full faceted displacement normal (detail = 1).
+Vec3 detailAdjustedWallNormal(const MeshQuad& quad, float detail) {
+    detail = clampFloat(detail, 0.0f, 1.0f);
+    const Vec3 face = generatedNormal(quad);
+    if (detail >= 0.999f) {
+        return face;
+    }
+    const Vec3 plane = wallPlaneNormal(quad);
+    return normalize(add(scale(plane, 1.0f - detail), scale(face, detail)));
+}
+
 Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings& previewSettings) {
     const ProductionPreviewDebugMode debugMode = (ProductionPreviewDebugMode)previewSettings.debugMode;
     if (debugMode == ProductionPreviewDebugMode::RawNormals) {
@@ -440,7 +461,7 @@ Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings&
     if (debugMode == ProductionPreviewDebugMode::BlendedNormals) {
         return blendedWallNormal(quad);
     }
-    return generatedNormal(quad);
+    return detailAdjustedWallNormal(quad, previewSettings.wallDetailNormal);
 }
 
 ImU32 productionLitColor(
@@ -473,9 +494,19 @@ ImU32 productionLitColor(
 
     if (quad.cliffWall) {
         const float wrappedLambert = clampFloat(dot(normal, lightDirection) * 0.5f + 0.5f, 0.0f, 1.0f);
-        const float lighting = previewSettings.wallBrightness *
+        float lighting = previewSettings.wallBrightness *
             (previewSettings.ambient + previewSettings.diffuseStrength * wrappedLambert);
-        return shadeColor(previewWallColor(quad.color), lighting);
+
+        const float ridge = clampFloat((quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
+        const float crevice = clampFloat((-quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
+        ImU32 wallColorOut = previewWallColor(quad.color);
+        wallColorOut = blendTowardWhite(wallColorOut, ridge * previewSettings.wallEdgeWearStrength * 0.35f);
+        wallColorOut = blendTowardColor(wallColorOut, IM_COL32(70, 80, 60, 255), crevice * previewSettings.wallCreviceStrength);
+
+        const float baseAo = clampFloat(quad.heightFraction / 0.45f, 0.0f, 1.0f);
+        const float ao = (1.0f - previewSettings.wallAoStrength) + previewSettings.wallAoStrength * baseAo;
+        lighting *= ao * (1.0f - crevice * previewSettings.wallCreviceStrength * 0.6f);
+        return shadeColor(wallColorOut, lighting);
     }
 
     const float lambert = std::max(0.0f, dot(normal, lightDirection));
@@ -592,6 +623,10 @@ render_core::MeshPreviewRenderParams makeRenderParams(
     params.edgeDarkness = previewSettings.edgeDarkness;
     params.macroScale = previewSettings.macroScale;
     params.macroStrength = previewSettings.macroStrength;
+    params.wallAoStrength = previewSettings.wallAoStrength;
+    params.wallEdgeWearStrength = previewSettings.wallEdgeWearStrength;
+    params.wallCreviceStrength = previewSettings.wallCreviceStrength;
+    params.wallGrainStrength = previewSettings.wallGrainStrength;
     params.debugMode = previewSettings.debugMode;
     return params;
 }

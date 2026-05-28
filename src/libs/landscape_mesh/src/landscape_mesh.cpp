@@ -129,7 +129,7 @@ ColorRgba surfaceColor(LandscapeZone zone, std::uint8_t level, std::uint8_t maxL
 
 ColorRgba wallColor(BoundarySide side, float heightT, float noiseValue) {
     const int sideBias = side == BoundarySide::Bottom ? 16 : (side == BoundarySide::Right ? -8 : 0);
-    const int shade = (int)(noiseValue * 24.0f) + (int)((1.0f - heightT) * 38.0f) + sideBias;
+    const int shade = (int)(noiseValue * 24.0f) + (int)((1.0f - heightT) * 12.0f) + sideBias;
     return {
         (std::uint8_t)std::clamp(92 + shade, 46, 170),
         (std::uint8_t)std::clamp(86 + shade, 44, 160),
@@ -1031,6 +1031,8 @@ TileMesh TileMeshCatalog::buildWallMesh(const LandscapeTileKey& key) const {
             quad.c = displaceWallPoint(m_settings, p11, normal, y1, n11, true);
             quad.d = displaceWallPoint(m_settings, p01, normal, y1, n01, true);
             quad.normal = displacedFaceNormal(quad.a, quad.b, quad.c, quad.d, normal);
+            quad.relief = std::clamp((n00 + n10 + n11 + n01) * 0.25f, -1.0f, 1.0f);
+            quad.heightFraction = std::clamp((y0 + y1) * 0.5f, 0.0f, 1.0f);
             quad.color = wallColor(key.side, (y0 + y1) * 0.5f, (n00 + n10 + n11 + n01) * 0.25f);
             quad.cliffWall = true;
             mesh.quads.push_back(quad);
@@ -1144,6 +1146,8 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom);
                 wall.normal = displacedFaceNormal(wall.a, wall.b, wall.c, wall.d, segment.normal);
                 const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
+                wall.relief = std::clamp(panelNoise, -1.0f, 1.0f);
+                wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
                 wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
                 wall.cliffWall = true;
                 addQuad(result, wall);

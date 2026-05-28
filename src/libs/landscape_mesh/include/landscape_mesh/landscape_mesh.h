@@ -45,6 +45,10 @@ struct MeshQuad {
     Vec3 normal{0.0f, 1.0f, 0.0f};
     ColorRgba color;
     bool cliffWall = false;
+    // Signed rock displacement of the panel: >0 protruding ridge, <0 recessed crevice.
+    float relief = 0.0f;
+    // Vertical position of the wall panel: 0 at the base, 1 at the top.
+    float heightFraction = 1.0f;
 };
 
 struct TileMesh {
