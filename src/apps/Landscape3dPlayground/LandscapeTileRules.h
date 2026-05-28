@@ -3,24 +3,9 @@
 #include <array>
 #include <cstdint>
 
-enum class LandscapeTileType : std::uint8_t {
-    Unknown = 0,
-    Full,
-    RightCorner,
-    LeftCorner,
-    UpCorner,
-    DownCorner,
-    DownLack,
-    UpLack,
-    RightLack,
-    LeftLack,
-    RightDownLine,
-    LeftDownLine,
-    RightUpLine,
-    LeftUpLine,
-    UpAndDownCorners,
-    LeftRightCorners,
-};
+#include <landscape_core/landscape_logic.h>
+
+using LandscapeTileType = landscape_core::LandscapeTileType;
 
 struct LandscapeValleyGeometry {
     // Point order: Left, Up, Right, Down, Center.
@@ -30,32 +15,7 @@ struct LandscapeValleyGeometry {
 };
 
 inline LandscapeTileType nodeMaskToTileType(const std::array<bool, 4>& mask) {
-    const bool a = mask[0];
-    const bool b = mask[1];
-    const bool c = mask[2];
-    const bool d = mask[3];
-
-    if (a && b && c && d) return LandscapeTileType::Full;
-
-    if (!a && !b && c && !d) return LandscapeTileType::RightCorner;
-    if (a && !b && !c && !d) return LandscapeTileType::LeftCorner;
-    if (!a && b && !c && !d) return LandscapeTileType::UpCorner;
-    if (!a && !b && !c && d) return LandscapeTileType::DownCorner;
-
-    if (a && !b && c && !d) return LandscapeTileType::LeftRightCorners;
-    if (!a && b && !c && d) return LandscapeTileType::UpAndDownCorners;
-
-    if (a && b && c && !d) return LandscapeTileType::DownLack;
-    if (a && !b && c && d) return LandscapeTileType::UpLack;
-    if (a && b && !c && d) return LandscapeTileType::RightLack;
-    if (!a && b && c && d) return LandscapeTileType::LeftLack;
-
-    if (!a && !b && c && d) return LandscapeTileType::RightDownLine;
-    if (a && !b && !c && d) return LandscapeTileType::LeftDownLine;
-    if (!a && b && c && !d) return LandscapeTileType::RightUpLine;
-    if (a && b && !c && !d) return LandscapeTileType::LeftUpLine;
-
-    return LandscapeTileType::Unknown;
+    return landscape_core::nodeMaskToTileType(mask);
 }
 
 inline int tileTypeToAtlasIndex(LandscapeTileType type) {
@@ -140,29 +100,6 @@ inline LandscapeTileType tileTypeFromAtlasIndex(int index) {
     }
 }
 
-inline const char* tileTypeName(LandscapeTileType type) {
-    switch (type) {
-    case LandscapeTileType::Full: return "Full";
-    case LandscapeTileType::RightCorner: return "RightCorner";
-    case LandscapeTileType::LeftCorner: return "LeftCorner";
-    case LandscapeTileType::UpCorner: return "UpCorner";
-    case LandscapeTileType::DownCorner: return "DownCorner";
-    case LandscapeTileType::DownLack: return "DownLack";
-    case LandscapeTileType::UpLack: return "UpLack";
-    case LandscapeTileType::RightLack: return "RightLack";
-    case LandscapeTileType::LeftLack: return "LeftLack";
-    case LandscapeTileType::RightDownLine: return "RightDownLine";
-    case LandscapeTileType::LeftDownLine: return "LeftDownLine";
-    case LandscapeTileType::RightUpLine: return "RightUpLine";
-    case LandscapeTileType::LeftUpLine: return "LeftUpLine";
-    case LandscapeTileType::UpAndDownCorners: return "UpAndDownCorners";
-    case LandscapeTileType::LeftRightCorners: return "LeftRightCorners";
-    case LandscapeTileType::Unknown:
-    default:
-        return "Unknown";
-    }
-}
-
 inline LandscapeValleyGeometry valleyGeometryForTile(LandscapeTileType type) {
     constexpr std::array<std::array<std::uint8_t, 3>, 4> fan{{
         {{4, 0, 1}},
@@ -221,9 +158,5 @@ inline LandscapeValleyGeometry valleyGeometryForTile(LandscapeTileType type) {
     default:
         return {{{0.0f, 0.0f, 0.0f, 0.0f, 0.0f}}, splitUD, 0};
     }
-}
-
-inline bool tileTypeHasSurface(LandscapeTileType type) {
-    return type != LandscapeTileType::Unknown;
 }
 

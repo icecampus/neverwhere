@@ -5,6 +5,8 @@
 #include "map/map_model.h"
 #include "assets_library/assets/slice_asset.h"
 #include "topology/staggered_isometry.h"
+#include <landscape_core/landscape_logic.h>
+#include <landscape_mesh/landscape_mesh.h>
 
 // Mock for SliceAsset to avoid loading real files
 class MockSliceAsset : public SliceAsset {
@@ -108,4 +110,53 @@ TEST_F(LandscapeTest, PencilConnectivityTest) {
         EXPECT_EQ(land->getTileIndex(), mockAsset->subTileIndexByType(currentTypeInMap))
             << "Cell at " << cellPos.x << "," << cellPos.y << " should be updated by Pencil connectivity logic!";
     }
+}
+
+TEST(LandscapePipelineTest, SharedTileResolverMatchesTileSetMasks) {
+    TileSet tileSet;
+    for (const auto& [mask, tileType] : tileSet.tileset) {
+        const landscape_core::LandscapeTileType sharedType = landscape_core::nodeMaskToTileType(mask);
+        EXPECT_EQ((int)sharedType, (int)tileType)
+            << "Shared no-Qt tile resolver must preserve editor TileSet mask semantics";
+    }
+}
+
+TEST(LandscapePipelineTest, BowlGeneratorKeepsClearingLowAndUsesDiscreteLevels) {
+    landscape_core::LandscapeBowlSettings settings;
+    settings.gridWidth = 32;
+    settings.gridHeight = 24;
+    settings.heightLevels = 4;
+    settings.clearingRadius = 5.5f;
+
+    landscape_core::BowlGenerationStats stats;
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(settings, &stats);
+
+    ASSERT_FALSE(grid.empty());
+    ASSERT_EQ((int)stats.levelCellCounts.size(), settings.heightLevels);
+    EXPECT_GT(stats.clearingCellCount, 0);
+    EXPECT_GT(stats.highGroundCellCount + stats.hillCellCount, 0);
+    EXPECT_EQ(grid.cellLevelAt(settings.gridWidth / 2, settings.gridHeight / 2), 0);
+    for (std::uint8_t level : grid.cellLevels) {
+        EXPECT_LT(level, settings.heightLevels);
+    }
+}
+
+TEST(LandscapePipelineTest, MeshComposerUsesReusableTilesAndPassesSeamContract) {
+    landscape_core::LandscapeBowlSettings settings;
+    settings.gridWidth = 24;
+    settings.gridHeight = 18;
+    settings.heightLevels = 4;
+
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(settings);
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.wallHorizontalSubdivisions = 3;
+    meshSettings.wallVerticalSubdivisions = 4;
+
+    const landscape_mesh::CompositionResult result = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
+
+    EXPECT_GT(result.stats.surfaceTileCount, 0);
+    EXPECT_GT(result.stats.uniqueTileMeshCount, 0);
+    EXPECT_GT(result.stats.reusedTileMeshCount, 0);
+    EXPECT_TRUE(result.seams.passed);
+    EXPECT_EQ(result.seams.mismatches, 0);
 }

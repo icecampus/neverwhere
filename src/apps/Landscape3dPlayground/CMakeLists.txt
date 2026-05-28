@@ -9,6 +9,7 @@ nw_add_console_app(
         imgui::imgui
         glm::glm-header-only
         topology_core
+        landscape_core
 )
 
 # Sokol is header-only in this project (via vcpkg overlay).

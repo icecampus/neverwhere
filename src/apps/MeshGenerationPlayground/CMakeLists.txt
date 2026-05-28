@@ -8,6 +8,8 @@ nw_add_console_app(
         spdlog::spdlog_header_only
         imgui::imgui
         FastNoise2::FastNoise
+        landscape_core
+        landscape_mesh
 )
 
 if(WIN32)

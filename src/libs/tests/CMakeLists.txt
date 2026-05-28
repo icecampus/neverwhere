@@ -14,6 +14,8 @@ target_link_libraries(landscape_tests PRIVATE
     math
     base_data
     generators
+    landscape_core
+    landscape_mesh
     utils
     Qt6::Core
     Qt6::Quick

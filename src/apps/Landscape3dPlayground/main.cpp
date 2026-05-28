@@ -281,7 +281,7 @@ void drawUi() {
         g_needsMeshRebuild = true;
     }
     if (g_renderParams.previewTileIndex >= 0) {
-        ImGui::Text("Preview Type: %s", tileTypeName(tileTypeFromAtlasIndex(g_renderParams.previewTileIndex)));
+        ImGui::Text("Preview Type: %s", tileTypeName(tileTypeFromAtlasIndex(g_renderParams.previewTileIndex)).data());
     } else {
         ImGui::Text("Preview Type: Generated nodes");
     }

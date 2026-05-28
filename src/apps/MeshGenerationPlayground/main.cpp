@@ -16,6 +16,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/pattern_formatter.h>
 
+#include <landscape_core/landscape_logic.h>
+#include <landscape_mesh/landscape_mesh.h>
+
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
 
@@ -184,6 +187,13 @@ struct LandscapeBowlModel {
     int cliffWallQuadCount = 0;
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
+    int surfaceTileCount = 0;
+    int wallTileCount = 0;
+    int uniqueTileMeshCount = 0;
+    int reusedTileMeshCount = 0;
+    int seamCheckedEdges = 0;
+    int seamMismatchCount = 0;
+    float seamMaxGap = 0.0f;
 };
 
 struct AppState {
@@ -353,6 +363,52 @@ void addMeshQuad(LandscapeBowlModel& model, MeshQuad quad) {
     } else {
         model.topQuadCount++;
     }
+}
+
+LandscapeZone toLocalZone(landscape_core::LandscapeZone zone) {
+    switch (zone) {
+    case landscape_core::LandscapeZone::Clearing:
+        return LandscapeZone::Clearing;
+    case landscape_core::LandscapeZone::Slope:
+        return LandscapeZone::Slope;
+    case landscape_core::LandscapeZone::HighGround:
+        return LandscapeZone::HighGround;
+    case landscape_core::LandscapeZone::Hill:
+        return LandscapeZone::Hill;
+    case landscape_core::LandscapeZone::Lowland:
+    default:
+        return LandscapeZone::Lowland;
+    }
+}
+
+landscape_core::LandscapeBowlSettings toCoreLandscapeSettings(const LandscapeBowlSettings& settings) {
+    landscape_core::LandscapeBowlSettings result;
+    result.gridWidth = settings.gridWidth;
+    result.gridHeight = settings.gridHeight;
+    result.seed = settings.seed;
+    result.clearingRadius = settings.clearingRadius;
+    result.clearingSoftness = settings.clearingSoftness;
+    result.highGroundRadius = settings.highGroundRadius;
+    result.highGroundWidth = settings.highGroundWidth;
+    result.highGroundHeight = settings.highGroundHeight;
+    result.heightLevels = settings.heightLevels;
+    result.arcNoiseScale = settings.arcNoiseScale;
+    result.arcNoiseAmplitude = settings.arcNoiseAmplitude;
+    result.hillCount = settings.hillCount;
+    result.hillHeight = settings.hillHeight;
+    result.hillRadius = settings.hillRadius;
+    return result;
+}
+
+MeshQuad toAppMeshQuad(const landscape_mesh::MeshQuad& quad) {
+    MeshQuad result;
+    result.a = {quad.a.x, quad.a.y, quad.a.z};
+    result.b = {quad.b.x, quad.b.y, quad.b.z};
+    result.c = {quad.c.x, quad.c.y, quad.c.z};
+    result.d = {quad.d.x, quad.d.y, quad.d.z};
+    result.color = IM_COL32(quad.color.r, quad.color.g, quad.color.b, quad.color.a);
+    result.cliffWall = quad.cliffWall;
+    return result;
 }
 
 ImU32 colorForBoundarySide(BoundarySide side) {
@@ -1515,114 +1571,55 @@ void rebuildLandscapeBowlModel() {
     }
 
     LandscapeBowlModel model;
+    landscape_core::BowlGenerationStats generationStats;
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(
+        toCoreLandscapeSettings(settings),
+        &generationStats);
+
     model.heights.assign((std::size_t)settings.gridWidth * (std::size_t)settings.gridHeight, 0.0f);
     model.heightLevels.assign(model.heights.size(), 0);
     model.zones.assign(model.heights.size(), LandscapeZone::Lowland);
-    model.levelCellCounts.assign((std::size_t)settings.heightLevels, 0);
-    model.minHeight = 100000.0f;
-    model.maxHeight = -100000.0f;
-
-    const FastNoise::SmartNode<> noiseNode = makeLandscapeNoiseNode(settings);
-    std::vector<Vec3> samplePoints;
-    samplePoints.reserve(model.heights.size());
-    for (int y = 0; y < settings.gridHeight; y++) {
-        for (int x = 0; x < settings.gridWidth; x++) {
-            samplePoints.push_back({(float)x * 0.42f, 0.0f, (float)y * 0.42f});
-        }
-    }
-
-    std::vector<float> noiseValues;
-    sampleLandscapeNoiseBatch(noiseNode, settings, samplePoints, noiseValues);
-
-    const float centerX = (float)settings.gridWidth * 0.5f;
-    const float centerY = (float)settings.gridHeight * 0.58f;
+    model.levelCellCounts = generationStats.levelCellCounts;
+    model.clearingCellCount = generationStats.clearingCellCount;
+    model.highGroundCellCount = generationStats.highGroundCellCount;
+    model.hillCellCount = generationStats.hillCellCount;
+    model.minHeight = generationStats.minHeight;
+    model.maxHeight = generationStats.maxHeight;
 
     for (int y = 0; y < settings.gridHeight; y++) {
         for (int x = 0; x < settings.gridWidth; x++) {
             const std::size_t index = (std::size_t)landscapeIndex(x, y, settings.gridWidth);
-            const float px = (float)x + 0.5f;
-            const float py = (float)y + 0.5f;
-            const float dx = px - centerX;
-            const float dy = py - centerY;
-            const float distance = std::sqrt(dx * dx + dy * dy);
-            const float topHalfMask = smoothStep(0.0f, settings.highGroundRadius * 0.5f, -dy + settings.clearingRadius * 0.2f);
-            const float distortedRadius = settings.highGroundRadius + noiseValues[index] * settings.arcNoiseAmplitude;
-            const float ringDistance = std::abs(distance - distortedRadius);
-            const float ringMask = 1.0f - smoothStep(settings.highGroundWidth * 0.35f, settings.highGroundWidth, ringDistance);
-            const float highGroundMask = clampFloat(topHalfMask * ringMask, 0.0f, 1.0f);
-            const float clearingMask = 1.0f - smoothStep(
-                settings.clearingRadius,
-                settings.clearingRadius + settings.clearingSoftness,
-                distance);
-
-            float hillContribution = 0.0f;
-            for (int hill = 0; hill < settings.hillCount; hill++) {
-                const float angleT = 0.12f + deterministicFloat01(settings.seed, hill * 7 + 1) * 0.76f;
-                const float angle = 3.14159265f * angleT;
-                const float radius = settings.highGroundRadius + (deterministicFloat01(settings.seed, hill * 7 + 2) - 0.5f) * settings.highGroundWidth;
-                const float hillX = centerX + std::cos(angle) * radius;
-                const float hillY = centerY - std::sin(angle) * radius;
-                const float hillDx = px - hillX;
-                const float hillDy = py - hillY;
-                const float hillDistanceSq = hillDx * hillDx + hillDy * hillDy;
-                const float hillRadius = settings.hillRadius * (0.75f + deterministicFloat01(settings.seed, hill * 7 + 3) * 0.65f);
-                const float local = std::exp(-hillDistanceSq / std::max(0.001f, hillRadius * hillRadius));
-                hillContribution += local * settings.hillHeight * (0.7f + deterministicFloat01(settings.seed, hill * 7 + 4) * 0.6f);
-            }
-
-            const int maxLevel = settings.heightLevels - 1;
-            int level = 0;
-            if (clearingMask <= 0.62f) {
-                const float hillLevelBoost = clampFloat(hillContribution / std::max(0.001f, settings.hillHeight), 0.0f, 1.5f);
-                const float levelScore = highGroundMask * (float)maxLevel + hillLevelBoost;
-                level = clampInt((int)std::round(levelScore), 0, maxLevel);
-                if (highGroundMask > 0.18f) {
-                    level = std::max(level, 1);
-                }
-                if (highGroundMask > 0.55f) {
-                    level = std::max(level, std::min(maxLevel, 2));
-                }
-                if (highGroundMask > 0.82f || hillLevelBoost > 1.05f) {
-                    level = std::max(level, maxLevel);
-                }
-            }
-
-            const float levelHeight = settings.highGroundHeight / (float)std::max(1, maxLevel);
-            const float height = (float)level * levelHeight;
-
-            LandscapeZone zone = LandscapeZone::Lowland;
-            if (clearingMask > 0.7f) {
-                zone = LandscapeZone::Clearing;
-                model.clearingCellCount++;
-            } else if (hillContribution > settings.hillHeight * 0.35f && level > 0) {
-                zone = LandscapeZone::Hill;
-                model.hillCellCount++;
-            } else if (level >= std::max(1, maxLevel - 1)) {
-                zone = LandscapeZone::HighGround;
-                model.highGroundCellCount++;
-            } else if (level > 0) {
-                zone = LandscapeZone::Slope;
-            }
-
-            model.heights[index] = height;
-            model.heightLevels[index] = (std::uint8_t)level;
-            model.zones[index] = zone;
-            if (level >= 0 && level < (int)model.levelCellCounts.size()) {
-                model.levelCellCounts[(std::size_t)level]++;
-            }
-            model.minHeight = std::min(model.minHeight, height);
-            model.maxHeight = std::max(model.maxHeight, height);
+            const std::uint8_t level = grid.cellLevelAt(x, y);
+            model.heightLevels[index] = level;
+            model.heights[index] = (float)level * grid.levelHeight;
+            model.zones[index] = toLocalZone(grid.zoneAt(x, y));
         }
     }
 
-    generateLandscapeBowlMesh(model, settings);
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.cellSize = 1.0f;
+    meshSettings.levelHeight = grid.levelHeight;
+    meshSettings.rockAmplitude = 0.16f;
+    meshSettings.wallHorizontalSubdivisions = 3;
+    meshSettings.wallVerticalSubdivisions = 4;
+    const landscape_mesh::CompositionResult composedMesh = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
+    model.surfaceTileCount = composedMesh.stats.surfaceTileCount;
+    model.wallTileCount = composedMesh.stats.wallTileCount;
+    model.uniqueTileMeshCount = composedMesh.stats.uniqueTileMeshCount;
+    model.reusedTileMeshCount = composedMesh.stats.reusedTileMeshCount;
+    model.seamCheckedEdges = composedMesh.seams.checkedEdges;
+    model.seamMismatchCount = composedMesh.seams.mismatches;
+    model.seamMaxGap = composedMesh.seams.maxGap;
+    for (const landscape_mesh::MeshQuad& quad : composedMesh.quads) {
+        addMeshQuad(model, toAppMeshQuad(quad));
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         g_landscapeModel = std::move(model);
     }
 
-    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, cells clearing/high/hill={}/{}/{}, quads top/walls/total={}/{}/{}",
+    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, cells clearing/high/hill={}/{}/{}, tiles surface/walls/unique={}/{}/{}, seams checked/mismatch/gap={}/{}/{:.4f}, quads top/walls/total={}/{}/{}",
         settings.gridWidth,
         settings.gridHeight,
         g_landscapeModel.minHeight,
@@ -1630,6 +1627,12 @@ void rebuildLandscapeBowlModel() {
         g_landscapeModel.clearingCellCount,
         g_landscapeModel.highGroundCellCount,
         g_landscapeModel.hillCellCount,
+        g_landscapeModel.surfaceTileCount,
+        g_landscapeModel.wallTileCount,
+        g_landscapeModel.uniqueTileMeshCount,
+        g_landscapeModel.seamCheckedEdges,
+        g_landscapeModel.seamMismatchCount,
+        g_landscapeModel.seamMaxGap,
         g_landscapeModel.topQuadCount,
         g_landscapeModel.cliffWallQuadCount,
         g_landscapeModel.meshQuads.size());
@@ -1890,7 +1893,7 @@ void drawLandscapeBowlDebugView(const LandscapeBowlSettings& settings, const Lan
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(20, 23, 28, 255));
     drawList->AddRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(70, 78, 92, 255));
-    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "2D level map: clearing + terraced noisy upper high-ground arc");
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "2D logical level map: heightmap quantized before tile composition");
     drawList->PushClipRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, true);
 
     for (int y = 0; y < settings.gridHeight; y++) {
@@ -1981,7 +1984,7 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         drawLandscapeProjectedQuad(drawList, settings, g_landscapeCamera, origin, viewportSize, model.meshQuads[(std::size_t)index]);
     }
 
-    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Landscape Bowl 3D preview: flat terraces + rocky cliff strips");
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Landscape Bowl 3D preview: composed from reusable surface/wall tile meshes");
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, mouse wheel: zoom, double click: reset");
     char cameraText[96];
     snprintf(cameraText, sizeof(cameraText), "Camera zoom: %.2fx, pan: %.0f %.0f", g_landscapeCamera.zoom, g_landscapeCamera.pan.x, g_landscapeCamera.pan.y);
@@ -2065,7 +2068,7 @@ void drawLandscapeScenarioControls(float panelWidth) {
     ImGui::Separator();
 
     ImGui::Text("Landscape Bowl Preview");
-    ImGui::TextWrapped("Discrete level scenario: flat clearing in the center, terraced upper high-ground arc and deterministic hills.");
+    ImGui::TextWrapped("Heightmap-to-logical scenario: flat clearing, terraced high-ground arc and hills composed from cached 3D tile meshes.");
 
     bool changed = false;
     {
@@ -2105,6 +2108,15 @@ void drawLandscapeScenarioControls(float panelWidth) {
             g_landscapeModel.topQuadCount,
             g_landscapeModel.cliffWallQuadCount,
             (int)g_landscapeModel.meshQuads.size());
+        ImGui::Text("Tile meshes surface/walls/unique/reused: %d / %d / %d / %d",
+            g_landscapeModel.surfaceTileCount,
+            g_landscapeModel.wallTileCount,
+            g_landscapeModel.uniqueTileMeshCount,
+            g_landscapeModel.reusedTileMeshCount);
+        ImGui::Text("Seams checked/mismatches/max gap: %d / %d / %.4f",
+            g_landscapeModel.seamCheckedEdges,
+            g_landscapeModel.seamMismatchCount,
+            g_landscapeModel.seamMaxGap);
         ImGui::Text("Level cells:");
         for (int level = 0; level < (int)g_landscapeModel.levelCellCounts.size(); level++) {
             ImGui::SameLine();
@@ -2313,6 +2325,50 @@ void simguiLog(
     }
 }
 
+bool runTestScenario() {
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const bool rectangleOk =
+        g_rectModel.solidCellCount > 0 &&
+        !g_rectModel.boundarySegments.empty() &&
+        g_rectModel.topQuadCount > 0 &&
+        g_rectModel.cliffWallQuadCount > 0;
+    const bool landscapeOk =
+        g_landscapeModel.surfaceTileCount > 0 &&
+        g_landscapeModel.wallTileCount > 0 &&
+        g_landscapeModel.uniqueTileMeshCount > 0 &&
+        g_landscapeModel.seamMismatchCount == 0 &&
+        g_landscapeModel.topQuadCount > 0 &&
+        g_landscapeModel.cliffWallQuadCount > 0;
+
+    if (rectangleOk && landscapeOk) {
+        spdlog::info(
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, landscape tiles surface/walls/unique={}/{}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            g_rectModel.topQuadCount,
+            g_rectModel.cliffWallQuadCount,
+            g_landscapeModel.surfaceTileCount,
+            g_landscapeModel.wallTileCount,
+            g_landscapeModel.uniqueTileMeshCount,
+            g_landscapeModel.seamCheckedEdges,
+            g_landscapeModel.seamMismatchCount,
+            g_landscapeModel.seamMaxGap);
+        return true;
+    }
+
+    spdlog::error(
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, landscape tiles surface/walls/unique={}/{}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        rectangleOk,
+        landscapeOk,
+        g_rectModel.topQuadCount,
+        g_rectModel.cliffWallQuadCount,
+        g_landscapeModel.surfaceTileCount,
+        g_landscapeModel.wallTileCount,
+        g_landscapeModel.uniqueTileMeshCount,
+        g_landscapeModel.seamCheckedEdges,
+        g_landscapeModel.seamMismatchCount,
+        g_landscapeModel.seamMaxGap);
+    return false;
+}
+
 void init() {
     spdlog::info("init: start");
     spdlog::info("init: calling stm_setup()");
@@ -2359,6 +2415,7 @@ void init() {
     rebuildRectangleCliffModel();
     spdlog::info("init: calling rebuildLandscapeBowlModel()");
     rebuildLandscapeBowlModel();
+    runTestScenario();
     spdlog::info("init: complete");
 }
 
