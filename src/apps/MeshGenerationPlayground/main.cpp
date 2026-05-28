@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
@@ -298,6 +299,34 @@ Vec3 outwardNormalForBoundarySide(BoundarySide side) {
     }
 }
 
+bool samePoint(const Int2& a, const Int2& b) {
+    return a.x == b.x && a.y == b.y;
+}
+
+Vec3 normalizeHorizontal(const Vec3& value, const Vec3& fallback) {
+    const float length = std::sqrt(value.x * value.x + value.z * value.z);
+    if (length < 0.0001f) {
+        return fallback;
+    }
+
+    return {value.x / length, 0.0f, value.z / length};
+}
+
+Vec3 boundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, const Vec3& fallback) {
+    Vec3 sum{};
+    for (const BoundarySegment& segment : model.boundarySegments) {
+        if (!samePoint(segment.a, vertex) && !samePoint(segment.b, vertex)) {
+            continue;
+        }
+
+        const Vec3 normal = outwardNormalForBoundarySide(segment.side);
+        sum.x += normal.x;
+        sum.z += normal.z;
+    }
+
+    return normalizeHorizontal(sum, fallback);
+}
+
 Vec3 lerpVec3(const Vec3& a, const Vec3& b, float t) {
     return {
         a.x + (b.x - a.x) * t,
@@ -388,7 +417,7 @@ Vec3 displaceRockPoint(
 
     const float steppedNoise = terraceValue(rawNoise, settings.terraceSteps);
     const float topFade = 1.0f - clampFloat(heightT, 0.0f, 1.0f);
-    const float lowerBias = 0.35f + topFade * 0.65f;
+    const float lowerBias = topFade * (0.35f + topFade * 0.65f);
     const float offset = steppedNoise * settings.rockAmplitude * lowerBias;
 
     return {
@@ -449,9 +478,12 @@ void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSet
         const Vec3 bottomA{(float)segment.a.x, 0.0f, (float)segment.a.y};
         const Vec3 bottomB{(float)segment.b.x, 0.0f, (float)segment.b.y};
         const Vec3 outwardNormal = outwardNormalForBoundarySide(segment.side);
+        const Vec3 startNormal = boundaryVertexNormal(model, segment.a, outwardNormal);
+        const Vec3 endNormal = boundaryVertexNormal(model, segment.b, outwardNormal);
         const int vertexColumns = settings.wallHorizontalSubdivisions + 1;
         const int vertexRows = settings.wallVerticalSubdivisions + 1;
         std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
+        std::vector<Vec3> wallNormals((std::size_t)vertexColumns * (std::size_t)vertexRows);
         std::vector<float> wallNoise;
 
         for (int row = 0; row < vertexRows; row++) {
@@ -462,7 +494,15 @@ void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSet
 
             for (int column = 0; column < vertexColumns; column++) {
                 const float u = (float)column / (float)settings.wallHorizontalSubdivisions;
-                wallPoints[(std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column] = lerpVec3(rowA, rowB, u);
+                const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
+                wallPoints[index] = lerpVec3(rowA, rowB, u);
+                if (column == 0) {
+                    wallNormals[index] = startNormal;
+                } else if (column == vertexColumns - 1) {
+                    wallNormals[index] = endNormal;
+                } else {
+                    wallNormals[index] = outwardNormal;
+                }
             }
         }
 
@@ -481,10 +521,10 @@ void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSet
                 const std::size_t i11 = i01 + 1;
 
                 MeshQuad wall;
-                wall.a = displaceRockPoint(settings, wallPoints[i00], outwardNormal, topT0, wallNoise[i00]);
-                wall.b = displaceRockPoint(settings, wallPoints[i10], outwardNormal, topT0, wallNoise[i10]);
-                wall.c = displaceRockPoint(settings, wallPoints[i11], outwardNormal, topT1, wallNoise[i11]);
-                wall.d = displaceRockPoint(settings, wallPoints[i01], outwardNormal, topT1, wallNoise[i01]);
+                wall.a = displaceRockPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00]);
+                wall.b = displaceRockPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10]);
+                wall.c = displaceRockPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11]);
+                wall.d = displaceRockPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01]);
 
                 const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
                 wall.color = rockWallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
