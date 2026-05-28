@@ -142,6 +142,50 @@ struct RectangleCliffModel {
     int cliffWallQuadCount = 0;
 };
 
+enum class LandscapeZone : std::uint8_t {
+    Lowland,
+    Clearing,
+    Slope,
+    HighGround,
+    Hill,
+};
+
+struct LandscapeBowlSettings {
+    int gridWidth = 32;
+    int gridHeight = 24;
+    int seed = 2027;
+    float clearingRadius = 5.5f;
+    float clearingSoftness = 2.2f;
+    float highGroundRadius = 9.5f;
+    float highGroundWidth = 3.5f;
+    float highGroundHeight = 3.2f;
+    int heightLevels = 4;
+    float arcNoiseScale = 4.0f;
+    float arcNoiseAmplitude = 1.6f;
+    int hillCount = 5;
+    float hillHeight = 1.2f;
+    float hillRadius = 2.6f;
+    bool showTopFaces = true;
+    bool showCliffWalls = true;
+    bool showMeshWireframe = true;
+    bool showHeightValues = false;
+};
+
+struct LandscapeBowlModel {
+    std::vector<float> heights;
+    std::vector<std::uint8_t> heightLevels;
+    std::vector<LandscapeZone> zones;
+    std::vector<MeshQuad> meshQuads;
+    std::vector<int> levelCellCounts;
+    int clearingCellCount = 0;
+    int highGroundCellCount = 0;
+    int hillCellCount = 0;
+    int topQuadCount = 0;
+    int cliffWallQuadCount = 0;
+    float minHeight = 0.0f;
+    float maxHeight = 0.0f;
+};
+
 struct AppState {
     std::uint64_t lastTime = 0;
     float dt = 1.0f / 60.0f;
@@ -160,6 +204,9 @@ AppState g_state;
 RectangleCliffSettings g_rectSettings;
 RectangleCliffModel g_rectModel;
 MeshPreviewCamera g_meshCamera;
+LandscapeBowlSettings g_landscapeSettings;
+LandscapeBowlModel g_landscapeModel;
+MeshPreviewCamera g_landscapeCamera;
 
 int cellIndex(int x, int y, int width) {
     return y * width + x;
@@ -213,6 +260,22 @@ void sanitizeSettings(RectangleCliffSettings& settings) {
     settings.wallHorizontalSubdivisions = clampInt(settings.wallHorizontalSubdivisions, 1, 16);
     settings.wallVerticalSubdivisions = clampInt(settings.wallVerticalSubdivisions, 1, 16);
     settings.terraceSteps = clampInt(settings.terraceSteps, 0, 12);
+}
+
+void sanitizeSettings(LandscapeBowlSettings& settings) {
+    settings.gridWidth = clampInt(settings.gridWidth, 12, 72);
+    settings.gridHeight = clampInt(settings.gridHeight, 10, 56);
+    settings.clearingRadius = clampFloat(settings.clearingRadius, 2.0f, (float)std::min(settings.gridWidth, settings.gridHeight) * 0.45f);
+    settings.clearingSoftness = clampFloat(settings.clearingSoftness, 0.25f, 8.0f);
+    settings.highGroundRadius = clampFloat(settings.highGroundRadius, settings.clearingRadius + 1.0f, (float)std::max(settings.gridWidth, settings.gridHeight));
+    settings.highGroundWidth = clampFloat(settings.highGroundWidth, 1.0f, 10.0f);
+    settings.highGroundHeight = clampFloat(settings.highGroundHeight, 0.5f, 8.0f);
+    settings.heightLevels = clampInt(settings.heightLevels, 2, 6);
+    settings.arcNoiseScale = clampFloat(settings.arcNoiseScale, 0.5f, 18.0f);
+    settings.arcNoiseAmplitude = clampFloat(settings.arcNoiseAmplitude, 0.0f, 5.0f);
+    settings.hillCount = clampInt(settings.hillCount, 0, 12);
+    settings.hillHeight = clampFloat(settings.hillHeight, 0.0f, 5.0f);
+    settings.hillRadius = clampFloat(settings.hillRadius, 0.75f, 8.0f);
 }
 
 bool isSolidCell(const RectangleCliffModel& model, const RectangleCliffSettings& settings, int x, int y) {
@@ -273,6 +336,16 @@ float meshQuadDepth(const MeshQuad& quad) {
 }
 
 void addMeshQuad(RectangleCliffModel& model, MeshQuad quad) {
+    quad.depth = meshQuadDepth(quad);
+    model.meshQuads.push_back(quad);
+    if (quad.cliffWall) {
+        model.cliffWallQuadCount++;
+    } else {
+        model.topQuadCount++;
+    }
+}
+
+void addMeshQuad(LandscapeBowlModel& model, MeshQuad quad) {
     quad.depth = meshQuadDepth(quad);
     model.meshQuads.push_back(quad);
     if (quad.cliffWall) {
@@ -542,6 +615,64 @@ void sampleRockNoiseBatch(
     }
 }
 
+FastNoise::SmartNode<> makeLandscapeNoiseNode(const LandscapeBowlSettings& settings) {
+    auto simplex = FastNoise::New<FastNoise::Simplex>();
+    if (!simplex) {
+        spdlog::error("makeLandscapeNoiseNode: failed to create Simplex node");
+        return nullptr;
+    }
+
+    simplex->SetScale(settings.arcNoiseScale);
+
+    auto fractal = FastNoise::New<FastNoise::FractalRidged>();
+    if (!fractal) {
+        spdlog::warn("makeLandscapeNoiseNode: failed to create FractalRidged, falling back to simplex");
+        return simplex;
+    }
+
+    fractal->SetSource(simplex);
+    fractal->SetOctaveCount(4);
+    fractal->SetLacunarity(2.05f);
+    fractal->SetGain(0.5f);
+    return fractal;
+}
+
+void sampleLandscapeNoiseBatch(
+    const FastNoise::SmartNode<>& noise,
+    const LandscapeBowlSettings& settings,
+    const std::vector<Vec3>& points,
+    std::vector<float>& outNoise) {
+
+    outNoise.assign(points.size(), 0.0f);
+    if (!noise || points.empty()) {
+        return;
+    }
+
+    std::vector<float> xs(points.size());
+    std::vector<float> ys(points.size());
+    std::vector<float> zs(points.size());
+    for (std::size_t i = 0; i < points.size(); i++) {
+        xs[i] = points[i].x;
+        ys[i] = points[i].y;
+        zs[i] = points[i].z;
+    }
+
+    noise->GenPositionArray3D(
+        outNoise.data(),
+        (int)points.size(),
+        xs.data(),
+        ys.data(),
+        zs.data(),
+        0.0f,
+        0.0f,
+        0.0f,
+        settings.seed);
+
+    for (float& value : outNoise) {
+        value = clampFloat(value, -1.0f, 1.0f);
+    }
+}
+
 float terraceValue(float value, int steps) {
     if (steps <= 1) {
         return value;
@@ -568,6 +699,32 @@ Vec3 displaceRockPoint(
     const float lowerBias = topFade * (0.35f + topFade * 0.65f);
     const float offset = steppedNoise * settings.rockAmplitude * lowerBias;
 
+    return {
+        point.x + outwardNormal.x * offset,
+        point.y,
+        point.z + outwardNormal.z * offset,
+    };
+}
+
+Vec3 displaceLandscapeWallPoint(
+    const RectangleCliffSettings& settings,
+    const Vec3& point,
+    const Vec3& outwardNormal,
+    float heightT,
+    float rawNoise) {
+
+    if (!settings.rockEnabled || settings.rockAmplitude <= 0.0f) {
+        return point;
+    }
+
+    const float clampedHeightT = clampFloat(heightT, 0.0f, 1.0f);
+    const float edgeFade = std::sin(clampedHeightT * 3.14159265f);
+    if (edgeFade <= 0.0001f) {
+        return point;
+    }
+
+    const float steppedNoise = terraceValue(rawNoise, settings.terraceSteps);
+    const float offset = steppedNoise * settings.rockAmplitude * edgeFade;
     return {
         point.x + outwardNormal.x * offset,
         point.y,
@@ -1073,6 +1230,411 @@ void rebuildRectangleCliffModel() {
         g_rectModel.diagonalJoinCount);
 }
 
+int landscapeIndex(int x, int y, int width) {
+    return y * width + x;
+}
+
+float smoothStep(float edge0, float edge1, float value) {
+    if (edge0 == edge1) {
+        return value < edge0 ? 0.0f : 1.0f;
+    }
+
+    const float t = clampFloat((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+float deterministicFloat01(int seed, int salt) {
+    const float value = std::sin((float)(seed * 37 + salt * 101) * 12.9898f) * 43758.5453f;
+    return value - std::floor(value);
+}
+
+float landscapeHeightAtCell(const LandscapeBowlModel& model, const LandscapeBowlSettings& settings, int x, int y) {
+    x = clampInt(x, 0, settings.gridWidth - 1);
+    y = clampInt(y, 0, settings.gridHeight - 1);
+    return model.heights[(std::size_t)landscapeIndex(x, y, settings.gridWidth)];
+}
+
+LandscapeZone landscapeZoneAtCell(const LandscapeBowlModel& model, const LandscapeBowlSettings& settings, int x, int y) {
+    x = clampInt(x, 0, settings.gridWidth - 1);
+    y = clampInt(y, 0, settings.gridHeight - 1);
+    return model.zones[(std::size_t)landscapeIndex(x, y, settings.gridWidth)];
+}
+
+int landscapeLevelAtCell(const LandscapeBowlModel& model, const LandscapeBowlSettings& settings, int x, int y) {
+    x = clampInt(x, 0, settings.gridWidth - 1);
+    y = clampInt(y, 0, settings.gridHeight - 1);
+    return (int)model.heightLevels[(std::size_t)landscapeIndex(x, y, settings.gridWidth)];
+}
+
+float landscapeHeightAtVertex(const LandscapeBowlModel& model, const LandscapeBowlSettings& settings, int x, int y) {
+    const float h00 = landscapeHeightAtCell(model, settings, x - 1, y - 1);
+    const float h10 = landscapeHeightAtCell(model, settings, x, y - 1);
+    const float h01 = landscapeHeightAtCell(model, settings, x - 1, y);
+    const float h11 = landscapeHeightAtCell(model, settings, x, y);
+    return (h00 + h10 + h01 + h11) * 0.25f;
+}
+
+ImU32 colorForLandscapeZone(LandscapeZone zone, float height, float minHeight, float maxHeight) {
+    const float t = clampFloat((height - minHeight) / std::max(0.001f, maxHeight - minHeight), 0.0f, 1.0f);
+    switch (zone) {
+    case LandscapeZone::Clearing:
+        return IM_COL32(110, 161, 89, 255);
+    case LandscapeZone::HighGround:
+        return IM_COL32(
+            clampInt(105 + (int)(t * 55.0f), 80, 180),
+            clampInt(120 + (int)(t * 46.0f), 90, 180),
+            clampInt(88 + (int)(t * 34.0f), 70, 150),
+            255);
+    case LandscapeZone::Hill:
+        return IM_COL32(126, 151, 91, 255);
+    case LandscapeZone::Slope:
+        return IM_COL32(96, 136, 84, 255);
+    case LandscapeZone::Lowland:
+    default:
+        return IM_COL32(78, 128, 82, 255);
+    }
+}
+
+ImU32 landscapeWallColor(float heightT, float noiseValue) {
+    const int shade = (int)(noiseValue * 22.0f) + (int)((1.0f - heightT) * 34.0f);
+    return IM_COL32(
+        clampInt(92 + shade, 52, 162),
+        clampInt(88 + shade, 50, 154),
+        clampInt(76 + shade, 44, 136),
+        255);
+}
+
+bool verticalRangesOverlap(float a0, float a1, float b0, float b1) {
+    const float aMin = std::min(a0, a1);
+    const float aMax = std::max(a0, a1);
+    const float bMin = std::min(b0, b1);
+    const float bMax = std::max(b0, b1);
+    return std::min(aMax, bMax) - std::max(aMin, bMin) > 0.0001f;
+}
+
+Vec3 landscapeBoundaryVertexNormal(
+    const LandscapeBowlModel& model,
+    const LandscapeBowlSettings& settings,
+    const Int2& vertex,
+    float lowHeight,
+    float highHeight,
+    const Vec3& fallback) {
+
+    Vec3 sum{};
+    bool found = false;
+    auto addCandidate = [&](const Int2& a, const Int2& b, float firstHeight, float secondHeight, const Vec3& normal) {
+        if (!samePoint(vertex, a) && !samePoint(vertex, b)) {
+            return;
+        }
+        if (!verticalRangesOverlap(lowHeight, highHeight, firstHeight, secondHeight)) {
+            return;
+        }
+
+        sum.x += normal.x;
+        sum.z += normal.z;
+        found = true;
+    };
+
+    for (int y = 0; y < settings.gridHeight; y++) {
+        for (int x = 0; x < settings.gridWidth; x++) {
+            const float currentHeight = landscapeHeightAtCell(model, settings, x, y);
+            const int currentLevel = landscapeLevelAtCell(model, settings, x, y);
+            if (x + 1 < settings.gridWidth) {
+                const float neighborHeight = landscapeHeightAtCell(model, settings, x + 1, y);
+                const int neighborLevel = landscapeLevelAtCell(model, settings, x + 1, y);
+                if (currentLevel != neighborLevel) {
+                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{-1.0f, 0.0f, 0.0f};
+                    addCandidate({x + 1, y}, {x + 1, y + 1}, currentHeight, neighborHeight, normal);
+                }
+            }
+
+            if (y + 1 < settings.gridHeight) {
+                const float neighborHeight = landscapeHeightAtCell(model, settings, x, y + 1);
+                const int neighborLevel = landscapeLevelAtCell(model, settings, x, y + 1);
+                if (currentLevel != neighborLevel) {
+                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 0.0f, -1.0f};
+                    addCandidate({x, y + 1}, {x + 1, y + 1}, currentHeight, neighborHeight, normal);
+                }
+            }
+        }
+    }
+
+    if (!found) {
+        return fallback;
+    }
+
+    return normalizeHorizontal(sum, fallback);
+}
+
+void addLandscapeCliffWall(
+    LandscapeBowlModel& model,
+    const LandscapeBowlSettings& settings,
+    const RectangleCliffSettings& rockSettings,
+    const FastNoise::SmartNode<>& rockNoise,
+    const Vec3& topA,
+    const Vec3& topB,
+    const Vec3& bottomA,
+    const Vec3& bottomB,
+    const Vec3& normal,
+    const Vec3& startNormal,
+    const Vec3& endNormal) {
+
+    const int horizontalSubdivisions = 3;
+    const int verticalSubdivisions = 4;
+    const int vertexColumns = horizontalSubdivisions + 1;
+    const int vertexRows = verticalSubdivisions + 1;
+    std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
+    std::vector<Vec3> wallNormals((std::size_t)vertexColumns * (std::size_t)vertexRows);
+    std::vector<float> wallNoise;
+
+    for (int row = 0; row < vertexRows; row++) {
+        const float v = (float)row / (float)verticalSubdivisions;
+        const float topT = 1.0f - v;
+        const Vec3 rowA = lerpVec3(bottomA, topA, topT);
+        const Vec3 rowB = lerpVec3(bottomB, topB, topT);
+        for (int column = 0; column < vertexColumns; column++) {
+            const float u = (float)column / (float)horizontalSubdivisions;
+            const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
+            wallPoints[index] = lerpVec3(rowA, rowB, u);
+            if (column == 0) {
+                wallNormals[index] = startNormal;
+            } else if (column == vertexColumns - 1) {
+                wallNormals[index] = endNormal;
+            } else {
+                wallNormals[index] = normal;
+            }
+        }
+    }
+
+    sampleRockNoiseBatch(rockNoise, rockSettings, wallPoints, wallNoise);
+
+    for (int sy = 0; sy < verticalSubdivisions; sy++) {
+        const float v0 = (float)sy / (float)verticalSubdivisions;
+        const float v1 = (float)(sy + 1) / (float)verticalSubdivisions;
+        const float topT0 = 1.0f - v0;
+        const float topT1 = 1.0f - v1;
+        for (int sx = 0; sx < horizontalSubdivisions; sx++) {
+            const std::size_t i00 = (std::size_t)sy * (std::size_t)vertexColumns + (std::size_t)sx;
+            const std::size_t i10 = i00 + 1;
+            const std::size_t i01 = (std::size_t)(sy + 1) * (std::size_t)vertexColumns + (std::size_t)sx;
+            const std::size_t i11 = i01 + 1;
+
+            MeshQuad wall;
+            wall.a = displaceLandscapeWallPoint(rockSettings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00]);
+            wall.b = displaceLandscapeWallPoint(rockSettings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10]);
+            wall.c = displaceLandscapeWallPoint(rockSettings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11]);
+            wall.d = displaceLandscapeWallPoint(rockSettings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01]);
+            wall.color = landscapeWallColor((topT0 + topT1) * 0.5f, (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f);
+            wall.cliffWall = true;
+            addMeshQuad(model, wall);
+        }
+    }
+}
+
+void generateLandscapeBowlMesh(LandscapeBowlModel& model, const LandscapeBowlSettings& settings) {
+    RectangleCliffSettings rockSettings;
+    rockSettings.rockEnabled = true;
+    rockSettings.rockSeed = settings.seed + 7919;
+    rockSettings.rockScale = std::max(0.5f, settings.arcNoiseScale * 1.25f);
+    rockSettings.rockAmplitude = 0.18f;
+    rockSettings.terraceSteps = 3;
+    sanitizeSettings(rockSettings);
+
+    const FastNoise::SmartNode<> rockNoise = makeRockNoiseNode(rockSettings);
+
+    for (int y = 0; y < settings.gridHeight; y++) {
+        for (int x = 0; x < settings.gridWidth; x++) {
+            const float currentHeight = landscapeHeightAtCell(model, settings, x, y);
+
+            MeshQuad top;
+            top.a = {(float)x, currentHeight, (float)y};
+            top.b = {(float)(x + 1), currentHeight, (float)y};
+            top.c = {(float)(x + 1), currentHeight, (float)(y + 1)};
+            top.d = {(float)x, currentHeight, (float)(y + 1)};
+            top.color = colorForLandscapeZone(landscapeZoneAtCell(model, settings, x, y), currentHeight, model.minHeight, model.maxHeight);
+            top.cliffWall = false;
+            addMeshQuad(model, top);
+
+            if (x + 1 < settings.gridWidth) {
+                const float neighborHeight = landscapeHeightAtCell(model, settings, x + 1, y);
+                if (landscapeLevelAtCell(model, settings, x, y) != landscapeLevelAtCell(model, settings, x + 1, y)) {
+                    const float high = std::max(currentHeight, neighborHeight);
+                    const float low = std::min(currentHeight, neighborHeight);
+                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{-1.0f, 0.0f, 0.0f};
+                    const Vec3 startNormal = landscapeBoundaryVertexNormal(model, settings, {x + 1, y}, low, high, normal);
+                    const Vec3 endNormal = landscapeBoundaryVertexNormal(model, settings, {x + 1, y + 1}, low, high, normal);
+                    addLandscapeCliffWall(
+                        model,
+                        settings,
+                        rockSettings,
+                        rockNoise,
+                        {(float)(x + 1), high, (float)y},
+                        {(float)(x + 1), high, (float)(y + 1)},
+                        {(float)(x + 1), low, (float)y},
+                        {(float)(x + 1), low, (float)(y + 1)},
+                        normal,
+                        startNormal,
+                        endNormal);
+                }
+            }
+
+            if (y + 1 < settings.gridHeight) {
+                const float neighborHeight = landscapeHeightAtCell(model, settings, x, y + 1);
+                if (landscapeLevelAtCell(model, settings, x, y) != landscapeLevelAtCell(model, settings, x, y + 1)) {
+                    const float high = std::max(currentHeight, neighborHeight);
+                    const float low = std::min(currentHeight, neighborHeight);
+                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 0.0f, -1.0f};
+                    const Vec3 startNormal = landscapeBoundaryVertexNormal(model, settings, {x, y + 1}, low, high, normal);
+                    const Vec3 endNormal = landscapeBoundaryVertexNormal(model, settings, {x + 1, y + 1}, low, high, normal);
+                    addLandscapeCliffWall(
+                        model,
+                        settings,
+                        rockSettings,
+                        rockNoise,
+                        {(float)x, high, (float)(y + 1)},
+                        {(float)(x + 1), high, (float)(y + 1)},
+                        {(float)x, low, (float)(y + 1)},
+                        {(float)(x + 1), low, (float)(y + 1)},
+                        normal,
+                        startNormal,
+                        endNormal);
+                }
+            }
+        }
+    }
+}
+
+void rebuildLandscapeBowlModel() {
+    spdlog::info("rebuildLandscapeBowlModel: start");
+
+    LandscapeBowlSettings settings = g_landscapeSettings;
+    sanitizeSettings(settings);
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        g_landscapeSettings = settings;
+    }
+
+    LandscapeBowlModel model;
+    model.heights.assign((std::size_t)settings.gridWidth * (std::size_t)settings.gridHeight, 0.0f);
+    model.heightLevels.assign(model.heights.size(), 0);
+    model.zones.assign(model.heights.size(), LandscapeZone::Lowland);
+    model.levelCellCounts.assign((std::size_t)settings.heightLevels, 0);
+    model.minHeight = 100000.0f;
+    model.maxHeight = -100000.0f;
+
+    const FastNoise::SmartNode<> noiseNode = makeLandscapeNoiseNode(settings);
+    std::vector<Vec3> samplePoints;
+    samplePoints.reserve(model.heights.size());
+    for (int y = 0; y < settings.gridHeight; y++) {
+        for (int x = 0; x < settings.gridWidth; x++) {
+            samplePoints.push_back({(float)x * 0.42f, 0.0f, (float)y * 0.42f});
+        }
+    }
+
+    std::vector<float> noiseValues;
+    sampleLandscapeNoiseBatch(noiseNode, settings, samplePoints, noiseValues);
+
+    const float centerX = (float)settings.gridWidth * 0.5f;
+    const float centerY = (float)settings.gridHeight * 0.58f;
+
+    for (int y = 0; y < settings.gridHeight; y++) {
+        for (int x = 0; x < settings.gridWidth; x++) {
+            const std::size_t index = (std::size_t)landscapeIndex(x, y, settings.gridWidth);
+            const float px = (float)x + 0.5f;
+            const float py = (float)y + 0.5f;
+            const float dx = px - centerX;
+            const float dy = py - centerY;
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            const float topHalfMask = smoothStep(0.0f, settings.highGroundRadius * 0.5f, -dy + settings.clearingRadius * 0.2f);
+            const float distortedRadius = settings.highGroundRadius + noiseValues[index] * settings.arcNoiseAmplitude;
+            const float ringDistance = std::abs(distance - distortedRadius);
+            const float ringMask = 1.0f - smoothStep(settings.highGroundWidth * 0.35f, settings.highGroundWidth, ringDistance);
+            const float highGroundMask = clampFloat(topHalfMask * ringMask, 0.0f, 1.0f);
+            const float clearingMask = 1.0f - smoothStep(
+                settings.clearingRadius,
+                settings.clearingRadius + settings.clearingSoftness,
+                distance);
+
+            float hillContribution = 0.0f;
+            for (int hill = 0; hill < settings.hillCount; hill++) {
+                const float angleT = 0.12f + deterministicFloat01(settings.seed, hill * 7 + 1) * 0.76f;
+                const float angle = 3.14159265f * angleT;
+                const float radius = settings.highGroundRadius + (deterministicFloat01(settings.seed, hill * 7 + 2) - 0.5f) * settings.highGroundWidth;
+                const float hillX = centerX + std::cos(angle) * radius;
+                const float hillY = centerY - std::sin(angle) * radius;
+                const float hillDx = px - hillX;
+                const float hillDy = py - hillY;
+                const float hillDistanceSq = hillDx * hillDx + hillDy * hillDy;
+                const float hillRadius = settings.hillRadius * (0.75f + deterministicFloat01(settings.seed, hill * 7 + 3) * 0.65f);
+                const float local = std::exp(-hillDistanceSq / std::max(0.001f, hillRadius * hillRadius));
+                hillContribution += local * settings.hillHeight * (0.7f + deterministicFloat01(settings.seed, hill * 7 + 4) * 0.6f);
+            }
+
+            const int maxLevel = settings.heightLevels - 1;
+            int level = 0;
+            if (clearingMask <= 0.62f) {
+                const float hillLevelBoost = clampFloat(hillContribution / std::max(0.001f, settings.hillHeight), 0.0f, 1.5f);
+                const float levelScore = highGroundMask * (float)maxLevel + hillLevelBoost;
+                level = clampInt((int)std::round(levelScore), 0, maxLevel);
+                if (highGroundMask > 0.18f) {
+                    level = std::max(level, 1);
+                }
+                if (highGroundMask > 0.55f) {
+                    level = std::max(level, std::min(maxLevel, 2));
+                }
+                if (highGroundMask > 0.82f || hillLevelBoost > 1.05f) {
+                    level = std::max(level, maxLevel);
+                }
+            }
+
+            const float levelHeight = settings.highGroundHeight / (float)std::max(1, maxLevel);
+            const float height = (float)level * levelHeight;
+
+            LandscapeZone zone = LandscapeZone::Lowland;
+            if (clearingMask > 0.7f) {
+                zone = LandscapeZone::Clearing;
+                model.clearingCellCount++;
+            } else if (hillContribution > settings.hillHeight * 0.35f && level > 0) {
+                zone = LandscapeZone::Hill;
+                model.hillCellCount++;
+            } else if (level >= std::max(1, maxLevel - 1)) {
+                zone = LandscapeZone::HighGround;
+                model.highGroundCellCount++;
+            } else if (level > 0) {
+                zone = LandscapeZone::Slope;
+            }
+
+            model.heights[index] = height;
+            model.heightLevels[index] = (std::uint8_t)level;
+            model.zones[index] = zone;
+            if (level >= 0 && level < (int)model.levelCellCounts.size()) {
+                model.levelCellCounts[(std::size_t)level]++;
+            }
+            model.minHeight = std::min(model.minHeight, height);
+            model.maxHeight = std::max(model.maxHeight, height);
+        }
+    }
+
+    generateLandscapeBowlMesh(model, settings);
+
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        g_landscapeModel = std::move(model);
+    }
+
+    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, cells clearing/high/hill={}/{}/{}, quads top/walls/total={}/{}/{}",
+        settings.gridWidth,
+        settings.gridHeight,
+        g_landscapeModel.minHeight,
+        g_landscapeModel.maxHeight,
+        g_landscapeModel.clearingCellCount,
+        g_landscapeModel.highGroundCellCount,
+        g_landscapeModel.hillCellCount,
+        g_landscapeModel.topQuadCount,
+        g_landscapeModel.cliffWallQuadCount,
+        g_landscapeModel.meshQuads.size());
+}
+
 ImU32 colorForVertex(VertexKind kind) {
     switch (kind) {
     case VertexKind::OuterCorner:
@@ -1277,67 +1839,169 @@ void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCl
     drawList->PopClipRect();
 }
 
-void drawUi() {
-    static bool layoutLogged = false;
+ImVec2 projectLandscapeMeshPoint(
+    const LandscapeBowlSettings& settings,
+    const MeshPreviewCamera& camera,
+    const ImVec2& origin,
+    const ImVec2& canvasSize,
+    const Vec3& point) {
 
-    ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
+    const float centeredX = point.x - (float)settings.gridWidth * 0.5f;
+    const float centeredZ = point.z - (float)settings.gridHeight * 0.5f;
+    const float isoX = (centeredX - centeredZ) * 19.0f * camera.zoom;
+    const float isoY = ((centeredX + centeredZ) * 9.5f - point.y * 25.0f) * camera.zoom;
+    const ImVec2 anchor = meshProjectionAnchor(origin, canvasSize, camera);
+    return {
+        anchor.x + isoX,
+        anchor.y + isoY,
+    };
+}
 
-    constexpr ImGuiWindowFlags rootFlags =
-        ImGuiWindowFlags_NoDecoration |
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoBringToFrontOnFocus;
+void drawLandscapeProjectedQuad(
+    ImDrawList* drawList,
+    const LandscapeBowlSettings& settings,
+    const MeshPreviewCamera& camera,
+    const ImVec2& origin,
+    const ImVec2& canvasSize,
+    const MeshQuad& quad) {
 
-    ImGui::Begin("MeshGenerationPlayground", nullptr, rootFlags);
+    const ImVec2 a = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.a);
+    const ImVec2 b = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.b);
+    const ImVec2 c = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.c);
+    const ImVec2 d = projectLandscapeMeshPoint(settings, camera, origin, canvasSize, quad.d);
 
-    const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
-    const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
-    const float gutter = 12.0f;
-    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
-    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
-    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
-    const float viewportHeight = std::max(1.0f, (layoutSize.y - gutter) * 0.5f);
+    drawList->AddQuadFilled(a, b, c, d, quad.color);
+    if (settings.showMeshWireframe) {
+        drawList->AddQuad(a, b, c, d, IM_COL32(24, 24, 24, 190), 1.0f);
+    }
+}
+
+void drawLandscapeBowlDebugView(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model, const ImVec2& viewportSize) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float availableWidth = std::max(1.0f, viewportSize.x - 24.0f);
+    const float availableHeight = std::max(1.0f, viewportSize.y - 48.0f);
+    const float cellSize = std::min(availableWidth / (float)settings.gridWidth, availableHeight / (float)settings.gridHeight);
+    const ImVec2 gridSize{cellSize * (float)settings.gridWidth, cellSize * (float)settings.gridHeight};
+    const ImVec2 gridOrigin{
+        origin.x + (viewportSize.x - gridSize.x) * 0.5f,
+        origin.y + 36.0f + (availableHeight - gridSize.y) * 0.5f,
+    };
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
-    if (!layoutLogged) {
-        spdlog::info("drawUi: viewport pos=({}, {}), workSize={}x{}, layoutSize={}x{}, leftPanelWidth={}, rightWidth={}, viewportHeight={}",
-            viewport->WorkPos.x,
-            viewport->WorkPos.y,
-            viewport->WorkSize.x,
-            viewport->WorkSize.y,
-            layoutSize.x,
-            layoutSize.y,
-            leftPanelWidth,
-            rightWidth,
-            viewportHeight);
-        layoutLogged = true;
+    drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(20, 23, 28, 255));
+    drawList->AddRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(70, 78, 92, 255));
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "2D level map: clearing + terraced noisy upper high-ground arc");
+    drawList->PushClipRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, true);
+
+    for (int y = 0; y < settings.gridHeight; y++) {
+        for (int x = 0; x < settings.gridWidth; x++) {
+            const std::size_t index = (std::size_t)landscapeIndex(x, y, settings.gridWidth);
+            const float height = model.heights[index];
+            const LandscapeZone zone = model.zones[index];
+            const ImVec2 min{gridOrigin.x + (float)x * cellSize, gridOrigin.y + (float)y * cellSize};
+            const ImVec2 max{min.x + cellSize + 0.5f, min.y + cellSize + 0.5f};
+            drawList->AddRectFilled(min, max, colorForLandscapeZone(zone, height, model.minHeight, model.maxHeight));
+            if (cellSize >= 13.0f) {
+                drawList->AddRect(min, max, IM_COL32(25, 30, 30, 90));
+            }
+            if (settings.showHeightValues && cellSize >= 18.0f) {
+                char label[16];
+                snprintf(label, sizeof(label), "L%d", landscapeLevelAtCell(model, settings, x, y));
+                drawList->AddText({min.x + 2.0f, min.y + 2.0f}, IM_COL32(230, 235, 220, 220), label);
+            }
+        }
     }
 
-    drawList->AddRectFilled(
-        layoutOrigin,
-        {layoutOrigin.x + leftPanelWidth, layoutOrigin.y + layoutSize.y},
-        IM_COL32(25, 28, 34, 255));
-    drawList->AddRect(
-        layoutOrigin,
-        {layoutOrigin.x + leftPanelWidth, layoutOrigin.y + layoutSize.y},
-        IM_COL32(65, 72, 84, 255));
+    drawList->PopClipRect();
+    ImGui::Dummy(viewportSize);
+}
 
-    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
-    ImGui::BeginGroup();
-    ImGui::PushItemWidth(leftPanelWidth - 24.0f);
+void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model, const ImVec2& viewportSize) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##LandscapeMeshViewport", viewportSize);
+    const bool hovered = ImGui::IsItemHovered();
+    const bool dragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left);
+    ImGuiIO& io = ImGui::GetIO();
 
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
-        ImGui::Text("Frame: %d", g_state.frameIndex);
-        ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
+        if (hovered && io.MouseWheel != 0.0f) {
+            const float previousZoom = g_landscapeCamera.zoom;
+            const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.28f, 4.0f);
+            if (nextZoom != previousZoom) {
+                const ImVec2 anchor = meshProjectionAnchor(origin, viewportSize, g_landscapeCamera);
+                const ImVec2 mouseLocal{
+                    io.MousePos.x - anchor.x,
+                    io.MousePos.y - anchor.y,
+                };
+                const float zoomRatio = nextZoom / previousZoom;
+                g_landscapeCamera.pan.x += mouseLocal.x * (1.0f - zoomRatio);
+                g_landscapeCamera.pan.y += mouseLocal.y * (1.0f - zoomRatio);
+                g_landscapeCamera.zoom = nextZoom;
+            }
+        }
+
+        if (dragging) {
+            g_landscapeCamera.pan.x += io.MouseDelta.x;
+            g_landscapeCamera.pan.y += io.MouseDelta.y;
+        }
+
+        if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            g_landscapeCamera.zoom = 1.0f;
+            g_landscapeCamera.pan = {0.0f, 0.0f};
+        }
     }
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(18, 21, 27, 255));
+    drawList->AddRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(70, 78, 92, 255));
+    drawList->PushClipRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, true);
+
+    const ImVec2 groundCenter{origin.x + viewportSize.x * 0.5f, origin.y + 170.0f};
+    drawList->AddEllipse(groundCenter, {390.0f, 150.0f}, IM_COL32(34, 39, 47, 255), 0.0f, 48, 2.0f);
+
+    std::vector<int> drawOrder;
+    drawOrder.reserve(model.meshQuads.size());
+    for (int i = 0; i < (int)model.meshQuads.size(); i++) {
+        const MeshQuad& quad = model.meshQuads[(std::size_t)i];
+        if (quad.cliffWall && !settings.showCliffWalls) {
+            continue;
+        }
+        if (!quad.cliffWall && !settings.showTopFaces) {
+            continue;
+        }
+        drawOrder.push_back(i);
+    }
+
+    std::sort(drawOrder.begin(), drawOrder.end(), [&](int lhs, int rhs) {
+        return model.meshQuads[(std::size_t)lhs].depth < model.meshQuads[(std::size_t)rhs].depth;
+    });
+
+    for (int index : drawOrder) {
+        drawLandscapeProjectedQuad(drawList, settings, g_landscapeCamera, origin, viewportSize, model.meshQuads[(std::size_t)index]);
+    }
+
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Landscape Bowl 3D preview: flat terraces + rocky cliff strips");
+    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, mouse wheel: zoom, double click: reset");
+    char cameraText[96];
+    snprintf(cameraText, sizeof(cameraText), "Camera zoom: %.2fx, pan: %.0f %.0f", g_landscapeCamera.zoom, g_landscapeCamera.pan.x, g_landscapeCamera.pan.y);
+    drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), cameraText);
+    drawList->PopClipRect();
+}
+
+void drawFrameStats() {
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    ImGui::Text("Frame: %d", g_state.frameIndex);
+    ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
+}
+
+void drawRectangleScenarioControls(float panelWidth) {
+    ImGui::PushItemWidth(panelWidth - 24.0f);
+    drawFrameStats();
     ImGui::Separator();
 
-    ImGui::Text("Logical rectangle cliff prototype");
-    ImGui::TextWrapped("Boundary segments are generated from solid cells that touch empty space, like cliff edges in Landscape3dPlayground.");
+    ImGui::Text("Rectangle Cliff Debug");
+    ImGui::TextWrapped("Debug scenario for boundary vertices, cutouts, bevels and rocky wall stitching.");
 
     bool changed = false;
     {
@@ -1393,6 +2057,89 @@ void drawUi() {
     ImGui::TextColored(ImVec4(0.91f, 0.36f, 0.36f, 1.0f), "I = inner corner");
     ImGui::TextColored(ImVec4(0.73f, 0.46f, 1.0f, 1.0f), "D = diagonal join");
     ImGui::PopItemWidth();
+}
+
+void drawLandscapeScenarioControls(float panelWidth) {
+    ImGui::PushItemWidth(panelWidth - 24.0f);
+    drawFrameStats();
+    ImGui::Separator();
+
+    ImGui::Text("Landscape Bowl Preview");
+    ImGui::TextWrapped("Discrete level scenario: flat clearing in the center, terraced upper high-ground arc and deterministic hills.");
+
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        changed |= ImGui::SliderInt("Grid Width", &g_landscapeSettings.gridWidth, 12, 72);
+        changed |= ImGui::SliderInt("Grid Height", &g_landscapeSettings.gridHeight, 10, 56);
+        changed |= ImGui::InputInt("Seed", &g_landscapeSettings.seed);
+        changed |= ImGui::SliderFloat("Clearing Radius", &g_landscapeSettings.clearingRadius, 2.0f, 18.0f);
+        changed |= ImGui::SliderFloat("Clearing Softness", &g_landscapeSettings.clearingSoftness, 0.25f, 8.0f);
+        changed |= ImGui::SliderFloat("High Ground Radius", &g_landscapeSettings.highGroundRadius, 3.0f, 28.0f);
+        changed |= ImGui::SliderFloat("High Ground Width", &g_landscapeSettings.highGroundWidth, 1.0f, 10.0f);
+        changed |= ImGui::SliderFloat("High Ground Height", &g_landscapeSettings.highGroundHeight, 0.5f, 8.0f);
+        changed |= ImGui::SliderInt("Height Levels", &g_landscapeSettings.heightLevels, 2, 6);
+        changed |= ImGui::SliderFloat("Arc Noise Scale", &g_landscapeSettings.arcNoiseScale, 0.5f, 18.0f);
+        changed |= ImGui::SliderFloat("Arc Noise Amplitude", &g_landscapeSettings.arcNoiseAmplitude, 0.0f, 5.0f);
+        changed |= ImGui::SliderInt("Hill Count", &g_landscapeSettings.hillCount, 0, 12);
+        changed |= ImGui::SliderFloat("Hill Height", &g_landscapeSettings.hillHeight, 0.0f, 5.0f);
+        changed |= ImGui::SliderFloat("Hill Radius", &g_landscapeSettings.hillRadius, 0.75f, 8.0f);
+        ImGui::Checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
+        ImGui::Checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
+        ImGui::Checkbox("Show Mesh Wireframe", &g_landscapeSettings.showMeshWireframe);
+        ImGui::Checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
+    }
+    if (changed) {
+        rebuildLandscapeBowlModel();
+    }
+
+    ImGui::Separator();
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::Text("Height range: %.2f - %.2f", g_landscapeModel.minHeight, g_landscapeModel.maxHeight);
+        ImGui::Text("Cells clearing/high/hill: %d / %d / %d",
+            g_landscapeModel.clearingCellCount,
+            g_landscapeModel.highGroundCellCount,
+            g_landscapeModel.hillCellCount);
+        ImGui::Text("3D quads top/walls/total: %d / %d / %d",
+            g_landscapeModel.topQuadCount,
+            g_landscapeModel.cliffWallQuadCount,
+            (int)g_landscapeModel.meshQuads.size());
+        ImGui::Text("Level cells:");
+        for (int level = 0; level < (int)g_landscapeModel.levelCellCounts.size(); level++) {
+            ImGui::SameLine();
+            ImGui::Text("L%d=%d", level, g_landscapeModel.levelCellCounts[(std::size_t)level]);
+        }
+    }
+    ImGui::TextColored(ImVec4(0.43f, 0.63f, 0.35f, 1.0f), "Green = clearing / lowland");
+    ImGui::TextColored(ImVec4(0.58f, 0.68f, 0.40f, 1.0f), "Olive = hills");
+    ImGui::TextColored(ImVec4(0.70f, 0.72f, 0.50f, 1.0f), "Bright = upper high ground");
+    ImGui::PopItemWidth();
+}
+
+void drawScenarioPanelBackground(const ImVec2& layoutOrigin, const ImVec2& layoutSize, float leftPanelWidth) {
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(
+        layoutOrigin,
+        {layoutOrigin.x + leftPanelWidth, layoutOrigin.y + layoutSize.y},
+        IM_COL32(25, 28, 34, 255));
+    drawList->AddRect(
+        layoutOrigin,
+        {layoutOrigin.x + leftPanelWidth, layoutOrigin.y + layoutSize.y},
+        IM_COL32(65, 72, 84, 255));
+}
+
+void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+    const float viewportHeight = std::max(1.0f, (layoutSize.y - gutter) * 0.5f);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawRectangleScenarioControls(leftPanelWidth);
     ImGui::EndGroup();
 
     {
@@ -1403,8 +2150,76 @@ void drawUi() {
         ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportHeight + gutter});
         drawMesh3dPreview(g_rectSettings, g_rectModel, {rightWidth, viewportHeight});
     }
+}
 
-    ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+    const float viewportHeight = std::max(1.0f, (layoutSize.y - gutter) * 0.5f);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawLandscapeScenarioControls(leftPanelWidth);
+    ImGui::EndGroup();
+
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
+        drawLandscapeBowlDebugView(g_landscapeSettings, g_landscapeModel, {rightWidth, viewportHeight});
+
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportHeight + gutter});
+        drawLandscapeMesh3dPreview(g_landscapeSettings, g_landscapeModel, {rightWidth, viewportHeight});
+    }
+}
+
+void drawUi() {
+    static bool layoutLogged = false;
+
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+
+    constexpr ImGuiWindowFlags rootFlags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+    ImGui::Begin("MeshGenerationPlayground", nullptr, rootFlags);
+
+    if (ImGui::BeginTabBar("ScenarioTabs", ImGuiTabBarFlags_None)) {
+        if (ImGui::BeginTabItem("Rectangle Debug")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            if (!layoutLogged) {
+                spdlog::info("drawUi: viewport pos=({}, {}), workSize={}x{}, first tab layoutSize={}x{}",
+                    viewport->WorkPos.x,
+                    viewport->WorkPos.y,
+                    viewport->WorkSize.x,
+                    viewport->WorkSize.y,
+                    layoutSize.x,
+                    layoutSize.y);
+                layoutLogged = true;
+            }
+            drawRectangleScenarioTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Landscape Bowl")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            drawLandscapeScenarioTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
     ImGui::End();
 }
 
@@ -1542,6 +2357,8 @@ void init() {
 
     spdlog::info("init: calling rebuildRectangleCliffModel()");
     rebuildRectangleCliffModel();
+    spdlog::info("init: calling rebuildLandscapeBowlModel()");
+    rebuildLandscapeBowlModel();
     spdlog::info("init: complete");
 }
 
