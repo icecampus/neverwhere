@@ -11,6 +11,7 @@ void initProductionPreviewTextures();
 void shutdownProductionPreviewTextures();
 bool productionGrassTextureLoaded();
 bool productionRockTextureLoaded();
+bool warmupProductionPreviewRenderer();
 
 void drawRectangleCliffDebugView(const RectangleCliffSettings& settings, const RectangleCliffModel& model, const ImVec2& viewportSize);
 void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCliffModel& model, const ImVec2& viewportSize);

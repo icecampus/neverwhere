@@ -117,6 +117,21 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::Checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
         ImGui::Checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
         ImGui::Checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
+        ImGui::Separator();
+        ImGui::Text("Rendering");
+        ImGui::Checkbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
+        ImGui::SliderFloat("Ambient", &g_productionPreviewSettings.ambient, 0.35f, 1.35f);
+        ImGui::SliderFloat("Diffuse Strength", &g_productionPreviewSettings.diffuseStrength, 0.0f, 0.85f);
+        ImGui::SliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
+        ImGui::SliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
+        ImGui::SliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
+        ImGui::SliderFloat("Macro Strength", &g_productionPreviewSettings.macroStrength, 0.0f, 0.35f);
+        ImGui::SliderFloat("Cliff Dark Radius", &g_productionPreviewSettings.cliffDarkeningRadius, 0.05f, 4.0f);
+        ImGui::SliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
+        ImGui::SliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
+        ImGui::SliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
+        const char* debugModes[] = {"Lit", "Albedo", "Normals", "UV", "Cliff Proximity", "Depth Order"};
+        ImGui::Combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
     }
     if (changed) {
         rebuildLandscapeBowlModel();
@@ -147,6 +162,12 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::Text("Production textures grass/rock: %s / %s",
             productionGrassTextureLoaded() ? "loaded" : "fallback",
             productionRockTextureLoaded() ? "loaded" : "fallback");
+        ImGui::Text("Preview renderer: %s",
+            g_productionPreviewSettings.useGpuRenderer ? "Sokol GPU offscreen" : "ImGui fallback");
+        ImGui::Text("Cliff top darkening radius/strength/min: %.2f / %.2f / %.2f",
+            g_productionPreviewSettings.cliffDarkeningRadius,
+            g_productionPreviewSettings.cliffDarkeningStrength,
+            g_productionPreviewSettings.minTopBrightness);
         ImGui::Text("Shared bevel segments/caps: %d / %d",
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount);

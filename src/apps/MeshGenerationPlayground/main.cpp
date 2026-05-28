@@ -115,6 +115,7 @@ void init() {
     rebuildRectangleCliffModel();
     spdlog::info("init: calling rebuildLandscapeBowlModel()");
     rebuildLandscapeBowlModel();
+    warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");
 }

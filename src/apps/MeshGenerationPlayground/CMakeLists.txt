@@ -1,5 +1,6 @@
 find_package(imgui CONFIG REQUIRED)
 find_package(FastNoise2 CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
@@ -8,8 +9,10 @@ nw_add_console_app(
         spdlog::spdlog_header_only
         imgui::imgui
         FastNoise2::FastNoise
+        glm::glm-header-only
         landscape_core
         landscape_mesh
+        render_core
 )
 
 if(WIN32)

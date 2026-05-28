@@ -54,6 +54,7 @@ struct MeshQuad {
     ImU32 color = IM_COL32(255, 255, 255, 255);
     bool cliffWall = false;
     float depth = 0.0f;
+    float cliffDistance = 1000.0f;
 };
 
 enum class LandscapeZone : std::uint8_t {
@@ -67,6 +68,30 @@ enum class LandscapeZone : std::uint8_t {
 struct MeshPreviewCamera {
     float zoom = 1.0f;
     ImVec2 pan{0.0f, 0.0f};
+};
+
+enum class ProductionPreviewDebugMode : int {
+    Lit = 0,
+    Albedo = 1,
+    Normals = 2,
+    Uv = 3,
+    CliffProximity = 4,
+    DepthOrder = 5,
+};
+
+struct ProductionPreviewSettings {
+    float ambient = 0.98f;
+    float diffuseStrength = 0.30f;
+    float wallBrightness = 1.05f;
+    float cliffDarkeningRadius = 1.35f;
+    float cliffDarkeningStrength = 0.32f;
+    float minTopBrightness = 0.68f;
+    float edgeDarkness = 0.12f;
+    float textureScale = 1.0f;
+    float macroScale = 0.35f;
+    float macroStrength = 0.08f;
+    int debugMode = (int)ProductionPreviewDebugMode::Lit;
+    bool useGpuRenderer = true;
 };
 
 inline int cellIndex(int x, int y, int width) {

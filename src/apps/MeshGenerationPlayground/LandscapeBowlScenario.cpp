@@ -4,8 +4,11 @@
 #include "PlaygroundState.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <mutex>
+#include <unordered_map>
 #include <utility>
 
 #include <landscape_core/landscape_logic.h>
@@ -23,6 +26,88 @@ void addMeshQuad(LandscapeBowlModel& model, MeshQuad quad) {
         model.cliffWallQuadCount++;
     } else {
         model.topQuadCount++;
+    }
+}
+
+Vec3 quadCenter(const MeshQuad& quad) {
+    return {
+        (quad.a.x + quad.b.x + quad.c.x + quad.d.x) * 0.25f,
+        (quad.a.y + quad.b.y + quad.c.y + quad.d.y) * 0.25f,
+        (quad.a.z + quad.b.z + quad.c.z + quad.d.z) * 0.25f,
+    };
+}
+
+std::uint64_t sampleBucketKey(int x, int z) {
+    return ((std::uint64_t)(std::uint32_t)x << 32) | (std::uint32_t)z;
+}
+
+void computeTopCliffDistances(LandscapeBowlModel& model) {
+    constexpr float kBucketSize = 1.0f;
+    constexpr float kMaxSearchDistance = 4.0f;
+    constexpr float kSameLevelTolerance = 0.75f;
+    constexpr int kSearchBucketRadius = (int)(kMaxSearchDistance / kBucketSize) + 2;
+
+    std::unordered_map<std::uint64_t, std::vector<Vec3>> cliffSamples;
+    for (const MeshQuad& quad : model.meshQuads) {
+        if (!quad.cliffWall) {
+            continue;
+        }
+
+        const float topY = std::max(std::max(quad.a.y, quad.b.y), std::max(quad.c.y, quad.d.y));
+        Vec3 sample{};
+        int sampleCount = 0;
+        const Vec3 points[] = {quad.a, quad.b, quad.c, quad.d};
+        for (const Vec3& point : points) {
+            if (std::abs(point.y - topY) <= 0.001f) {
+                sample.x += point.x;
+                sample.y += point.y;
+                sample.z += point.z;
+                sampleCount++;
+            }
+        }
+        if (sampleCount == 0) {
+            continue;
+        }
+
+        sample.x /= (float)sampleCount;
+        sample.y /= (float)sampleCount;
+        sample.z /= (float)sampleCount;
+
+        const int bucketX = (int)std::floor(sample.x / kBucketSize);
+        const int bucketZ = (int)std::floor(sample.z / kBucketSize);
+        cliffSamples[sampleBucketKey(bucketX, bucketZ)].push_back(sample);
+    }
+
+    for (MeshQuad& quad : model.meshQuads) {
+        if (quad.cliffWall) {
+            quad.cliffDistance = 0.0f;
+            continue;
+        }
+
+        const Vec3 center = quadCenter(quad);
+        const int centerBucketX = (int)std::floor(center.x / kBucketSize);
+        const int centerBucketZ = (int)std::floor(center.z / kBucketSize);
+        float nearestSq = kMaxSearchDistance * kMaxSearchDistance;
+
+        for (int dz = -kSearchBucketRadius; dz <= kSearchBucketRadius; dz++) {
+            for (int dx = -kSearchBucketRadius; dx <= kSearchBucketRadius; dx++) {
+                const auto it = cliffSamples.find(sampleBucketKey(centerBucketX + dx, centerBucketZ + dz));
+                if (it == cliffSamples.end()) {
+                    continue;
+                }
+
+                for (const Vec3& sample : it->second) {
+                    if (std::abs(center.y - sample.y) > kSameLevelTolerance) {
+                        continue;
+                    }
+                    const float x = center.x - sample.x;
+                    const float z = center.z - sample.z;
+                    nearestSq = std::min(nearestSq, x * x + z * z);
+                }
+            }
+        }
+
+        quad.cliffDistance = std::sqrt(nearestSq);
     }
 }
 
@@ -105,6 +190,7 @@ void rebuildLandscapeBowlModel() {
     for (const landscape_mesh::MeshQuad& quad : composedMesh.quads) {
         addMeshQuad(model, toAppMeshQuad(quad));
     }
+    computeTopCliffDistances(model);
 
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);

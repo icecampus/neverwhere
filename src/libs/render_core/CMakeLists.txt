@@ -24,6 +24,8 @@ nw_add_lib_sources(
         src/texture_atlas.cpp
         include/render_core/landscape_renderer.h
         src/landscape_renderer.cpp
+        include/render_core/mesh_preview_renderer.h
+        src/mesh_preview_renderer.cpp
     LIBS
         glm::glm-header-only
         topology_core
