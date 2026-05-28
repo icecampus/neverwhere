@@ -1,0 +1,139 @@
+#include "LandscapeBowlScenario.h"
+
+#include "MeshBridge.h"
+#include "PlaygroundState.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <mutex>
+#include <utility>
+
+#include <landscape_core/landscape_logic.h>
+#include <landscape_mesh/landscape_mesh.h>
+#include <spdlog/spdlog.h>
+
+namespace meshgen_playground {
+
+namespace {
+
+void addMeshQuad(LandscapeBowlModel& model, MeshQuad quad) {
+    quad.depth = meshQuadDepth(quad);
+    model.meshQuads.push_back(quad);
+    if (quad.cliffWall) {
+        model.cliffWallQuadCount++;
+    } else {
+        model.topQuadCount++;
+    }
+}
+
+} // namespace
+
+int landscapeIndex(int x, int y, int width) {
+    return y * width + x;
+}
+
+void sanitizeSettings(LandscapeBowlSettings& settings) {
+    settings.gridWidth = clampInt(settings.gridWidth, 12, 72);
+    settings.gridHeight = clampInt(settings.gridHeight, 10, 56);
+    settings.clearingRadius = clampFloat(settings.clearingRadius, 2.0f, (float)std::min(settings.gridWidth, settings.gridHeight) * 0.45f);
+    settings.clearingSoftness = clampFloat(settings.clearingSoftness, 0.25f, 8.0f);
+    settings.highGroundRadius = clampFloat(settings.highGroundRadius, settings.clearingRadius + 1.0f, (float)std::max(settings.gridWidth, settings.gridHeight));
+    settings.highGroundWidth = clampFloat(settings.highGroundWidth, 1.0f, 10.0f);
+    settings.highGroundHeight = clampFloat(settings.highGroundHeight, 0.5f, 8.0f);
+    settings.heightLevels = clampInt(settings.heightLevels, 2, 6);
+    settings.arcNoiseScale = clampFloat(settings.arcNoiseScale, 0.5f, 18.0f);
+    settings.arcNoiseAmplitude = clampFloat(settings.arcNoiseAmplitude, 0.0f, 5.0f);
+    settings.hillCount = clampInt(settings.hillCount, 0, 12);
+    settings.hillHeight = clampFloat(settings.hillHeight, 0.0f, 5.0f);
+    settings.hillRadius = clampFloat(settings.hillRadius, 0.75f, 8.0f);
+}
+
+int landscapeLevelAtCell(const LandscapeBowlModel& model, const LandscapeBowlSettings& settings, int x, int y) {
+    x = clampInt(x, 0, settings.gridWidth - 1);
+    y = clampInt(y, 0, settings.gridHeight - 1);
+    return (int)model.heightLevels[(std::size_t)landscapeIndex(x, y, settings.gridWidth)];
+}
+
+void rebuildLandscapeBowlModel() {
+    spdlog::info("rebuildLandscapeBowlModel: start");
+
+    LandscapeBowlSettings settings = g_landscapeSettings;
+    sanitizeSettings(settings);
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        g_landscapeSettings = settings;
+    }
+
+    LandscapeBowlModel model;
+    landscape_core::BowlGenerationStats generationStats;
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(
+        toCoreLandscapeSettings(settings),
+        &generationStats);
+
+    model.heights.assign((std::size_t)settings.gridWidth * (std::size_t)settings.gridHeight, 0.0f);
+    model.heightLevels.assign(model.heights.size(), 0);
+    model.zones.assign(model.heights.size(), LandscapeZone::Lowland);
+    model.levelCellCounts = generationStats.levelCellCounts;
+    model.clearingCellCount = generationStats.clearingCellCount;
+    model.highGroundCellCount = generationStats.highGroundCellCount;
+    model.hillCellCount = generationStats.hillCellCount;
+    model.minHeight = generationStats.minHeight;
+    model.maxHeight = generationStats.maxHeight;
+    model.maxAdjacentLevelDelta = generationStats.maxAdjacentLevelDelta;
+
+    for (int y = 0; y < settings.gridHeight; y++) {
+        for (int x = 0; x < settings.gridWidth; x++) {
+            const std::size_t index = (std::size_t)landscapeIndex(x, y, settings.gridWidth);
+            const std::uint8_t level = grid.cellLevelAt(x, y);
+            model.heightLevels[index] = level;
+            model.heights[index] = (float)level * grid.levelHeight;
+            model.zones[index] = toLocalZone(grid.zoneAt(x, y));
+        }
+    }
+
+    const landscape_mesh::MeshBuildSettings meshSettings = makeSharedLandscapeMeshSettings(grid.levelHeight);
+    const landscape_mesh::CompositionResult composedMesh = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
+    model.surfaceTileCount = composedMesh.stats.surfaceTileCount;
+    model.wallTileCount = composedMesh.stats.wallTileCount;
+    model.uniqueTileMeshCount = composedMesh.stats.uniqueTileMeshCount;
+    model.reusedTileMeshCount = composedMesh.stats.reusedTileMeshCount;
+    model.seamCheckedEdges = composedMesh.seams.checkedEdges;
+    model.seamMismatchCount = composedMesh.seams.mismatches;
+    model.seamMaxGap = composedMesh.seams.maxGap;
+    model.beveledSegmentCount = composedMesh.stats.beveledSegmentCount;
+    model.cornerCapCount = composedMesh.stats.cornerCapCount;
+    for (const landscape_mesh::MeshQuad& quad : composedMesh.quads) {
+        addMeshQuad(model, toAppMeshQuad(quad));
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        g_landscapeModel = std::move(model);
+    }
+
+    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, maxAdjacentDelta={}, cells clearing/high/hill={}/{}/{}, meshQuality hSub/vSub/rockAmp={}/{}/{:.2f}, tiles surface/walls/unique={}/{}/{}, bevelSegments/caps={}/{}, seams checked/mismatch/gap={}/{}/{:.4f}, quads top/walls/total={}/{}/{}",
+        settings.gridWidth,
+        settings.gridHeight,
+        g_landscapeModel.minHeight,
+        g_landscapeModel.maxHeight,
+        g_landscapeModel.maxAdjacentLevelDelta,
+        g_landscapeModel.clearingCellCount,
+        g_landscapeModel.highGroundCellCount,
+        g_landscapeModel.hillCellCount,
+        meshSettings.wallHorizontalSubdivisions,
+        meshSettings.wallVerticalSubdivisions,
+        meshSettings.rockAmplitude,
+        g_landscapeModel.surfaceTileCount,
+        g_landscapeModel.wallTileCount,
+        g_landscapeModel.uniqueTileMeshCount,
+        g_landscapeModel.beveledSegmentCount,
+        g_landscapeModel.cornerCapCount,
+        g_landscapeModel.seamCheckedEdges,
+        g_landscapeModel.seamMismatchCount,
+        g_landscapeModel.seamMaxGap,
+        g_landscapeModel.topQuadCount,
+        g_landscapeModel.cliffWallQuadCount,
+        g_landscapeModel.meshQuads.size());
+}
+
+} // namespace meshgen_playground
