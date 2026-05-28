@@ -9,7 +9,6 @@
 #include <sstream>
 #include <iomanip>
 
-#include <FastNoise/FastNoise.h>
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -143,6 +142,8 @@ struct RectangleCliffModel {
     std::vector<MeshQuad> meshQuads;
     int topQuadCount = 0;
     int cliffWallQuadCount = 0;
+    int beveledSegmentCount = 0;
+    int cornerCapCount = 0;
 };
 
 enum class LandscapeZone : std::uint8_t {
@@ -194,6 +195,8 @@ struct LandscapeBowlModel {
     int seamCheckedEdges = 0;
     int seamMismatchCount = 0;
     float seamMaxGap = 0.0f;
+    int beveledSegmentCount = 0;
+    int cornerCapCount = 0;
 };
 
 struct AppState {
@@ -411,797 +414,36 @@ MeshQuad toAppMeshQuad(const landscape_mesh::MeshQuad& quad) {
     return result;
 }
 
-ImU32 colorForBoundarySide(BoundarySide side) {
-    switch (side) {
-    case BoundarySide::Top:
-        return IM_COL32(104, 92, 76, 255);
-    case BoundarySide::Right:
-        return IM_COL32(86, 82, 74, 255);
-    case BoundarySide::Bottom:
-        return IM_COL32(130, 108, 84, 255);
-    case BoundarySide::Left:
-    default:
-        return IM_COL32(96, 88, 78, 255);
-    }
+landscape_mesh::SolidMaskGrid toSharedSolidMaskGrid(
+    const std::vector<std::uint8_t>& solidCells,
+    int width,
+    int height) {
+
+    landscape_mesh::SolidMaskGrid mask;
+    mask.width = width;
+    mask.height = height;
+    mask.solidCells = solidCells;
+    mask.topCells = solidCells;
+    mask.zones.assign(solidCells.size(), landscape_core::LandscapeZone::Lowland);
+    return mask;
 }
 
-Vec3 outwardNormalForBoundarySide(BoundarySide side) {
-    switch (side) {
-    case BoundarySide::Top:
-        return {0.0f, 0.0f, -1.0f};
-    case BoundarySide::Right:
-        return {1.0f, 0.0f, 0.0f};
-    case BoundarySide::Bottom:
-        return {0.0f, 0.0f, 1.0f};
-    case BoundarySide::Left:
-    default:
-        return {-1.0f, 0.0f, 0.0f};
-    }
-}
-
-bool samePoint(const Int2& a, const Int2& b) {
-    return a.x == b.x && a.y == b.y;
-}
-
-Vec3 normalizeHorizontal(const Vec3& value, const Vec3& fallback) {
-    const float length = std::sqrt(value.x * value.x + value.z * value.z);
-    if (length < 0.0001f) {
-        return fallback;
-    }
-
-    return {value.x / length, 0.0f, value.z / length};
-}
-
-bool tryBoundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, Vec3& outNormal) {
-    Vec3 sum{};
-    bool found = false;
-    for (const BoundarySegment& segment : model.boundarySegments) {
-        if (!samePoint(segment.a, vertex) && !samePoint(segment.b, vertex)) {
-            continue;
-        }
-
-        const Vec3 normal = outwardNormalForBoundarySide(segment.side);
-        sum.x += normal.x;
-        sum.z += normal.z;
-        found = true;
-    }
-
-    if (!found) {
-        return false;
-    }
-
-    outNormal = normalizeHorizontal(sum, {0.0f, 0.0f, 1.0f});
-    return true;
-}
-
-Vec3 boundaryVertexNormal(const RectangleCliffModel& model, const Int2& vertex, const Vec3& fallback) {
-    Vec3 normal;
-    if (tryBoundaryVertexNormal(model, vertex, normal)) {
-        return normal;
-    }
-
-    return fallback;
-}
-
-bool isBoundaryCorner(const RectangleCliffModel& model, const Int2& vertex) {
-    int firstSide = -1;
-    for (const BoundarySegment& segment : model.boundarySegments) {
-        if (!samePoint(segment.a, vertex) && !samePoint(segment.b, vertex)) {
-            continue;
-        }
-
-        const int side = (int)segment.side;
-        if (firstSide < 0) {
-            firstSide = side;
-        } else if (firstSide != side) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-Vec3 subtractVec3(const Vec3& a, const Vec3& b) {
-    return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-Vec3 addVec3(const Vec3& a, const Vec3& b) {
-    return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-
-Vec3 scaleVec3(const Vec3& value, float scale) {
-    return {value.x * scale, value.y * scale, value.z * scale};
-}
-
-float horizontalLength(const Vec3& value) {
-    return std::sqrt(value.x * value.x + value.z * value.z);
-}
-
-Vec3 gridPointToVec3(const Int2& point, float y) {
-    return {(float)point.x, y, (float)point.y};
-}
-
-std::vector<MeshBoundarySegment> buildBeveledBoundarySegments(const RectangleCliffModel& model, const RectangleCliffSettings& settings) {
-    struct TrimmedEndpoint {
-        Int2 corner;
-        Vec3 point;
-        BoundarySide side = BoundarySide::Top;
-        Vec3 sideNormal;
-        Vec3 bevelNormal;
-    };
-
-    std::vector<MeshBoundarySegment> segments;
-    std::vector<TrimmedEndpoint> endpoints;
-    const float bevel = clampFloat(settings.cornerBevel, 0.0f, 0.45f);
-
-    for (const BoundarySegment& segment : model.boundarySegments) {
-        const Vec3 a = gridPointToVec3(segment.a, 0.0f);
-        const Vec3 b = gridPointToVec3(segment.b, 0.0f);
-        const Vec3 delta = subtractVec3(b, a);
-        const float length = horizontalLength(delta);
-        if (length < 0.0001f) {
-            continue;
-        }
-
-        const Vec3 direction = scaleVec3(delta, 1.0f / length);
-        const bool trimStart = bevel > 0.0f && isBoundaryCorner(model, segment.a);
-        const bool trimEnd = bevel > 0.0f && isBoundaryCorner(model, segment.b);
-        const float trim = std::min(bevel, length * 0.45f);
-        const Vec3 start = trimStart ? addVec3(a, scaleVec3(direction, trim)) : a;
-        const Vec3 end = trimEnd ? addVec3(b, scaleVec3(direction, -trim)) : b;
-        const Vec3 sideNormal = outwardNormalForBoundarySide(segment.side);
-        const Vec3 startBevelNormal = trimStart ? boundaryVertexNormal(model, segment.a, sideNormal) : sideNormal;
-        const Vec3 endBevelNormal = trimEnd ? boundaryVertexNormal(model, segment.b, sideNormal) : sideNormal;
-        const Vec3 startNormal = trimStart ? normalizeHorizontal(addVec3(sideNormal, startBevelNormal), sideNormal) : sideNormal;
-        const Vec3 endNormal = trimEnd ? normalizeHorizontal(addVec3(sideNormal, endBevelNormal), sideNormal) : sideNormal;
-
-        if (horizontalLength(subtractVec3(end, start)) > 0.0001f) {
-            segments.push_back({start, end, sideNormal, startNormal, endNormal, segment.side});
-        }
-
-        if (trimStart) {
-            endpoints.push_back({segment.a, start, segment.side, sideNormal, startBevelNormal});
-        }
-        if (trimEnd) {
-            endpoints.push_back({segment.b, end, segment.side, sideNormal, endBevelNormal});
-        }
-    }
-
-    std::vector<std::uint8_t> consumed(endpoints.size(), 0);
-    for (std::size_t i = 0; i < endpoints.size(); i++) {
-        if (consumed[i]) {
-            continue;
-        }
-
-        std::vector<std::size_t> group;
-        for (std::size_t j = i; j < endpoints.size(); j++) {
-            if (!consumed[j] && samePoint(endpoints[i].corner, endpoints[j].corner)) {
-                group.push_back(j);
-                consumed[j] = 1;
-            }
-        }
-
-        if (group.size() != 2) {
-            continue;
-        }
-
-        const TrimmedEndpoint& a = endpoints[group[0]];
-        const TrimmedEndpoint& b = endpoints[group[1]];
-        if (a.side == b.side) {
-            continue;
-        }
-
-        const Vec3 normal = normalizeHorizontal(
-            addVec3(outwardNormalForBoundarySide(a.side), outwardNormalForBoundarySide(b.side)),
-            outwardNormalForBoundarySide(a.side));
-        const Vec3 startNormal = normalizeHorizontal(addVec3(normal, a.sideNormal), normal);
-        const Vec3 endNormal = normalizeHorizontal(addVec3(normal, b.sideNormal), normal);
-        if (horizontalLength(subtractVec3(b.point, a.point)) > 0.0001f) {
-            segments.push_back({a.point, b.point, normal, startNormal, endNormal, a.side});
-        }
-    }
-
-    return segments;
-}
-
-Vec3 lerpVec3(const Vec3& a, const Vec3& b, float t) {
-    return {
-        a.x + (b.x - a.x) * t,
-        a.y + (b.y - a.y) * t,
-        a.z + (b.z - a.z) * t,
-    };
-}
-
-FastNoise::SmartNode<> makeRockNoiseNode(const RectangleCliffSettings& settings) {
-    auto simplex = FastNoise::New<FastNoise::Simplex>();
-    if (!simplex) {
-        spdlog::error("makeRockNoiseNode: failed to create Simplex node");
-        return nullptr;
-    }
-
-    simplex->SetScale(settings.rockScale);
-
-    auto fractal = FastNoise::New<FastNoise::FractalRidged>();
-    if (!fractal) {
-        spdlog::warn("makeRockNoiseNode: failed to create FractalRidged, falling back to simplex");
-        return simplex;
-    }
-
-    fractal->SetSource(simplex);
-    fractal->SetOctaveCount(4);
-    fractal->SetLacunarity(2.15f);
-    fractal->SetGain(0.55f);
-    fractal->SetWeightedStrength(0.35f);
-    return fractal;
-}
-
-void sampleRockNoiseBatch(
-    const FastNoise::SmartNode<>& noise,
-    const RectangleCliffSettings& settings,
-    const std::vector<Vec3>& points,
-    std::vector<float>& outNoise) {
-
-    outNoise.assign(points.size(), 0.0f);
-    if (!noise || points.empty()) {
-        return;
-    }
-
-    std::vector<float> xs(points.size());
-    std::vector<float> ys(points.size());
-    std::vector<float> zs(points.size());
-    for (std::size_t i = 0; i < points.size(); i++) {
-        xs[i] = points[i].x;
-        ys[i] = points[i].y;
-        zs[i] = points[i].z;
-    }
-
-    noise->GenPositionArray3D(
-        outNoise.data(),
-        (int)points.size(),
-        xs.data(),
-        ys.data(),
-        zs.data(),
-        0.0f,
-        0.0f,
-        0.0f,
-        settings.rockSeed);
-
-    for (float& value : outNoise) {
-        value = clampFloat(value, -1.0f, 1.0f);
-    }
-}
-
-FastNoise::SmartNode<> makeLandscapeNoiseNode(const LandscapeBowlSettings& settings) {
-    auto simplex = FastNoise::New<FastNoise::Simplex>();
-    if (!simplex) {
-        spdlog::error("makeLandscapeNoiseNode: failed to create Simplex node");
-        return nullptr;
-    }
-
-    simplex->SetScale(settings.arcNoiseScale);
-
-    auto fractal = FastNoise::New<FastNoise::FractalRidged>();
-    if (!fractal) {
-        spdlog::warn("makeLandscapeNoiseNode: failed to create FractalRidged, falling back to simplex");
-        return simplex;
-    }
-
-    fractal->SetSource(simplex);
-    fractal->SetOctaveCount(4);
-    fractal->SetLacunarity(2.05f);
-    fractal->SetGain(0.5f);
-    return fractal;
-}
-
-void sampleLandscapeNoiseBatch(
-    const FastNoise::SmartNode<>& noise,
-    const LandscapeBowlSettings& settings,
-    const std::vector<Vec3>& points,
-    std::vector<float>& outNoise) {
-
-    outNoise.assign(points.size(), 0.0f);
-    if (!noise || points.empty()) {
-        return;
-    }
-
-    std::vector<float> xs(points.size());
-    std::vector<float> ys(points.size());
-    std::vector<float> zs(points.size());
-    for (std::size_t i = 0; i < points.size(); i++) {
-        xs[i] = points[i].x;
-        ys[i] = points[i].y;
-        zs[i] = points[i].z;
-    }
-
-    noise->GenPositionArray3D(
-        outNoise.data(),
-        (int)points.size(),
-        xs.data(),
-        ys.data(),
-        zs.data(),
-        0.0f,
-        0.0f,
-        0.0f,
-        settings.seed);
-
-    for (float& value : outNoise) {
-        value = clampFloat(value, -1.0f, 1.0f);
-    }
-}
-
-float terraceValue(float value, int steps) {
-    if (steps <= 1) {
-        return value;
-    }
-
-    const float normalized = (value + 1.0f) * 0.5f;
-    const float terraced = (float)((int)(normalized * (float)steps)) / (float)steps;
-    return terraced * 2.0f - 1.0f;
-}
-
-Vec3 displaceRockPoint(
-    const RectangleCliffSettings& settings,
-    const Vec3& point,
-    const Vec3& outwardNormal,
-    float heightT,
-    float rawNoise) {
-
-    if (!settings.rockEnabled || settings.rockAmplitude <= 0.0f) {
-        return point;
-    }
-
-    const float steppedNoise = terraceValue(rawNoise, settings.terraceSteps);
-    const float topFade = 1.0f - clampFloat(heightT, 0.0f, 1.0f);
-    const float lowerBias = topFade * (0.35f + topFade * 0.65f);
-    const float offset = steppedNoise * settings.rockAmplitude * lowerBias;
-
-    return {
-        point.x + outwardNormal.x * offset,
-        point.y,
-        point.z + outwardNormal.z * offset,
-    };
-}
-
-Vec3 displaceLandscapeWallPoint(
-    const RectangleCliffSettings& settings,
-    const Vec3& point,
-    const Vec3& outwardNormal,
-    float heightT,
-    float rawNoise) {
-
-    if (!settings.rockEnabled || settings.rockAmplitude <= 0.0f) {
-        return point;
-    }
-
-    const float clampedHeightT = clampFloat(heightT, 0.0f, 1.0f);
-    const float edgeFade = std::sin(clampedHeightT * 3.14159265f);
-    if (edgeFade <= 0.0001f) {
-        return point;
-    }
-
-    const float steppedNoise = terraceValue(rawNoise, settings.terraceSteps);
-    const float offset = steppedNoise * settings.rockAmplitude * edgeFade;
-    return {
-        point.x + outwardNormal.x * offset,
-        point.y,
-        point.z + outwardNormal.z * offset,
-    };
-}
-
-ImU32 rockWallColor(BoundarySide side, float heightT, float noiseValue) {
-    const int sideBias = side == BoundarySide::Bottom ? 16 : (side == BoundarySide::Right ? -8 : 0);
-    const int shade = (int)(noiseValue * 24.0f) + (int)((1.0f - heightT) * 38.0f) + sideBias;
-    const int r = clampInt(92 + shade, 46, 170);
-    const int g = clampInt(86 + shade, 44, 160);
-    const int b = clampInt(78 + shade, 40, 150);
-    return IM_COL32(r, g, b, 255);
-}
-
-ImU32 rockTopColor(float noiseValue) {
-    const int shade = (int)(noiseValue * 10.0f);
-    const int r = clampInt(88 + shade, 58, 122);
-    const int g = clampInt(143 + shade, 104, 172);
-    const int b = clampInt(82 + shade, 52, 116);
-    return IM_COL32(r, g, b, 255);
-}
-
-bool applyTopCornerBevel(
-    const RectangleCliffModel& model,
-    const RectangleCliffSettings& settings,
-    int cellX,
-    int cellY,
-    Vec3& point,
-    Vec3& outNormal) {
-
-    struct CornerRule {
-        Int2 vertex;
-        bool enabled = false;
-        float axisAX = 0.0f;
-        float axisAZ = 0.0f;
-        float axisBX = 0.0f;
-        float axisBZ = 0.0f;
-    };
-
-    const float bevel = settings.cornerBevel;
-    if (bevel <= 0.0f) {
-        return false;
-    }
-
-    const CornerRule rules[] = {
-        {{cellX, cellY},
-            !isSolidCell(model, settings, cellX, cellY - 1) && !isSolidCell(model, settings, cellX - 1, cellY),
-            1.0f, 0.0f, 0.0f, 1.0f},
-        {{cellX + 1, cellY},
-            !isSolidCell(model, settings, cellX, cellY - 1) && !isSolidCell(model, settings, cellX + 1, cellY),
-            -1.0f, 0.0f, 0.0f, 1.0f},
-        {{cellX + 1, cellY + 1},
-            !isSolidCell(model, settings, cellX + 1, cellY) && !isSolidCell(model, settings, cellX, cellY + 1),
-            -1.0f, 0.0f, 0.0f, -1.0f},
-        {{cellX, cellY + 1},
-            !isSolidCell(model, settings, cellX - 1, cellY) && !isSolidCell(model, settings, cellX, cellY + 1),
-            1.0f, 0.0f, 0.0f, -1.0f},
-    };
-
-    for (const CornerRule& rule : rules) {
-        if (!rule.enabled) {
-            continue;
-        }
-
-        const float fromCornerX = point.x - (float)rule.vertex.x;
-        const float fromCornerZ = point.z - (float)rule.vertex.y;
-        float distanceA = fromCornerX * rule.axisAX + fromCornerZ * rule.axisAZ;
-        float distanceB = fromCornerX * rule.axisBX + fromCornerZ * rule.axisBZ;
-        if (distanceA < -0.0001f || distanceB < -0.0001f || distanceA > bevel || distanceB > bevel) {
-            continue;
-        }
-
-        const float sum = distanceA + distanceB;
-        if (sum >= bevel) {
-            continue;
-        }
-
-        if (sum < 0.0001f) {
-            distanceA = bevel * 0.5f;
-            distanceB = bevel * 0.5f;
-        } else {
-            const float scale = bevel / sum;
-            distanceA *= scale;
-            distanceB *= scale;
-        }
-
-        point.x = (float)rule.vertex.x + rule.axisAX * distanceA + rule.axisBX * distanceB;
-        point.z = (float)rule.vertex.y + rule.axisAZ * distanceA + rule.axisBZ * distanceB;
-        outNormal = boundaryVertexNormal(model, rule.vertex, {0.0f, 0.0f, 1.0f});
-        return true;
-    }
-
-    return false;
-}
-
-bool topBoundaryNormalForCellPoint(
-    const RectangleCliffModel& model,
-    const RectangleCliffSettings& settings,
-    int cellX,
-    int cellY,
-    int subX,
-    int subY,
-    int subdivisions,
-    Vec3& outNormal) {
-
-    const bool onLeft = subX == 0;
-    const bool onRight = subX == subdivisions;
-    const bool onTop = subY == 0;
-    const bool onBottom = subY == subdivisions;
-
-    if ((onLeft || onRight) && (onTop || onBottom)) {
-        const Int2 vertex{
-            cellX + (onRight ? 1 : 0),
-            cellY + (onBottom ? 1 : 0),
-        };
-        if (tryBoundaryVertexNormal(model, vertex, outNormal)) {
-            return true;
-        }
-    }
-
-    Vec3 sum{};
-    bool found = false;
-    if (onTop && !isSolidCell(model, settings, cellX, cellY - 1)) {
-        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Top);
-        sum.x += normal.x;
-        sum.z += normal.z;
-        found = true;
-    }
-    if (onRight && !isSolidCell(model, settings, cellX + 1, cellY)) {
-        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Right);
-        sum.x += normal.x;
-        sum.z += normal.z;
-        found = true;
-    }
-    if (onBottom && !isSolidCell(model, settings, cellX, cellY + 1)) {
-        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Bottom);
-        sum.x += normal.x;
-        sum.z += normal.z;
-        found = true;
-    }
-    if (onLeft && !isSolidCell(model, settings, cellX - 1, cellY)) {
-        const Vec3 normal = outwardNormalForBoundarySide(BoundarySide::Left);
-        sum.x += normal.x;
-        sum.z += normal.z;
-        found = true;
-    }
-
-    if (!found) {
-        return false;
-    }
-
-    outNormal = normalizeHorizontal(sum, {0.0f, 0.0f, 1.0f});
-    return true;
-}
-
-Vec3 displaceRockTopPoint(
-    const RectangleCliffSettings& settings,
-    const Vec3& point,
-    const Vec3& normal,
-    bool boundaryPoint,
-    float rawNoise) {
-
-    if (!boundaryPoint) {
-        return point;
-    }
-
-    return displaceRockPoint(settings, point, normal, 1.0f, rawNoise);
-}
-
-void addRockTopCell(
-    RectangleCliffModel& model,
-    const RectangleCliffSettings& settings,
-    const FastNoise::SmartNode<>& rockNoise,
-    int cellX,
-    int cellY) {
-
-    const float h = settings.cliffHeight;
-    const int subdivisions = settings.wallHorizontalSubdivisions;
-    const int vertexColumns = subdivisions + 1;
-    std::vector<Vec3> points((std::size_t)vertexColumns * (std::size_t)vertexColumns);
-    std::vector<Vec3> normals(points.size());
-    std::vector<std::uint8_t> boundaryFlags(points.size(), 0);
-    std::vector<float> noise;
-
-    for (int y = 0; y <= subdivisions; y++) {
-        const float v = (float)y / (float)subdivisions;
-        for (int x = 0; x <= subdivisions; x++) {
-            const float u = (float)x / (float)subdivisions;
-            const std::size_t index = (std::size_t)y * (std::size_t)vertexColumns + (std::size_t)x;
-            points[index] = {(float)cellX + u, h, (float)cellY + v};
-            if (applyTopCornerBevel(model, settings, cellX, cellY, points[index], normals[index])) {
-                boundaryFlags[index] = 1;
-            } else {
-                boundaryFlags[index] = topBoundaryNormalForCellPoint(
-                    model,
-                    settings,
-                    cellX,
-                    cellY,
-                    x,
-                    y,
-                    subdivisions,
-                    normals[index]) ? 1 : 0;
-            }
-        }
-    }
-
-    sampleRockNoiseBatch(rockNoise, settings, points, noise);
-
-    for (int y = 0; y < subdivisions; y++) {
-        for (int x = 0; x < subdivisions; x++) {
-            const std::size_t i00 = (std::size_t)y * (std::size_t)vertexColumns + (std::size_t)x;
-            const std::size_t i10 = i00 + 1;
-            const std::size_t i01 = (std::size_t)(y + 1) * (std::size_t)vertexColumns + (std::size_t)x;
-            const std::size_t i11 = i01 + 1;
-
-            MeshQuad top;
-            top.a = displaceRockTopPoint(settings, points[i00], normals[i00], boundaryFlags[i00] != 0, noise[i00]);
-            top.b = displaceRockTopPoint(settings, points[i10], normals[i10], boundaryFlags[i10] != 0, noise[i10]);
-            top.c = displaceRockTopPoint(settings, points[i11], normals[i11], boundaryFlags[i11] != 0, noise[i11]);
-            top.d = displaceRockTopPoint(settings, points[i01], normals[i01], boundaryFlags[i01] != 0, noise[i01]);
-
-            const float panelNoise = (noise[i00] + noise[i10] + noise[i11] + noise[i01]) * 0.25f;
-            top.color = rockTopColor(panelNoise);
-            top.cliffWall = false;
-            addMeshQuad(model, top);
-        }
-    }
-}
-
-void addInnerCornerBevelCaps(RectangleCliffModel& model, const RectangleCliffSettings& settings) {
-    struct CornerEndpoint {
-        Int2 corner;
-        Vec3 point;
-        BoundarySide side = BoundarySide::Top;
-    };
-
-    const float bevel = clampFloat(settings.cornerBevel, 0.0f, 0.45f);
-    if (bevel <= 0.0f) {
-        return;
-    }
-
-    std::vector<CornerEndpoint> endpoints;
-    endpoints.reserve(model.boundarySegments.size() * 2);
-    for (const BoundarySegment& segment : model.boundarySegments) {
-        const Vec3 a = gridPointToVec3(segment.a, settings.cliffHeight);
-        const Vec3 b = gridPointToVec3(segment.b, settings.cliffHeight);
-        const Vec3 delta = subtractVec3(b, a);
-        const float length = horizontalLength(delta);
-        if (length < 0.0001f) {
-            continue;
-        }
-
-        const Vec3 direction = scaleVec3(delta, 1.0f / length);
-        const float trim = std::min(bevel, length * 0.45f);
-        if (isBoundaryCorner(model, segment.a)) {
-            endpoints.push_back({segment.a, addVec3(a, scaleVec3(direction, trim)), segment.side});
-        }
-        if (isBoundaryCorner(model, segment.b)) {
-            endpoints.push_back({segment.b, addVec3(b, scaleVec3(direction, -trim)), segment.side});
-        }
-    }
-
-    std::vector<std::uint8_t> consumed(endpoints.size(), 0);
-    int capCount = 0;
-    for (std::size_t i = 0; i < endpoints.size(); i++) {
-        if (consumed[i]) {
-            continue;
-        }
-
-        std::vector<std::size_t> group;
-        for (std::size_t j = i; j < endpoints.size(); j++) {
-            if (!consumed[j] && samePoint(endpoints[i].corner, endpoints[j].corner)) {
-                group.push_back(j);
-                consumed[j] = 1;
-            }
-        }
-
-        if (group.size() != 2) {
-            continue;
-        }
-
-        const VertexKind kind = classifyVertex(model, settings, endpoints[i].corner.x, endpoints[i].corner.y);
-        if (kind != VertexKind::InnerCorner) {
-            continue;
-        }
-
-        const CornerEndpoint& a = endpoints[group[0]];
-        const CornerEndpoint& b = endpoints[group[1]];
-        if (a.side == b.side) {
-            continue;
-        }
-
-        const Vec3 corner = gridPointToVec3(a.corner, settings.cliffHeight);
-        const Vec3 mid = scaleVec3(addVec3(a.point, b.point), 0.5f);
-
-        MeshQuad cap;
-        cap.a = corner;
-        cap.b = a.point;
-        cap.c = mid;
-        cap.d = b.point;
-        cap.color = rockTopColor(0.0f);
-        cap.cliffWall = false;
-        addMeshQuad(model, cap);
-        capCount++;
-    }
-
-    if (capCount > 0) {
-        spdlog::info("addInnerCornerBevelCaps: added {} concave top bevel caps", capCount);
-    }
-}
-
-void generateSimpleCliffMesh(RectangleCliffModel& model, const RectangleCliffSettings& settings) {
-    const float h = settings.cliffHeight;
-    const FastNoise::SmartNode<> rockNoise = settings.rockEnabled ? makeRockNoiseNode(settings) : nullptr;
-
-    spdlog::info("generateSimpleCliffMesh: grid={}x{}, cliffHeight={}, rockEnabled={}, boundarySegments={}",
-        settings.gridWidth, settings.gridHeight, h, settings.rockEnabled, model.boundarySegments.size());
-
-    for (int y = 0; y < settings.gridHeight; y++) {
-        for (int x = 0; x < settings.gridWidth; x++) {
-            if (!isSolidCell(model, settings, x, y)) {
-                continue;
-            }
-
-            if (settings.rockEnabled) {
-                addRockTopCell(model, settings, rockNoise, x, y);
-                continue;
-            }
-
-            MeshQuad top;
-            top.a = {(float)x, h, (float)y};
-            top.b = {(float)(x + 1), h, (float)y};
-            top.c = {(float)(x + 1), h, (float)(y + 1)};
-            top.d = {(float)x, h, (float)(y + 1)};
-            top.color = IM_COL32(88, 143, 82, 255);
-            top.cliffWall = false;
-            addMeshQuad(model, top);
-        }
-    }
-
-    if (settings.rockEnabled) {
-        addInnerCornerBevelCaps(model, settings);
-    }
-
-    const std::vector<MeshBoundarySegment> meshBoundarySegments = buildBeveledBoundarySegments(model, settings);
-
-    for (const MeshBoundarySegment& segment : meshBoundarySegments) {
-        if (!settings.rockEnabled) {
-            MeshQuad wall;
-            wall.a = {segment.a.x, h, segment.a.z};
-            wall.b = {segment.b.x, h, segment.b.z};
-            wall.c = {segment.b.x, 0.0f, segment.b.z};
-            wall.d = {segment.a.x, 0.0f, segment.a.z};
-            wall.color = colorForBoundarySide(segment.side);
-            wall.cliffWall = true;
-            addMeshQuad(model, wall);
-            continue;
-        }
-
-        const Vec3 topA{segment.a.x, h, segment.a.z};
-        const Vec3 topB{segment.b.x, h, segment.b.z};
-        const Vec3 bottomA{segment.a.x, 0.0f, segment.a.z};
-        const Vec3 bottomB{segment.b.x, 0.0f, segment.b.z};
-        const int vertexColumns = settings.wallHorizontalSubdivisions + 1;
-        const int vertexRows = settings.wallVerticalSubdivisions + 1;
-        std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
-        std::vector<Vec3> wallNormals((std::size_t)vertexColumns * (std::size_t)vertexRows);
-        std::vector<float> wallNoise;
-
-        for (int row = 0; row < vertexRows; row++) {
-            const float v = (float)row / (float)settings.wallVerticalSubdivisions;
-            const float topT = 1.0f - v;
-            const Vec3 rowA = lerpVec3(bottomA, topA, topT);
-            const Vec3 rowB = lerpVec3(bottomB, topB, topT);
-
-            for (int column = 0; column < vertexColumns; column++) {
-                const float u = (float)column / (float)settings.wallHorizontalSubdivisions;
-                const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
-                wallPoints[index] = lerpVec3(rowA, rowB, u);
-                if (column == 0) {
-                    wallNormals[index] = segment.startNormal;
-                } else if (column == vertexColumns - 1) {
-                    wallNormals[index] = segment.endNormal;
-                } else {
-                    wallNormals[index] = segment.normal;
-                }
-            }
-        }
-
-        sampleRockNoiseBatch(rockNoise, settings, wallPoints, wallNoise);
-
-        for (int sy = 0; sy < settings.wallVerticalSubdivisions; sy++) {
-            const float v0 = (float)sy / (float)settings.wallVerticalSubdivisions;
-            const float v1 = (float)(sy + 1) / (float)settings.wallVerticalSubdivisions;
-            const float topT0 = 1.0f - v0;
-            const float topT1 = 1.0f - v1;
-
-            for (int sx = 0; sx < settings.wallHorizontalSubdivisions; sx++) {
-                const std::size_t i00 = (std::size_t)sy * (std::size_t)vertexColumns + (std::size_t)sx;
-                const std::size_t i10 = i00 + 1;
-                const std::size_t i01 = (std::size_t)(sy + 1) * (std::size_t)vertexColumns + (std::size_t)sx;
-                const std::size_t i11 = i01 + 1;
-
-                MeshQuad wall;
-                wall.a = displaceRockPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00]);
-                wall.b = displaceRockPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10]);
-                wall.c = displaceRockPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11]);
-                wall.d = displaceRockPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01]);
-
-                const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
-                wall.color = rockWallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
-                wall.cliffWall = true;
-                addMeshQuad(model, wall);
-            }
-        }
-    }
-
-    spdlog::info("generateSimpleCliffMesh: result topQuads={}, cliffWallQuads={}, total={}",
-        model.topQuadCount, model.cliffWallQuadCount, model.meshQuads.size());
+landscape_mesh::MeshBuildSettings makeSharedLandscapeMeshSettings(float levelHeight) {
+    RectangleCliffSettings qualitySettings = g_rectSettings;
+    sanitizeSettings(qualitySettings);
+
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.cellSize = 1.0f;
+    meshSettings.levelHeight = levelHeight;
+    meshSettings.cornerBevel = qualitySettings.cornerBevel;
+    meshSettings.rockEnabled = qualitySettings.rockEnabled;
+    meshSettings.rockSeed = qualitySettings.rockSeed;
+    meshSettings.rockScale = qualitySettings.rockScale;
+    meshSettings.rockAmplitude = qualitySettings.rockAmplitude;
+    meshSettings.wallHorizontalSubdivisions = qualitySettings.wallHorizontalSubdivisions;
+    meshSettings.wallVerticalSubdivisions = qualitySettings.wallVerticalSubdivisions;
+    meshSettings.terraceSteps = qualitySettings.terraceSteps;
+    return meshSettings;
 }
 
 void rebuildRectangleCliffModel() {
@@ -1270,16 +512,35 @@ void rebuildRectangleCliffModel() {
         }
     }
 
-    generateSimpleCliffMesh(model, settings);
+    const landscape_mesh::SolidMaskGrid sharedMask = toSharedSolidMaskGrid(model.solidCells, settings.gridWidth, settings.gridHeight);
+    landscape_mesh::SolidMeshBuildRequest meshRequest;
+    meshRequest.mask = sharedMask;
+    meshRequest.baseHeight = 0.0f;
+    meshRequest.topHeight = settings.cliffHeight;
+    meshRequest.level = 1;
+    meshRequest.maxLevel = 1;
+    meshRequest.includeWalls = true;
+    meshRequest.fadeWallDisplacementAtBottom = false;
+
+    const landscape_mesh::CompositionResult meshResult = landscape_mesh::composeSolidMaskMesh(
+        meshRequest,
+        makeSharedLandscapeMeshSettings(settings.cliffHeight));
+    model.beveledSegmentCount = meshResult.stats.beveledSegmentCount;
+    model.cornerCapCount = meshResult.stats.cornerCapCount;
+    for (const landscape_mesh::MeshQuad& quad : meshResult.quads) {
+        addMeshQuad(model, toAppMeshQuad(quad));
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         g_rectModel = std::move(model);
     }
 
-    spdlog::info("rebuildRectangleCliffModel: done, solidCells={}, boundarySegments={}, vertices E={}/O={}/I={}/D={}",
+    spdlog::info("rebuildRectangleCliffModel: done, solidCells={}, boundarySegments={}, beveledSegments={}, cornerCaps={}, vertices E={}/O={}/I={}/D={}",
         g_rectModel.solidCellCount,
         g_rectModel.boundarySegments.size(),
+        g_rectModel.beveledSegmentCount,
+        g_rectModel.cornerCapCount,
         g_rectModel.edgeVertexCount,
         g_rectModel.outerCornerCount,
         g_rectModel.innerCornerCount,
@@ -1351,215 +612,6 @@ ImU32 colorForLandscapeZone(LandscapeZone zone, float height, float minHeight, f
     }
 }
 
-ImU32 landscapeWallColor(float heightT, float noiseValue) {
-    const int shade = (int)(noiseValue * 22.0f) + (int)((1.0f - heightT) * 34.0f);
-    return IM_COL32(
-        clampInt(92 + shade, 52, 162),
-        clampInt(88 + shade, 50, 154),
-        clampInt(76 + shade, 44, 136),
-        255);
-}
-
-bool verticalRangesOverlap(float a0, float a1, float b0, float b1) {
-    const float aMin = std::min(a0, a1);
-    const float aMax = std::max(a0, a1);
-    const float bMin = std::min(b0, b1);
-    const float bMax = std::max(b0, b1);
-    return std::min(aMax, bMax) - std::max(aMin, bMin) > 0.0001f;
-}
-
-Vec3 landscapeBoundaryVertexNormal(
-    const LandscapeBowlModel& model,
-    const LandscapeBowlSettings& settings,
-    const Int2& vertex,
-    float lowHeight,
-    float highHeight,
-    const Vec3& fallback) {
-
-    Vec3 sum{};
-    bool found = false;
-    auto addCandidate = [&](const Int2& a, const Int2& b, float firstHeight, float secondHeight, const Vec3& normal) {
-        if (!samePoint(vertex, a) && !samePoint(vertex, b)) {
-            return;
-        }
-        if (!verticalRangesOverlap(lowHeight, highHeight, firstHeight, secondHeight)) {
-            return;
-        }
-
-        sum.x += normal.x;
-        sum.z += normal.z;
-        found = true;
-    };
-
-    for (int y = 0; y < settings.gridHeight; y++) {
-        for (int x = 0; x < settings.gridWidth; x++) {
-            const float currentHeight = landscapeHeightAtCell(model, settings, x, y);
-            const int currentLevel = landscapeLevelAtCell(model, settings, x, y);
-            if (x + 1 < settings.gridWidth) {
-                const float neighborHeight = landscapeHeightAtCell(model, settings, x + 1, y);
-                const int neighborLevel = landscapeLevelAtCell(model, settings, x + 1, y);
-                if (currentLevel != neighborLevel) {
-                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{-1.0f, 0.0f, 0.0f};
-                    addCandidate({x + 1, y}, {x + 1, y + 1}, currentHeight, neighborHeight, normal);
-                }
-            }
-
-            if (y + 1 < settings.gridHeight) {
-                const float neighborHeight = landscapeHeightAtCell(model, settings, x, y + 1);
-                const int neighborLevel = landscapeLevelAtCell(model, settings, x, y + 1);
-                if (currentLevel != neighborLevel) {
-                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 0.0f, -1.0f};
-                    addCandidate({x, y + 1}, {x + 1, y + 1}, currentHeight, neighborHeight, normal);
-                }
-            }
-        }
-    }
-
-    if (!found) {
-        return fallback;
-    }
-
-    return normalizeHorizontal(sum, fallback);
-}
-
-void addLandscapeCliffWall(
-    LandscapeBowlModel& model,
-    const LandscapeBowlSettings& settings,
-    const RectangleCliffSettings& rockSettings,
-    const FastNoise::SmartNode<>& rockNoise,
-    const Vec3& topA,
-    const Vec3& topB,
-    const Vec3& bottomA,
-    const Vec3& bottomB,
-    const Vec3& normal,
-    const Vec3& startNormal,
-    const Vec3& endNormal) {
-
-    const int horizontalSubdivisions = 3;
-    const int verticalSubdivisions = 4;
-    const int vertexColumns = horizontalSubdivisions + 1;
-    const int vertexRows = verticalSubdivisions + 1;
-    std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
-    std::vector<Vec3> wallNormals((std::size_t)vertexColumns * (std::size_t)vertexRows);
-    std::vector<float> wallNoise;
-
-    for (int row = 0; row < vertexRows; row++) {
-        const float v = (float)row / (float)verticalSubdivisions;
-        const float topT = 1.0f - v;
-        const Vec3 rowA = lerpVec3(bottomA, topA, topT);
-        const Vec3 rowB = lerpVec3(bottomB, topB, topT);
-        for (int column = 0; column < vertexColumns; column++) {
-            const float u = (float)column / (float)horizontalSubdivisions;
-            const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
-            wallPoints[index] = lerpVec3(rowA, rowB, u);
-            if (column == 0) {
-                wallNormals[index] = startNormal;
-            } else if (column == vertexColumns - 1) {
-                wallNormals[index] = endNormal;
-            } else {
-                wallNormals[index] = normal;
-            }
-        }
-    }
-
-    sampleRockNoiseBatch(rockNoise, rockSettings, wallPoints, wallNoise);
-
-    for (int sy = 0; sy < verticalSubdivisions; sy++) {
-        const float v0 = (float)sy / (float)verticalSubdivisions;
-        const float v1 = (float)(sy + 1) / (float)verticalSubdivisions;
-        const float topT0 = 1.0f - v0;
-        const float topT1 = 1.0f - v1;
-        for (int sx = 0; sx < horizontalSubdivisions; sx++) {
-            const std::size_t i00 = (std::size_t)sy * (std::size_t)vertexColumns + (std::size_t)sx;
-            const std::size_t i10 = i00 + 1;
-            const std::size_t i01 = (std::size_t)(sy + 1) * (std::size_t)vertexColumns + (std::size_t)sx;
-            const std::size_t i11 = i01 + 1;
-
-            MeshQuad wall;
-            wall.a = displaceLandscapeWallPoint(rockSettings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00]);
-            wall.b = displaceLandscapeWallPoint(rockSettings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10]);
-            wall.c = displaceLandscapeWallPoint(rockSettings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11]);
-            wall.d = displaceLandscapeWallPoint(rockSettings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01]);
-            wall.color = landscapeWallColor((topT0 + topT1) * 0.5f, (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f);
-            wall.cliffWall = true;
-            addMeshQuad(model, wall);
-        }
-    }
-}
-
-void generateLandscapeBowlMesh(LandscapeBowlModel& model, const LandscapeBowlSettings& settings) {
-    RectangleCliffSettings rockSettings;
-    rockSettings.rockEnabled = true;
-    rockSettings.rockSeed = settings.seed + 7919;
-    rockSettings.rockScale = std::max(0.5f, settings.arcNoiseScale * 1.25f);
-    rockSettings.rockAmplitude = 0.18f;
-    rockSettings.terraceSteps = 3;
-    sanitizeSettings(rockSettings);
-
-    const FastNoise::SmartNode<> rockNoise = makeRockNoiseNode(rockSettings);
-
-    for (int y = 0; y < settings.gridHeight; y++) {
-        for (int x = 0; x < settings.gridWidth; x++) {
-            const float currentHeight = landscapeHeightAtCell(model, settings, x, y);
-
-            MeshQuad top;
-            top.a = {(float)x, currentHeight, (float)y};
-            top.b = {(float)(x + 1), currentHeight, (float)y};
-            top.c = {(float)(x + 1), currentHeight, (float)(y + 1)};
-            top.d = {(float)x, currentHeight, (float)(y + 1)};
-            top.color = colorForLandscapeZone(landscapeZoneAtCell(model, settings, x, y), currentHeight, model.minHeight, model.maxHeight);
-            top.cliffWall = false;
-            addMeshQuad(model, top);
-
-            if (x + 1 < settings.gridWidth) {
-                const float neighborHeight = landscapeHeightAtCell(model, settings, x + 1, y);
-                if (landscapeLevelAtCell(model, settings, x, y) != landscapeLevelAtCell(model, settings, x + 1, y)) {
-                    const float high = std::max(currentHeight, neighborHeight);
-                    const float low = std::min(currentHeight, neighborHeight);
-                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{-1.0f, 0.0f, 0.0f};
-                    const Vec3 startNormal = landscapeBoundaryVertexNormal(model, settings, {x + 1, y}, low, high, normal);
-                    const Vec3 endNormal = landscapeBoundaryVertexNormal(model, settings, {x + 1, y + 1}, low, high, normal);
-                    addLandscapeCliffWall(
-                        model,
-                        settings,
-                        rockSettings,
-                        rockNoise,
-                        {(float)(x + 1), high, (float)y},
-                        {(float)(x + 1), high, (float)(y + 1)},
-                        {(float)(x + 1), low, (float)y},
-                        {(float)(x + 1), low, (float)(y + 1)},
-                        normal,
-                        startNormal,
-                        endNormal);
-                }
-            }
-
-            if (y + 1 < settings.gridHeight) {
-                const float neighborHeight = landscapeHeightAtCell(model, settings, x, y + 1);
-                if (landscapeLevelAtCell(model, settings, x, y) != landscapeLevelAtCell(model, settings, x, y + 1)) {
-                    const float high = std::max(currentHeight, neighborHeight);
-                    const float low = std::min(currentHeight, neighborHeight);
-                    const Vec3 normal = currentHeight > neighborHeight ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 0.0f, -1.0f};
-                    const Vec3 startNormal = landscapeBoundaryVertexNormal(model, settings, {x, y + 1}, low, high, normal);
-                    const Vec3 endNormal = landscapeBoundaryVertexNormal(model, settings, {x + 1, y + 1}, low, high, normal);
-                    addLandscapeCliffWall(
-                        model,
-                        settings,
-                        rockSettings,
-                        rockNoise,
-                        {(float)x, high, (float)(y + 1)},
-                        {(float)(x + 1), high, (float)(y + 1)},
-                        {(float)x, low, (float)(y + 1)},
-                        {(float)(x + 1), low, (float)(y + 1)},
-                        normal,
-                        startNormal,
-                        endNormal);
-                }
-            }
-        }
-    }
-}
-
 void rebuildLandscapeBowlModel() {
     spdlog::info("rebuildLandscapeBowlModel: start");
 
@@ -1596,12 +648,7 @@ void rebuildLandscapeBowlModel() {
         }
     }
 
-    landscape_mesh::MeshBuildSettings meshSettings;
-    meshSettings.cellSize = 1.0f;
-    meshSettings.levelHeight = grid.levelHeight;
-    meshSettings.rockAmplitude = 0.16f;
-    meshSettings.wallHorizontalSubdivisions = 3;
-    meshSettings.wallVerticalSubdivisions = 4;
+    const landscape_mesh::MeshBuildSettings meshSettings = makeSharedLandscapeMeshSettings(grid.levelHeight);
     const landscape_mesh::CompositionResult composedMesh = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
     model.surfaceTileCount = composedMesh.stats.surfaceTileCount;
     model.wallTileCount = composedMesh.stats.wallTileCount;
@@ -1610,6 +657,8 @@ void rebuildLandscapeBowlModel() {
     model.seamCheckedEdges = composedMesh.seams.checkedEdges;
     model.seamMismatchCount = composedMesh.seams.mismatches;
     model.seamMaxGap = composedMesh.seams.maxGap;
+    model.beveledSegmentCount = composedMesh.stats.beveledSegmentCount;
+    model.cornerCapCount = composedMesh.stats.cornerCapCount;
     for (const landscape_mesh::MeshQuad& quad : composedMesh.quads) {
         addMeshQuad(model, toAppMeshQuad(quad));
     }
@@ -1619,7 +668,7 @@ void rebuildLandscapeBowlModel() {
         g_landscapeModel = std::move(model);
     }
 
-    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, cells clearing/high/hill={}/{}/{}, tiles surface/walls/unique={}/{}/{}, seams checked/mismatch/gap={}/{}/{:.4f}, quads top/walls/total={}/{}/{}",
+    spdlog::info("rebuildLandscapeBowlModel: done, grid={}x{}, heightRange={:.2f}-{:.2f}, cells clearing/high/hill={}/{}/{}, meshQuality hSub/vSub/rockAmp={}/{}/{:.2f}, tiles surface/walls/unique={}/{}/{}, bevelSegments/caps={}/{}, seams checked/mismatch/gap={}/{}/{:.4f}, quads top/walls/total={}/{}/{}",
         settings.gridWidth,
         settings.gridHeight,
         g_landscapeModel.minHeight,
@@ -1627,9 +676,14 @@ void rebuildLandscapeBowlModel() {
         g_landscapeModel.clearingCellCount,
         g_landscapeModel.highGroundCellCount,
         g_landscapeModel.hillCellCount,
+        meshSettings.wallHorizontalSubdivisions,
+        meshSettings.wallVerticalSubdivisions,
+        meshSettings.rockAmplitude,
         g_landscapeModel.surfaceTileCount,
         g_landscapeModel.wallTileCount,
         g_landscapeModel.uniqueTileMeshCount,
+        g_landscapeModel.beveledSegmentCount,
+        g_landscapeModel.cornerCapCount,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,
         g_landscapeModel.seamMaxGap,
@@ -2037,6 +1091,7 @@ void drawRectangleScenarioControls(float panelWidth) {
     }
     if (changed) {
         rebuildRectangleCliffModel();
+        rebuildLandscapeBowlModel();
     }
 
     ImGui::Separator();
@@ -2048,6 +1103,9 @@ void drawRectangleScenarioControls(float panelWidth) {
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             (int)g_rectModel.meshQuads.size());
+        ImGui::Text("Shared bevel segments/caps: %d / %d",
+            g_rectModel.beveledSegmentCount,
+            g_rectModel.cornerCapCount);
         ImGui::Text("Rock mode: %s", g_rectSettings.rockEnabled ? "FastNoise2 ridged" : "flat walls");
         ImGui::Text("Vertices E/O/I/D: %d / %d / %d / %d",
             g_rectModel.edgeVertexCount,
@@ -2068,7 +1126,7 @@ void drawLandscapeScenarioControls(float panelWidth) {
     ImGui::Separator();
 
     ImGui::Text("Landscape Bowl Preview");
-    ImGui::TextWrapped("Heightmap-to-logical scenario: flat clearing, terraced high-ground arc and hills composed from cached 3D tile meshes.");
+    ImGui::TextWrapped("Heightmap-to-logical scenario: flat clearing, terraced high-ground arc and hills composed from the same 3D tile quality profile as Rectangle Debug.");
 
     bool changed = false;
     {
@@ -2113,6 +1171,14 @@ void drawLandscapeScenarioControls(float panelWidth) {
             g_landscapeModel.wallTileCount,
             g_landscapeModel.uniqueTileMeshCount,
             g_landscapeModel.reusedTileMeshCount);
+        ImGui::Text("Shared tile quality h/v/rock/terrace: %d / %d / %.2f / %d",
+            g_rectSettings.wallHorizontalSubdivisions,
+            g_rectSettings.wallVerticalSubdivisions,
+            g_rectSettings.rockAmplitude,
+            g_rectSettings.terraceSteps);
+        ImGui::Text("Shared bevel segments/caps: %d / %d",
+            g_landscapeModel.beveledSegmentCount,
+            g_landscapeModel.cornerCapCount);
         ImGui::Text("Seams checked/mismatches/max gap: %d / %d / %.4f",
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
@@ -2331,23 +1397,30 @@ bool runTestScenario() {
         g_rectModel.solidCellCount > 0 &&
         !g_rectModel.boundarySegments.empty() &&
         g_rectModel.topQuadCount > 0 &&
-        g_rectModel.cliffWallQuadCount > 0;
+        g_rectModel.cliffWallQuadCount > 0 &&
+        g_rectModel.beveledSegmentCount > (int)g_rectModel.boundarySegments.size() &&
+        g_rectModel.cornerCapCount > 0;
     const bool landscapeOk =
         g_landscapeModel.surfaceTileCount > 0 &&
         g_landscapeModel.wallTileCount > 0 &&
         g_landscapeModel.uniqueTileMeshCount > 0 &&
         g_landscapeModel.seamMismatchCount == 0 &&
         g_landscapeModel.topQuadCount > 0 &&
-        g_landscapeModel.cliffWallQuadCount > 0;
+        g_landscapeModel.cliffWallQuadCount > 0 &&
+        g_landscapeModel.beveledSegmentCount > 0;
 
     if (rectangleOk && landscapeOk) {
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, landscape tiles surface/walls/unique={}/{}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
+            g_rectModel.beveledSegmentCount,
+            g_rectModel.cornerCapCount,
             g_landscapeModel.surfaceTileCount,
             g_landscapeModel.wallTileCount,
             g_landscapeModel.uniqueTileMeshCount,
+            g_landscapeModel.beveledSegmentCount,
+            g_landscapeModel.cornerCapCount,
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
             g_landscapeModel.seamMaxGap);
@@ -2355,14 +1428,18 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, landscape tiles surface/walls/unique={}/{}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,
+        g_rectModel.beveledSegmentCount,
+        g_rectModel.cornerCapCount,
         g_landscapeModel.surfaceTileCount,
         g_landscapeModel.wallTileCount,
         g_landscapeModel.uniqueTileMeshCount,
+        g_landscapeModel.beveledSegmentCount,
+        g_landscapeModel.cornerCapCount,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,
         g_landscapeModel.seamMaxGap);

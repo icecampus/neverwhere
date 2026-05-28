@@ -155,8 +155,43 @@ TEST(LandscapePipelineTest, MeshComposerUsesReusableTilesAndPassesSeamContract) 
     const landscape_mesh::CompositionResult result = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
 
     EXPECT_GT(result.stats.surfaceTileCount, 0);
-    EXPECT_GT(result.stats.uniqueTileMeshCount, 0);
-    EXPECT_GT(result.stats.reusedTileMeshCount, 0);
+    EXPECT_GT(result.stats.beveledSegmentCount, 0);
+    EXPECT_GT(result.stats.cliffWallQuadCount, 0);
     EXPECT_TRUE(result.seams.passed);
     EXPECT_EQ(result.seams.mismatches, 0);
+}
+
+TEST(LandscapePipelineTest, SharedSolidMaskBuilderCreatesBevelCapsForCutout) {
+    landscape_mesh::SolidMaskGrid mask;
+    mask.width = 8;
+    mask.height = 8;
+    mask.solidCells.assign((std::size_t)mask.width * (std::size_t)mask.height, 0);
+    mask.topCells.assign(mask.solidCells.size(), 0);
+
+    for (int y = 1; y < 7; y++) {
+        for (int x = 1; x < 7; x++) {
+            const bool cutout = x >= 3 && x < 5 && y >= 3 && y < 5;
+            const std::size_t index = (std::size_t)mask.cellIndex(x, y);
+            mask.solidCells[index] = cutout ? 0 : 1;
+            mask.topCells[index] = mask.solidCells[index];
+        }
+    }
+
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.cornerBevel = 0.3f;
+    meshSettings.wallHorizontalSubdivisions = 5;
+    meshSettings.wallVerticalSubdivisions = 6;
+
+    landscape_mesh::SolidMeshBuildRequest request;
+    request.mask = mask;
+    request.baseHeight = 0.0f;
+    request.topHeight = 2.5f;
+    request.includeWalls = true;
+
+    const landscape_mesh::CompositionResult result = landscape_mesh::composeSolidMaskMesh(request, meshSettings);
+
+    EXPECT_GT(result.stats.boundarySegmentCount, 0);
+    EXPECT_GT(result.stats.beveledSegmentCount, result.stats.boundarySegmentCount);
+    EXPECT_GT(result.stats.cornerCapCount, 0);
+    EXPECT_GT(result.stats.cliffWallQuadCount, 0);
 }

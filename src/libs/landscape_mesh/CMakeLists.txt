@@ -1,3 +1,5 @@
+find_package(FastNoise2 CONFIG REQUIRED)
+
 nw_add_lib_sources(
     NAME landscape_mesh
     GROUP libs
@@ -7,6 +9,7 @@ nw_add_lib_sources(
         src/landscape_mesh.cpp
     LIBS
         landscape_core
+        FastNoise2::FastNoise
 )
 
 target_include_directories(landscape_mesh PUBLIC include)
