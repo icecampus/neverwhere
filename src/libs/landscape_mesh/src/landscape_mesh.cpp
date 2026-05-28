@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace landscape_mesh {
 namespace {
@@ -250,7 +251,8 @@ Vec3 displaceWallPoint(
     const Vec3& normal,
     float heightT,
     float rawNoise,
-    bool fadeAtBottom) {
+    bool fadeAtBottom,
+    float maxOffset = std::numeric_limits<float>::max()) {
 
     if (!settings.rockEnabled || settings.rockAmplitude <= 0.0f) {
         return point;
@@ -263,7 +265,12 @@ Vec3 displaceWallPoint(
         fade = std::sin(clamp01(heightT) * 3.14159265f);
     }
 
-    const float offset = steppedNoise * settings.rockAmplitude * fade;
+    // Clamp the lateral push to a fraction of the local vertex spacing. When the rock amplitude
+    // exceeds the distance between neighbouring wall vertices, adjacent samples cross over and the
+    // quad folds back on itself (its two triangles end up facing opposite ways). Capping the offset
+    // keeps the displaced surface a valid, non-overhanging height field while preserving relief
+    // wherever the subdivision is fine enough to carry it.
+    const float offset = std::clamp(steppedNoise * settings.rockAmplitude * fade, -maxOffset, maxOffset);
     return {
         point.x + normal.x * offset,
         point.y,
@@ -861,7 +868,6 @@ BeveledBoundaryResult buildBeveledBoundary(const SolidMaskGrid& mask, const Mesh
         Vec3 point;
         BoundarySide side = BoundarySide::Top;
         Vec3 sideNormal;
-        Vec3 bevelNormal;
     };
 
     BeveledBoundaryResult result;
@@ -879,26 +885,34 @@ BeveledBoundaryResult buildBeveledBoundary(const SolidMaskGrid& mask, const Mesh
         }
 
         const Vec3 direction = scale(delta, 1.0f / length);
-        const bool trimStart = bevel > 0.0f && isBoundaryCorner(result.boundarySegments, segment.a);
-        const bool trimEnd = bevel > 0.0f && isBoundaryCorner(result.boundarySegments, segment.b);
+        // Only trim where a bevel facet will actually be generated (a clean 2-segment corner).
+        // Diagonal pinch points have four boundary segments meeting at one vertex and never receive
+        // a bevel; trimming them anyway pulled the walls back and left an open gap at the seam.
+        const bool canBevelA = isBoundaryCorner(result.boundarySegments, segment.a) &&
+            classifyVertex(mask, segment.a.x, segment.a.y) != VertexKind::DiagonalJoin;
+        const bool canBevelB = isBoundaryCorner(result.boundarySegments, segment.b) &&
+            classifyVertex(mask, segment.b.x, segment.b.y) != VertexKind::DiagonalJoin;
+        const bool trimStart = bevel > 0.0f && canBevelA;
+        const bool trimEnd = bevel > 0.0f && canBevelB;
         const float trim = std::min(bevel, length * 0.45f);
         const Vec3 start = trimStart ? add(a, scale(direction, trim)) : a;
         const Vec3 end = trimEnd ? add(b, scale(direction, -trim)) : b;
         const Vec3 sideNormal = outwardNormalForSide(segment.side);
-        const Vec3 startBevelNormal = trimStart ? boundaryVertexNormal(mask, result.boundarySegments, segment.a, sideNormal) : sideNormal;
-        const Vec3 endBevelNormal = trimEnd ? boundaryVertexNormal(mask, result.boundarySegments, segment.b, sideNormal) : sideNormal;
-        const Vec3 startNormal = trimStart ? normalizeHorizontal(add(sideNormal, startBevelNormal), sideNormal) : sideNormal;
-        const Vec3 endNormal = trimEnd ? normalizeHorizontal(add(sideNormal, endBevelNormal), sideNormal) : sideNormal;
 
+        // Straight wall panels keep a single, uniform side normal across every column. Blending the
+        // corner columns toward the bevel diagonal used to tilt only the edge column, which displaced
+        // that one column in a different direction than its neighbour and produced a twisted,
+        // non-planar quad that flat shading rendered as a stray "plane" at the seam. The corner
+        // curvature is instead carried entirely by the small bevel facet below.
         if (horizontalLength(subtract(end, start)) > 0.0001f) {
-            result.beveledSegments.push_back({start, end, sideNormal, startNormal, endNormal, segment.side});
+            result.beveledSegments.push_back({start, end, sideNormal, sideNormal, sideNormal, segment.side});
         }
 
         if (trimStart) {
-            endpoints.push_back({segment.a, start, segment.side, sideNormal, startBevelNormal});
+            endpoints.push_back({segment.a, start, segment.side, sideNormal});
         }
         if (trimEnd) {
-            endpoints.push_back({segment.b, end, segment.side, sideNormal, endBevelNormal});
+            endpoints.push_back({segment.b, end, segment.side, sideNormal});
         }
     }
 
@@ -929,10 +943,13 @@ BeveledBoundaryResult buildBeveledBoundary(const SolidMaskGrid& mask, const Mesh
         const Vec3 normal = normalizeHorizontal(
             add(outwardNormalForSide(a.side), outwardNormalForSide(b.side)),
             outwardNormalForSide(a.side));
-        const Vec3 startNormal = normalizeHorizontal(add(normal, a.sideNormal), normal);
-        const Vec3 endNormal = normalizeHorizontal(add(normal, b.sideNormal), normal);
+        // The bevel facet absorbs the corner curvature: its interior columns face along the diagonal,
+        // while the two edge columns face along the adjacent straight panels' side normals. Because
+        // those edge columns share their vertical seam (a.point / b.point) and side normal with the
+        // neighbouring straight wall, both panels displace the shared edge to the exact same place,
+        // so the chamfer stays watertight without tilting the flat wall faces.
         if (horizontalLength(subtract(b.point, a.point)) > 0.0001f) {
-            result.beveledSegments.push_back({a.point, b.point, normal, startNormal, endNormal, a.side});
+            result.beveledSegments.push_back({a.point, b.point, normal, a.sideNormal, b.sideNormal, a.side});
         }
     }
 
@@ -1108,6 +1125,20 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
             request.maxLevel);
     }
 
+    // Cap rock displacement to a fraction of the vertex spacing so neighbouring samples cannot cross
+    // and fold a panel. The cap MUST be identical for every segment: adjacent panels share vertical
+    // edges, and if two panels clamped a shared vertex by different amounts the edge would split open.
+    // The tightest bound (shortest bevel facet, plus the row height) is therefore applied uniformly.
+    const float vSpacing = (request.topHeight - request.baseHeight) / (float)settings.wallVerticalSubdivisions;
+    float minHSpacing = vSpacing;
+    for (const MeshBoundarySegment& segment : boundary.beveledSegments) {
+        const float length = horizontalLength(subtract(segment.b, segment.a));
+        if (length > 0.0001f) {
+            minHSpacing = std::min(minHSpacing, length / (float)settings.wallHorizontalSubdivisions);
+        }
+    }
+    const float wallMaxOffset = 0.7f * std::max(0.0001f, std::min(minHSpacing, vSpacing));
+
     for (const MeshBoundarySegment& segment : boundary.beveledSegments) {
         const Vec3 topA{segment.a.x, request.topHeight, segment.a.z};
         const Vec3 topB{segment.b.x, request.topHeight, segment.b.z};
@@ -1152,10 +1183,10 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 const std::size_t i11 = i01 + 1;
 
                 MeshQuad wall;
-                wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], request.fadeWallDisplacementAtBottom);
-                wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom);
-                wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom);
-                wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom);
+                wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], request.fadeWallDisplacementAtBottom, wallMaxOffset);
+                wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom, wallMaxOffset);
+                wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom, wallMaxOffset);
+                wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom, wallMaxOffset);
                 wall.normal = displacedFaceNormal(
                     wall.a, wall.b, wall.c, wall.d,
                     wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],

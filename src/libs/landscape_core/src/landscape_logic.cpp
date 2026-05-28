@@ -225,6 +225,68 @@ void enforcePyramidLevelSpacing(LandscapeLevelGrid& grid) {
     }
 }
 
+// Removes one-cell spikes/pits and one-cell-wide ridge tips. Such features make four walls (and
+// four corner bevels) converge around a single 1x1 top cell, producing a degenerate "pinwheel" of
+// tiny, wildly oriented facets. Widening every feature to at least two cells eliminates the vortex
+// while leaving the overall bowl shape intact.
+void removeThinLevelFeatures(LandscapeLevelGrid& grid) {
+    if (grid.empty()) {
+        return;
+    }
+
+    const int maxLevel = std::max(0, grid.levelCount - 1);
+    const int orthoX[4] = {-1, 1, 0, 0};
+    const int orthoY[4] = {0, 0, -1, 1};
+
+    for (int pass = 0; pass < 8; pass++) {
+        bool changed = false;
+        std::vector<std::uint8_t> next = grid.cellLevels;
+
+        for (int y = 0; y < grid.height; y++) {
+            for (int x = 0; x < grid.width; x++) {
+                const int index = grid.cellIndex(x, y);
+                if (grid.zones[(std::size_t)index] == LandscapeZone::Clearing) {
+                    continue;
+                }
+
+                const int level = (int)grid.cellLevels[(std::size_t)index];
+                int lower = 0;
+                int higher = 0;
+                int maxLowerNeighbor = 0;
+                int minHigherNeighbor = maxLevel;
+                for (int k = 0; k < 4; k++) {
+                    const int nx = x + orthoX[k];
+                    const int ny = y + orthoY[k];
+                    if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+                        continue; // Treat the grid border as equal height so plateaus are not trimmed.
+                    }
+                    const int neighbor = (int)grid.cellLevelAt(nx, ny);
+                    if (neighbor < level) {
+                        lower++;
+                        maxLowerNeighbor = std::max(maxLowerNeighbor, neighbor);
+                    } else if (neighbor > level) {
+                        higher++;
+                        minHigherNeighbor = std::min(minHigherNeighbor, neighbor);
+                    }
+                }
+
+                if (lower >= 3) {
+                    next[(std::size_t)index] = (std::uint8_t)std::clamp(maxLowerNeighbor, 0, maxLevel);
+                    changed = true;
+                } else if (higher >= 3) {
+                    next[(std::size_t)index] = (std::uint8_t)std::clamp(minHigherNeighbor, 0, maxLevel);
+                    changed = true;
+                }
+            }
+        }
+
+        grid.cellLevels = std::move(next);
+        if (!changed) {
+            break;
+        }
+    }
+}
+
 void deriveNodeLevelsFromCells(LandscapeLevelGrid& grid) {
     grid.nodeLevels.assign((std::size_t)(grid.width + 1) * (std::size_t)(grid.height + 1), 0);
     for (int y = 0; y <= grid.height; y++) {
@@ -441,6 +503,7 @@ LandscapeLevelGrid generateLandscapeBowl(const LandscapeBowlSettings& inputSetti
     }
 
     enforcePyramidLevelSpacing(grid);
+    removeThinLevelFeatures(grid);
     deriveNodeLevelsFromCells(grid);
 
     BowlGenerationStats localStats;
