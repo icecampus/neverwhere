@@ -627,6 +627,8 @@ render_core::MeshPreviewRenderParams makeRenderParams(
     params.wallEdgeWearStrength = previewSettings.wallEdgeWearStrength;
     params.wallCreviceStrength = previewSettings.wallCreviceStrength;
     params.wallGrainStrength = previewSettings.wallGrainStrength;
+    params.wallFacetWearStrength = previewSettings.wallFacetWearStrength;
+    params.wallFacetWearWidth = previewSettings.wallFacetWearWidth;
     params.debugMode = previewSettings.debugMode;
     return params;
 }

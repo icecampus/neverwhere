@@ -50,6 +50,9 @@ struct MeshPreviewRenderParams {
     float wallEdgeWearStrength = 0.4f; // C1: lighten/desaturate protruding facet ridges.
     float wallCreviceStrength = 0.45f; // C2: darken recessed facets (dirt/moss).
     float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
+    // C3 (reserved): extra mask channel plumbed to the shader (options4) for a future facet effect.
+    float wallFacetWearStrength = 0.0f;
+    float wallFacetWearWidth = 1.4f;
 };
 
 class MeshPreviewRenderer {
@@ -62,6 +65,7 @@ public:
         float faceKind;
         float cliffDistance;
         float wallDetail[2]; // x=relief, y=heightFraction.
+        float facetUv[2];    // per-quad local 0..1 coords for facet-edge wear.
     };
 
     void init();
@@ -97,7 +101,8 @@ private:
         float options0[4]; // ambient, diffuse, wallBrightness, textureScale.
         float options1[4]; // cliffRadius, cliffStrength, minTopBrightness, edgeDarkness.
         float options2[4]; // macroScale, macroStrength, debugMode, unused.
-        float options3[4]; // wallAoStrength, wallEdgeWearStrength, wallCreviceStrength, unused.
+        float options3[4]; // wallAoStrength, wallEdgeWearStrength, wallCreviceStrength, wallGrainStrength.
+        float options4[4]; // reserved extra mask channel (facet effect), unused by the shader for now.
     };
 
     void ensurePipeline();

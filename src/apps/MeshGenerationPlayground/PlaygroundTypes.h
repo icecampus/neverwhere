@@ -100,6 +100,9 @@ struct ProductionPreviewSettings {
     float wallEdgeWearStrength = 0.4f; // C1: lighten/desaturate protruding facet ridges.
     float wallCreviceStrength = 0.45f; // C2: darken recessed facets (dirt/moss).
     float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
+    // C3 (reserved): extra mask channel plumbed to the shader (options4) for a future facet effect.
+    float wallFacetWearStrength = 0.0f;
+    float wallFacetWearWidth = 1.4f;
     int debugMode = (int)ProductionPreviewDebugMode::Lit;
     bool useGpuRenderer = true;
 };

@@ -16,6 +16,7 @@ layout(location=3) in vec4 color0;
 layout(location=4) in float face_kind0;
 layout(location=5) in float cliff_distance0;
 layout(location=6) in vec2 wall_detail0;
+layout(location=7) in vec2 facet_uv0;
 
 out vec3 v_world_pos;
 out vec3 v_normal;
@@ -24,6 +25,7 @@ out vec4 v_color;
 out float v_face_kind;
 out float v_cliff_distance;
 out vec2 v_wall_detail;
+out vec2 v_facet_uv;
 
 uniform vec2 output_size;
 uniform vec2 world_center;
@@ -51,6 +53,7 @@ void main() {
     v_face_kind = face_kind0;
     v_cliff_distance = cliff_distance0;
     v_wall_detail = wall_detail0;
+    v_facet_uv = facet_uv0;
 }
 )";
 
@@ -63,6 +66,7 @@ in vec4 v_color;
 in float v_face_kind;
 in float v_cliff_distance;
 in vec2 v_wall_detail;
+in vec2 v_facet_uv;
 out vec4 frag_color;
 
 uniform sampler2D grass_tex;
@@ -72,6 +76,7 @@ uniform vec4 options0;
 uniform vec4 options1;
 uniform vec4 options2;
 uniform vec4 options3;
+uniform vec4 options4;
 
 float hash21(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -155,6 +160,12 @@ void main() {
         vec3 mossy = albedo.rgb * vec3(0.60, 0.68, 0.52);
         albedo.rgb = mix(albedo.rgb, mossy, crevice * creviceStrength);
 
+        // C3 hook (reserved): per-quad facet-local coords (v_facet_uv) and an extra parameter
+        // channel (options4) are plumbed all the way to the fragment shader so a future mask can be
+        // applied here. Intentionally a no-op for now - the naive facet-edge rim read as a brick grid.
+        // float maskParam = options4.x;
+        // vec2 facetLocal = v_facet_uv;
+
         // A3: directional AO - darker at the base and inside crevices.
         float baseAo = mix(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
         wallAo = baseAo * (1.0 - crevice * creviceStrength * 0.6);
@@ -215,6 +226,7 @@ struct VSIn {
     float faceKind0: TEXCOORD4;
     float cliffDistance0: TEXCOORD5;
     float2 wallDetail0: TEXCOORD6;
+    float2 facetUv0: TEXCOORD7;
 };
 
 struct VSOut {
@@ -226,6 +238,7 @@ struct VSOut {
     float faceKind0: TEXCOORD4;
     float cliffDistance0: TEXCOORD5;
     float2 wallDetail0: TEXCOORD6;
+    float2 facetUv0: TEXCOORD7;
 };
 
 VSOut main(VSIn inp) {
@@ -246,6 +259,7 @@ VSOut main(VSIn inp) {
     o.faceKind0 = inp.faceKind0;
     o.cliffDistance0 = inp.cliffDistance0;
     o.wallDetail0 = inp.wallDetail0;
+    o.facetUv0 = inp.facetUv0;
     return o;
 }
 )";
@@ -261,6 +275,7 @@ cbuffer fs_params: register(b0) {
     float4 options1;
     float4 options2;
     float4 options3;
+    float4 options4;
 };
 
 struct PSIn {
@@ -272,6 +287,7 @@ struct PSIn {
     float faceKind0: TEXCOORD4;
     float cliffDistance0: TEXCOORD5;
     float2 wallDetail0: TEXCOORD6;
+    float2 facetUv0: TEXCOORD7;
 };
 
 float hash21(float2 p) {
@@ -354,6 +370,12 @@ float4 main(PSIn inp): SV_Target0 {
         float3 mossy = albedo.rgb * float3(0.60, 0.68, 0.52);
         albedo.rgb = lerp(albedo.rgb, mossy, crevice * creviceStrength);
 
+        // C3 hook (reserved): per-quad facet-local coords (inp.facetUv0) and an extra parameter
+        // channel (options4) are plumbed to the fragment shader so a future mask can be applied here.
+        // Intentionally a no-op for now - the naive facet-edge rim read as a brick grid.
+        // float maskParam = options4.x;
+        // float2 facetLocal = inp.facetUv0;
+
         // A3: directional AO - darker at the base and inside crevices.
         float baseAo = lerp(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
         wallAo = baseAo * (1.0 - crevice * creviceStrength * 0.6);
@@ -410,7 +432,9 @@ void pushVertex(
     float faceKind,
     float cliffDistance,
     float relief,
-    float heightFraction) {
+    float heightFraction,
+    float facetU,
+    float facetV) {
 
     vertices.push_back({
         {position.x, position.y, position.z},
@@ -420,6 +444,7 @@ void pushVertex(
         faceKind,
         cliffDistance,
         {relief, heightFraction},
+        {facetU, facetV},
     });
 }
 
@@ -488,12 +513,12 @@ bool MeshPreviewRenderer::render(
     });
 
     for (const MeshPreviewQuad* quad : drawOrder) {
-        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction);
-        pushVertex(m_vertices, quad->b, quad->normal, quad->uvB, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction);
-        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction);
-        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction);
-        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction);
-        pushVertex(m_vertices, quad->d, quad->normal, quad->uvD, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction);
+        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 0.0f, 0.0f);
+        pushVertex(m_vertices, quad->b, quad->normal, quad->uvB, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 1.0f, 0.0f);
+        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 1.0f, 1.0f);
+        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 0.0f, 0.0f);
+        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 1.0f, 1.0f);
+        pushVertex(m_vertices, quad->d, quad->normal, quad->uvD, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 0.0f, 1.0f);
     }
 
     ensureVertexBuffer(m_vertices.size());
@@ -557,6 +582,10 @@ bool MeshPreviewRenderer::render(
         fs.options3[1] = params.wallEdgeWearStrength;
         fs.options3[2] = params.wallCreviceStrength;
         fs.options3[3] = params.wallGrainStrength;
+        fs.options4[0] = params.wallFacetWearStrength;
+        fs.options4[1] = params.wallFacetWearWidth;
+        fs.options4[2] = 0.0f;
+        fs.options4[3] = 0.0f;
         sg_range fsRange = {&fs, sizeof(fs)};
         sg_apply_uniforms(1, &fsRange);
 
@@ -581,7 +610,7 @@ void MeshPreviewRenderer::ensurePipeline() {
 #if defined(SOKOL_D3D11)
     shdDesc.vertex_func.source = vs_src_hlsl;
     shdDesc.fragment_func.source = fs_src_hlsl;
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         shdDesc.attrs[i].hlsl_sem_name = "TEXCOORD";
         shdDesc.attrs[i].hlsl_sem_index = (std::uint8_t)i;
     }
@@ -627,6 +656,8 @@ void MeshPreviewRenderer::ensurePipeline() {
     shdDesc.uniform_blocks[1].glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT4;
     shdDesc.uniform_blocks[1].glsl_uniforms[4].glsl_name = "options3";
     shdDesc.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT4;
+    shdDesc.uniform_blocks[1].glsl_uniforms[5].glsl_name = "options4";
+    shdDesc.uniform_blocks[1].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT4;
 
     const char* glslNames[] = {"grass_tex", "rock_tex"};
     for (int i = 0; i < 2; i++) {
@@ -663,6 +694,7 @@ void MeshPreviewRenderer::ensurePipeline() {
     pipDesc.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT;
     pipDesc.layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT;
     pipDesc.layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT2;
+    pipDesc.layout.attrs[7].format = SG_VERTEXFORMAT_FLOAT2;
     pipDesc.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
     pipDesc.colors[0].blend.enabled = true;
     pipDesc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
