@@ -6,7 +6,6 @@
 #include "PlaygroundState.h"
 #include "PlaygroundUi.h"
 #include "RectangleCliffScenario.h"
-#include "RockFractureScenario.h"
 
 #include <cstdint>
 #include <mutex>
@@ -101,7 +100,7 @@ void init() {
 
     spdlog::info("init: calling simgui_setup()");
     simgui_desc_t imguiDesc = {};
-    imguiDesc.max_vertices = 8u * 1024u * 1024u; // 8M verts to fit Rock Fracture MC up to res=200
+    imguiDesc.max_vertices = 2u * 1024u * 1024u; // 2M verts, plenty for all current scenarios
     imguiDesc.logger.func = simguiLog;
     simgui_setup(&imguiDesc);
 
@@ -119,8 +118,6 @@ void init() {
     rebuildLandscapeBowlModel();
     spdlog::info("init: calling rebuildObjectGenerationModel()");
     rebuildObjectGenerationModel();
-    spdlog::info("init: calling rebuildRockFractureModel()");
-    rebuildRockFractureModel();
     warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");

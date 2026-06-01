@@ -3,7 +3,6 @@
 #include "LandscapeBowlScenario.h"
 #include "ObjectGenerationScenario.h"
 #include "RectangleCliffScenario.h"
-#include "RockFractureScenario.h"
 
 #include <imgui.h>
 
@@ -24,7 +23,5 @@ void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCl
 void drawObjectMesh3dPreview(const ObjectGenerationSettings& settings, const ObjectGenerationModel& model, const ImVec2& viewportSize);
 void drawLandscapeBowlDebugView(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model, const ImVec2& viewportSize);
 void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model, const ImVec2& viewportSize);
-void drawRockFractureDebugView(const RockFractureSettings& settings, const RockFractureModel& model, const ImVec2& viewportSize);
-void drawRockFractureMeshPreview(const RockFractureSettings& settings, const RockFractureModel& model, const ImVec2& viewportSize);
 
 } // namespace meshgen_playground

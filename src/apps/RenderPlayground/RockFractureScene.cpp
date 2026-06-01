@@ -1,22 +1,18 @@
-#include "RockFractureScenario.h"
-
-#include "PlaygroundState.h"
-#include "rock_fracture/Blocks.h"
+#include "RockFractureScene.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
-#include <mutex>
 #include <system_error>
-#include <vector>
+#include <thread>
 
 #include <spdlog/spdlog.h>
 
-namespace meshgen_playground {
+namespace render_playground {
 
 namespace {
 
@@ -50,7 +46,7 @@ bool fileExists(const std::filesystem::path& p) {
 
 bool tryLoadWarpingTexture(RockFractureModel& model) {
     namespace fs = std::filesystem;
-    const fs::path relative = fs::path("src") / "apps" / "MeshGenerationPlayground" / "resources" / "textures" / "rock1.png";
+    const fs::path relative = fs::path("src") / "apps" / "RenderPlayground" / "resources" / "textures" / "rock1.png";
 
     fs::path dir = fs::current_path();
     std::error_code ec;
@@ -73,23 +69,49 @@ bool tryLoadWarpingTexture(RockFractureModel& model) {
     return false;
 }
 
-double triangleBarycenterY(const Vec3& a, const Vec3& b, const Vec3& c) {
-    return (a.y + b.y + c.y) / 3.0f;
-}
-
 } // namespace
 
-int rockFractureKindCount() {
+RockFractureScene::RockFractureScene() = default;
+
+RockFractureScene::~RockFractureScene() {
+    if (m_worker.joinable()) {
+        m_worker.join();
+    }
+}
+
+const char* RockFractureScene::buildStage() const {
+    switch (m_buildStage.load()) {
+    case 1: return "Poisson sampling";
+    case 2: return "generating fractures";
+    case 3: return "clustering";
+    case 4: return "marching cubes";
+    default: return "starting";
+    }
+}
+
+double RockFractureScene::buildElapsedSeconds() const {
+    if (!m_isBuilding.load()) {
+        return m_buildFinalSeconds.load();
+    }
+    const int64_t startNs = m_buildStartSteadyNs.load();
+    if (startNs == 0) return 0.0;
+    const int64_t nowNs = (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const double sec = double(nowNs - startNs) / 1e9;
+    return sec < 0.0 ? 0.0 : sec;
+}
+
+int RockFractureScene::kindCount() {
     return kKindCount;
 }
 
-const char* rockFractureKindName(RockFractureKind kind) {
+const char* RockFractureScene::kindName(RockFractureKind kind) {
     const int idx = (int)kind;
     if (idx < 0 || idx >= kKindCount) return kKindNames[0];
     return kKindNames[idx];
 }
 
-void sanitizeSettings(RockFractureSettings& settings) {
+void RockFractureScene::sanitize(RockFractureSettings& settings) {
     int idx = (int)settings.kind;
     if (idx < 0 || idx >= kKindCount) idx = 0;
     settings.kind = (RockFractureKind)idx;
@@ -102,27 +124,28 @@ void sanitizeSettings(RockFractureSettings& settings) {
     settings.bvhTransitionRadius = clampFloat((float)settings.bvhTransitionRadius, 0.05f, 4.0f);
 }
 
-void rebuildRockFractureModel() {
-    spdlog::info("rebuildRockFractureModel: start");
+void RockFractureScene::rebuild(const RockFractureSettings& settings) {
+    spdlog::info("rebuildRockFractureScene: start");
 
-    RockFractureSettings settings = g_rockSettings;
-    sanitizeSettings(settings);
-    {
-        std::lock_guard<std::mutex> lock(g_modelMutex);
-        g_rockSettings = settings;
-    }
+    RockFractureSettings sanitized = settings;
+    sanitize(sanitized);
+    m_pendingKind = sanitized.kind;
+    m_pendingSeed = sanitized.seed;
 
     RockFractureModel model;
     const auto t0 = std::chrono::steady_clock::now();
+    m_buildStartSteadyNs.store((int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count());
+    m_buildFinalSeconds.store(0.0);
+    m_buildStage.store(0);
 
     try {
-        std::srand(settings.seed);
-        spdlog::info("rebuildRockFractureModel: seed={}, kind={}, tileSize={}, poisson(r={}, tries={}), mcRes={}, useOpenMP={}, useTexture={}",
-            settings.seed, rockFractureKindName(settings.kind), settings.tileSize,
-            settings.poissonRadius, settings.poissonTries, settings.mcResolution,
-            settings.useOpenMP, settings.useTextureWarp);
+        std::srand(sanitized.seed);
+        spdlog::info("rebuildRockFractureScene: seed={}, kind={}, tileSize={}, poisson(r={}, tries={}), mcRes={}, useOpenMP={}, useTexture={}",
+            sanitized.seed, kindName(sanitized.kind), sanitized.tileSize,
+            sanitized.poissonRadius, sanitized.poissonTries, sanitized.mcResolution,
+            sanitized.useOpenMP, sanitized.useTextureWarp);
 
-        if (settings.useOpenMP) {
+        if (sanitized.useOpenMP) {
 #ifdef ROCK_FRACTURE_USE_OPENMP
             model.usedOpenMP = true;
 #else
@@ -130,42 +153,45 @@ void rebuildRockFractureModel() {
 #endif
         }
 
-        if (settings.useTextureWarp) {
+        if (sanitized.useTextureWarp) {
             tryLoadWarpingTexture(model);
         } else {
-            rock_fracture::GenerateProceduralWarpingField(6.0, 4, settings.seed);
+            rock_fracture::GenerateProceduralWarpingField(6.0, 4, sanitized.seed);
             model.usedFallbackTexture = true;
         }
 
-        const float halfTile = settings.tileSize * 0.5f;
+        const float halfTile = sanitized.tileSize * 0.5f;
         rock_fracture::Box tile(rock_fracture::Vector3(0), halfTile);
 
-        spdlog::info("rebuildRockFractureModel: stage 1/4 Poisson sampling");
-        rock_fracture::PointSet3 samples = rock_fracture::PoissonSamplingBox(tile, settings.poissonRadius, settings.poissonTries);
-        spdlog::info("rebuildRockFractureModel: samples={}", samples.Size());
+        m_buildStage.store(1);
+        spdlog::info("rebuildRockFractureScene: stage 1/4 Poisson sampling");
+        rock_fracture::PointSet3 samples = rock_fracture::PoissonSamplingBox(tile, sanitized.poissonRadius, sanitized.poissonTries);
+        spdlog::info("rebuildRockFractureScene: samples={}", samples.Size());
 
-        spdlog::info("rebuildRockFractureModel: stage 2/4 generate fractures");
-        rock_fracture::FractureSet fractures = rock_fracture::GenerateFractures(toRockType(settings.kind), tile, settings.fractureInflate);
-        spdlog::info("rebuildRockFractureModel: fractures={}", fractures.Size());
+        m_buildStage.store(2);
+        spdlog::info("rebuildRockFractureScene: stage 2/4 generate fractures");
+        rock_fracture::FractureSet fractures = rock_fracture::GenerateFractures(toRockType(sanitized.kind), tile, sanitized.fractureInflate);
+        spdlog::info("rebuildRockFractureScene: fractures={}", fractures.Size());
 
-        spdlog::info("rebuildRockFractureModel: stage 3/4 cluster");
+        m_buildStage.store(3);
+        spdlog::info("rebuildRockFractureScene: stage 3/4 cluster");
         std::vector<rock_fracture::BlockCluster> clusters = rock_fracture::ComputeBlockClusters(samples, fractures);
-        spdlog::info("rebuildRockFractureModel: clusters={}", clusters.size());
+        spdlog::info("rebuildRockFractureScene: clusters={}", clusters.size());
 
-        spdlog::info("rebuildRockFractureModel: stage 4/4 implicit SDF + marching cubes (res={})", settings.mcResolution);
+        m_buildStage.store(4);
+        spdlog::info("rebuildRockFractureScene: stage 4/4 implicit SDF + marching cubes (res={})", sanitized.mcResolution);
         rock_fracture::SDFNode* sdfRoot = rock_fracture::ComputeBlockSDF(clusters);
         if (sdfRoot == nullptr) {
-            spdlog::warn("rebuildRockFractureModel: ComputeBlockSDF returned null (no closed convex blocks)");
+            spdlog::warn("rebuildRockFractureScene: ComputeBlockSDF returned null (no closed convex blocks)");
         }
 
         rock_fracture::MC::mcMesh mesh;
         if (sdfRoot != nullptr) {
-            mesh = rock_fracture::PolygonizeSDF(sdfRoot->box, sdfRoot, settings.mcResolution);
-            spdlog::info("rebuildRockFractureModel: MC vertices={}, normals={}, indices={} ({} triangles)",
+            mesh = rock_fracture::PolygonizeSDF(sdfRoot->box, sdfRoot, sanitized.mcResolution);
+            spdlog::info("rebuildRockFractureScene: MC vertices={}, normals={}, indices={} ({} triangles)",
                 mesh.vertices.size(), mesh.normals.size(), mesh.indices.size(), mesh.indices.size() / 3);
         }
 
-        // Pack data for UI consumption.
         model.samples.reserve(samples.Size());
         for (int i = 0; i < samples.Size(); i++) {
             model.samples.push_back(toVec3(samples.At(i)));
@@ -203,9 +229,8 @@ void rebuildRockFractureModel() {
         model.vertexCount = (int)model.meshVertices.size();
         model.triangleCount = (int)model.meshIndices.size() / 3;
 
-        // Field min/max scan (rough, sampled at low res for stats).
         if (sdfRoot != nullptr) {
-            const int scanRes = std::min(32, settings.mcResolution);
+            const int scanRes = std::min(32, sanitized.mcResolution);
             rock_fracture::Box b = sdfRoot->box;
             rock_fracture::Vector3 d = b.Diagonal() / double(scanRes - 1);
             double fmin = 1e30, fmax = -1e30;
@@ -230,41 +255,59 @@ void rebuildRockFractureModel() {
     } catch (const std::exception& e) {
         model.generationFailed = true;
         model.failureMessage = e.what();
-        spdlog::error("rebuildRockFractureModel: exception: {}", e.what());
+        spdlog::error("rebuildRockFractureScene: exception: {}", e.what());
     } catch (...) {
         model.generationFailed = true;
         model.failureMessage = "unknown exception";
-        spdlog::error("rebuildRockFractureModel: unknown exception");
+        spdlog::error("rebuildRockFractureScene: unknown exception");
     }
 
     const auto t1 = std::chrono::steady_clock::now();
     model.buildSeconds = std::chrono::duration<double>(t1 - t0).count();
+    m_buildFinalSeconds.store(model.buildSeconds);
+    m_buildStage.store(0);
 
     {
-        std::lock_guard<std::mutex> lock(g_modelMutex);
-        g_rockModel = std::move(model);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_model = std::move(model);
     }
 
     spdlog::info(
-        "rebuildRockFractureModel: done, samples={}, fractures={}, clusters={}, vertices={}, triangles={}, field=[{:.3f}, {:.3f}], build={:.3f}s, openMP={}",
-        g_rockModel.sampleCount,
-        g_rockModel.fractureCount,
-        g_rockModel.clusterCount,
-        g_rockModel.vertexCount,
-        g_rockModel.triangleCount,
-        g_rockModel.fieldMin,
-        g_rockModel.fieldMax,
-        g_rockModel.buildSeconds,
-        g_rockModel.usedOpenMP ? "yes" : "no");
+        "rebuildRockFractureScene: done, samples={}, fractures={}, clusters={}, vertices={}, triangles={}, field=[{:.3f}, {:.3f}], build={:.3f}s, openMP={}",
+        m_model.sampleCount, m_model.fractureCount, m_model.clusterCount,
+        m_model.vertexCount, m_model.triangleCount, m_model.fieldMin, m_model.fieldMax,
+        m_model.buildSeconds, m_model.usedOpenMP ? "yes" : "no");
     spdlog::info(
-        "rebuildRockFractureModel: warp={}, failed={}",
-        std::string(g_rockModel.usedTextureWarp ? (g_rockModel.usedFallbackTexture ? "perlin" : "rock1.png") : "disabled"),
-        g_rockModel.generationFailed ? (std::string("yes: ") + g_rockModel.failureMessage) : std::string("no"));
+        "rebuildRockFractureScene: warp={}, failed={}",
+        std::string(m_model.usedTextureWarp ? (m_model.usedFallbackTexture ? "perlin" : "rock1.png") : "disabled"),
+        m_model.generationFailed ? (std::string("yes: ") + m_model.failureMessage) : std::string("no"));
 }
 
-bool rockFractureModelValid() {
-    std::lock_guard<std::mutex> lock(g_modelMutex);
-    return !g_rockModel.generationFailed && g_rockModel.triangleCount > 0 && g_rockModel.vertexCount > 0;
+void RockFractureScene::requestAsyncRebuild(const RockFractureSettings& settings) {
+    if (m_isBuilding.load()) {
+        spdlog::warn("requestAsyncRebuild: rebuild already in progress, ignoring (latest result will win)");
+        return;
+    }
+    m_isBuilding.store(true);
+    m_buildStage.store(0);
+    m_buildFinalSeconds.store(0.0);
+    m_buildStartSteadyNs.store(0); // will be set inside rebuild()
+
+    if (m_worker.joinable()) {
+        // The previous worker should have finished (we only set m_isBuilding=false on completion
+        // after rebuilding), but be safe in case the worker was abandoned due to an exception
+        // path: detach it so we don't block on join. The mutex on m_model keeps state consistent.
+        m_worker.join();
+    }
+
+    m_worker = std::thread([this, settings]() {
+        try {
+            this->rebuild(settings);
+        } catch (...) {
+            spdlog::error("requestAsyncRebuild: worker thread caught an exception");
+        }
+        m_isBuilding.store(false);
+    });
 }
 
-} // namespace meshgen_playground
+} // namespace render_playground

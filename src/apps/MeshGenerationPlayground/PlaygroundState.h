@@ -3,7 +3,6 @@
 #include "LandscapeBowlScenario.h"
 #include "ObjectGenerationScenario.h"
 #include "RectangleCliffScenario.h"
-#include "RockFractureScenario.h"
 
 #include <cstdint>
 #include <mutex>
@@ -34,8 +33,5 @@ extern ObjectGenerationModel g_objectModel;
 extern MeshPreviewCamera g_objectCamera;
 extern Vec3 g_productionLightDirection;
 extern ProductionPreviewSettings g_productionPreviewSettings;
-extern RockFractureSettings g_rockSettings;
-extern RockFractureModel g_rockModel;
-extern MeshPreviewCamera g_rockCamera;
 
 } // namespace meshgen_playground
