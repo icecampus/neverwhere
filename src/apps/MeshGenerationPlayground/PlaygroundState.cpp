@@ -17,5 +17,8 @@ ObjectGenerationModel g_objectModel;
 MeshPreviewCamera g_objectCamera;
 Vec3 g_productionLightDirection{-0.35f, 0.82f, -0.45f};
 ProductionPreviewSettings g_productionPreviewSettings;
+RockFractureSettings g_rockSettings;
+RockFractureModel g_rockModel;
+MeshPreviewCamera g_rockCamera;
 
 } // namespace meshgen_playground

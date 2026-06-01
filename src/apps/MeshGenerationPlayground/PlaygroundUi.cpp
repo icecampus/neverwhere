@@ -5,6 +5,7 @@
 #include "ObjectGenerationScenario.h"
 #include "PlaygroundState.h"
 #include "RectangleCliffScenario.h"
+#include "RockFractureScenario.h"
 
 #include <algorithm>
 #include <mutex>
@@ -284,6 +285,107 @@ void drawObjectScenarioControls(float panelWidth) {
     ImGui::PopItemWidth();
 }
 
+void drawRockFractureScenarioControls(float panelWidth) {
+    ImGui::PushItemWidth(panelWidth - 24.0f);
+    drawFrameStats();
+    ImGui::Separator();
+
+    ImGui::Text("Rock Fracture");
+    ImGui::TextWrapped("Port of aparis69/Rock-fracturing: Poisson sample + fracture planes + cluster SDF + marching cubes. Imzolyarot duniya.");
+
+    bool changed = false;
+    bool requested = false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+
+        int kindIndex = static_cast<int>(g_rockSettings.kind);
+        if (ImGui::BeginCombo("Fracture kind", rockFractureKindName(g_rockSettings.kind))) {
+            const int count = rockFractureKindCount();
+            for (int i = 0; i < count; i++) {
+                const bool selected = i == kindIndex;
+                RockFractureKind candidate = RockFractureKind::Equidimensional;
+                switch (i) {
+                    case 0: candidate = RockFractureKind::Equidimensional; break;
+                    case 1: candidate = RockFractureKind::Rhombohedral;    break;
+                    case 2: candidate = RockFractureKind::Polyhedral;      break;
+                    case 3: candidate = RockFractureKind::Tabular;         break;
+                }
+                if (ImGui::Selectable(rockFractureKindName(candidate), selected)) {
+                    kindIndex = i;
+                    g_rockSettings.kind = candidate;
+                    changed = true;
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Tile & sampling");
+        changed |= ImGui::SliderFloat("Tile size",       &g_rockSettings.tileSize,         6.0f, 60.0f);
+        changed |= ImGui::SliderFloat("Poisson radius",  &g_rockSettings.poissonRadius,   0.1f, 2.0f);
+        changed |= ImGui::SliderInt  ("Poisson tries",   &g_rockSettings.poissonTries,     100, 50000);
+        changed |= ImGui::SliderFloat("Fracture inflate",&g_rockSettings.fractureInflate, 1.0f, 8.0f);
+        changed |= ImGui::InputInt   ("Seed",            &g_rockSettings.seed);
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Marching cubes");
+        changed |= ImGui::SliderInt("MC resolution", &g_rockSettings.mcResolution, 40, 200);
+        static const double smoothMin = 0.05;
+        static const double smoothMax = 1.5;
+        static const double bvhMin = 0.1;
+        static const double bvhMax = 2.0;
+        changed |= ImGui::SliderScalar("Smoothing radius", ImGuiDataType_Double, &g_rockSettings.blockSmoothingRadius, &smoothMin, &smoothMax);
+        changed |= ImGui::SliderScalar("BVH transition",   ImGuiDataType_Double, &g_rockSettings.bvhTransitionRadius,   &bvhMin,     &bvhMax);
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Render & debug");
+        ImGui::Checkbox("Use OpenMP",           &g_rockSettings.useOpenMP);
+        ImGui::Checkbox("Use texture warping",  &g_rockSettings.useTextureWarp);
+        ImGui::Checkbox("Show mesh wireframe",  &g_rockSettings.showWireframe);
+        ImGui::Checkbox("Show samples (top)",   &g_rockSettings.showSamples2d);
+        ImGui::Checkbox("Show fractures (top)", &g_rockSettings.showFractures2d);
+
+        if (ImGui::Button("Regenerate")) {
+            g_rockSettings.regenerateRequested = true;
+            requested = true;
+        }
+    }
+
+    if (changed) {
+        g_rockSettings.regenerateRequested = true;
+        requested = true;
+    }
+    if (requested) {
+        rebuildRockFractureModel();
+    }
+
+    ImGui::Separator();
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::Text("Build: %.2f s",   g_rockModel.buildSeconds);
+        ImGui::Text("Samples: %d",     g_rockModel.sampleCount);
+        ImGui::Text("Fractures: %d",   g_rockModel.fractureCount);
+        ImGui::Text("Clusters: %d",    g_rockModel.clusterCount);
+        ImGui::Text("Verts / tris: %d / %d", g_rockModel.vertexCount, g_rockModel.triangleCount);
+        ImGui::Text("Field range: [%.3f, %.3f]", g_rockModel.fieldMin, g_rockModel.fieldMax);
+        ImGui::Text("Warping: %s",
+            g_rockModel.usedTextureWarp
+                ? (g_rockModel.usedFallbackTexture ? "Perlin fallback" : "rock1.png")
+                : "disabled");
+        ImGui::Text("OpenMP: %s", g_rockModel.usedOpenMP ? "yes" : "no");
+        if (g_rockModel.generationFailed) {
+            ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Generation failed:");
+            ImGui::TextWrapped("%s", g_rockModel.failureMessage.c_str());
+        }
+    }
+    ImGui::TextColored(ImVec4(0.55f, 0.78f, 0.55f, 1.0f),
+        "Top view: blue=Poisson samples, orange=fracture centers, green rings=clusters.");
+    ImGui::PopItemWidth();
+}
+
 void drawScenarioPanelBackground(const ImVec2& layoutOrigin, const ImVec2& layoutSize, float leftPanelWidth) {
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(
@@ -361,6 +463,29 @@ void drawObjectScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize)
     }
 }
 
+void drawRockFractureScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+    const float viewportHeight = std::max(1.0f, (layoutSize.y - gutter) * 0.5f);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawRockFractureScenarioControls(leftPanelWidth);
+    ImGui::EndGroup();
+
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
+        drawRockFractureDebugView(g_rockSettings, g_rockModel, {rightWidth, viewportHeight});
+
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportHeight + gutter});
+        drawRockFractureMeshPreview(g_rockSettings, g_rockModel, {rightWidth, viewportHeight});
+    }
+}
+
 } // namespace
 
 void drawUi() {
@@ -410,6 +535,14 @@ void drawUi() {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawObjectScenarioTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Rock Fracture")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            drawRockFractureScenarioTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
             ImGui::EndTabItem();
         }

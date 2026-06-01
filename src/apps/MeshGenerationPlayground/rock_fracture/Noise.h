@@ -1,0 +1,124 @@
+#pragma once
+
+#include <cmath>
+#include "Vec.h"
+
+namespace rock_fracture {
+
+static int Perm[512] = {
+    151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233,
+    7, 225, 140, 36, 103, 30, 69, 142, 8, 99, 37, 240, 21, 10, 23,
+    190, 6, 148, 247, 120, 234, 75, 0, 26, 197, 62, 94, 252, 219,
+    203, 117, 35, 11, 32, 57, 177, 33, 88, 237, 149, 56, 87, 174,
+    20, 125, 136, 171, 168, 68, 175, 74, 165, 71, 134, 139, 48, 27,
+    166, 77, 146, 158, 231, 83, 111, 229, 122, 60, 211, 133, 230,
+    220, 105, 92, 41, 55, 46, 245, 40, 244, 102, 143, 54, 65, 25,
+    63, 161, 1, 216, 80, 73, 209, 76, 132, 187, 208, 89, 18, 169,
+    200, 196, 135, 130, 116, 188, 159, 86, 164, 100, 109, 198, 173,
+    186, 3, 64, 52, 217, 226, 250, 124, 123, 5, 202, 38, 147, 118,
+    126, 255, 82, 85, 212, 207, 206, 59, 227, 47, 16, 58, 17, 182,
+    189, 28, 42, 223, 183, 170, 213, 119, 248, 152, 2, 44, 154, 163,
+    70, 221, 153, 101, 155, 167, 43, 172, 9, 129, 22, 39, 253, 19,
+    98, 108, 110, 79, 113, 224, 232, 178, 185, 112, 104, 218, 246,
+    97, 228, 251, 34, 242, 193, 238, 210, 144, 12, 191, 179, 162,
+    241, 81, 51, 145, 235, 249, 14, 239, 107, 49, 192, 214, 31, 181,
+    199, 106, 157, 184, 84, 204, 176, 115, 121, 50, 45, 127, 4, 150,
+    254, 138, 236, 205, 93, 222, 114, 67, 29, 24, 72, 243, 141, 128,
+    195, 78, 66, 215, 61, 156, 180, 151, 160, 137, 91, 90, 15, 131,
+    13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69,
+    142, 8, 99, 37, 240, 21, 10, 23, 190, 6, 148, 247, 120, 234, 75,
+    0, 26, 197, 62, 94, 252, 219, 203, 117, 35, 11, 32, 57, 177, 33,
+    88, 237, 149, 56, 87, 174, 20, 125, 136, 171, 168, 68, 175, 74,
+    165, 71, 134, 139, 48, 27, 166, 77, 146, 158, 231, 83, 111, 229,
+    122, 60, 211, 133, 230, 220, 105, 92, 41, 55, 46, 245, 40, 244,
+    102, 143, 54, 65, 25, 63, 161, 1, 216, 80, 73, 209, 76, 132,
+    187, 208, 89, 18, 169, 200, 196, 135, 130, 116, 188, 159, 86,
+    164, 100, 109, 198, 173, 186, 3, 64, 52, 217, 226, 250, 124,
+    123, 5, 202, 38, 147, 118, 126, 255, 82, 85, 212, 207, 206, 59,
+    227, 47, 16, 58, 17, 182, 189, 28, 42, 223, 183, 170, 213, 119,
+    248, 152, 2, 44, 154, 163, 70, 221, 153, 101, 155, 167, 43, 172,
+    9, 129, 22, 39, 253, 19, 98, 108, 110, 79, 113, 224, 232, 178,
+    185, 112, 104, 218, 246, 97, 228, 251, 34, 242, 193, 238, 210,
+    144, 12, 191, 179, 162, 241, 81, 51, 145, 235, 249, 14, 239,
+    107, 49, 192, 214, 31, 181, 199, 106, 157, 184, 84, 204, 176,
+    115, 121, 50, 45, 127, 4, 150, 254, 138, 236, 205, 93, 222, 114,
+    67, 29, 24, 72, 243, 141, 128, 195, 78, 66, 215, 61, 156, 180
+};
+
+class PerlinNoise {
+public:
+    static inline double Gradient(int hash, double x, double y, double z) {
+        const int h = hash & 15;
+        const double u = h < 8 ? x : y;
+        const double v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
+        return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+    }
+
+    static inline double GetValueNormalized(const Vector2& p) {
+        return GetValue(p) * 0.5 + 0.5;
+    }
+
+    static inline double GetValue(const Vector2& p) {
+        return GetValue(p.ToVector3(0.0));
+    }
+
+    static inline double GetValue(const Vector3& p) {
+        double x = p.x;
+        double y = p.y;
+        double z = p.z;
+
+        const int unit_x = int(std::floor(x)) & 255;
+        const int unit_y = int(std::floor(y)) & 255;
+        const int unit_z = int(std::floor(z)) & 255;
+
+        x = x - std::floor(x);
+        y = y - std::floor(y);
+        z = z - std::floor(z);
+
+        const double u = Math::QuinticSmooth(x);
+        const double v = Math::QuinticSmooth(y);
+        const double w = Math::QuinticSmooth(z);
+
+        const int a = Perm[unit_x] + unit_y;
+        const int aa = Perm[a] + unit_z;
+        const int ab = Perm[a + 1] + unit_z;
+        const int b = Perm[unit_x + 1] + unit_y;
+        const int ba = Perm[b] + unit_z;
+        const int bb = Perm[b + 1] + unit_z;
+
+        const double l1 = Math::Lerp(Gradient(Perm[aa], x, y, z), Gradient(Perm[ba], x - 1, y, z), u);
+        const double l2 = Math::Lerp(Gradient(Perm[ab], x, y - 1, z), Gradient(Perm[bb], x - 1, y - 1, z), u);
+        const double l3 = Math::Lerp(Gradient(Perm[aa + 1], x, y, z - 1), Gradient(Perm[ba + 1], x - 1, y, z - 1), u);
+        const double l4 = Math::Lerp(Gradient(Perm[ab + 1], x, y - 1, z - 1), Gradient(Perm[bb + 1], x - 1, y - 1, z - 1), u);
+        const double l5 = Math::Lerp(l1, l2, v);
+        const double l6 = Math::Lerp(l3, l4, v);
+
+        return Math::Lerp(l5, l6, w);
+    }
+
+    static inline double fBm(const Vector3& p, double a, double f, int o) {
+        double ret = 0.0;
+        double freq = f;
+        double amp = a;
+        for (int i = 0; i < o; i++) {
+            ret += (GetValue(p * freq) * 0.5 + 0.5) * amp;
+            amp *= 0.5;
+            freq *= 2.0;
+        }
+        return ret;
+    }
+
+    static inline double fBmNormalized(const Vector2& p, double a, double f, int o) {
+        double ret = 0.0;
+        double freq = f;
+        double amp = a;
+        for (int i = 0; i < o; i++) {
+            ret += (GetValueNormalized(p * freq) * 0.5 + 0.5) * amp;
+            amp *= 0.5;
+            freq *= 2.0;
+        }
+        return ret;
+    }
+};
+
+} // namespace rock_fracture

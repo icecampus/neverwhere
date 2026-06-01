@@ -1,6 +1,7 @@
 #include "PlaygroundSmokeTest.h"
 
 #include "PlaygroundState.h"
+#include "RockFractureScenario.h"
 
 #include <algorithm>
 #include <cmath>
@@ -134,9 +135,17 @@ bool runTestScenario() {
         g_objectModel.rockQuadCount > 0 &&
         objectDegenerateQuads == 0;
 
-    if (rectangleOk && landscapeOk && objectOk) {
+    const bool rockOk =
+        !g_rockModel.generationFailed &&
+        g_rockModel.triangleCount > 0 &&
+        g_rockModel.fractureCount > 0 &&
+        g_rockModel.clusterCount > 0 &&
+        g_rockModel.vertexCount > 0 &&
+        g_rockModel.sampleCount > 0;
+
+    if (rectangleOk && landscapeOk && objectOk && rockOk) {
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, object generator={}, fastNoise={}, gridVerts/rock/recessed/degenerate={}/{}/{}/{}, faces/vertices={}/{}, pyramid maxAdjacentDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, object generator={}, fastNoise={}, gridVerts/rock/recessed/degenerate={}/{}/{}/{}, faces/vertices={}/{}, pyramid maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}, rockFracture kind={}, samples/fractures/clusters={}/{}/{}, verts/tris={}/{}, build={:.2f}s, warping={}, openMP={}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             g_rectModel.beveledSegmentCount,
@@ -157,15 +166,25 @@ bool runTestScenario() {
             g_landscapeModel.maxAdjacentLevelDelta,
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
-            g_landscapeModel.seamMaxGap);
+            g_landscapeModel.seamMaxGap,
+            rockFractureKindName(g_rockSettings.kind),
+            g_rockModel.sampleCount,
+            g_rockModel.fractureCount,
+            g_rockModel.clusterCount,
+            g_rockModel.vertexCount,
+            g_rockModel.triangleCount,
+            g_rockModel.buildSeconds,
+            g_rockModel.usedTextureWarp ? (g_rockModel.usedFallbackTexture ? "perlin" : "rock1.png") : "off",
+            g_rockModel.usedOpenMP);
         return true;
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, objectOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, object generator={}, fastNoise={}, gridVerts/rock/recessed/degenerate={}/{}/{}/{}, faces/vertices={}/{}, pyramid maxAdjacentDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, objectOk={}, rockOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, object generator={}, fastNoise={}, gridVerts/rock/recessed/degenerate={}/{}/{}/{}, faces/vertices={}/{}, pyramid maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}, rockFracture kind={}, samples/fractures/clusters={}/{}/{}, verts/tris={}/{}, build={:.2f}s",
         rectangleOk,
         landscapeOk,
         objectOk,
+        rockOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,
         g_rectModel.beveledSegmentCount,
@@ -186,7 +205,14 @@ bool runTestScenario() {
         g_landscapeModel.maxAdjacentLevelDelta,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,
-        g_landscapeModel.seamMaxGap);
+        g_landscapeModel.seamMaxGap,
+        rockFractureKindName(g_rockSettings.kind),
+        g_rockModel.sampleCount,
+        g_rockModel.fractureCount,
+        g_rockModel.clusterCount,
+        g_rockModel.vertexCount,
+        g_rockModel.triangleCount,
+        g_rockModel.buildSeconds);
     return false;
 }
 
