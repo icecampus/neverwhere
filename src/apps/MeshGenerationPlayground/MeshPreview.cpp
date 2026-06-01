@@ -6,9 +6,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <mutex>
+#include <random>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -39,6 +43,28 @@ struct ProductionTextureState {
 
 ProductionTextureState g_textures;
 render_core::MeshPreviewRenderer g_gpuPreviewRenderer;
+
+// ---- Throwaway test: 2D environment sprites placed on the 3D landscape ----
+struct EnvSprite {
+    PreviewTexture tex;
+    int pixelWidth = 1;
+    int pixelHeight = 1;
+    float worldWidth = 1.0f; // world units, from index.json "image.width"
+    bool isTree = false;     // trees/bushes prefer flat low ground in the scatter
+    std::string name;
+};
+
+struct EnvPlacement {
+    int sprite = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float scale = 1.0f;
+};
+
+std::vector<EnvSprite> g_envSprites;
+std::vector<EnvPlacement> g_envPlacements;
+bool g_envReseedRequested = true;
 
 bool validTexture(const PreviewTexture& texture) {
     return texture.view.id != SG_INVALID_ID && texture.sampler.id != SG_INVALID_ID;
@@ -172,6 +198,151 @@ ImTextureID textureId(const PreviewTexture& texture) {
 
 ImTextureID textureId(sg_view view, sg_sampler sampler) {
     return (ImTextureID)simgui_imtextureid_with_sampler(view, sampler);
+}
+
+// Minimal scanner for a numeric value following "key": in a flat JSON file.
+// Good enough for the simple environment index.json files; avoids pulling a JSON
+// dependency into this throwaway test.
+float parseJsonNumber(const std::string& text, const std::string& key, float fallback) {
+    const std::string token = "\"" + key + "\"";
+    std::size_t pos = text.find(token);
+    if (pos == std::string::npos) {
+        return fallback;
+    }
+    pos = text.find(':', pos + token.size());
+    if (pos == std::string::npos) {
+        return fallback;
+    }
+    pos++;
+    while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\n' || text[pos] == '\r')) {
+        pos++;
+    }
+    char* end = nullptr;
+    const double value = std::strtod(text.c_str() + pos, &end);
+    if (end == text.c_str() + pos) {
+        return fallback;
+    }
+    return (float)value;
+}
+
+bool loadSpriteTexture(const std::filesystem::path& path, EnvSprite& sprite) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &channels, 4);
+    if (pixels == nullptr || width <= 0 || height <= 0) {
+        if (pixels != nullptr) {
+            stbi_image_free(pixels);
+        }
+        return false;
+    }
+
+    sg_image_desc imageDesc = {};
+    imageDesc.width = width;
+    imageDesc.height = height;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.data.mip_levels[0].ptr = pixels;
+    imageDesc.data.mip_levels[0].size = (std::size_t)width * (std::size_t)height * 4;
+    imageDesc.label = "meshgen-env-sprite";
+    sprite.tex.image = sg_make_image(&imageDesc);
+    stbi_image_free(pixels);
+
+    if (sprite.tex.image.id == SG_INVALID_ID) {
+        return false;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = sprite.tex.image;
+    sprite.tex.view = sg_make_view(&viewDesc);
+
+    sg_sampler_desc samplerDesc = {};
+    samplerDesc.min_filter = SG_FILTER_LINEAR;
+    samplerDesc.mag_filter = SG_FILTER_LINEAR;
+    samplerDesc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+    samplerDesc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+    samplerDesc.label = "meshgen-env-sprite-sampler";
+    sprite.tex.sampler = sg_make_sampler(&samplerDesc);
+    sprite.tex.loadedFromFile = validTexture(sprite.tex);
+    sprite.pixelWidth = width;
+    sprite.pixelHeight = height;
+    return validTexture(sprite.tex);
+}
+
+void loadEnvironmentSprites(const std::filesystem::path& dataRoot) {
+    namespace fs = std::filesystem;
+    for (EnvSprite& sprite : g_envSprites) {
+        destroyTexture(sprite.tex);
+    }
+    g_envSprites.clear();
+
+    const fs::path envRoot = dataRoot / "resources" / "assets" / "environment";
+    std::error_code ec;
+    if (!fs::exists(envRoot, ec)) {
+        spdlog::warn("MeshPreview: environment assets root not found '{}'", envRoot.string());
+        return;
+    }
+
+    for (const auto& entry : fs::directory_iterator(envRoot, ec)) {
+        if (!entry.is_directory()) {
+            continue;
+        }
+        const fs::path indexPath = entry.path() / "index.json";
+        const fs::path imagePath = entry.path() / "image.png";
+        if (!fs::exists(indexPath, ec) || !fs::exists(imagePath, ec)) {
+            continue;
+        }
+
+        std::ifstream file(indexPath);
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        const std::string text = buffer.str();
+
+        EnvSprite sprite;
+        sprite.name = entry.path().filename().string();
+        sprite.worldWidth = std::max(0.2f, parseJsonNumber(text, "width", 1.0f));
+        sprite.isTree = sprite.name.find("Tree") != std::string::npos ||
+            sprite.name.find("Bush") != std::string::npos;
+        if (!loadSpriteTexture(imagePath, sprite)) {
+            spdlog::warn("MeshPreview: failed to load env sprite '{}'", imagePath.string());
+            continue;
+        }
+        g_envSprites.push_back(std::move(sprite));
+    }
+
+    spdlog::info("MeshPreview: loaded {} environment sprites from '{}'", g_envSprites.size(), envRoot.string());
+}
+
+void regenerateEnvPlacements(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model) {
+    g_envPlacements.clear();
+    if (g_envSprites.empty() || model.heights.empty()) {
+        return;
+    }
+
+    std::mt19937 rng((unsigned)settings.seed * 2654435761u + 12345u);
+    std::uniform_real_distribution<float> jitter(-0.32f, 0.32f);
+    std::uniform_real_distribution<float> scaleDist(0.82f, 1.18f);
+    std::uniform_int_distribution<int> spriteDist(0, (int)g_envSprites.size() - 1);
+
+    const int gw = settings.gridWidth;
+    const int gh = settings.gridHeight;
+    const int target = std::min(160, std::max(20, gw * gh / 6));
+    for (int i = 0; i < target; i++) {
+        const int cx = (int)(rng() % (unsigned)gw);
+        const int cz = (int)(rng() % (unsigned)gh);
+        const std::size_t idx = (std::size_t)landscapeIndex(cx, cz, gw);
+        if (idx >= model.heights.size()) {
+            continue;
+        }
+        EnvPlacement placement;
+        placement.sprite = spriteDist(rng);
+        placement.x = (float)cx + 0.5f + jitter(rng);
+        placement.z = (float)cz + 0.5f + jitter(rng);
+        placement.y = model.heights[idx];
+        placement.scale = scaleDist(rng);
+        g_envPlacements.push_back(placement);
+    }
+
+    spdlog::info("MeshPreview: scattered {} environment sprite placements", g_envPlacements.size());
 }
 
 ImU32 colorForVertex(VertexKind kind) {
@@ -767,6 +938,7 @@ void initProductionPreviewTextures() {
 
     loadPreviewTexture(grassPath, grassFallback, 2, 2, "grass", "meshgen-grass", "meshgen-grass-sampler", g_textures.grass);
     loadPreviewTexture(rockPath, rockFallback, 2, 2, "rock", "meshgen-rock", "meshgen-rock-sampler", g_textures.rock);
+    loadEnvironmentSprites(dataRoot);
     g_gpuPreviewRenderer.init();
 }
 
@@ -774,6 +946,19 @@ void shutdownProductionPreviewTextures() {
     g_gpuPreviewRenderer.shutdown();
     destroyTexture(g_textures.grass);
     destroyTexture(g_textures.rock);
+    for (EnvSprite& sprite : g_envSprites) {
+        destroyTexture(sprite.tex);
+    }
+    g_envSprites.clear();
+    g_envPlacements.clear();
+}
+
+int loadedEnvSpriteCount() {
+    return (int)g_envSprites.size();
+}
+
+void requestEnvSpriteReseed() {
+    g_envReseedRequested = true;
 }
 
 bool productionGrassTextureLoaded() {
@@ -949,6 +1134,88 @@ void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCl
     drawList->PopClipRect();
 }
 
+void drawObjectMesh3dPreview(const ObjectGenerationSettings& settings, const ObjectGenerationModel& model, const ImVec2& viewportSize) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##ObjectMeshViewport", viewportSize);
+    const bool hovered = ImGui::IsItemHovered();
+    const bool dragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left);
+    ImGuiIO& io = ImGui::GetIO();
+
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        if (hovered && io.MouseWheel != 0.0f) {
+            g_objectCamera.zoom = clampFloat(g_objectCamera.zoom * (1.0f + io.MouseWheel * 0.12f), 0.25f, 16.0f);
+        }
+
+        if (dragging) {
+            g_objectCamera.pan.x += io.MouseDelta.x;
+            g_objectCamera.pan.y += io.MouseDelta.y;
+        }
+
+        if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            g_objectCamera.zoom = 1.0f;
+            g_objectCamera.pan = {0.0f, 0.0f};
+        }
+    }
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(18, 21, 27, 255));
+    drawList->AddRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(70, 78, 92, 255));
+    drawList->PushClipRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, true);
+
+    const ImVec2 groundCenter{origin.x + viewportSize.x * 0.5f, origin.y + viewportSize.y * 0.62f};
+    drawList->AddEllipse(groundCenter, {220.0f, 90.0f}, IM_COL32(34, 39, 47, 255), 0.0f, 48, 2.0f);
+
+    MeshPreviewCamera camera;
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        camera = g_objectCamera;
+    }
+
+    const Vec3 lightDirection = normalize({-0.45f, 0.85f, -0.35f});
+    auto projectObjectPoint = [&](const Vec3& point) {
+        const float isoX = (point.x - point.z) * 42.0f * camera.zoom;
+        const float isoY = ((point.x + point.z) * 21.0f - point.y * 54.0f) * camera.zoom;
+        return ImVec2{
+            groundCenter.x + camera.pan.x + isoX,
+            groundCenter.y + camera.pan.y + isoY,
+        };
+    };
+
+    std::vector<int> drawOrder;
+    drawOrder.reserve(model.meshQuads.size());
+    for (int i = 0; i < (int)model.meshQuads.size(); i++) {
+        drawOrder.push_back(i);
+    }
+
+    std::sort(drawOrder.begin(), drawOrder.end(), [&](int lhs, int rhs) {
+        return model.meshQuads[(std::size_t)lhs].depth < model.meshQuads[(std::size_t)rhs].depth;
+    });
+
+    for (int index : drawOrder) {
+        const MeshQuad& quad = model.meshQuads[(std::size_t)index];
+        const ImVec2 a = projectObjectPoint(quad.a);
+        const ImVec2 b = projectObjectPoint(quad.b);
+        const ImVec2 c = projectObjectPoint(quad.c);
+        const ImVec2 d = projectObjectPoint(quad.d);
+        const float lambert = std::max(0.0f, dot(normalize(quad.normal), lightDirection));
+        const ImU32 color = shadeColor(quad.color, 0.62f + lambert * 0.48f);
+        drawList->AddQuadFilled(a, b, c, d, color);
+        if (settings.showMeshWireframe) {
+            drawList->AddQuad(a, b, c, d, IM_COL32(18, 24, 32, 230), 1.4f);
+        }
+    }
+
+    char titleText[128];
+    snprintf(titleText, sizeof(titleText), "Generated object mesh: %s", objectGeneratorName(settings.generatorKind));
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), titleText);
+    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, mouse wheel: zoom, double click: reset");
+    char cameraText[96];
+    snprintf(cameraText, sizeof(cameraText), "Camera zoom: %.2fx, pan: %.0f %.0f", camera.zoom, camera.pan.x, camera.pan.y);
+    drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), cameraText);
+    drawList->PopClipRect();
+}
+
 void drawLandscapeBowlDebugView(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model, const ImVec2& viewportSize) {
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float availableWidth = std::max(1.0f, viewportSize.x - 24.0f);
@@ -1096,6 +1363,56 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
                 previewSettings);
         }
         drawList->Flags = previousFlags;
+    }
+
+    if (previewSettings.showEnvSprites && !g_envSprites.empty()) {
+        if (g_envReseedRequested || g_envPlacements.empty()) {
+            regenerateEnvPlacements(settings, model);
+            g_envReseedRequested = false;
+        }
+
+        // Replicate the GPU isometric projection so overlaid sprites line up with
+        // the rendered terrain image (the CPU fallback anchor differs slightly).
+        const float anchorY = std::min(170.0f, std::max(96.0f, viewportSize.y * 0.34f));
+        const float halfW = (float)settings.gridWidth * 0.5f;
+        const float halfH = (float)settings.gridHeight * 0.5f;
+        const float zoom = g_landscapeCamera.zoom;
+        const ImVec2 pan = g_landscapeCamera.pan;
+        auto projectWorld = [&](float wx, float wy, float wz) -> ImVec2 {
+            const float cx = wx - halfW;
+            const float cz = wz - halfH;
+            const float sx = viewportSize.x * 0.5f + pan.x + (cx - cz) * 19.0f * zoom;
+            const float sy = anchorY + pan.y + ((cx + cz) * 9.5f - wy * 25.0f) * zoom;
+            return {origin.x + sx, origin.y + sy};
+        };
+
+        std::vector<int> order(g_envPlacements.size());
+        for (int i = 0; i < (int)order.size(); i++) {
+            order[i] = i;
+        }
+        std::sort(order.begin(), order.end(), [&](int lhs, int rhs) {
+            const EnvPlacement& a = g_envPlacements[(std::size_t)lhs];
+            const EnvPlacement& b = g_envPlacements[(std::size_t)rhs];
+            return (a.x + a.z) < (b.x + b.z);
+        });
+
+        const float pxPerUnit = 25.0f * zoom;
+        for (int index : order) {
+            const EnvPlacement& placement = g_envPlacements[(std::size_t)index];
+            if (placement.sprite < 0 || placement.sprite >= (int)g_envSprites.size()) {
+                continue;
+            }
+            const EnvSprite& sprite = g_envSprites[(std::size_t)placement.sprite];
+            if (!validTexture(sprite.tex)) {
+                continue;
+            }
+            const ImVec2 base = projectWorld(placement.x, placement.y, placement.z);
+            const float widthPx = sprite.worldWidth * placement.scale * pxPerUnit;
+            const float heightPx = widthPx * (float)sprite.pixelHeight / (float)std::max(1, sprite.pixelWidth);
+            const ImVec2 pMin{base.x - widthPx * 0.5f, base.y - heightPx};
+            const ImVec2 pMax{base.x + widthPx * 0.5f, base.y};
+            drawList->AddImage(textureId(sprite.tex), pMin, pMax);
+        }
     }
 
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Production Preview: shaded landscape mesh");

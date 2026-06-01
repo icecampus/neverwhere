@@ -1,5 +1,6 @@
 #include "LandscapeBowlScenario.h"
 #include "MeshPreview.h"
+#include "ObjectGenerationScenario.h"
 #include "PlaygroundLog.h"
 #include "PlaygroundSmokeTest.h"
 #include "PlaygroundState.h"
@@ -115,6 +116,8 @@ void init() {
     rebuildRectangleCliffModel();
     spdlog::info("init: calling rebuildLandscapeBowlModel()");
     rebuildLandscapeBowlModel();
+    spdlog::info("init: calling rebuildObjectGenerationModel()");
+    rebuildObjectGenerationModel();
     warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");

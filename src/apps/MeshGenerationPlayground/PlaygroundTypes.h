@@ -105,6 +105,8 @@ struct ProductionPreviewSettings {
     float wallFacetWearWidth = 1.4f;
     int debugMode = (int)ProductionPreviewDebugMode::Lit;
     bool useGpuRenderer = true;
+    // Throwaway test: overlay 2D environment sprites on top of the 3D landscape.
+    bool showEnvSprites = false;
 };
 
 inline int cellIndex(int x, int y, int width) {

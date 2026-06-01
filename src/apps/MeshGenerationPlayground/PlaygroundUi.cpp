@@ -2,6 +2,7 @@
 
 #include "LandscapeBowlScenario.h"
 #include "MeshPreview.h"
+#include "ObjectGenerationScenario.h"
 #include "PlaygroundState.h"
 #include "RectangleCliffScenario.h"
 
@@ -147,6 +148,14 @@ void drawLandscapeScenarioControls(float panelWidth) {
             "Depth Order",
         };
         ImGui::Combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
+        ImGui::Separator();
+        ImGui::Text("Env Sprites (throwaway test)");
+        ImGui::Checkbox("Scatter 2D Env Sprites", &g_productionPreviewSettings.showEnvSprites);
+        ImGui::SameLine();
+        if (ImGui::Button("Reseed")) {
+            requestEnvSpriteReseed();
+        }
+        ImGui::Text("Loaded sprite kinds: %d", loadedEnvSpriteCount());
     }
     if (changed) {
         rebuildLandscapeBowlModel();
@@ -201,6 +210,77 @@ void drawLandscapeScenarioControls(float panelWidth) {
     ImGui::TextColored(ImVec4(0.43f, 0.63f, 0.35f, 1.0f), "Green = clearing / lowland");
     ImGui::TextColored(ImVec4(0.58f, 0.68f, 0.40f, 1.0f), "Olive = hills");
     ImGui::TextColored(ImVec4(0.70f, 0.72f, 0.50f, 1.0f), "Bright = upper high ground");
+    ImGui::PopItemWidth();
+}
+
+void drawObjectScenarioControls(float panelWidth) {
+    ImGui::PushItemWidth(panelWidth - 24.0f);
+    drawFrameStats();
+    ImGui::Separator();
+
+    ImGui::Text("Object Generation");
+    ImGui::TextWrapped("Debug scenario for isolated object mesh generators. Add new generators through ObjectGeneratorKind and a builder function.");
+
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        int generatorIndex = objectGeneratorIndex(g_objectSettings.generatorKind);
+        if (ImGui::BeginCombo("Generator", objectGeneratorInfo(generatorIndex).name)) {
+            for (int i = 0; i < objectGeneratorCount(); i++) {
+                const bool selected = i == generatorIndex;
+                if (ImGui::Selectable(objectGeneratorInfo(i).name, selected)) {
+                    generatorIndex = i;
+                    g_objectSettings.generatorKind = objectGeneratorKindAt(i);
+                    changed = true;
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::TextWrapped("%s", objectGeneratorInfo(generatorIndex).description);
+        ImGui::Separator();
+        ImGui::Text("Cliff Rock Parameters");
+        changed |= ImGui::InputInt("Seed", &g_objectSettings.seed);
+        ImGui::TextDisabled("Base shape");
+        changed |= ImGui::SliderFloat("Height", &g_objectSettings.height, 1.5f, 14.0f);
+        changed |= ImGui::SliderFloat("Radius X", &g_objectSettings.radiusX, 0.35f, 4.0f);
+        changed |= ImGui::SliderFloat("Radius Z", &g_objectSettings.radiusZ, 0.25f, 4.0f);
+        changed |= ImGui::SliderFloat("Taper", &g_objectSettings.taper, 0.0f, 0.85f);
+        changed |= ImGui::SliderInt("Rings", &g_objectSettings.rings, 6, 96);
+        changed |= ImGui::SliderInt("Segments", &g_objectSettings.segments, 6, 96);
+        ImGui::TextDisabled("Cliff forms (silhouette + strata)");
+        changed |= ImGui::SliderFloat("Cliff Scale", &g_objectSettings.cliffScale, 0.1f, 3.0f);
+        changed |= ImGui::SliderFloat("Cliff Strength", &g_objectSettings.cliffStrength, 0.0f, 1.2f);
+        changed |= ImGui::SliderFloat("Wall Bias", &g_objectSettings.wallBias, 0.0f, 1.0f);
+        changed |= ImGui::SliderInt("Cliff Steps", &g_objectSettings.cliffSteps, 2, 16);
+        changed |= ImGui::SliderFloat("Terrace Strength", &g_objectSettings.terraceStrength, 0.0f, 1.0f);
+        ImGui::TextDisabled("Vertical fracture grooves");
+        changed |= ImGui::SliderFloat("Cliff Y Stretch", &g_objectSettings.cliffYStretch, 0.05f, 1.5f);
+        changed |= ImGui::SliderFloat("Groove Depth", &g_objectSettings.grooveDepth, 0.0f, 1.0f);
+        ImGui::TextDisabled("Surface detail (fbm)");
+        changed |= ImGui::SliderFloat("Detail Scale", &g_objectSettings.detailScale, 0.5f, 12.0f);
+        changed |= ImGui::SliderFloat("Detail Strength", &g_objectSettings.detailStrength, 0.0f, 0.6f);
+        ImGui::Checkbox("Show Mesh Wireframe", &g_objectSettings.showMeshWireframe);
+    }
+    if (changed) {
+        rebuildObjectGenerationModel();
+    }
+
+    ImGui::Separator();
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::Text("Generated object: %s", objectGeneratorName(g_objectSettings.generatorKind));
+        ImGui::Text("FastNoise2: %s", g_objectModel.usedFastNoise ? "active" : "fallback (flat)");
+        ImGui::Text("Grid vertices: %d", g_objectModel.gridVertexCount);
+        ImGui::Text("Faces / vertices: %d / %d", g_objectModel.faceCount, g_objectModel.vertexCount);
+        ImGui::Text("Rock / recessed quads: %d / %d",
+            g_objectModel.rockQuadCount,
+            g_objectModel.recessedQuadCount);
+    }
+    ImGui::TextColored(ImVec4(0.43f, 0.68f, 1.0f, 1.0f), "Dark faces mark recessed cracks in the rock");
+    ImGui::TextColored(ImVec4(0.78f, 0.84f, 0.92f, 1.0f), "Next generators should add a kind + metadata + build function.");
     ImGui::PopItemWidth();
 }
 
@@ -262,6 +342,25 @@ void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
     }
 }
 
+void drawObjectScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawObjectScenarioControls(leftPanelWidth);
+    ImGui::EndGroup();
+
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
+        drawObjectMesh3dPreview(g_objectSettings, g_objectModel, {rightWidth, layoutSize.y});
+    }
+}
+
 } // namespace
 
 void drawUi() {
@@ -303,6 +402,14 @@ void drawUi() {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawLandscapeScenarioTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Object Generation")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            drawObjectScenarioTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
             ImGui::EndTabItem();
         }
