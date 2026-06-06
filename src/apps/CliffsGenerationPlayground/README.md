@@ -8,16 +8,15 @@
 
 ## Референс
 
-За основу взят подход из статьи *Modeling Rocky Scenery using Implicit Blocks* (Paris et al., TVC 2020):
+Материалы (PDF, gap-анализ, roadmap, open-source) — в корне репозитория: **[reference/](../../../reference/README.md)**
 
-- [Preprint PDF](./references/Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf) — локальная копия в репозитории
-- [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) — implicit blocks, SDF, marching cubes, процедурное дробление камня
+- [Paris 2020 TVC — Implicit Blocks](../../../reference/papers/paris-2020-implicit-blocks/)
+- [Paris 2019 TOG — Terrain Amplification](../../../reference/papers/paris-2019-terrain-amplification/)
+- [Peytavie 2009 — Arches](../../../reference/papers/peytavie-2009-arches/)
+- [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) — upstream MIT code
+- [Neverwhere notes](../../../reference/neverwhere/cliffs-generation-playground/) — gap analysis & scene roadmap
 
-Этот playground адаптирует и изучает те же идеи в контексте Neverwhere (Sokol, ImGui, собственный рендер).
-
-**Сравнение с upstream:** [references/rock-fracturing-upstream.md](./references/rock-fracturing-upstream.md) — карта файлов, что портировано, чего нет в оригинале и в paper. Метаданные репозитория: [references/upstream.meta.json](./references/upstream.meta.json).
-
-**План до сцен как в paper (арки, strata, replication):** [references/SCENE_EVOLUTION_ROADMAP.md](./references/SCENE_EVOLUTION_ROADMAP.md).
+Этот playground адаптирует Paris 2020 в контексте Neverwhere (Sokol, ImGui, собственный рендер).
 
 ## Сборка и запуск
 
