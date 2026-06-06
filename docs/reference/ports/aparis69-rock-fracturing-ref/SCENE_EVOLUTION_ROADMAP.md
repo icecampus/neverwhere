@@ -283,10 +283,10 @@ CliffSceneModel buildCliffScene(const SceneSpec& spec, const TileLibrary& tiles)
 
 ## 10. Ссылки
 
-- [Paris 2020 TVC PDF](../../../papers/paris-2020-implicit-blocks/) — implicit blocks (локально).
-- [Paris 2019 TOG PDF](../../../papers/paris-2019-terrain-amplification/) — terrain amplification, arches (локально).
-- [Peytavie 2009 Arches PDF](../../../papers/peytavie-2009-arches/) — hybrid terrain framework (локально).
-- [reference/](../../../README.md) — индекс papers & open-source projects.
+- [Paris 2020 TVC PDF](../../papers/paris-2020-implicit-blocks/) — implicit blocks (локально).
+- [Paris 2019 TOG PDF](../../papers/paris-2019-terrain-amplification/) — terrain amplification, arches (локально).
+- [Peytavie 2009 Arches PDF](../../papers/peytavie-2009-arches/) — hybrid terrain framework (локально).
+- [reference/](../../README.md) — индекс papers & open-source projects.
 - [rock-fracturing-upstream.md](./rock-fracturing-upstream.md) — что портировано из GitHub.
 - Paper §3–5 — overview, fracturing, amplification.
 - Fig. 11 — strata (equidimensional bottom + tabular top).

@@ -10,9 +10,9 @@ Neverwhere-specific analysis and roadmaps for the Rock-fracturing reference port
 
 **Algorithm code:** `src/refs/aparis69-rock-fracturing-ref/rock_fracture/`
 
-**Papers & external projects:** see repo root [reference/](../../../README.md):
+**Papers & external projects:** see [reference index](../../README.md):
 
-- [Paris 2020 TVC PDF](../../../papers/paris-2020-implicit-blocks/)
-- [Paris 2019 TOG PDF](../../../papers/paris-2019-terrain-amplification/)
-- [Peytavie 2009 Arches PDF](../../../papers/peytavie-2009-arches/)
-- [Open-source projects](../../../projects/aparis69-rock-fracturing/)
+- [Paris 2020 TVC PDF](../../papers/paris-2020-implicit-blocks/)
+- [Paris 2019 TOG PDF](../../papers/paris-2019-terrain-amplification/)
+- [Peytavie 2009 Arches PDF](../../papers/peytavie-2009-arches/)
+- [Open-source projects](../../projects/aparis69-rock-fracturing/)

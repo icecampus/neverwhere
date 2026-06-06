@@ -25,15 +25,13 @@ Curated papers, open-source projects, and Neverwhere-specific notes for **volume
 | [projects/unity-procedural-rock](./projects/unity-procedural-rock/) | https://github.com/przemyslawzaworski/Unity-Procedural-Rock-Generation |
 | [projects/jc-g-mountains](./projects/jc-g-mountains/) | https://github.com/JC-G/Mountains |
 
-## Neverwhere implementation notes
+## Reference ports (`src/refs/`)
 
-| Folder | Content |
-|--------|---------|
-| [neverwhere/aparis69-rock-fracturing-ref](./neverwhere/aparis69-rock-fracturing-ref/) | Gap analysis vs upstream, scene evolution roadmap, `upstream.meta.json` |
+| Reference code | Docs | Upstream |
+|----------------|------|----------|
+| `src/refs/aparis69-rock-fracturing-ref/` | [ports/aparis69-rock-fracturing-ref](./ports/aparis69-rock-fracturing-ref/) | [projects/aparis69-rock-fracturing](./projects/aparis69-rock-fracturing/) |
 
-Ported algorithm code lives in `src/refs/aparis69-rock-fracturing-ref/rock_fracture/` (not duplicated here).
-
-Related apps in the monorepo (no separate reference folder yet):
+Related apps in the monorepo (no dedicated port yet):
 
 - `src/apps/MeshGenerationPlayground` — FastNoise cliff silhouette prototype
 - `src/libs/landscape_mesh` — heightmap cliff walls for the map editor

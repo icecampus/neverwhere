@@ -23,6 +23,6 @@ Console app exporting **four OBJ tiles** (one per fracture type). Implements Poi
 
 Ported to `src/refs/aparis69-rock-fracturing-ref/rock_fracture/` with interactive viewer and async rebuild.
 
-Analysis: [../../neverwhere/aparis69-rock-fracturing-ref/rock-fracturing-upstream.md](../../neverwhere/aparis69-rock-fracturing-ref/rock-fracturing-upstream.md)
+Analysis: [../../ports/aparis69-rock-fracturing-ref/rock-fracturing-upstream.md](../../ports/aparis69-rock-fracturing-ref/rock-fracturing-upstream.md)
 
 Pinned commit (gap analysis baseline): `b91965b3011ed269cbc3a051b00c9b284aaa2e36`

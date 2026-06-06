@@ -11,7 +11,9 @@
 - **Repository:** [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) — implicit blocks, SDF, marching cubes, процедурное дробление камня.
 - **Paper:** Paris et al., *Modeling Rocky Scenery using Implicit Blocks*, The Visual Computer, 2020
 
-**Сравнение с upstream:** [references/rock-fracturing-upstream.md](./references/rock-fracturing-upstream.md) — карта файлов, что портировано, чего нет в оригинале и в paper. Метаданные репозитория: [references/upstream.meta.json](./references/upstream.meta.json).
+**Paper (PDF):** [docs/reference/papers/paris-2020-implicit-blocks/](../../../docs/reference/papers/paris-2020-implicit-blocks/)
+
+**Сравнение с upstream:** [docs/reference/ports/aparis69-rock-fracturing-ref/](../../../docs/reference/ports/aparis69-rock-fracturing-ref/) — gap analysis, roadmap, `upstream.meta.json`.
 
 ## Сборка и запуск
 

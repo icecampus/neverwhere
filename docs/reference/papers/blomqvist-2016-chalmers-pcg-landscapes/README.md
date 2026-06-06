@@ -36,7 +36,7 @@ Open-source **modular PCG engine** (deterministic seed → pipeline of modules):
 
 Good **practical companion** to research papers when designing a deterministic playground pipeline (seed → landmass → terrain → detail → foliage).
 
-## Related in [reference/](../../README.md)
+## Related in [docs/reference/](../../README.md)
 
 - Research cliffs/blocks: [paris-2020-implicit-blocks](../paris-2020-implicit-blocks/), [paris-2019-terrain-amplification](../paris-2019-terrain-amplification/)
 - Survey: [surveys-and-classics](../surveys-and-classics/)

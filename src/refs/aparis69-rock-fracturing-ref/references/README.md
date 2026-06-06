@@ -1,9 +1,9 @@
 # Moved
 
-Reference materials live at the repo root:
+Reference materials live under `docs/reference/`:
 
-**[../../../../reference/README.md](../../../../reference/README.md)**
+**[../../../../docs/reference/README.md](../../../../docs/reference/README.md)**
 
-Neverwhere-specific notes:
+Neverwhere-specific notes for this port:
 
-**[../../../../reference/neverwhere/aparis69-rock-fracturing-ref/](../../../../reference/neverwhere/aparis69-rock-fracturing-ref/)**
+**[../../../../docs/reference/ports/aparis69-rock-fracturing-ref/](../../../../docs/reference/ports/aparis69-rock-fracturing-ref/)**
