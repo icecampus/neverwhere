@@ -45,8 +45,10 @@ struct MeshPreviewRenderParams {
     float rimPower = 2.5f;
     float specularStrength = 0.12f;
     float shininess = 24.0f;
-    float sunShadowStrength = 0.38f;
-    float shadowTintStrength = 0.28f;
+    float sunShadowStrength = 0.48f;
+    float shadowTintStrength = 0.22f;
+    float shadowAmbientFloor = 0.42f;
+    float shadowSoftness = 1.65f;
     float textureScale = 1.0f;
     float cliffDarkeningRadius = 1.35f;
     float cliffDarkeningStrength = 0.22f;
@@ -118,7 +120,7 @@ private:
         float options2[4]; // macroScale, macroStrength, debugMode, unused.
         float options3[4]; // wallAoStrength, wallEdgeWearStrength, wallCreviceStrength, wallGrainStrength.
         float options4[4]; // wallFacetWearStrength, wallFacetWearWidth, sunShadowStrength, specularStrength.
-        float options5[4]; // shadowTintStrength, unused.
+        float options5[4]; // shadowTintStrength, shadowAmbientFloor, shadowSoftness, unused.
     };
 
     void ensurePipeline();

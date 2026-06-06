@@ -9,6 +9,19 @@
 
 namespace meshgen_playground {
 
+namespace {
+
+Vec3 normalizeVec3(const Vec3& value) {
+    const float lenSq = value.x * value.x + value.y * value.y + value.z * value.z;
+    if (lenSq <= 1e-8f) {
+        return {0.0f, 1.0f, 0.0f};
+    }
+    const float invLen = 1.0f / std::sqrt(lenSq);
+    return {value.x * invLen, value.y * invLen, value.z * invLen};
+}
+
+} // namespace
+
 LandscapeZone toLocalZone(landscape_core::LandscapeZone zone) {
     switch (zone) {
     case landscape_core::LandscapeZone::Clearing:
@@ -131,20 +144,30 @@ void applySunShadowToMeshQuads(
     const std::vector<float> shadowField =
         landscape_core::computeSunShadowField(gridWidth, gridHeight, cellLevels, settings);
 
+    const Vec3 lightDir = normalizeVec3(lightDirection);
     for (MeshQuad& quad : quads) {
-        if (quad.cliffWall) {
-            quad.sunShadow = 1.0f;
-            continue;
-        }
-
         const float centerX =
             (quad.a.x + quad.b.x + quad.c.x + quad.d.x) * 0.25f;
         const float centerZ =
             (quad.a.z + quad.b.z + quad.c.z + quad.d.z) * 0.25f;
-        const int x = clampInt((int)std::floor(centerX), 0, gridWidth - 1);
-        const int z = clampInt((int)std::floor(centerZ), 0, gridHeight - 1);
-        const std::size_t index = (std::size_t)z * (std::size_t)gridWidth + (std::size_t)x;
-        quad.sunShadow = index < shadowField.size() ? shadowField[index] : 1.0f;
+        const float groundVisibility = landscape_core::sampleShadowFieldBilinear(
+            shadowField,
+            gridWidth,
+            gridHeight,
+            centerX,
+            centerZ);
+
+        if (!quad.cliffWall) {
+            quad.sunShadow = groundVisibility;
+            continue;
+        }
+
+        const landscape_mesh::Vec3 litNormal = landscape_mesh::litWallNormal(toLandscapeMeshQuad(quad));
+        const float facing = std::max(
+            0.0f,
+            litNormal.x * lightDir.x + litNormal.y * lightDir.y + litNormal.z * lightDir.z);
+        const float wallAmbient = 0.40f + 0.18f * facing;
+        quad.sunShadow = std::clamp(wallAmbient + (1.0f - wallAmbient) * groundVisibility * (0.42f + 0.58f * facing), 0.28f, 1.0f);
     }
 }
 

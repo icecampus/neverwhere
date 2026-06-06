@@ -97,8 +97,10 @@ struct ProductionPreviewSettings {
     float rimPower = 2.5f;
     float specularStrength = 0.12f;
     float shininess = 24.0f;
-    float sunShadowStrength = 0.38f;
-    float shadowTintStrength = 0.28f;
+    float sunShadowStrength = 0.48f;
+    float shadowTintStrength = 0.22f;
+    float shadowAmbientFloor = 0.42f;
+    float shadowSoftness = 1.65f;
     float cliffDarkeningRadius = 1.35f;
     float cliffDarkeningStrength = 0.22f;
     float minTopBrightness = 0.78f;

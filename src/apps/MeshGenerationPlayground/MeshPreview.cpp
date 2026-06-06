@@ -692,7 +692,7 @@ ImU32 productionLitColor(
         return quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.48f);
     }
 
-    constexpr Vec3 kCoolShadow{0.18f, 0.24f, 0.26f};
+    constexpr Vec3 kCoolShadow{0.28f, 0.30f, 0.26f};
     constexpr Vec3 kWarmSky{0.52f, 0.44f, 0.32f};
     constexpr Vec3 kLightTint{1.12f, 1.04f, 0.90f};
     const Vec3 viewDir = normalize({0.35f, 0.55f, 0.35f});
@@ -741,17 +741,20 @@ ImU32 productionLitColor(
             previewSettings.minTopBrightness,
             1.0f - previewSettings.cliffDarkeningStrength * proximity);
         lightingScalar *= topDarkening * (1.0f - previewSettings.edgeDarkness * proximity);
-
-        const float sunShadow = 1.0f - previewSettings.sunShadowStrength * (1.0f - quad.sunShadow);
-        lightingScalar *= sunShadow;
-        ImU32 lit = shadeColor(baseColor, lightingScalar);
-        if (sunShadow < 0.999f) {
-            lit = blendTowardColor(lit, IM_COL32(36, 51, 56, 255), (1.0f - sunShadow) * previewSettings.shadowTintStrength);
-        }
-        return lit;
     }
 
-    return shadeColor(baseColor, lightingScalar);
+    const float rawVisibility = clampFloat(quad.sunShadow, 0.0f, 1.0f);
+    const float softenedVisibility =
+        previewSettings.shadowAmbientFloor +
+        (1.0f - previewSettings.shadowAmbientFloor) *
+            std::pow(rawVisibility, 1.0f / std::max(0.35f, previewSettings.shadowSoftness));
+    const float sunShadow = 1.0f - previewSettings.sunShadowStrength * (1.0f - softenedVisibility);
+    lightingScalar *= sunShadow;
+    ImU32 lit = shadeColor(baseColor, lightingScalar);
+    if (sunShadow < 0.999f) {
+        lit = blendTowardColor(lit, IM_COL32(72, 78, 68, 255), (1.0f - sunShadow) * previewSettings.shadowTintStrength);
+    }
+    return lit;
 }
 
 ImVec2 grassUv(const Vec3& point) {
@@ -884,6 +887,8 @@ render_core::MeshPreviewRenderParams makeRenderParams(
     params.shininess = previewSettings.shininess;
     params.sunShadowStrength = previewSettings.sunShadowStrength;
     params.shadowTintStrength = previewSettings.shadowTintStrength;
+    params.shadowAmbientFloor = previewSettings.shadowAmbientFloor;
+    params.shadowSoftness = previewSettings.shadowSoftness;
     params.debugMode = previewSettings.debugMode;
     return params;
 }

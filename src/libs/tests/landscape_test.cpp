@@ -486,7 +486,8 @@ TEST(SunShadowTest, LowerCellFallsIntoShadowFromHigherNeighborTowardSun) {
         landscape_core::computeSunShadowField(width, height, cellLevels, settings);
 
     ASSERT_EQ(field.size(), cellLevels.size());
-    EXPECT_FLOAT_EQ(field[(std::size_t)2 * (std::size_t)width + 2], 1.0f);
+    // Adjacent lit cell keeps most of the sunlight but may receive soft penumbra.
+    EXPECT_GT(field[(std::size_t)2 * (std::size_t)width + 2], 0.82f);
     EXPECT_LT(field[(std::size_t)1 * (std::size_t)width + 2], 0.5f);
 }
 

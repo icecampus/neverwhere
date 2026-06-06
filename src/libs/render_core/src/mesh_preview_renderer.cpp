@@ -148,9 +148,11 @@ void main() {
     float sunShadowStrength = options4.z;
     float specularStrength = options4.w;
     float shadowTintStrength = options5.x;
+    float shadowAmbientFloor = options5.y;
+    float shadowSoftness = max(0.35, options5.z);
     const float rimPower = 2.5;
     const float shininess = 24.0;
-    const vec3 coolShadow = vec3(0.18, 0.24, 0.26);
+    const vec3 coolShadow = vec3(0.28, 0.30, 0.26);
     const vec3 warmSky = vec3(0.52, 0.44, 0.32);
     const vec3 lightTint = vec3(1.12, 1.04, 0.90);
     const vec3 viewDir = normalize(vec3(0.35, 0.55, 0.35));
@@ -202,8 +204,12 @@ void main() {
     float lambert = max(0.0, dot(n, l));
     float cliffProximity = clamp(1.0 - v_cliff_distance / cliffRadius, 0.0, 1.0);
 
+    float rawVisibility = clamp(v_facet_uv.x, 0.0, 1.0);
+    float softenedVisibility =
+        shadowAmbientFloor + (1.0 - shadowAmbientFloor) * pow(max(rawVisibility, 0.0), 1.0 / shadowSoftness);
+    float sunShadow = mix(1.0, softenedVisibility, sunShadowStrength);
+
     vec3 lighting;
-    float sunShadow = 1.0;
     if (wall) {
         // Wrap diffuse for stable outwardHint normals: avoids hard lit/shadow bands on displaced facets.
         float facing = sqrt(clamp(lambert * 0.72 + 0.28, 0.0, 1.0));
@@ -220,13 +226,10 @@ void main() {
         lighting = ambientCol + diffuseCol + vec3(spec + rim);
         float topDarkening = max(minTopBrightness, 1.0 - cliffStrength * cliffProximity);
         lighting *= topDarkening * (1.0 - edgeDarkness * cliffProximity);
-        sunShadow = mix(1.0, v_facet_uv.x, sunShadowStrength);
     }
 
     vec3 litRgb = albedo.rgb * lighting * wallAo * sunShadow;
-    if (!wall) {
-        litRgb = mix(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
-    }
+    litRgb = mix(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
     vec4 lit = vec4(litRgb, albedo.a);
 
     if (debugMode > 7.5) {
@@ -387,9 +390,11 @@ float4 main(PSIn inp): SV_Target0 {
     float sunShadowStrength = options4.z;
     float specularStrength = options4.w;
     float shadowTintStrength = options5.x;
+    float shadowAmbientFloor = options5.y;
+    float shadowSoftness = max(0.35, options5.z);
     const float rimPower = 2.5;
     const float shininess = 24.0;
-    const float3 coolShadow = float3(0.18, 0.24, 0.26);
+    const float3 coolShadow = float3(0.28, 0.30, 0.26);
     const float3 warmSky = float3(0.52, 0.44, 0.32);
     const float3 lightTint = float3(1.12, 1.04, 0.90);
     const float3 viewDir = normalize(float3(0.35, 0.55, 0.35));
@@ -441,8 +446,12 @@ float4 main(PSIn inp): SV_Target0 {
     float lambert = max(0.0, dot(n, l));
     float cliffProximity = clamp(1.0 - inp.cliffDistance0 / cliffRadius, 0.0, 1.0);
 
+    float rawVisibility = clamp(inp.facetUv0.x, 0.0, 1.0);
+    float softenedVisibility =
+        shadowAmbientFloor + (1.0 - shadowAmbientFloor) * pow(max(rawVisibility, 0.0), 1.0 / shadowSoftness);
+    float sunShadow = lerp(1.0, softenedVisibility, sunShadowStrength);
+
     float3 lighting;
-    float sunShadow = 1.0;
     if (wall) {
         float facing = sqrt(saturate(lambert * 0.72 + 0.28));
         float3 ambientCol = lerp(coolShadow, warmSky, 0.32) * ambient * (0.52 + 0.48 * facing);
@@ -458,13 +467,10 @@ float4 main(PSIn inp): SV_Target0 {
         lighting = ambientCol + diffuseCol + float3(spec + rim, spec + rim, spec + rim);
         float topDarkening = max(minTopBrightness, 1.0 - cliffStrength * cliffProximity);
         lighting *= topDarkening * (1.0 - edgeDarkness * cliffProximity);
-        sunShadow = lerp(1.0, inp.facetUv0.x, sunShadowStrength);
     }
 
     float3 litRgb = albedo.rgb * lighting * wallAo * sunShadow;
-    if (!wall) {
-        litRgb = lerp(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
-    }
+    litRgb = lerp(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
     float4 lit = float4(litRgb, albedo.a);
 
     if (debugMode > 7.5) {
@@ -804,8 +810,8 @@ bool MeshPreviewRenderer::render(
         fs.options4[2] = params.sunShadowStrength;
         fs.options4[3] = params.specularStrength;
         fs.options5[0] = params.shadowTintStrength;
-        fs.options5[1] = 0.0f;
-        fs.options5[2] = 0.0f;
+        fs.options5[1] = params.shadowAmbientFloor;
+        fs.options5[2] = params.shadowSoftness;
         fs.options5[3] = 0.0f;
         sg_range fsRange = {&fs, sizeof(fs)};
         sg_apply_uniforms(1, &fsRange);

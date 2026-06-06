@@ -211,6 +211,8 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::SliderFloat("Specular Strength", &g_productionPreviewSettings.specularStrength, 0.0f, 0.4f);
         ImGui::SliderFloat("Sun Shadow Strength", &g_productionPreviewSettings.sunShadowStrength, 0.0f, 1.0f);
         ImGui::SliderFloat("Shadow Tint", &g_productionPreviewSettings.shadowTintStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("Shadow Ambient Floor", &g_productionPreviewSettings.shadowAmbientFloor, 0.15f, 0.75f);
+        ImGui::SliderFloat("Shadow Softness", &g_productionPreviewSettings.shadowSoftness, 0.6f, 3.0f);
         ImGui::SliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
         ImGui::SliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
         ImGui::SliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
