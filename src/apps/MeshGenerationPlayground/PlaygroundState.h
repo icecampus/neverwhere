@@ -1,7 +1,6 @@
 #pragma once
 
 #include "LandscapeBowlScenario.h"
-#include "ObjectGenerationScenario.h"
 #include "RectangleCliffScenario.h"
 
 #include <cstdint>
@@ -28,9 +27,6 @@ extern MeshPreviewCamera g_meshCamera;
 extern LandscapeBowlSettings g_landscapeSettings;
 extern LandscapeBowlModel g_landscapeModel;
 extern MeshPreviewCamera g_landscapeCamera;
-extern ObjectGenerationSettings g_objectSettings;
-extern ObjectGenerationModel g_objectModel;
-extern MeshPreviewCamera g_objectCamera;
 extern Vec3 g_productionLightDirection;
 extern ProductionPreviewSettings g_productionPreviewSettings;
 

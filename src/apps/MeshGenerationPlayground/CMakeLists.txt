@@ -1,5 +1,4 @@
 find_package(imgui CONFIG REQUIRED)
-find_package(FastNoise2 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
 nw_add_console_app(
@@ -8,7 +7,6 @@ nw_add_console_app(
     LIBS
         spdlog::spdlog_header_only
         imgui::imgui
-        FastNoise2::FastNoise
         glm::glm-header-only
         landscape_core
         landscape_mesh
@@ -16,6 +14,7 @@ nw_add_console_app(
 )
 
 if(WIN32)
+    find_package(FastNoise2 CONFIG REQUIRED)
     add_custom_command(TARGET ${AppName} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:FastNoise2::FastNoise>

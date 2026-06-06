@@ -89,20 +89,6 @@ void scanWallGeometryIntegrity() {
         marker, g_landscapeModel.cliffWallQuadCount, spikes, b45, b90, b135, b170, degenerate, worstCx, worstCz, worstCount);
 }
 
-int countDegenerateObjectQuads() {
-    int degenerate = 0;
-    for (const MeshQuad& quad : g_objectModel.meshQuads) {
-        const Vec3 n0 = triNormal(quad.a, quad.b, quad.c);
-        const Vec3 n1 = triNormal(quad.a, quad.c, quad.d);
-        const bool n0bad = n0.x == 0.0f && n0.y == 0.0f && n0.z == 0.0f;
-        const bool n1bad = n1.x == 0.0f && n1.y == 0.0f && n1.z == 0.0f;
-        if (n0bad || n1bad) {
-            degenerate++;
-        }
-    }
-    return degenerate;
-}
-
 } // namespace
 
 bool runTestScenario() {
@@ -124,19 +110,9 @@ bool runTestScenario() {
         g_landscapeModel.topQuadCount > 0 &&
         g_landscapeModel.cliffWallQuadCount > 0 &&
         g_landscapeModel.beveledSegmentCount > 0;
-    const int objectDegenerateQuads = countDegenerateObjectQuads();
-    const bool objectOk =
-        g_objectSettings.generatorKind == ObjectGeneratorKind::CliffRock &&
-        !g_objectModel.meshQuads.empty() &&
-        g_objectModel.faceCount == (int)g_objectModel.meshQuads.size() &&
-        g_objectModel.vertexCount == g_objectModel.faceCount * 4 &&
-        g_objectModel.gridVertexCount > 0 &&
-        g_objectModel.rockQuadCount > 0 &&
-        objectDegenerateQuads == 0;
-
-    if (rectangleOk && landscapeOk && objectOk) {
+    if (rectangleOk && landscapeOk) {
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, object generator={}, fastNoise={}, gridVerts/rock/recessed/degenerate={}/{}/{}/{}, faces/vertices={}/{}, pyramid maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             g_rectModel.beveledSegmentCount,
@@ -146,14 +122,6 @@ bool runTestScenario() {
             g_landscapeModel.uniqueTileMeshCount,
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount,
-            objectGeneratorName(g_objectSettings.generatorKind),
-            g_objectModel.usedFastNoise,
-            g_objectModel.gridVertexCount,
-            g_objectModel.rockQuadCount,
-            g_objectModel.recessedQuadCount,
-            objectDegenerateQuads,
-            g_objectModel.faceCount,
-            g_objectModel.vertexCount,
             g_landscapeModel.maxAdjacentLevelDelta,
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
@@ -162,10 +130,9 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, objectOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, object generator={}, fastNoise={}, gridVerts/rock/recessed/degenerate={}/{}/{}/{}, faces/vertices={}/{}, pyramid maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
-        objectOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,
         g_rectModel.beveledSegmentCount,
@@ -175,14 +142,6 @@ bool runTestScenario() {
         g_landscapeModel.uniqueTileMeshCount,
         g_landscapeModel.beveledSegmentCount,
         g_landscapeModel.cornerCapCount,
-        objectGeneratorName(g_objectSettings.generatorKind),
-        g_objectModel.usedFastNoise,
-        g_objectModel.gridVertexCount,
-        g_objectModel.rockQuadCount,
-        g_objectModel.recessedQuadCount,
-        objectDegenerateQuads,
-        g_objectModel.faceCount,
-        g_objectModel.vertexCount,
         g_landscapeModel.maxAdjacentLevelDelta,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,
