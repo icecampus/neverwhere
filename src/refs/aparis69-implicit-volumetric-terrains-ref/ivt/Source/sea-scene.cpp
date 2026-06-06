@@ -107,5 +107,6 @@ void SeaScene()
 {
 	TTree* terrainTree = BuildSeaTerrainTree();
 	marching_cube("sea.obj", terrainTree, 350);
+	delete terrainTree;
 	std::cout << std::endl;
 }

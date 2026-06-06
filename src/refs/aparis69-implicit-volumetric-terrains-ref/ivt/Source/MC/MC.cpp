@@ -659,6 +659,9 @@ void marching_cube_polygonize(const TTree* tree, int res, MarchingCubeMesh& out)
 	vertices.clear();
 	indices.clear();
 	voxels.clear();
+	vertices.shrink_to_fit();
+	indices.shrink_to_fit();
+	voxels.shrink_to_fit();
 
 	generate_voxels(tree, res);
 	generate_geometry_smooth();

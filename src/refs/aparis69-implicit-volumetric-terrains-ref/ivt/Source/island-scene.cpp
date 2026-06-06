@@ -20,5 +20,6 @@ void FloatingIsland()
 	std::cout << "Floating Islands" << std::endl;
 	TTree* terrainTree = BuildIslandTerrainTree();
 	marching_cube("islands.obj", terrainTree, 100);
+	delete terrainTree;
 	std::cout << std::endl;
 }

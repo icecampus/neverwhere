@@ -119,9 +119,10 @@ void drawUi() {
         g_rebuildRequested = true;
     }
 
-    if (ImGui::SliderInt("MC resolution", &g_settings.mcResolution, 24, 200)) {
+    if (ImGui::SliderInt("MC resolution", &g_settings.mcResolution, 24, 350)) {
         g_rebuildRequested = true;
     }
+    ImGui::TextDisabled("Upstream batch: island=100, sea=350, karst=200");
     if (ImGui::InputInt("Seed", &g_settings.seed)) {
         g_rebuildRequested = true;
     }

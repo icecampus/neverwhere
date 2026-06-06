@@ -222,5 +222,6 @@ void KarstScene()
 {
 	TTree* terrainTree = BuildKarstTerrainTree();
 	marching_cube("karst.obj", terrainTree, 200);
+	delete terrainTree;
 	std::cout << std::endl;
 }

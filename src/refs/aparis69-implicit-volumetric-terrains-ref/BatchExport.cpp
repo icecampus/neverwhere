@@ -7,6 +7,8 @@
 
 #include <spdlog/spdlog.h>
 
+// Batch path uses upstream XxxScene() wrappers (hardcoded MC + OBJ names).
+// Viewer path uses Build*TerrainTree() from ivt_scenes.h via IvtScene.
 void SeaScene();
 void KarstScene();
 void FloatingIsland();
@@ -23,6 +25,7 @@ enum class Scene {
 void printUsage(const char* argv0) {
     spdlog::info("Usage: {} [--batch-export] [--scene sea|karst|island|all] [--smoke-test]", argv0);
     spdlog::info("  Exports OBJ meshes to the current working directory (sea.obj, karst.obj, islands.obj).");
+    spdlog::info("  --smoke-test runs all upstream batch scenes (island/karst/sea); sea@350^3 may take several minutes.");
 }
 
 Scene parseScene(const char* name) {
@@ -64,23 +67,57 @@ bool objLooksValid(const std::filesystem::path& path) {
     return std::filesystem::file_size(path, ec) > 64 && !ec;
 }
 
-bool runSmokeTest() {
-    spdlog::info("IVT smoke test: FloatingIsland only");
-    const auto cwd = std::filesystem::current_path();
-    const auto outPath = cwd / "islands.obj";
+struct SmokeCase {
+    const char* label;
+    const char* sceneArg;
+    const char* objName;
+};
+
+bool runSmokeCaseIsolated(const SmokeCase& test, const std::filesystem::path& exePath) {
+    spdlog::info("IVT smoke: {}", test.label);
+    const auto outPath = std::filesystem::current_path() / test.objName;
 
     std::error_code ec;
     std::filesystem::remove(outPath, ec);
 
-    FloatingIsland();
-
-    if (!objLooksValid(outPath)) {
-        spdlog::error("TEST FAIL: missing or empty islands.obj at {}", outPath.string());
+    const std::string cmd = "\"" + exePath.string() + "\" --batch-export --scene " + test.sceneArg;
+    const int exitCode = std::system(cmd.c_str());
+    if (exitCode != 0) {
+        spdlog::error("TEST FAIL: {} subprocess exit code {}", test.label, exitCode);
         return false;
     }
 
-    spdlog::info("TEST PASS: islands.obj exported ({} bytes)", std::filesystem::file_size(outPath));
+    if (!objLooksValid(outPath)) {
+        spdlog::error("TEST FAIL: missing or empty {} at {}", test.objName, outPath.string());
+        return false;
+    }
+
+    spdlog::info("TEST PASS: {} ({} bytes)", test.objName, std::filesystem::file_size(outPath));
     return true;
+}
+
+bool runSmokeTest(const char* argv0) {
+    spdlog::info("IVT smoke test: all upstream batch scenes (isolated subprocess per scene)");
+    const std::filesystem::path exePath = std::filesystem::absolute(argv0);
+    const SmokeCase cases[] = {
+        {"FloatingIsland (MC 100^3)", "island", "islands.obj"},
+        {"KarstScene (MC 200^3)", "karst", "karst.obj"},
+        {"SeaScene (MC 350^3)", "sea", "sea.obj"},
+    };
+
+    bool allOk = true;
+    for (const SmokeCase& test : cases) {
+        if (!runSmokeCaseIsolated(test, exePath)) {
+            allOk = false;
+        }
+    }
+
+    if (allOk) {
+        spdlog::info("TEST PASS: islands.obj, karst.obj, sea.obj");
+    } else {
+        spdlog::error("TEST FAIL: one or more batch scenes failed");
+    }
+    return allOk;
 }
 
 } // namespace
@@ -110,10 +147,11 @@ int runIvtBatchExport(int argc, char* argv[]) {
         spdlog::warn("Unknown argument: {}", argv[i]);
     }
 
+    // Upstream parity: fixed seed for deterministic batch OBJ export.
     std::srand(1234);
 
     if (smokeTest) {
-        return runSmokeTest() ? 0 : 1;
+        return runSmokeTest(argv[0]) ? 0 : 1;
     }
 
     spdlog::info("aparis69-implicit-volumetric-terrains-ref: cwd={}", std::filesystem::current_path().string());
