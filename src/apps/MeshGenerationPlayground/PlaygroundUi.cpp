@@ -16,6 +16,85 @@ namespace meshgen_playground {
 
 namespace {
 
+constexpr float kViewportSplitterThickness = 10.0f;
+constexpr float kMinStackedViewportHeight = 72.0f;
+
+struct StackedViewportLayout {
+    float topHeight = 0.0f;
+    float bottomHeight = 0.0f;
+};
+
+float clampViewportTopFraction(float fraction, float availableHeight) {
+    if (availableHeight <= kMinStackedViewportHeight * 2.0f) {
+        return 0.5f;
+    }
+
+    const float minFraction = kMinStackedViewportHeight / availableHeight;
+    const float maxFraction = 1.0f - minFraction;
+    return std::clamp(fraction, minFraction, maxFraction);
+}
+
+StackedViewportLayout layoutStackedViewports(
+    const ImVec2& origin,
+    float width,
+    float totalHeight,
+    float& topFraction,
+    const char* splitterId) {
+
+    const float availableHeight = std::max(1.0f, totalHeight - kViewportSplitterThickness);
+    topFraction = clampViewportTopFraction(topFraction, availableHeight);
+
+    auto computeLayout = [&](float fraction) {
+        StackedViewportLayout result;
+        result.topHeight = availableHeight * fraction;
+        result.bottomHeight = availableHeight - result.topHeight;
+        return result;
+    };
+
+    StackedViewportLayout layout = computeLayout(topFraction);
+
+    ImGui::SetCursorScreenPos({origin.x, origin.y + layout.topHeight});
+    ImGui::PushID(splitterId);
+    ImGui::InvisibleButton("##viewport_splitter", {width, kViewportSplitterThickness});
+    const bool splitterHovered = ImGui::IsItemHovered();
+    const bool splitterActive = ImGui::IsItemActive();
+    if (splitterActive && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        const float mouseY = ImGui::GetIO().MousePos.y;
+        const float newTopHeight = mouseY - origin.y;
+        topFraction = clampViewportTopFraction(newTopHeight / availableHeight, availableHeight);
+        layout = computeLayout(topFraction);
+    }
+    if (splitterHovered || splitterActive) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    }
+    ImGui::PopID();
+
+    const ImVec2 splitterMin{origin.x, origin.y + layout.topHeight};
+    const ImVec2 splitterMax{origin.x + width, splitterMin.y + kViewportSplitterThickness};
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImU32 splitterColor = splitterActive
+        ? IM_COL32(96, 132, 196, 255)
+        : splitterHovered
+            ? IM_COL32(74, 86, 108, 255)
+            : IM_COL32(52, 58, 70, 255);
+    drawList->AddRectFilled(splitterMin, splitterMax, splitterColor);
+    drawList->AddLine(
+        {splitterMin.x + 8.0f, splitterMin.y + kViewportSplitterThickness * 0.5f},
+        {splitterMax.x - 8.0f, splitterMin.y + kViewportSplitterThickness * 0.5f},
+        IM_COL32(150, 162, 180, splitterHovered || splitterActive ? 220 : 140),
+        1.5f);
+    const float gripCenterX = splitterMin.x + width * 0.5f;
+    const float gripCenterY = splitterMin.y + kViewportSplitterThickness * 0.5f;
+    for (int i = -1; i <= 1; i++) {
+        drawList->AddCircleFilled(
+            {gripCenterX + (float)i * 5.0f, gripCenterY},
+            1.6f,
+            IM_COL32(196, 206, 220, splitterHovered || splitterActive ? 255 : 180));
+    }
+
+    return layout;
+}
+
 void drawFrameStats() {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     ImGui::Text("Frame: %d", g_state.frameIndex);
@@ -226,11 +305,18 @@ void drawScenarioPanelBackground(const ImVec2& layoutOrigin, const ImVec2& layou
 }
 
 void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    static float viewportTopFraction = 0.2f;
+
     const float gutter = 12.0f;
     const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
     const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
     const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
-    const float viewportHeight = std::max(1.0f, (layoutSize.y - gutter) * 0.5f);
+    const StackedViewportLayout viewportLayout = layoutStackedViewports(
+        {rightX, layoutOrigin.y},
+        rightWidth,
+        layoutSize.y,
+        viewportTopFraction,
+        "RectViewportSplit");
 
     drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
     ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
@@ -241,19 +327,26 @@ void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
-        drawRectangleCliffDebugView(g_rectSettings, g_rectModel, {rightWidth, viewportHeight});
+        drawRectangleCliffDebugView(g_rectSettings, g_rectModel, {rightWidth, viewportLayout.topHeight});
 
-        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportHeight + gutter});
-        drawMesh3dPreview(g_rectSettings, g_rectModel, {rightWidth, viewportHeight});
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportLayout.topHeight + kViewportSplitterThickness});
+        drawMesh3dPreview(g_rectSettings, g_rectModel, {rightWidth, viewportLayout.bottomHeight});
     }
 }
 
 void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    static float viewportTopFraction = 0.2f;
+
     const float gutter = 12.0f;
     const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
     const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
     const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
-    const float viewportHeight = std::max(1.0f, (layoutSize.y - gutter) * 0.5f);
+    const StackedViewportLayout viewportLayout = layoutStackedViewports(
+        {rightX, layoutOrigin.y},
+        rightWidth,
+        layoutSize.y,
+        viewportTopFraction,
+        "LandscapeViewportSplit");
 
     drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
     ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
@@ -264,10 +357,10 @@ void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
-        drawLandscapeBowlDebugView(g_landscapeSettings, g_landscapeModel, {rightWidth, viewportHeight});
+        drawLandscapeBowlDebugView(g_landscapeSettings, g_landscapeModel, {rightWidth, viewportLayout.topHeight});
 
-        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportHeight + gutter});
-        drawLandscapeMesh3dPreview(g_landscapeSettings, g_landscapeModel, {rightWidth, viewportHeight});
+        ImGui::SetCursorScreenPos({rightX, layoutOrigin.y + viewportLayout.topHeight + kViewportSplitterThickness});
+        drawLandscapeMesh3dPreview(g_landscapeSettings, g_landscapeModel, {rightWidth, viewportLayout.bottomHeight});
     }
 }
 
