@@ -75,6 +75,7 @@ endif()
 
 add_subdirectory(src/libs)
 add_subdirectory(src/apps)
+add_subdirectory(src/refs)
 
 qt_finalize_project()
 

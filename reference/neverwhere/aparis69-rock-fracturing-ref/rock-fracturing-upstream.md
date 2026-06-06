@@ -1,6 +1,6 @@
-# Rock-fracturing: upstream vs CliffsGenerationPlayground
+# Rock-fracturing: upstream vs aparis69-rock-fracturing-ref
 
-Анализ [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) (commit `b91965b`, 2022-05-20) относительно нашего порта в `CliffsGenerationPlayground`.
+Анализ [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) (commit `b91965b`, 2022-05-20) относительно нашего порта в `aparis69-rock-fracturing-ref`.
 
 Автор upstream явно предупреждает: это **переписанный** research-код, не бинарно идентичный сценам из статьи; часть операторов из paper в репозитории **отсутствует даже в оригинале**.
 
@@ -150,7 +150,7 @@ Debug top view использует фиксированный `halfTile = 10` �
 
 ## 9. Рекомендуемый backlog (по убыванию пользы)
 
-1. **Export OBJ/GLTF** из playground (parity с upstream workflow + pipeline в DCC).
+1. **Export OBJ/GLTF** из референс-порта (parity с upstream workflow + pipeline в DCC).
 2. **Preset «Upstream defaults»**: MC=200, tile=20, poisson 0.5/10000, seed 1234.
 3. **Провести `blockSmoothingRadius` / `bvhTransitionRadius` в `ComputeBlockSDF`** (или убрать слайдеры).
 4. **Регрессия против `Objs/tile_equidimensional.obj`** (Hausdorff / vertex count / bbox) на фиксированном seed.
@@ -170,4 +170,4 @@ Debug top view использует фиксированный `halfTile = 10` �
 | Export + reference assets | **у upstream больше** |
 | Параметрическая честность UI | **есть дыры** (слайдеры без эффекта) |
 
-Наш playground — это **интерактивная оболочка** вокруг того же research pipeline, с preview и эксперiment UI, но без batch OBJ export и без prebuilt эталонов. Для «как в статье по качеству меша» нужно поднять MC до 200 и сравнить с `Objs/`; для «как в paper по сценам» ни upstream, ни мы не покрываем replication/tiling.
+Наш референс-порт — это **интерактивная оболочка** вокруг того же research pipeline, с preview и experiment UI, но без batch OBJ export и без prebuilt эталонов. Для «как в статье по качеству меша» нужно поднять MC до 200 и сравнить с `Objs/`; для «как в paper по сценам» ни upstream, ни мы не покрываем replication/tiling.

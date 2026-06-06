@@ -1,6 +1,6 @@
-# Cliffs Generation Playground — implementation notes
+# aparis69-rock-fracturing-ref — implementation notes
 
-Neverwhere-specific analysis and roadmaps for the Rock-fracturing port.
+Neverwhere-specific analysis and roadmaps for the Rock-fracturing reference port.
 
 | Document | Description |
 |----------|-------------|
@@ -8,7 +8,7 @@ Neverwhere-specific analysis and roadmaps for the Rock-fracturing port.
 | [SCENE_EVOLUTION_ROADMAP.md](./SCENE_EVOLUTION_ROADMAP.md) | Phased plan toward paper scenes (terrain + replication) |
 | [upstream.meta.json](./upstream.meta.json) | Machine-readable upstream metadata |
 
-**Algorithm code:** `src/apps/CliffsGenerationPlayground/rock_fracture/`
+**Algorithm code:** `src/refs/aparis69-rock-fracturing-ref/rock_fracture/`
 
 **Papers & external projects:** see repo root [reference/](../../../README.md):
 

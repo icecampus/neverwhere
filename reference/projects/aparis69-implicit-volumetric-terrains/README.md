@@ -23,4 +23,4 @@ Console app exporting **OBJ scenes** from *Terrain Amplification with Implicit 3
 
 **Primary candidate to port for macro terrain `f`** before combining with Rock-fracturing blocks (`fe = max(f, t)`).
 
-Roadmap: [../../neverwhere/cliffs-generation-playground/SCENE_EVOLUTION_ROADMAP.md](../../neverwhere/cliffs-generation-playground/SCENE_EVOLUTION_ROADMAP.md)
+Roadmap: [../../neverwhere/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md](../../neverwhere/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md)

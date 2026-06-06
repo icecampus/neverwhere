@@ -22,8 +22,8 @@
 
 ## Neverwhere port
 
-- Code: `src/apps/CliffsGenerationPlayground/rock_fracture/`
-- Analysis: [../../neverwhere/cliffs-generation-playground/rock-fracturing-upstream.md](../../neverwhere/cliffs-generation-playground/rock-fracturing-upstream.md)
+- Code: `src/refs/aparis69-rock-fracturing-ref/rock_fracture/`
+- Analysis: [../../neverwhere/aparis69-rock-fracturing-ref/rock-fracturing-upstream.md](../../neverwhere/aparis69-rock-fracturing-ref/rock-fracturing-upstream.md)
 
 ## Key sections to read
 

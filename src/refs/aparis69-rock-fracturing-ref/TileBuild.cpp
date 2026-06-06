@@ -37,7 +37,7 @@ bool setupWarpingField(const RockFractureSettings& settings, TileBuildResult& ou
     }
 
     namespace fs = std::filesystem;
-    const fs::path relative = fs::path("src") / "apps" / "CliffsGenerationPlayground" / "resources" / "textures" / "rock1.png";
+    const fs::path relative = fs::path("src") / "refs" / "aparis69-rock-fracturing-ref" / "resources" / "textures" / "rock1.png";
 
     fs::path dir = fs::current_path();
     for (int i = 0; i < 16; i++) {

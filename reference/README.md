@@ -29,9 +29,9 @@ Curated papers, open-source projects, and Neverwhere-specific notes for **volume
 
 | Folder | Content |
 |--------|---------|
-| [neverwhere/cliffs-generation-playground](./neverwhere/cliffs-generation-playground/) | Gap analysis vs upstream, scene evolution roadmap, `upstream.meta.json` |
+| [neverwhere/aparis69-rock-fracturing-ref](./neverwhere/aparis69-rock-fracturing-ref/) | Gap analysis vs upstream, scene evolution roadmap, `upstream.meta.json` |
 
-Ported algorithm code lives in `src/apps/CliffsGenerationPlayground/rock_fracture/` (not duplicated here).
+Ported algorithm code lives in `src/refs/aparis69-rock-fracturing-ref/rock_fracture/` (not duplicated here).
 
 Related apps in the monorepo (no separate reference folder yet):
 

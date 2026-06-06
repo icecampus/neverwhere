@@ -354,7 +354,7 @@ void drawUi() {
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoBringToFrontOnFocus;
 
-    ImGui::Begin("Cliffs Generation Playground", nullptr, rootFlags);
+    ImGui::Begin("aparis69-rock-fracturing-ref", nullptr, rootFlags);
 
     const float gutter = kRightPanelGutter;
     // Lock both the left panel and the right column to the window's content height so the
@@ -414,7 +414,7 @@ void drawUi() {
 
 void init() {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("CliffsGenerationPlayground: init()");
+    spdlog::info("aparis69-rock-fracturing-ref: init()");
 
     stm_setup();
     g_state.lastTime = stm_now();
@@ -424,7 +424,7 @@ void init() {
     desc.logger.func = slog_func;
     sg_setup(&desc);
     g_state.gfxOk = sg_isvalid();
-    spdlog::info("CliffsGenerationPlayground: sg_setup() {}", g_state.gfxOk ? "OK" : "FAILED");
+    spdlog::info("aparis69-rock-fracturing-ref: sg_setup() {}", g_state.gfxOk ? "OK" : "FAILED");
 
     if (!g_state.gfxOk) return;
 
@@ -433,11 +433,11 @@ void init() {
     imguiDesc.logger.func = slog_func;
     simgui_setup(&imguiDesc);
     g_state.imguiOk = true;
-    spdlog::info("CliffsGenerationPlayground: simgui_setup() done, max_vertices=8M");
+    spdlog::info("aparis69-rock-fracturing-ref: simgui_setup() done, max_vertices=8M");
 
     render_playground::applyCliffSceneDefaults(g_settings);
     g_renderer.initGpu();
-    spdlog::info("CliffsGenerationPlayground: defaults cliff scene, replication={}, scene MC={}",
+    spdlog::info("aparis69-rock-fracturing-ref: defaults cliff scene, replication={}, scene MC={}",
         g_settings.enableBlockReplication ? "on" : "off",
         g_settings.scene.mcResolution);
 }
@@ -469,7 +469,7 @@ void frame() {
                 && model.triangleCount > 0 && !model.generationFailed) {
                 g_renderer.resetViewForModel(model);
                 spdlog::info(
-                    "CliffsGenerationPlayground: auto-framed cliff scene (tri={}, replication={})",
+                    "aparis69-rock-fracturing-ref: auto-framed cliff scene (tri={}, replication={})",
                     model.triangleCount, model.enableBlockReplication ? "yes" : "no");
             }
         });
@@ -518,7 +518,7 @@ void frame() {
 }
 
 void cleanup() {
-    spdlog::info("CliffsGenerationPlayground: cleanup()");
+    spdlog::info("aparis69-rock-fracturing-ref: cleanup()");
     g_renderer.shutdownGpu();
     if (g_state.imguiOk) {
         simgui_shutdown();
@@ -593,7 +593,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "Cliffs Generation Playground";
+    desc.window_title = "aparis69-rock-fracturing-ref";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32.console_utf8 = true;

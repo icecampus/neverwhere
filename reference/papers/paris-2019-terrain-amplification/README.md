@@ -30,4 +30,4 @@
 
 This is the **macro layer `f`** missing from Rock-fracturing alone. Pair with TVC 2020 for `fe = max(f, t)`.
 
-See [../../neverwhere/cliffs-generation-playground/SCENE_EVOLUTION_ROADMAP.md](../../neverwhere/cliffs-generation-playground/SCENE_EVOLUTION_ROADMAP.md).
+See [../../neverwhere/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md](../../neverwhere/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md).

@@ -6,4 +6,4 @@ Reference materials live at the repo root:
 
 Neverwhere-specific notes:
 
-**[../../../../reference/neverwhere/cliffs-generation-playground/](../../../../reference/neverwhere/cliffs-generation-playground/)**
+**[../../../../reference/neverwhere/aparis69-rock-fracturing-ref/](../../../../reference/neverwhere/aparis69-rock-fracturing-ref/)**

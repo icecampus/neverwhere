@@ -25,7 +25,7 @@ bool exportModelToObj(const RockFractureModel& model, const std::string& path) {
         return false;
     }
 
-    std::fprintf(file, "# CliffsGenerationPlayground export\n");
+    std::fprintf(file, "# aparis69-rock-fracturing-ref export\n");
     std::fprintf(file, "# vertices=%d triangles=%d\n", model.vertexCount, model.triangleCount);
 
     for (const Vec3& v : model.meshVertices) {

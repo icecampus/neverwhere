@@ -3,7 +3,7 @@ find_package(glm CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
-        _apps
+        _refs
     LIBS
         spdlog::spdlog_header_only
         imgui::imgui
@@ -30,9 +30,9 @@ find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(${AppName} PRIVATE OpenMP::OpenMP_CXX)
     target_compile_definitions(${AppName} PRIVATE ROCK_FRACTURE_USE_OPENMP)
-    message(STATUS "CliffsGenerationPlayground: OpenMP enabled for Rock Fracture")
+    message(STATUS "aparis69-rock-fracturing-ref: OpenMP enabled for Rock Fracture")
 else()
-    message(STATUS "CliffsGenerationPlayground: OpenMP not found, Rock Fracture will run single-threaded")
+    message(STATUS "aparis69-rock-fracturing-ref: OpenMP not found, Rock Fracture will run single-threaded")
 endif()
 
 # Copy resources (textures used by warping field) to the build directory.

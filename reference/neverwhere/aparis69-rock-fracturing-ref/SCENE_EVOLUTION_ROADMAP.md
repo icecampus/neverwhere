@@ -211,7 +211,7 @@ Paper: Sea cliff 100×100 m, ~959 replicated blocks, **< 1 MB** на хране�
 ## 5. Предлагаемая структура кода
 
 ```
-src/apps/CliffsGenerationPlayground/
+src/refs/aparis69-rock-fracturing-ref/
   rock_fracture/          # без изменений контракта: tile C → SDFNode* / mcMesh
   rock_scene/             # NEW
     SceneSpec.h           # macro + strata + water
@@ -238,7 +238,7 @@ CliffSceneModel buildCliffScene(const SceneSpec& spec, const TileLibrary& tiles)
 
 | Компонент | Роль |
 |-----------|------|
-| **`CliffsGenerationPlayground`** | Paper blocks + replication R&D |
+| **`aparis69-rock-fracturing-ref`** | Paper blocks + replication R&D |
 | **`MeshGenerationPlayground`** | FastNoise cliff — **silhouette / strata preview**, не замена `bi` |
 | **`landscape_mesh`** | Heightfields карты → будущий input `h(x,y)` для `f` |
 | **`render_core`** | Позже GPU mesh path вместо ImGui CPU fill |
