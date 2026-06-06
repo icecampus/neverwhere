@@ -7,8 +7,11 @@
 
 namespace render_playground {
 
-// Camera state shared by both viewports.
+// Orbit camera around a scene pivot (Blender-style: object stays in world space).
 struct RockFractureCamera {
+    Vec3 target{0.0f, 0.0f, 0.0f};
+    float yaw = 0.785398163f;    // 45 deg — default iso-like orbit
+    float pitch = 0.615479708f;  // ~35.26 deg
     float zoom = 1.0f;
     ImVec2 pan{0.0f, 0.0f};
 };
@@ -28,6 +31,7 @@ struct RockFractureShading {
     float groundShadowStrength = 0.35f;
     float fogStrength = 0.18f;
     bool showWireframe = true;
+    bool showWorldGrid = true;
     bool showSamples2d = true;
     bool showFractures2d = true;
 };
@@ -48,7 +52,13 @@ public:
     RockFractureShading& shading() { return m_shading; }
     const RockFractureShading& shading() const { return m_shading; }
 
-    void resetView() { m_camera.zoom = 1.0f; m_camera.pan = {0.0f, 0.0f}; }
+    void resetView() {
+        m_camera.target = {0.0f, 0.0f, 0.0f};
+        m_camera.yaw = 0.785398163f;
+        m_camera.pitch = 0.615479708f;
+        m_camera.zoom = 1.0f;
+        m_camera.pan = {0.0f, 0.0f};
+    }
 
 private:
     RockFractureCamera m_camera;

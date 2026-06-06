@@ -46,7 +46,7 @@ bool fileExists(const std::filesystem::path& p) {
 
 bool tryLoadWarpingTexture(RockFractureModel& model) {
     namespace fs = std::filesystem;
-    const fs::path relative = fs::path("src") / "apps" / "RenderPlayground" / "resources" / "textures" / "rock1.png";
+    const fs::path relative = fs::path("src") / "apps" / "CliffsGenerationPlayground" / "resources" / "textures" / "rock1.png";
 
     fs::path dir = fs::current_path();
     std::error_code ec;

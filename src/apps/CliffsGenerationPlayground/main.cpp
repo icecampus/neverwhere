@@ -54,6 +54,43 @@ bool g_rebuildRequested = true;
 bool g_showControls = true;
 bool g_showDebugView = true;
 bool g_showMeshView = true;
+float g_debugViewHeightRatio = 0.32f;
+
+constexpr float kRightPanelGutter = 12.0f;
+constexpr float kDebugMeshSplitterHeight = 6.0f;
+constexpr float kMinDebugViewHeight = 80.0f;
+constexpr float kMinMeshViewHeight = 120.0f;
+
+float clampDebugViewHeight(float debugHeight, float fullHeight) {
+    const float maxDebugHeight = std::max(
+        kMinDebugViewHeight,
+        fullHeight - kMinMeshViewHeight - kDebugMeshSplitterHeight - kRightPanelGutter);
+    return std::clamp(debugHeight, kMinDebugViewHeight, maxDebugHeight);
+}
+
+bool drawVerticalSplitter(const char* id, float x, float y, float width, float fullHeight, float& debugHeight) {
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
+    ImGui::InvisibleButton(id, ImVec2(width, kDebugMeshSplitterHeight));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    if (hovered || active) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    }
+    if (active) {
+        debugHeight = clampDebugViewHeight(debugHeight + ImGui::GetIO().MouseDelta.y, fullHeight);
+        g_debugViewHeightRatio = debugHeight / std::max(1.0f, fullHeight);
+    }
+
+    const ImVec2 splitMin{x, y};
+    const ImVec2 splitMax{x + width, y + kDebugMeshSplitterHeight};
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImU32 lineColor = active ? IM_COL32(120, 170, 230, 255)
+        : hovered ? IM_COL32(95, 110, 130, 255)
+                  : IM_COL32(58, 66, 78, 255);
+    const float midY = y + kDebugMeshSplitterHeight * 0.5f;
+    drawList->AddLine({x + 8.0f, midY}, {x + width - 8.0f, midY}, lineColor, active ? 2.0f : 1.2f);
+    return active;
+}
 
 bool kKindCombo(int& kindIndex) {
     bool changed = false;
@@ -102,6 +139,7 @@ void drawSceneControls() {
     if (ImGui::Checkbox("Use OpenMP",           &g_settings.useOpenMP))   g_rebuildRequested = true;
     if (ImGui::Checkbox("Use texture warping",  &g_settings.useTextureWarp)) g_rebuildRequested = true;
     if (ImGui::Checkbox("Show mesh wireframe",  &g_renderer.shading().showWireframe)) {}
+    if (ImGui::Checkbox("Show world grid",      &g_renderer.shading().showWorldGrid)) {}
     if (ImGui::Checkbox("Show samples (top)",   &g_renderer.shading().showSamples2d))   {}
     if (ImGui::Checkbox("Show fractures (top)", &g_renderer.shading().showFractures2d)) {}
 
@@ -170,9 +208,9 @@ void drawUi() {
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoBringToFrontOnFocus;
 
-    ImGui::Begin("RenderPlayground", nullptr, rootFlags);
+    ImGui::Begin("Cliffs Generation Playground", nullptr, rootFlags);
 
-    const float gutter = 12.0f;
+    const float gutter = kRightPanelGutter;
     // Lock both the left panel and the right column to the window's content height so the
     // BeginChild calls never auto-grow past the window bottom (which would push the cursor
     // off-screen and clamp the right-side viewport to negative height -> invisible mesh).
@@ -194,14 +232,17 @@ void drawUi() {
     const char* buildStage = g_scene.buildStage();
 
     if (g_showDebugView && g_showMeshView) {
-        const float debugHeight = std::max(120.0f, fullHeight * 0.32f);
+        float debugHeight = clampDebugViewHeight(g_debugViewHeightRatio * fullHeight, fullHeight);
         const ImVec2 debugSize(rightWidth, debugHeight);
         ImGui::BeginChild("##debugView", debugSize, true);
         g_renderer.drawDebugView(g_scene.model(), debugSize, building, buildElapsed, buildStage);
         ImGui::EndChild();
 
-        ImGui::SetCursorScreenPos(ImVec2(rightX, viewport->WorkPos.y + debugHeight + gutter));
-        const float meshHeight = std::max(1.0f, fullHeight - debugHeight - gutter);
+        const float splitterY = viewport->WorkPos.y + debugHeight;
+        drawVerticalSplitter("##debugMeshSplitter", rightX, splitterY, rightWidth, fullHeight, debugHeight);
+
+        ImGui::SetCursorScreenPos(ImVec2(rightX, splitterY + kDebugMeshSplitterHeight));
+        const float meshHeight = std::max(1.0f, fullHeight - debugHeight - kDebugMeshSplitterHeight);
         const ImVec2 meshSize(rightWidth, meshHeight);
         ImGui::BeginChild("##meshView", meshSize, true);
         g_renderer.drawMeshView(g_scene.model(), meshSize, building, buildElapsed, buildStage);
@@ -223,7 +264,7 @@ void drawUi() {
 
 void init() {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("RenderPlayground: init()");
+    spdlog::info("CliffsGenerationPlayground: init()");
 
     stm_setup();
     g_state.lastTime = stm_now();
@@ -233,7 +274,7 @@ void init() {
     desc.logger.func = slog_func;
     sg_setup(&desc);
     g_state.gfxOk = sg_isvalid();
-    spdlog::info("RenderPlayground: sg_setup() {}", g_state.gfxOk ? "OK" : "FAILED");
+    spdlog::info("CliffsGenerationPlayground: sg_setup() {}", g_state.gfxOk ? "OK" : "FAILED");
 
     if (!g_state.gfxOk) return;
 
@@ -242,7 +283,7 @@ void init() {
     imguiDesc.logger.func = slog_func;
     simgui_setup(&imguiDesc);
     g_state.imguiOk = true;
-    spdlog::info("RenderPlayground: simgui_setup() done, max_vertices=8M");
+    spdlog::info("CliffsGenerationPlayground: simgui_setup() done, max_vertices=8M");
 }
 
 void frame() {
@@ -298,7 +339,7 @@ void frame() {
 }
 
 void cleanup() {
-    spdlog::info("RenderPlayground: cleanup()");
+    spdlog::info("CliffsGenerationPlayground: cleanup()");
     if (g_state.imguiOk) {
         simgui_shutdown();
         g_state.imguiOk = false;
@@ -328,7 +369,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "RenderPlayground";
+    desc.window_title = "Cliffs Generation Playground";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32.console_utf8 = true;

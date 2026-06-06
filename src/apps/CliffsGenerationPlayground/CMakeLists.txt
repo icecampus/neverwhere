@@ -30,9 +30,9 @@ find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(${AppName} PRIVATE OpenMP::OpenMP_CXX)
     target_compile_definitions(${AppName} PRIVATE ROCK_FRACTURE_USE_OPENMP)
-    message(STATUS "RenderPlayground: OpenMP enabled for Rock Fracture")
+    message(STATUS "CliffsGenerationPlayground: OpenMP enabled for Rock Fracture")
 else()
-    message(STATUS "RenderPlayground: OpenMP not found, Rock Fracture will run single-threaded")
+    message(STATUS "CliffsGenerationPlayground: OpenMP not found, Rock Fracture will run single-threaded")
 endif()
 
 # Copy resources (textures used by warping field) to the build directory.
