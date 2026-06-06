@@ -183,6 +183,20 @@ void rebuildRectangleCliffModel() {
         addMeshQuad(model, toAppMeshQuad(quad));
     }
 
+    std::vector<std::uint8_t> shadowLevels(model.solidCells.size(), 0);
+    for (std::size_t i = 0; i < model.solidCells.size(); i++) {
+        shadowLevels[i] = model.solidCells[i] ? 1 : 0;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        applySunShadowToMeshQuads(
+            model.meshQuads,
+            settings.gridWidth,
+            settings.gridHeight,
+            shadowLevels,
+            g_productionLightDirection);
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         g_rectModel = std::move(model);

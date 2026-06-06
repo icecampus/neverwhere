@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LandscapeBowlScenario.h"
+#include "PlaygroundTypes.h"
 #include "RectangleCliffScenario.h"
 
 #include <imgui.h>
@@ -8,10 +9,12 @@
 namespace meshgen_playground {
 
 void initProductionPreviewTextures();
+void configureProductionPreviewGpuReadback(void* d3d11Device, void* d3d11Context);
 void shutdownProductionPreviewTextures();
 bool productionGrassTextureLoaded();
 bool productionRockTextureLoaded();
 bool warmupProductionPreviewRenderer();
+bool captureProductionPreviewGpuPng(const char* path, ProductionPreviewDebugMode debugMode, int width = 960, int height = 540);
 
 // Throwaway env-sprite test helpers.
 int loadedEnvSpriteCount();

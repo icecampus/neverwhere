@@ -4,7 +4,9 @@
 #include <stdexcept>
 
 #define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image.h>
+#include <stb_image_write.h>
 
 namespace render_core {
 namespace fs = std::filesystem;
@@ -23,6 +25,13 @@ ImageRGBA8 loadImageRGBA8(const fs::path& path) {
     std::memcpy(img.pixels.data(), data, img.pixels.size());
     stbi_image_free(data);
     return img;
+}
+
+bool writeRgbaPng(const std::filesystem::path& path, int width, int height, const std::uint8_t* pixels, int strideBytes) {
+    if (!pixels || width <= 0 || height <= 0 || strideBytes <= 0) {
+        return false;
+    }
+    return stbi_write_png(path.string().c_str(), width, height, 4, pixels, strideBytes) != 0;
 }
 
 } // namespace render_core

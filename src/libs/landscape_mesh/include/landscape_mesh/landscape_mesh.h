@@ -173,6 +173,8 @@ VertexKind classifyVertex(const SolidMaskGrid& mask, int x, int y);
 std::vector<BoundarySegment> buildBoundarySegments(const SolidMaskGrid& mask);
 BeveledBoundaryResult buildBeveledBoundary(const SolidMaskGrid& mask, const MeshBuildSettings& settings);
 NormalOrientationStats validateNormalOrientation(const std::vector<MeshQuad>& quads);
+// Lambert lighting normal for wall quads: mesh-authoritative outwardHint, not displaced facet geometry.
+Vec3 litWallNormal(const MeshQuad& quad);
 CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, const MeshBuildSettings& settings);
 CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& settings);
 SeamValidation validateLandscapeSeams(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& settings);

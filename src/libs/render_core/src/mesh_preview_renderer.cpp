@@ -2,7 +2,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
+#include <filesystem>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <d3d11.h>
+#endif
+
+#include "render_core/image_loader.h"
 
 namespace render_core {
 namespace {
@@ -77,6 +89,7 @@ uniform vec4 options1;
 uniform vec4 options2;
 uniform vec4 options3;
 uniform vec4 options4;
+uniform vec4 options5;
 
 float hash21(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -131,6 +144,16 @@ void main() {
     float minTopBrightness = options1.z;
     float edgeDarkness = options1.w;
     float debugMode = options2.z;
+    float rimStrength = options2.w;
+    float sunShadowStrength = options4.z;
+    float specularStrength = options4.w;
+    float shadowTintStrength = options5.x;
+    const float rimPower = 2.5;
+    const float shininess = 24.0;
+    const vec3 coolShadow = vec3(0.14, 0.20, 0.22);
+    const vec3 warmSky = vec3(0.42, 0.36, 0.27);
+    const vec3 lightTint = vec3(1.05, 0.96, 0.82);
+    const vec3 viewDir = normalize(vec3(0.35, 0.55, 0.35));
 
     bool wall = v_face_kind > 0.5;
     vec2 uv = v_uv * textureScale;
@@ -166,9 +189,9 @@ void main() {
         // float maskParam = options4.x;
         // vec2 facetLocal = v_facet_uv;
 
-        // A3: directional AO - darker at the base and inside crevices.
+        // A3: foot darkening only; crevice tint stays in albedo so facets do not modulate light.
         float baseAo = mix(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
-        wallAo = baseAo * (1.0 - crevice * creviceStrength * 0.6);
+        wallAo = baseAo;
     }
 
     vec3 n = normalize(v_normal);
@@ -177,20 +200,37 @@ void main() {
     }
     vec3 l = normalize(light_dir.xyz);
     float lambert = max(0.0, dot(n, l));
-    float wrapped = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
     float cliffProximity = clamp(1.0 - v_cliff_distance / cliffRadius, 0.0, 1.0);
 
-    float lighting = wall
-        ? wallBrightness * (ambient + diffuseStrength * wrapped)
-        : ambient + diffuseStrength * lambert;
-    if (!wall) {
+    vec3 lighting;
+    float sunShadow = 1.0;
+    if (wall) {
+        float facing = lambert;
+        vec3 ambientCol = mix(coolShadow, warmSky, 0.32) * ambient * (0.30 + 0.70 * facing);
+        vec3 diffuseCol = lightTint * diffuseStrength * facing;
+        lighting = (ambientCol + diffuseCol) * wallBrightness;
+    } else {
+        float hemi = n.y * 0.5 + 0.5;
+        vec3 ambientCol = mix(coolShadow, warmSky, hemi) * ambient;
+        vec3 diffuseCol = lightTint * diffuseStrength * lambert;
+        float rim = pow(1.0 - max(dot(n, viewDir), 0.0), rimPower) * rimStrength;
+        vec3 halfVec = normalize(l + viewDir);
+        float spec = pow(max(dot(n, halfVec), 0.0), shininess) * specularStrength;
+        lighting = ambientCol + diffuseCol + vec3(spec + rim);
         float topDarkening = max(minTopBrightness, 1.0 - cliffStrength * cliffProximity);
         lighting *= topDarkening * (1.0 - edgeDarkness * cliffProximity);
+        sunShadow = mix(1.0, v_facet_uv.x, sunShadowStrength);
     }
 
-    vec4 lit = vec4(albedo.rgb * lighting * wallAo, albedo.a);
+    vec3 litRgb = albedo.rgb * lighting * wallAo * sunShadow;
+    if (!wall) {
+        litRgb = mix(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
+    }
+    vec4 lit = vec4(litRgb, albedo.a);
 
-    if (debugMode > 6.5) {
+    if (debugMode > 7.5) {
+        frag_color = vec4(vec3(v_facet_uv.x), 1.0);
+    } else if (debugMode > 6.5) {
         frag_color = v_color;
     } else if (debugMode > 5.5) {
         frag_color = vec4(vec3(cliffProximity), 1.0);
@@ -276,6 +316,7 @@ cbuffer fs_params: register(b0) {
     float4 options2;
     float4 options3;
     float4 options4;
+    float4 options5;
 };
 
 struct PSIn {
@@ -341,6 +382,16 @@ float4 main(PSIn inp): SV_Target0 {
     float minTopBrightness = options1.z;
     float edgeDarkness = options1.w;
     float debugMode = options2.z;
+    float rimStrength = options2.w;
+    float sunShadowStrength = options4.z;
+    float specularStrength = options4.w;
+    float shadowTintStrength = options5.x;
+    const float rimPower = 2.5;
+    const float shininess = 24.0;
+    const float3 coolShadow = float3(0.14, 0.20, 0.22);
+    const float3 warmSky = float3(0.42, 0.36, 0.27);
+    const float3 lightTint = float3(1.05, 0.96, 0.82);
+    const float3 viewDir = normalize(float3(0.35, 0.55, 0.35));
 
     bool wall = inp.faceKind0 > 0.5;
     float2 uv = inp.uv0 * textureScale;
@@ -376,9 +427,9 @@ float4 main(PSIn inp): SV_Target0 {
         // float maskParam = options4.x;
         // float2 facetLocal = inp.facetUv0;
 
-        // A3: directional AO - darker at the base and inside crevices.
+        // A3: foot darkening only; crevice tint stays in albedo.
         float baseAo = lerp(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
-        wallAo = baseAo * (1.0 - crevice * creviceStrength * 0.6);
+        wallAo = baseAo;
     }
 
     float3 n = normalize(inp.normal0);
@@ -387,20 +438,37 @@ float4 main(PSIn inp): SV_Target0 {
     }
     float3 l = normalize(light_dir.xyz);
     float lambert = max(0.0, dot(n, l));
-    float wrapped = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
     float cliffProximity = clamp(1.0 - inp.cliffDistance0 / cliffRadius, 0.0, 1.0);
 
-    float lighting = wall
-        ? wallBrightness * (ambient + diffuseStrength * wrapped)
-        : ambient + diffuseStrength * lambert;
-    if (!wall) {
+    float3 lighting;
+    float sunShadow = 1.0;
+    if (wall) {
+        float facing = lambert;
+        float3 ambientCol = lerp(coolShadow, warmSky, 0.32) * ambient * (0.30 + 0.70 * facing);
+        float3 diffuseCol = lightTint * diffuseStrength * facing;
+        lighting = (ambientCol + diffuseCol) * wallBrightness;
+    } else {
+        float hemi = n.y * 0.5 + 0.5;
+        float3 ambientCol = lerp(coolShadow, warmSky, hemi) * ambient;
+        float3 diffuseCol = lightTint * diffuseStrength * lambert;
+        float rim = pow(1.0 - max(dot(n, viewDir), 0.0), rimPower) * rimStrength;
+        float3 halfVec = normalize(l + viewDir);
+        float spec = pow(max(dot(n, halfVec), 0.0), shininess) * specularStrength;
+        lighting = ambientCol + diffuseCol + float3(spec + rim, spec + rim, spec + rim);
         float topDarkening = max(minTopBrightness, 1.0 - cliffStrength * cliffProximity);
         lighting *= topDarkening * (1.0 - edgeDarkness * cliffProximity);
+        sunShadow = lerp(1.0, inp.facetUv0.x, sunShadowStrength);
     }
 
-    float4 lit = float4(albedo.rgb * lighting * wallAo, albedo.a);
+    float3 litRgb = albedo.rgb * lighting * wallAo * sunShadow;
+    if (!wall) {
+        litRgb = lerp(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
+    }
+    float4 lit = float4(litRgb, albedo.a);
 
-    if (debugMode > 6.5) {
+    if (debugMode > 7.5) {
+        return float4(inp.facetUv0.x, inp.facetUv0.x, inp.facetUv0.x, 1.0);
+    } else if (debugMode > 6.5) {
         return inp.color0;
     } else if (debugMode > 5.5) {
         return float4(cliffProximity, cliffProximity, cliffProximity, 1.0);
@@ -468,6 +536,7 @@ void MeshPreviewRenderer::init() {
 
 void MeshPreviewRenderer::shutdown() {
     destroyTarget();
+    destroyWin32ReadbackTextures();
     destroyVertexBuffer();
     destroyPipeline();
     if (m_outputSampler.id != SG_INVALID_ID) {
@@ -476,6 +545,152 @@ void MeshPreviewRenderer::shutdown() {
     }
     m_vertices.clear();
     m_initialized = false;
+}
+
+#if defined(_WIN32)
+void MeshPreviewRenderer::initWin32Readback(void* d3d11Device, void* d3d11Context) {
+    destroyWin32ReadbackTextures();
+    m_d3d11Device = d3d11Device;
+    m_d3d11Context = d3d11Context;
+    m_win32ReadbackEnabled = d3d11Device != nullptr && d3d11Context != nullptr;
+}
+
+void MeshPreviewRenderer::destroyWin32ReadbackTextures() {
+    if (m_d3d11StagingTex) {
+        static_cast<ID3D11Texture2D*>(m_d3d11StagingTex)->Release();
+        m_d3d11StagingTex = nullptr;
+    }
+    if (m_d3d11ColorTex) {
+        static_cast<ID3D11Texture2D*>(m_d3d11ColorTex)->Release();
+        m_d3d11ColorTex = nullptr;
+    }
+    m_d3d11Device = nullptr;
+    m_d3d11Context = nullptr;
+    m_win32ReadbackEnabled = false;
+}
+
+bool MeshPreviewRenderer::ensureWin32ReadbackTarget(int width, int height) {
+    if (!m_win32ReadbackEnabled || !m_d3d11Device) {
+        return false;
+    }
+
+    auto* device = static_cast<ID3D11Device*>(m_d3d11Device);
+    destroyTarget();
+    m_width = width;
+    m_height = height;
+
+    D3D11_TEXTURE2D_DESC colorDesc = {};
+    colorDesc.Width = (UINT)width;
+    colorDesc.Height = (UINT)height;
+    colorDesc.MipLevels = 1;
+    colorDesc.ArraySize = 1;
+    colorDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    colorDesc.SampleDesc.Count = 1;
+    colorDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    colorDesc.Usage = D3D11_USAGE_DEFAULT;
+
+    ID3D11Texture2D* colorTex = nullptr;
+    if (FAILED(device->CreateTexture2D(&colorDesc, nullptr, &colorTex)) || !colorTex) {
+        destroyTarget();
+        return false;
+    }
+    m_d3d11ColorTex = colorTex;
+
+    D3D11_TEXTURE2D_DESC stagingDesc = colorDesc;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    ID3D11Texture2D* stagingTex = nullptr;
+    if (FAILED(device->CreateTexture2D(&stagingDesc, nullptr, &stagingTex)) || !stagingTex) {
+        destroyTarget();
+        return false;
+    }
+    m_d3d11StagingTex = stagingTex;
+
+    sg_image_desc imageDesc = {};
+    imageDesc.usage.color_attachment = true;
+    imageDesc.width = width;
+    imageDesc.height = height;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.label = "mesh-preview-output-image-readback";
+    imageDesc.d3d11_texture = colorTex;
+    m_outputImage = sg_make_image(&imageDesc);
+    if (m_outputImage.id == SG_INVALID_ID) {
+        destroyTarget();
+        return false;
+    }
+
+    sg_view_desc attachmentViewDesc = {};
+    attachmentViewDesc.color_attachment.image = m_outputImage;
+    m_outputAttachmentView = sg_make_view(&attachmentViewDesc);
+
+    sg_view_desc textureViewDesc = {};
+    textureViewDesc.texture.image = m_outputImage;
+    m_outputTextureView = sg_make_view(&textureViewDesc);
+
+    if (m_outputAttachmentView.id == SG_INVALID_ID || m_outputTextureView.id == SG_INVALID_ID) {
+        destroyTarget();
+        return false;
+    }
+
+    return true;
+}
+#else
+void MeshPreviewRenderer::destroyWin32ReadbackTextures() {}
+bool MeshPreviewRenderer::ensureWin32ReadbackTarget(int, int) { return false; }
+#endif
+
+bool MeshPreviewRenderer::readOutputRgba8(std::vector<std::uint8_t>& pixels, int& width, int& height) const {
+    width = m_width;
+    height = m_height;
+    if (width <= 0 || height <= 0 || !validOutput()) {
+        return false;
+    }
+
+#if defined(_WIN32)
+    if (!m_win32ReadbackEnabled || !m_d3d11Context || !m_d3d11ColorTex || !m_d3d11StagingTex) {
+        return false;
+    }
+
+    auto* context = static_cast<ID3D11DeviceContext*>(m_d3d11Context);
+    auto* colorTex = static_cast<ID3D11Texture2D*>(m_d3d11ColorTex);
+    auto* stagingTex = static_cast<ID3D11Texture2D*>(m_d3d11StagingTex);
+    context->CopyResource(stagingTex, colorTex);
+
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    if (FAILED(context->Map(stagingTex, 0, D3D11_MAP_READ, 0, &mapped))) {
+        return false;
+    }
+
+    pixels.resize((std::size_t)width * (std::size_t)height * 4);
+    const std::uint8_t* src = static_cast<const std::uint8_t*>(mapped.pData);
+    for (int y = 0; y < height; y++) {
+        const std::uint8_t* srcRow = src + (std::size_t)y * mapped.RowPitch;
+        std::uint8_t* dstRow = pixels.data() + (std::size_t)y * (std::size_t)width * 4;
+        std::memcpy(dstRow, srcRow, (std::size_t)width * 4);
+    }
+    context->Unmap(stagingTex, 0);
+    return true;
+#else
+    (void)pixels;
+    return false;
+#endif
+}
+
+bool MeshPreviewRenderer::writeOutputPng(const char* path) const {
+    if (!path || path[0] == '\0') {
+        return false;
+    }
+
+    std::vector<std::uint8_t> pixels;
+    int width = 0;
+    int height = 0;
+    if (!readOutputRgba8(pixels, width, height)) {
+        return false;
+    }
+
+    return writeRgbaPng(std::filesystem::path(path), width, height, pixels.data(), width * 4);
 }
 
 bool MeshPreviewRenderer::render(
@@ -513,12 +728,13 @@ bool MeshPreviewRenderer::render(
     });
 
     for (const MeshPreviewQuad* quad : drawOrder) {
-        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 0.0f, 0.0f);
-        pushVertex(m_vertices, quad->b, quad->normal, quad->uvB, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 1.0f, 0.0f);
-        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 1.0f, 1.0f);
-        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 0.0f, 0.0f);
-        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 1.0f, 1.0f);
-        pushVertex(m_vertices, quad->d, quad->normal, quad->uvD, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, 0.0f, 1.0f);
+        const float sunShadow = quad->sunShadow;
+        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
+        pushVertex(m_vertices, quad->b, quad->normal, quad->uvB, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
+        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
+        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
+        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
+        pushVertex(m_vertices, quad->d, quad->normal, quad->uvD, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
     }
 
     ensureVertexBuffer(m_vertices.size());
@@ -577,15 +793,19 @@ bool MeshPreviewRenderer::render(
         fs.options2[0] = params.macroScale;
         fs.options2[1] = params.macroStrength;
         fs.options2[2] = (float)params.debugMode;
-        fs.options2[3] = 0.0f;
+        fs.options2[3] = params.rimStrength;
         fs.options3[0] = params.wallAoStrength;
         fs.options3[1] = params.wallEdgeWearStrength;
         fs.options3[2] = params.wallCreviceStrength;
         fs.options3[3] = params.wallGrainStrength;
         fs.options4[0] = params.wallFacetWearStrength;
         fs.options4[1] = params.wallFacetWearWidth;
-        fs.options4[2] = 0.0f;
-        fs.options4[3] = 0.0f;
+        fs.options4[2] = params.sunShadowStrength;
+        fs.options4[3] = params.specularStrength;
+        fs.options5[0] = params.shadowTintStrength;
+        fs.options5[1] = 0.0f;
+        fs.options5[2] = 0.0f;
+        fs.options5[3] = 0.0f;
         sg_range fsRange = {&fs, sizeof(fs)};
         sg_apply_uniforms(1, &fsRange);
 
@@ -658,6 +878,8 @@ void MeshPreviewRenderer::ensurePipeline() {
     shdDesc.uniform_blocks[1].glsl_uniforms[4].type = SG_UNIFORMTYPE_FLOAT4;
     shdDesc.uniform_blocks[1].glsl_uniforms[5].glsl_name = "options4";
     shdDesc.uniform_blocks[1].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT4;
+    shdDesc.uniform_blocks[1].glsl_uniforms[6].glsl_name = "options5";
+    shdDesc.uniform_blocks[1].glsl_uniforms[6].type = SG_UNIFORMTYPE_FLOAT4;
 
     const char* glslNames[] = {"grass_tex", "rock_tex"};
     for (int i = 0; i < 2; i++) {
@@ -723,6 +945,13 @@ void MeshPreviewRenderer::ensureTarget(int width, int height) {
         return;
     }
 
+#if defined(_WIN32)
+    if (m_win32ReadbackEnabled) {
+        ensureWin32ReadbackTarget(width, height);
+        return;
+    }
+#endif
+
     destroyTarget();
     m_width = width;
     m_height = height;
@@ -765,6 +994,16 @@ void MeshPreviewRenderer::destroyTarget() {
         sg_destroy_image(m_outputImage);
         m_outputImage = {SG_INVALID_ID};
     }
+#if defined(_WIN32)
+    if (m_d3d11StagingTex) {
+        static_cast<ID3D11Texture2D*>(m_d3d11StagingTex)->Release();
+        m_d3d11StagingTex = nullptr;
+    }
+    if (m_d3d11ColorTex) {
+        static_cast<ID3D11Texture2D*>(m_d3d11ColorTex)->Release();
+        m_d3d11ColorTex = nullptr;
+    }
+#endif
     m_width = 0;
     m_height = 0;
 }

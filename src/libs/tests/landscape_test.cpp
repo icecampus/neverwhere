@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <QUuid>
 #include "topology/staggered_tiled_landscape.h"
 #include "game_objects/landscape.h"
@@ -7,6 +9,7 @@
 #include "assets_library/assets/slice_asset.h"
 #include "topology/staggered_isometry.h"
 #include <landscape_core/landscape_logic.h>
+#include <landscape_core/sun_shadow.h>
 #include <landscape_mesh/landscape_mesh.h>
 
 // Mock for SliceAsset to avoid loading real files
@@ -349,6 +352,91 @@ TEST(LandscapePipelineTest, SharedSolidMaskBuilderCreatesBevelCapsForCutout) {
     EXPECT_EQ(result.normalOrientation.outwardFailCount, 0);
 }
 
+namespace {
+
+float dot3(const landscape_mesh::Vec3& a, const landscape_mesh::Vec3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+landscape_mesh::Vec3 normalizeHorizontal(const landscape_mesh::Vec3& value, const landscape_mesh::Vec3& fallback) {
+    const float length = std::sqrt(value.x * value.x + value.z * value.z);
+    if (length < 0.0001f) {
+        return fallback;
+    }
+    return {value.x / length, 0.0f, value.z / length};
+}
+
+bool isCardinalOutwardHint(const landscape_mesh::Vec3& hint) {
+    const float horizontalLength = std::sqrt(hint.x * hint.x + hint.z * hint.z);
+    if (horizontalLength < 0.999f) {
+        return false;
+    }
+    return std::abs(std::abs(hint.x) - 1.0f) < 0.01f || std::abs(std::abs(hint.z) - 1.0f) < 0.01f;
+}
+
+} // namespace
+
+TEST(LandscapePipelineTest, LitWallNormalUsesOutwardHint) {
+    landscape_mesh::MeshQuad synthetic;
+    synthetic.cliffWall = true;
+    synthetic.boundarySide = landscape_mesh::BoundarySide::Right;
+    synthetic.outwardHint = {1.0f, 0.0f, 0.0f};
+    const landscape_mesh::Vec3 syntheticLit = landscape_mesh::litWallNormal(synthetic);
+    EXPECT_NEAR(syntheticLit.x, 1.0f, 1e-4f);
+    EXPECT_NEAR(syntheticLit.y, 0.0f, 1e-4f);
+    EXPECT_NEAR(syntheticLit.z, 0.0f, 1e-4f);
+
+    synthetic.outwardHint = {0.0f, 0.0f, 0.0f};
+    const landscape_mesh::Vec3 fallbackLit = landscape_mesh::litWallNormal(synthetic);
+    EXPECT_GT(dot3(fallbackLit, landscape_mesh::Vec3{1.0f, 0.0f, 0.0f}), 0.99f);
+
+    landscape_core::LandscapeBowlSettings settings;
+    settings.gridWidth = 24;
+    settings.gridHeight = 18;
+    settings.heightLevels = 4;
+
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(settings);
+    landscape_mesh::MeshBuildSettings meshSettings;
+    meshSettings.cornerBevel = 0.3f;
+    meshSettings.wallHorizontalSubdivisions = 5;
+    meshSettings.wallVerticalSubdivisions = 6;
+
+    const landscape_mesh::CompositionResult result = landscape_mesh::composeLandscapeMesh(grid, meshSettings);
+    ASSERT_GT(result.stats.cliffWallQuadCount, 0);
+
+    std::map<int, landscape_mesh::Vec3> cardinalReferenceBySide;
+    for (const landscape_mesh::MeshQuad& quad : result.quads) {
+        if (!quad.cliffWall) {
+            continue;
+        }
+
+        const landscape_mesh::Vec3 lit = landscape_mesh::litWallNormal(quad);
+        const landscape_mesh::Vec3 hint = normalizeHorizontal(
+            quad.outwardHint,
+            normalizeHorizontal(quad.normal, {0.0f, 0.0f, 1.0f}));
+
+        EXPECT_GT(dot3(lit, hint), 0.99f) << "lit must align with outwardHint";
+        EXPECT_NEAR(lit.y, 0.0f, 1e-3f);
+
+        if (!isCardinalOutwardHint(quad.outwardHint)) {
+            continue;
+        }
+
+        const int sideKey = static_cast<int>(quad.boundarySide);
+        const auto existing = cardinalReferenceBySide.find(sideKey);
+        if (existing == cardinalReferenceBySide.end()) {
+            cardinalReferenceBySide.emplace(sideKey, lit);
+            continue;
+        }
+
+        EXPECT_NEAR(existing->second.x, lit.x, 1e-4f);
+        EXPECT_NEAR(existing->second.y, lit.y, 1e-4f);
+        EXPECT_NEAR(existing->second.z, lit.z, 1e-4f);
+    }
+
+    EXPECT_GE(cardinalReferenceBySide.size(), 2u);
+}
+
 TEST(LandscapePipelineTest, SolidMaskBuilderOutwardNormalsPassWithoutRockDisplacement) {
     landscape_mesh::SolidMaskGrid mask;
     mask.width = 8;
@@ -381,4 +469,49 @@ TEST(LandscapePipelineTest, SolidMaskBuilderOutwardNormalsPassWithoutRockDisplac
 
     EXPECT_EQ(result.normalOrientation.outwardFailCount, 0);
     EXPECT_EQ(result.normalOrientation.outwardWarnCount, 0);
+}
+
+TEST(SunShadowTest, LowerCellFallsIntoShadowFromHigherNeighborTowardSun) {
+    const int width = 3;
+    const int height = 3;
+    std::vector<std::uint8_t> cellLevels((std::size_t)width * (std::size_t)height, 0);
+    cellLevels[(std::size_t)1 * (std::size_t)width + 0] = 2;
+
+    landscape_core::SunShadowSettings settings;
+    settings.lightDirectionX = -1.0f;
+    settings.lightDirectionY = 0.8f;
+    settings.lightDirectionZ = 0.0f;
+
+    const std::vector<float> field =
+        landscape_core::computeSunShadowField(width, height, cellLevels, settings);
+
+    ASSERT_EQ(field.size(), cellLevels.size());
+    EXPECT_FLOAT_EQ(field[(std::size_t)2 * (std::size_t)width + 2], 1.0f);
+    EXPECT_LT(field[(std::size_t)1 * (std::size_t)width + 2], 0.5f);
+}
+
+TEST(SunShadowTest, GeneratedBowlProducesVariedShadowField) {
+    landscape_core::LandscapeBowlSettings settings;
+    settings.gridWidth = 24;
+    settings.gridHeight = 18;
+    settings.heightLevels = 4;
+    const landscape_core::LandscapeLevelGrid grid = landscape_core::generateLandscapeBowl(settings);
+
+    landscape_core::SunShadowSettings shadowSettings;
+    shadowSettings.lightDirectionX = -0.35f;
+    shadowSettings.lightDirectionY = 0.82f;
+    shadowSettings.lightDirectionZ = -0.45f;
+    const std::vector<float> field = landscape_core::computeSunShadowField(grid, shadowSettings);
+
+    ASSERT_FALSE(field.empty());
+    float minShadow = 1.0f;
+    float maxShadow = 0.0f;
+    for (float value : field) {
+        EXPECT_GE(value, 0.0f);
+        EXPECT_LE(value, 1.0f);
+        minShadow = std::min(minShadow, value);
+        maxShadow = std::max(maxShadow, value);
+    }
+    EXPECT_LT(minShadow, 1.0f);
+    EXPECT_GT(maxShadow, 0.0f);
 }

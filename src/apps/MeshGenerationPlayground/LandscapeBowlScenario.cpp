@@ -194,6 +194,15 @@ void rebuildLandscapeBowlModel() {
         addMeshQuad(model, toAppMeshQuad(quad));
     }
     computeTopCliffDistances(model);
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        applySunShadowToMeshQuads(
+            model.meshQuads,
+            settings.gridWidth,
+            settings.gridHeight,
+            model.heightLevels,
+            g_productionLightDirection);
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);

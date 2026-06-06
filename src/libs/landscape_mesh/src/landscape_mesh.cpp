@@ -843,10 +843,21 @@ NormalOrientationStats validateNormalOrientationInternal(const std::vector<MeshQ
     return stats;
 }
 
+Vec3 litWallNormalInternal(const MeshQuad& quad) {
+    const Vec3 sideFallback = outwardNormalForSide(quad.boundarySide);
+    const Vec3 normalFallback = normalizeHorizontal(quad.normal, {0.0f, 0.0f, 1.0f});
+    const Vec3 primaryFallback = normalizeHorizontal(sideFallback, normalFallback);
+    return normalizeHorizontal(quad.outwardHint, primaryFallback);
+}
+
 } // namespace
 
 NormalOrientationStats validateNormalOrientation(const std::vector<MeshQuad>& quads) {
     return validateNormalOrientationInternal(quads);
+}
+
+Vec3 litWallNormal(const MeshQuad& quad) {
+    return litWallNormalInternal(quad);
 }
 
 bool SolidMaskGrid::empty() const {
@@ -1269,16 +1280,21 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom, wallMaxOffset);
                 wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom, wallMaxOffset);
                 wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom, wallMaxOffset);
+                const Vec3 quadOutward = normalizeHorizontal(
+                    add(
+                        add(wallNormals[i00], wallNormals[i10]),
+                        add(wallNormals[i01], wallNormals[i11])),
+                    segment.normal);
                 wall.normal = displacedFaceNormal(
                     wall.a, wall.b, wall.c, wall.d,
                     wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],
-                    segment.normal);
+                    quadOutward);
                 const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
                 wall.relief = std::clamp(panelNoise, -1.0f, 1.0f);
                 wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
                 wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
                 wall.cliffWall = true;
-                assignWallQuadMetadata(wall, segment.side, segment.normal);
+                assignWallQuadMetadata(wall, segment.side, quadOutward);
                 addQuad(result, wall);
             }
         }

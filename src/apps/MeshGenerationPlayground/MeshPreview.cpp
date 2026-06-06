@@ -1,6 +1,8 @@
 ﻿#include "MeshPreview.h"
 
+#include "MeshBridge.h"
 #include "PlaygroundState.h"
+#include "PlaygroundVisualCapture.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,7 +20,11 @@
 #include <vector>
 
 #include <render_core/mesh_preview_renderer.h>
+#if defined(_WIN32) && !defined(SOKOL_D3D11)
+#define SOKOL_D3D11
+#endif
 #include <sokol_app.h>
+#include <sokol_gfx.h>
 #include <sokol_gfx.h>
 #include <util/sokol_imgui.h>
 #include <spdlog/spdlog.h>
@@ -390,6 +396,17 @@ ImVec2 meshProjectionAnchor(const ImVec2& origin, const ImVec2& canvasSize, cons
     };
 }
 
+float landscapeProjectionAnchorY(const ImVec2& canvasSize) {
+    return std::min(170.0f, std::max(96.0f, canvasSize.y * 0.34f));
+}
+
+ImVec2 landscapeProjectionAnchor(const ImVec2& origin, const ImVec2& canvasSize, const MeshPreviewCamera& camera) {
+    return {
+        origin.x + canvasSize.x * 0.5f + camera.pan.x,
+        origin.y + landscapeProjectionAnchorY(canvasSize) + camera.pan.y,
+    };
+}
+
 Vec3 subtract(const Vec3& lhs, const Vec3& rhs) {
     return {
         lhs.x - rhs.x,
@@ -616,6 +633,11 @@ Vec3 detailAdjustedWallNormal(const MeshQuad& quad, float detail) {
     return normalize(add(scale(plane, 1.0f - detail), scale(face, detail)));
 }
 
+Vec3 wallLightingNormal(const MeshQuad& quad) {
+    const landscape_mesh::Vec3 lit = landscape_mesh::litWallNormal(toLandscapeMeshQuad(quad));
+    return {lit.x, lit.y, lit.z};
+}
+
 Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings& previewSettings) {
     const ProductionPreviewDebugMode debugMode = (ProductionPreviewDebugMode)previewSettings.debugMode;
     if (debugMode == ProductionPreviewDebugMode::RawNormals) {
@@ -632,7 +654,7 @@ Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings&
     if (debugMode == ProductionPreviewDebugMode::BlendedNormals) {
         return blendedWallNormal(quad);
     }
-    return detailAdjustedWallNormal(quad, previewSettings.wallDetailNormal);
+    return wallLightingNormal(quad);
 }
 
 ImU32 productionLitColor(
@@ -662,32 +684,73 @@ ImU32 productionLitColor(
             clampInt((int)((1.0f - t) * 255.0f), 0, 255),
             255);
     }
-
-    if (quad.cliffWall) {
-        const float wrappedLambert = clampFloat(dot(normal, lightDirection) * 0.5f + 0.5f, 0.0f, 1.0f);
-        float lighting = previewSettings.wallBrightness *
-            (previewSettings.ambient + previewSettings.diffuseStrength * wrappedLambert);
-
-        const float ridge = clampFloat((quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
-        const float crevice = clampFloat((-quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
-        ImU32 wallColorOut = previewWallColor(quad.color);
-        wallColorOut = blendTowardWhite(wallColorOut, ridge * previewSettings.wallEdgeWearStrength * 0.35f);
-        wallColorOut = blendTowardColor(wallColorOut, IM_COL32(70, 80, 60, 255), crevice * previewSettings.wallCreviceStrength);
-
-        const float baseAo = clampFloat(quad.heightFraction / 0.45f, 0.0f, 1.0f);
-        const float ao = (1.0f - previewSettings.wallAoStrength) + previewSettings.wallAoStrength * baseAo;
-        lighting *= ao * (1.0f - crevice * previewSettings.wallCreviceStrength * 0.6f);
-        return shadeColor(wallColorOut, lighting);
+    if (debugMode == ProductionPreviewDebugMode::SunShadow) {
+        const int shade = clampInt((int)(quad.sunShadow * 255.0f), 0, 255);
+        return IM_COL32(shade, shade, shade, 255);
+    }
+    if (debugMode == ProductionPreviewDebugMode::NormalVectors) {
+        return quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.48f);
     }
 
+    constexpr Vec3 kCoolShadow{0.14f, 0.20f, 0.22f};
+    constexpr Vec3 kWarmSky{0.42f, 0.36f, 0.27f};
+    constexpr Vec3 kLightTint{1.05f, 0.96f, 0.82f};
+    const Vec3 viewDir = normalize({0.35f, 0.55f, 0.35f});
+
     const float lambert = std::max(0.0f, dot(normal, lightDirection));
-    float lighting = previewSettings.ambient + previewSettings.diffuseStrength * lambert;
-    const float proximity = cliffProximity(quad, previewSettings);
-    const float topDarkening = std::max(
-        previewSettings.minTopBrightness,
-        1.0f - previewSettings.cliffDarkeningStrength * proximity);
-    lighting *= topDarkening * (1.0f - previewSettings.edgeDarkness * proximity);
-    return shadeColor(blendTowardWhite(quad.color, 0.50f), lighting);
+    ImU32 baseColor = quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.50f);
+    float lightingScalar = 1.0f;
+    float wallAo = 1.0f;
+
+    if (quad.cliffWall) {
+        const float ridge = clampFloat((quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
+        const float crevice = clampFloat((-quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
+        baseColor = blendTowardWhite(baseColor, ridge * previewSettings.wallEdgeWearStrength * 0.35f);
+        baseColor = blendTowardColor(baseColor, IM_COL32(70, 80, 60, 255), crevice * previewSettings.wallCreviceStrength);
+
+        const Vec3 ambientCol = add(
+            scale(kCoolShadow, 0.68f * previewSettings.ambient * (0.30f + 0.70f * lambert)),
+            scale(kWarmSky, 0.32f * previewSettings.ambient * (0.30f + 0.70f * lambert)));
+        const Vec3 diffuseCol = scale(kLightTint, previewSettings.diffuseStrength * lambert);
+        lightingScalar =
+            (ambientCol.x * 0.299f + ambientCol.y * 0.587f + ambientCol.z * 0.114f +
+             diffuseCol.x * 0.299f + diffuseCol.y * 0.587f + diffuseCol.z * 0.114f) *
+            previewSettings.wallBrightness;
+        const float baseAo = clampFloat(quad.heightFraction / 0.45f, 0.0f, 1.0f);
+        wallAo = (1.0f - previewSettings.wallAoStrength) + previewSettings.wallAoStrength * baseAo;
+        lightingScalar *= wallAo;
+    } else {
+        const float hemi = normal.y * 0.5f + 0.5f;
+        const Vec3 ambientCol = add(
+            scale(kCoolShadow, (1.0f - hemi) * previewSettings.ambient),
+            scale(kWarmSky, hemi * previewSettings.ambient));
+        const Vec3 diffuseCol = scale(kLightTint, previewSettings.diffuseStrength * lambert);
+        const Vec3 halfVec = normalize(add(lightDirection, viewDir));
+        const float rim = std::pow(1.0f - std::max(0.0f, dot(normal, viewDir)), previewSettings.rimPower) *
+            previewSettings.rimStrength;
+        const float spec = std::pow(std::max(0.0f, dot(normal, halfVec)), previewSettings.shininess) *
+            previewSettings.specularStrength;
+        lightingScalar =
+            ambientCol.x * 0.299f + ambientCol.y * 0.587f + ambientCol.z * 0.114f +
+            diffuseCol.x * 0.299f + diffuseCol.y * 0.587f + diffuseCol.z * 0.114f +
+            spec + rim;
+
+        const float proximity = cliffProximity(quad, previewSettings);
+        const float topDarkening = std::max(
+            previewSettings.minTopBrightness,
+            1.0f - previewSettings.cliffDarkeningStrength * proximity);
+        lightingScalar *= topDarkening * (1.0f - previewSettings.edgeDarkness * proximity);
+
+        const float sunShadow = 1.0f - previewSettings.sunShadowStrength * (1.0f - quad.sunShadow);
+        lightingScalar *= sunShadow;
+        ImU32 lit = shadeColor(baseColor, lightingScalar);
+        if (sunShadow < 0.999f) {
+            lit = blendTowardColor(lit, IM_COL32(36, 51, 56, 255), (1.0f - sunShadow) * previewSettings.shadowTintStrength);
+        }
+        return lit;
+    }
+
+    return shadeColor(baseColor, lightingScalar);
 }
 
 ImVec2 grassUv(const Vec3& point) {
@@ -739,6 +802,9 @@ render_core::MeshPreviewQuad toRenderQuad(const MeshQuad& quad, const Production
     result.uvD = toGlm(quad.cliffWall ? wallUv(quad, quad.d) : grassUv(quad.d));
     result.faceKind = quad.cliffWall ? 1.0f : 0.0f;
     result.cliffDistance = quad.cliffDistance;
+    result.relief = quad.relief;
+    result.heightFraction = quad.heightFraction;
+    result.sunShadow = quad.sunShadow;
     result.depth = quad.depth;
 
     if ((ProductionPreviewDebugMode)previewSettings.debugMode == ProductionPreviewDebugMode::DepthOrder) {
@@ -752,11 +818,22 @@ render_core::MeshPreviewQuad toRenderQuad(const MeshQuad& quad, const Production
 std::vector<render_core::MeshPreviewQuad> buildRenderQuads(
     const LandscapeBowlSettings& settings,
     const LandscapeBowlModel& model,
-    const ProductionPreviewSettings& previewSettings) {
+    const ProductionPreviewSettings& previewSettings,
+    const Vec3& lightDirection) {
+
+    std::vector<MeshQuad> shadedQuads = model.meshQuads;
+    if (!model.heightLevels.empty()) {
+        applySunShadowToMeshQuads(
+            shadedQuads,
+            settings.gridWidth,
+            settings.gridHeight,
+            model.heightLevels,
+            lightDirection);
+    }
 
     std::vector<render_core::MeshPreviewQuad> quads;
-    quads.reserve(model.meshQuads.size());
-    for (const MeshQuad& quad : model.meshQuads) {
+    quads.reserve(shadedQuads.size());
+    for (const MeshQuad& quad : shadedQuads) {
         if (quad.cliffWall && !settings.showCliffWalls) {
             continue;
         }
@@ -780,7 +857,7 @@ render_core::MeshPreviewRenderParams makeRenderParams(
     params.pan = {camera.pan.x, camera.pan.y};
     params.lightDirection = toGlm(lightDirection);
     params.zoom = camera.zoom;
-    params.anchorY = std::min(170.0f, std::max(96.0f, viewportSize.y * 0.34f));
+    params.anchorY = landscapeProjectionAnchorY(viewportSize);
     params.isoScaleX = 19.0f;
     params.isoScaleY = 9.5f;
     params.heightScale = 25.0f;
@@ -800,6 +877,12 @@ render_core::MeshPreviewRenderParams makeRenderParams(
     params.wallGrainStrength = previewSettings.wallGrainStrength;
     params.wallFacetWearStrength = previewSettings.wallFacetWearStrength;
     params.wallFacetWearWidth = previewSettings.wallFacetWearWidth;
+    params.rimStrength = previewSettings.rimStrength;
+    params.rimPower = previewSettings.rimPower;
+    params.specularStrength = previewSettings.specularStrength;
+    params.shininess = previewSettings.shininess;
+    params.sunShadowStrength = previewSettings.sunShadowStrength;
+    params.shadowTintStrength = previewSettings.shadowTintStrength;
     params.debugMode = previewSettings.debugMode;
     return params;
 }
@@ -841,6 +924,86 @@ void drawProjectedQuad(
     }
 }
 
+Vec3 meshQuadCenter(const MeshQuad& quad) {
+    return {
+        (quad.a.x + quad.b.x + quad.c.x + quad.d.x) * 0.25f,
+        (quad.a.y + quad.b.y + quad.c.y + quad.d.y) * 0.25f,
+        (quad.a.z + quad.b.z + quad.c.z + quad.d.z) * 0.25f,
+    };
+}
+
+void drawNormalArrow(ImDrawList* drawList, const ImVec2& start, const ImVec2& end, ImU32 color, float thickness) {
+    const float dx = end.x - start.x;
+    const float dy = end.y - start.y;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    if (length < 1.5f) {
+        drawList->AddCircleFilled(end, 2.0f, color);
+        return;
+    }
+
+    drawList->AddLine(start, end, color, thickness);
+    const float nx = dx / length;
+    const float ny = dy / length;
+    const float px = -ny;
+    const float py = nx;
+    const ImVec2 headA{end.x - nx * 5.0f + px * 3.0f, end.y - ny * 5.0f + py * 3.0f};
+    const ImVec2 headB{end.x - nx * 5.0f - px * 3.0f, end.y - ny * 5.0f - py * 3.0f};
+    drawList->AddTriangleFilled(end, headA, headB, color);
+}
+
+template<typename ProjectPointFn>
+void drawMeshQuadNormalVectors(
+    ImDrawList* drawList,
+    const std::vector<MeshQuad>& quads,
+    const ProjectPointFn& projectPoint,
+    const ProductionPreviewSettings& previewSettings,
+    bool showCliffWalls,
+    bool showTopFaces) {
+
+    const float arrowScale = std::max(0.05f, previewSettings.normalVectorScale);
+    constexpr ImU32 kLitColor = IM_COL32(96, 255, 128, 255);
+    constexpr ImU32 kRawColor = IM_COL32(255, 96, 96, 255);
+    constexpr ImU32 kHintColor = IM_COL32(255, 220, 72, 255);
+    constexpr ImU32 kStableColor = IM_COL32(196, 128, 255, 255);
+
+    for (const MeshQuad& quad : quads) {
+        if (quad.cliffWall && !showCliffWalls) {
+            continue;
+        }
+        if (!quad.cliffWall && !showTopFaces) {
+            continue;
+        }
+
+        const ImVec2 a = projectPoint(quad.a);
+        const ImVec2 b = projectPoint(quad.b);
+        const ImVec2 c = projectPoint(quad.c);
+        const ImVec2 d = projectPoint(quad.d);
+        drawList->AddQuad(a, b, c, d, IM_COL32(28, 32, 40, 210), 1.0f);
+
+        const Vec3 center = meshQuadCenter(quad);
+        const ImVec2 centerScreen = projectPoint(center);
+        const Vec3 litNormal = previewNormalForQuad(quad, previewSettings);
+        const ImVec2 litTip = projectPoint(add(center, scale(litNormal, arrowScale)));
+        drawNormalArrow(drawList, centerScreen, litTip, kLitColor, 1.6f);
+
+        const Vec3 rawNormal = generatedNormal(quad);
+        const ImVec2 rawTip = projectPoint(add(center, scale(rawNormal, arrowScale * 0.72f)));
+        drawNormalArrow(drawList, centerScreen, rawTip, kRawColor, 1.1f);
+
+        if (quad.cliffWall) {
+            const float hintLength = std::sqrt(dot(quad.outwardHint, quad.outwardHint));
+            if (hintLength > 0.0001f) {
+                const Vec3 hint = scale(quad.outwardHint, 1.0f / hintLength);
+                const ImVec2 hintTip = projectPoint(add(center, scale(hint, arrowScale * 0.72f)));
+                drawNormalArrow(drawList, centerScreen, hintTip, kHintColor, 1.1f);
+            }
+            const Vec3 stable = stableWallNormal(quad);
+            const ImVec2 stableTip = projectPoint(add(center, scale(stable, arrowScale * 0.72f)));
+            drawNormalArrow(drawList, centerScreen, stableTip, kStableColor, 1.1f);
+        }
+    }
+}
+
 ImVec2 projectLandscapeMeshPoint(
     const LandscapeBowlSettings& settings,
     const MeshPreviewCamera& camera,
@@ -852,7 +1015,7 @@ ImVec2 projectLandscapeMeshPoint(
     const float centeredZ = point.z - (float)settings.gridHeight * 0.5f;
     const float isoX = (centeredX - centeredZ) * 19.0f * camera.zoom;
     const float isoY = ((centeredX + centeredZ) * 9.5f - point.y * 25.0f) * camera.zoom;
-    const ImVec2 anchor = meshProjectionAnchor(origin, canvasSize, camera);
+    const ImVec2 anchor = landscapeProjectionAnchor(origin, canvasSize, camera);
     return {
         anchor.x + isoX,
         anchor.y + isoY,
@@ -942,6 +1105,19 @@ void initProductionPreviewTextures() {
     g_gpuPreviewRenderer.init();
 }
 
+void configureProductionPreviewGpuReadback(void* d3d11Device, void* d3d11Context) {
+#if defined(_WIN32)
+    if (d3d11Device && d3d11Context) {
+        g_gpuPreviewRenderer.initWin32Readback(d3d11Device, d3d11Context);
+    } else {
+        spdlog::warn("configureProductionPreviewGpuReadback: missing D3D11 device/context, GPU PNG capture disabled");
+    }
+#else
+    (void)d3d11Device;
+    (void)d3d11Context;
+#endif
+}
+
 void shutdownProductionPreviewTextures() {
     g_gpuPreviewRenderer.shutdown();
     destroyTexture(g_textures.grass);
@@ -969,6 +1145,56 @@ bool productionRockTextureLoaded() {
     return g_textures.rock.loadedFromFile;
 }
 
+bool captureProductionPreviewGpuPng(const char* path, ProductionPreviewDebugMode debugMode, int width, int height) {
+    LandscapeBowlSettings settings;
+    LandscapeBowlModel model;
+    MeshPreviewCamera camera;
+    ProductionPreviewSettings previewSettings;
+    Vec3 lightDirection;
+    {
+        std::lock_guard<std::mutex> modelLock(g_modelMutex);
+        settings = g_landscapeSettings;
+        model = g_landscapeModel;
+        previewSettings = g_productionPreviewSettings;
+    }
+    {
+        std::lock_guard<std::mutex> stateLock(g_stateMutex);
+        camera = g_landscapeCamera;
+        lightDirection = normalize(g_productionLightDirection);
+        previewSettings.useGpuRenderer = true;
+        previewSettings.showEnvSprites = false;
+        previewSettings.debugMode = (int)debugMode;
+        if (debugMode == ProductionPreviewDebugMode::NormalVectors) {
+            previewSettings.debugMode = (int)ProductionPreviewDebugMode::Albedo;
+        }
+    }
+
+    const ImVec2 captureSize{(float)width, (float)height};
+    const std::vector<render_core::MeshPreviewQuad> renderQuads =
+        buildRenderQuads(settings, model, previewSettings, lightDirection);
+    const bool rendered = g_gpuPreviewRenderer.render(
+        renderQuads,
+        makeRenderParams(settings, camera, captureSize, lightDirection, previewSettings),
+        g_textures.grass.view,
+        g_textures.rock.view,
+        g_textures.grass.sampler,
+        width,
+        height);
+    if (!rendered) {
+        spdlog::error("captureProductionPreviewGpuPng: render failed for {}", path);
+        return false;
+    }
+
+    sg_commit();
+    if (!g_gpuPreviewRenderer.writeOutputPng(path)) {
+        spdlog::error("captureProductionPreviewGpuPng: writeOutputPng failed for {}", path);
+        return false;
+    }
+
+    spdlog::info("captureProductionPreviewGpuPng: saved {}x{} to {}", width, height, path);
+    return true;
+}
+
 bool warmupProductionPreviewRenderer() {
     LandscapeBowlSettings settings;
     LandscapeBowlModel model;
@@ -988,7 +1214,8 @@ bool warmupProductionPreviewRenderer() {
     }
 
     const ImVec2 warmupSize{640.0f, 360.0f};
-    const std::vector<render_core::MeshPreviewQuad> renderQuads = buildRenderQuads(settings, model, previewSettings);
+    const std::vector<render_core::MeshPreviewQuad> renderQuads =
+        buildRenderQuads(settings, model, previewSettings, lightDirection);
     const bool ok = g_gpuPreviewRenderer.render(
         renderQuads,
         makeRenderParams(settings, camera, warmupSize, lightDirection, previewSettings),
@@ -997,6 +1224,9 @@ bool warmupProductionPreviewRenderer() {
         g_textures.grass.sampler,
         (int)warmupSize.x,
         (int)warmupSize.y);
+    if (ok) {
+        sg_commit();
+    }
 
     if (ok && g_gpuPreviewRenderer.validOutput()) {
         spdlog::info("TEST PASS MeshGenerationPlayground GPU preview renderer warmup: quads={}, output={}x{}",
@@ -1122,8 +1352,30 @@ void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCl
         return model.meshQuads[(std::size_t)lhs].depth < model.meshQuads[(std::size_t)rhs].depth;
     });
 
+    ProductionPreviewSettings previewSettings;
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        previewSettings = g_productionPreviewSettings;
+    }
+    const bool normalVectorsMode =
+        previewSettings.debugMode == (int)ProductionPreviewDebugMode::NormalVectors;
+
     for (int index : drawOrder) {
         drawProjectedQuad(drawList, settings, g_meshCamera, origin, viewportSize, model.meshQuads[(std::size_t)index]);
+    }
+
+    if (normalVectorsMode) {
+        const auto projectPoint = [&](const Vec3& point) {
+            return projectMeshPoint(settings, g_meshCamera, origin, viewportSize, point);
+        };
+        drawMeshQuadNormalVectors(
+            drawList,
+            model.meshQuads,
+            projectPoint,
+            previewSettings,
+            settings.showCliffWalls,
+            settings.showTopFaces);
+        drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(96, 255, 128, 255), "Green: lit (hint) | Red: facet | Yellow: hint | Purple: legacy stable");
     }
 
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Generated 3D mesh: top quads + cliff wall quads");
@@ -1190,7 +1442,7 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
             const float previousZoom = g_landscapeCamera.zoom;
             const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.28f, 12.0f);
             if (nextZoom != previousZoom) {
-                const ImVec2 anchor = meshProjectionAnchor(origin, viewportSize, g_landscapeCamera);
+                const ImVec2 anchor = landscapeProjectionAnchor(origin, viewportSize, g_landscapeCamera);
                 const ImVec2 mouseLocal{
                     io.MousePos.x - anchor.x,
                     io.MousePos.y - anchor.y,
@@ -1222,6 +1474,15 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         lightDirection = g_productionLightDirection;
     }
     previewSettings = g_productionPreviewSettings;
+    if (visualCaptureEnabled() && visualCaptureBlockGpuPreview()) {
+        previewSettings.useGpuRenderer = false;
+    }
+    const bool normalVectorsMode =
+        previewSettings.debugMode == (int)ProductionPreviewDebugMode::NormalVectors;
+    ProductionPreviewSettings renderSettings = previewSettings;
+    if (normalVectorsMode) {
+        renderSettings.debugMode = (int)ProductionPreviewDebugMode::Albedo;
+    }
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(18, 21, 27, 255));
@@ -1230,10 +1491,11 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
 
     bool renderedWithGpu = false;
     if (previewSettings.useGpuRenderer) {
-        const std::vector<render_core::MeshPreviewQuad> renderQuads = buildRenderQuads(settings, model, previewSettings);
+        const std::vector<render_core::MeshPreviewQuad> renderQuads =
+            buildRenderQuads(settings, model, renderSettings, lightDirection);
         renderedWithGpu = g_gpuPreviewRenderer.render(
             renderQuads,
-            makeRenderParams(settings, g_landscapeCamera, viewportSize, lightDirection, previewSettings),
+            makeRenderParams(settings, g_landscapeCamera, viewportSize, lightDirection, renderSettings),
             g_textures.grass.view,
             g_textures.rock.view,
             g_textures.grass.sampler,
@@ -1250,10 +1512,20 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         const ImVec2 groundCenter{origin.x + viewportSize.x * 0.5f, origin.y + 170.0f};
         drawList->AddEllipse(groundCenter, {390.0f, 150.0f}, IM_COL32(34, 39, 47, 255), 0.0f, 48, 2.0f);
 
+        std::vector<MeshQuad> shadedQuads = model.meshQuads;
+        if (!model.heightLevels.empty()) {
+            applySunShadowToMeshQuads(
+                shadedQuads,
+                settings.gridWidth,
+                settings.gridHeight,
+                model.heightLevels,
+                lightDirection);
+        }
+
         std::vector<int> drawOrder;
-        drawOrder.reserve(model.meshQuads.size());
-        for (int i = 0; i < (int)model.meshQuads.size(); i++) {
-            const MeshQuad& quad = model.meshQuads[(std::size_t)i];
+        drawOrder.reserve(shadedQuads.size());
+        for (int i = 0; i < (int)shadedQuads.size(); i++) {
+            const MeshQuad& quad = shadedQuads[(std::size_t)i];
             if (quad.cliffWall && !settings.showCliffWalls) {
                 continue;
             }
@@ -1264,7 +1536,7 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         }
 
         std::sort(drawOrder.begin(), drawOrder.end(), [&](int lhs, int rhs) {
-            return model.meshQuads[(std::size_t)lhs].depth < model.meshQuads[(std::size_t)rhs].depth;
+            return shadedQuads[(std::size_t)lhs].depth < shadedQuads[(std::size_t)rhs].depth;
         });
 
         const ImDrawListFlags previousFlags = drawList->Flags;
@@ -1276,11 +1548,24 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
                 g_landscapeCamera,
                 origin,
                 viewportSize,
-                model.meshQuads[(std::size_t)index],
+                shadedQuads[(std::size_t)index],
                 lightDirection,
-                previewSettings);
+                normalVectorsMode ? renderSettings : previewSettings);
         }
         drawList->Flags = previousFlags;
+    }
+
+    if (normalVectorsMode) {
+        const auto projectPoint = [&](const Vec3& point) {
+            return projectLandscapeMeshPoint(settings, g_landscapeCamera, origin, viewportSize, point);
+        };
+        drawMeshQuadNormalVectors(
+            drawList,
+            model.meshQuads,
+            projectPoint,
+            previewSettings,
+            settings.showCliffWalls,
+            settings.showTopFaces);
     }
 
     if (previewSettings.showEnvSprites && !g_envSprites.empty()) {
@@ -1289,19 +1574,13 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
             g_envReseedRequested = false;
         }
 
-        // Replicate the GPU isometric projection so overlaid sprites line up with
-        // the rendered terrain image (the CPU fallback anchor differs slightly).
-        const float anchorY = std::min(170.0f, std::max(96.0f, viewportSize.y * 0.34f));
-        const float halfW = (float)settings.gridWidth * 0.5f;
-        const float halfH = (float)settings.gridHeight * 0.5f;
-        const float zoom = g_landscapeCamera.zoom;
-        const ImVec2 pan = g_landscapeCamera.pan;
         auto projectWorld = [&](float wx, float wy, float wz) -> ImVec2 {
-            const float cx = wx - halfW;
-            const float cz = wz - halfH;
-            const float sx = viewportSize.x * 0.5f + pan.x + (cx - cz) * 19.0f * zoom;
-            const float sy = anchorY + pan.y + ((cx + cz) * 9.5f - wy * 25.0f) * zoom;
-            return {origin.x + sx, origin.y + sy};
+            return projectLandscapeMeshPoint(
+                settings,
+                g_landscapeCamera,
+                origin,
+                viewportSize,
+                {wx, wy, wz});
         };
 
         std::vector<int> order(g_envPlacements.size());
@@ -1314,7 +1593,7 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
             return (a.x + a.z) < (b.x + b.z);
         });
 
-        const float pxPerUnit = 25.0f * zoom;
+        const float pxPerUnit = 25.0f * g_landscapeCamera.zoom;
         for (int index : order) {
             const EnvPlacement& placement = g_envPlacements[(std::size_t)index];
             if (placement.sprite < 0 || placement.sprite >= (int)g_envSprites.size()) {
@@ -1345,6 +1624,12 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         {origin.x + 12.0f, origin.y + 92.0f},
         renderedWithGpu ? IM_COL32(126, 220, 150, 255) : IM_COL32(235, 186, 90, 255),
         renderedWithGpu ? "Renderer: Sokol GPU offscreen" : "Renderer: ImGui CPU fallback");
+    if (normalVectorsMode) {
+        drawList->AddText({origin.x + 12.0f, origin.y + 112.0f}, IM_COL32(96, 255, 128, 255), "Green: lit normal (outwardHint-based)");
+        drawList->AddText({origin.x + 12.0f, origin.y + 132.0f}, IM_COL32(255, 96, 96, 255), "Red: raw facet normal (quad.normal, albedo only)");
+        drawList->AddText({origin.x + 12.0f, origin.y + 152.0f}, IM_COL32(255, 220, 72, 255), "Yellow: outwardHint mesh metadata");
+        drawList->AddText({origin.x + 12.0f, origin.y + 172.0f}, IM_COL32(196, 128, 255, 255), "Purple: legacy stableWallNormal (debug compare)");
+    }
     drawList->PopClipRect();
 }
 } // namespace meshgen_playground

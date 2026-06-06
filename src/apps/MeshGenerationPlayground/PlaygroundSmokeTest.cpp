@@ -1,5 +1,6 @@
 #include "PlaygroundSmokeTest.h"
 
+#include "MeshBridge.h"
 #include "PlaygroundState.h"
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <landscape_mesh/landscape_mesh.h>
 #include <spdlog/spdlog.h>
 
 namespace meshgen_playground {
@@ -62,6 +64,58 @@ OutwardOrientationScan scanModelOutwardOrientation(const std::vector<MeshQuad>& 
         } else if (dot < kOutwardWarnDotThreshold) {
             scan.outwardWarnCount++;
         }
+    }
+    return scan;
+}
+
+struct SunShadowScan {
+    float minShadow = 1.0f;
+    float maxShadow = 0.0f;
+};
+
+struct LitWallNormalScan {
+    float minHintDot = 1.0f;
+    int wallQuadCount = 0;
+};
+
+LitWallNormalScan scanLitWallNormals(const std::vector<MeshQuad>& quads) {
+    LitWallNormalScan scan;
+    for (const MeshQuad& quad : quads) {
+        if (!quad.cliffWall) {
+            continue;
+        }
+        scan.wallQuadCount++;
+        const landscape_mesh::MeshQuad sharedQuad = toLandscapeMeshQuad(quad);
+        const landscape_mesh::Vec3 lit = landscape_mesh::litWallNormal(sharedQuad);
+        const landscape_mesh::Vec3& hint = sharedQuad.outwardHint;
+        const float hintHorizLength = std::sqrt(hint.x * hint.x + hint.z * hint.z);
+        if (hintHorizLength < 0.0001f) {
+            continue;
+        }
+        const float dot = (lit.x * hint.x + lit.z * hint.z) / hintHorizLength;
+        scan.minHintDot = std::min(scan.minHintDot, dot);
+    }
+    return scan;
+}
+
+void logLitWallNormalScan(const char* label, const LitWallNormalScan& scan) {
+    const char* marker = scan.wallQuadCount > 0 && scan.minHintDot > 0.99f ? "TEST PASS" : "TEST FAIL";
+    spdlog::info(
+        "{} {} lit wall normals: walls={}, minHintDot={:.4f}",
+        marker,
+        label,
+        scan.wallQuadCount,
+        scan.minHintDot);
+}
+
+SunShadowScan scanModelSunShadow(const std::vector<MeshQuad>& quads) {
+    SunShadowScan scan;
+    for (const MeshQuad& quad : quads) {
+        if (quad.cliffWall) {
+            continue;
+        }
+        scan.minShadow = std::min(scan.minShadow, quad.sunShadow);
+        scan.maxShadow = std::max(scan.maxShadow, quad.sunShadow);
     }
     return scan;
 }
@@ -163,11 +217,28 @@ bool runTestScenario() {
     scanWallGeometryIntegrity();
     const OutwardOrientationScan rectangleOrientation = scanModelOutwardOrientation(g_rectModel.meshQuads);
     const OutwardOrientationScan landscapeOrientation = scanModelOutwardOrientation(g_landscapeModel.meshQuads);
+    const SunShadowScan rectangleSunShadow = scanModelSunShadow(g_rectModel.meshQuads);
+    const SunShadowScan landscapeSunShadow = scanModelSunShadow(g_landscapeModel.meshQuads);
+    const LitWallNormalScan rectangleLitNormals = scanLitWallNormals(g_rectModel.meshQuads);
+    const LitWallNormalScan landscapeLitNormals = scanLitWallNormals(g_landscapeModel.meshQuads);
     logOutwardOrientationScan("rectangle mesh", rectangleOrientation);
     logOutwardOrientationScan("landscape mesh", landscapeOrientation);
+    logLitWallNormalScan("rectangle mesh", rectangleLitNormals);
+    logLitWallNormalScan("landscape mesh", landscapeLitNormals);
+    spdlog::info(
+        "TEST PASS sun shadow range: rectangle min/max={:.4f}/{:.4f}, landscape min/max={:.4f}/{:.4f}",
+        rectangleSunShadow.minShadow,
+        rectangleSunShadow.maxShadow,
+        landscapeSunShadow.minShadow,
+        landscapeSunShadow.maxShadow);
     const bool outwardOk =
         rectangleOrientation.outwardFailCount == 0 &&
         landscapeOrientation.outwardFailCount == 0;
+    const bool litNormalsOk =
+        rectangleLitNormals.wallQuadCount > 0 &&
+        landscapeLitNormals.wallQuadCount > 0 &&
+        rectangleLitNormals.minHintDot > 0.99f &&
+        landscapeLitNormals.minHintDot > 0.99f;
     const bool outwardWarn =
         rectangleOrientation.outwardWarnCount > 0 ||
         landscapeOrientation.outwardWarnCount > 0;
@@ -187,7 +258,7 @@ bool runTestScenario() {
         g_landscapeModel.topQuadCount > 0 &&
         g_landscapeModel.cliffWallQuadCount > 0 &&
         g_landscapeModel.beveledSegmentCount > 0;
-    if (rectangleOk && landscapeOk && outwardOk) {
+    if (rectangleOk && landscapeOk && outwardOk && litNormalsOk) {
         if (outwardWarn) {
             spdlog::warn(
                 "TEST WARN MeshGenerationPlayground outward orientation: rectangle fail/warn/minDot={}/{}/{:.4f}, landscape fail/warn/minDot={}/{}/{:.4f}",
@@ -199,7 +270,7 @@ bool runTestScenario() {
                 landscapeOrientation.minWallOutwardDot);
         }
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, sunShadow min/max={:.4f}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, sunShadow min/max={:.4f}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             g_rectModel.beveledSegmentCount,
@@ -207,6 +278,8 @@ bool runTestScenario() {
             rectangleOrientation.outwardFailCount,
             rectangleOrientation.outwardWarnCount,
             rectangleOrientation.minWallOutwardDot,
+            rectangleSunShadow.minShadow,
+            rectangleSunShadow.maxShadow,
             g_landscapeModel.surfaceTileCount,
             g_landscapeModel.wallTileCount,
             g_landscapeModel.uniqueTileMeshCount,
@@ -215,6 +288,8 @@ bool runTestScenario() {
             landscapeOrientation.outwardFailCount,
             landscapeOrientation.outwardWarnCount,
             landscapeOrientation.minWallOutwardDot,
+            landscapeSunShadow.minShadow,
+            landscapeSunShadow.maxShadow,
             g_landscapeModel.maxAdjacentLevelDelta,
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
@@ -223,10 +298,11 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
         outwardOk,
+        litNormalsOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,
         g_rectModel.beveledSegmentCount,
@@ -234,6 +310,7 @@ bool runTestScenario() {
         rectangleOrientation.outwardFailCount,
         rectangleOrientation.outwardWarnCount,
         rectangleOrientation.minWallOutwardDot,
+        rectangleLitNormals.minHintDot,
         g_landscapeModel.surfaceTileCount,
         g_landscapeModel.wallTileCount,
         g_landscapeModel.uniqueTileMeshCount,
@@ -242,6 +319,7 @@ bool runTestScenario() {
         landscapeOrientation.outwardFailCount,
         landscapeOrientation.outwardWarnCount,
         landscapeOrientation.minWallOutwardDot,
+        landscapeLitNormals.minHintDot,
         g_landscapeModel.maxAdjacentLevelDelta,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,

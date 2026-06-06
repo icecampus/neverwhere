@@ -58,6 +58,7 @@ struct MeshQuad {
     float heightFraction = 1.0f;
     float depth = 0.0f;
     float cliffDistance = 1000.0f;
+    float sunShadow = 1.0f;
     BoundarySide boundarySide = BoundarySide::Top;
     Vec3 outwardHint{0.0f, 1.0f, 0.0f};
 };
@@ -84,12 +85,20 @@ enum class ProductionPreviewDebugMode : int {
     Uv = 5,
     CliffProximity = 6,
     DepthOrder = 7,
+    SunShadow = 8,
+    NormalVectors = 9,
 };
 
 struct ProductionPreviewSettings {
-    float ambient = 0.98f;
-    float diffuseStrength = 0.30f;
+    float ambient = 0.48f;
+    float diffuseStrength = 0.62f;
     float wallBrightness = 1.05f;
+    float rimStrength = 0.18f;
+    float rimPower = 2.5f;
+    float specularStrength = 0.12f;
+    float shininess = 24.0f;
+    float sunShadowStrength = 0.55f;
+    float shadowTintStrength = 0.35f;
     float cliffDarkeningRadius = 1.35f;
     float cliffDarkeningStrength = 0.32f;
     float minTopBrightness = 0.68f;
@@ -97,7 +106,6 @@ struct ProductionPreviewSettings {
     float textureScale = 1.0f;
     float macroScale = 0.35f;
     float macroStrength = 0.08f;
-    float wallDetailNormal = 1.0f;     // A1: 0 = flat cliff plane, 1 = full faceted relief.
     float wallAoStrength = 0.35f;      // A3: darken wall base and crevices.
     float wallEdgeWearStrength = 0.4f; // C1: lighten/desaturate protruding facet ridges.
     float wallCreviceStrength = 0.45f; // C2: darken recessed facets (dirt/moss).
@@ -106,6 +114,7 @@ struct ProductionPreviewSettings {
     float wallFacetWearStrength = 0.0f;
     float wallFacetWearWidth = 1.4f;
     int debugMode = (int)ProductionPreviewDebugMode::Lit;
+    float normalVectorScale = 0.5f;
     bool useGpuRenderer = true;
     // Throwaway test: overlay 2D environment sprites on top of the 3D landscape.
     bool showEnvSprites = false;

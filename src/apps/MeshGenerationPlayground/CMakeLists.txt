@@ -39,6 +39,6 @@ target_include_directories(${AppName} PRIVATE ${STB_INCLUDE_DIRS})
 
 # Sokol backend link requirements (standalone app uses sokol_app + D3D11 on Windows).
 if(MSVC)
-    target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
+    target_link_libraries(${AppName} PRIVATE d3d11 dxgi dwmapi)
 endif()
 

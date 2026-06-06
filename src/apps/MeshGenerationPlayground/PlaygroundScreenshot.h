@@ -2,7 +2,6 @@
 
 namespace meshgen_playground {
 
-void drawUi();
-void drawVisualCaptureUi();
+bool captureWindowClientPng(const char* path);
 
 } // namespace meshgen_playground

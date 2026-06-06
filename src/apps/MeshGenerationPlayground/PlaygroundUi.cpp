@@ -4,6 +4,7 @@
 #include "MeshPreview.h"
 #include "PlaygroundLog.h"
 #include "PlaygroundState.h"
+#include "PlaygroundVisualCapture.h"
 #include "RectangleCliffScenario.h"
 
 #include <algorithm>
@@ -206,6 +207,10 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::Checkbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
         ImGui::SliderFloat("Ambient", &g_productionPreviewSettings.ambient, 0.35f, 1.35f);
         ImGui::SliderFloat("Diffuse Strength", &g_productionPreviewSettings.diffuseStrength, 0.0f, 0.85f);
+        ImGui::SliderFloat("Rim Strength", &g_productionPreviewSettings.rimStrength, 0.0f, 0.5f);
+        ImGui::SliderFloat("Specular Strength", &g_productionPreviewSettings.specularStrength, 0.0f, 0.4f);
+        ImGui::SliderFloat("Sun Shadow Strength", &g_productionPreviewSettings.sunShadowStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("Shadow Tint", &g_productionPreviewSettings.shadowTintStrength, 0.0f, 1.0f);
         ImGui::SliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
         ImGui::SliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
         ImGui::SliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
@@ -215,7 +220,6 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::SliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
         ImGui::SliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
         ImGui::Text("Cliff Surface");
-        ImGui::SliderFloat("Wall Detail Normal", &g_productionPreviewSettings.wallDetailNormal, 0.0f, 1.0f);
         ImGui::SliderFloat("Wall AO", &g_productionPreviewSettings.wallAoStrength, 0.0f, 0.85f);
         ImGui::SliderFloat("Edge Wear", &g_productionPreviewSettings.wallEdgeWearStrength, 0.0f, 1.0f);
         ImGui::SliderFloat("Crevice Darken", &g_productionPreviewSettings.wallCreviceStrength, 0.0f, 1.0f);
@@ -229,8 +233,13 @@ void drawLandscapeScenarioControls(float panelWidth) {
             "UV",
             "Cliff Proximity",
             "Depth Order",
+            "Sun Shadow",
+            "Normal Vectors",
         };
         ImGui::Combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
+        if (g_productionPreviewSettings.debugMode == (int)ProductionPreviewDebugMode::NormalVectors) {
+            ImGui::SliderFloat("Normal Arrow Scale", &g_productionPreviewSettings.normalVectorScale, 0.1f, 1.5f);
+        }
         ImGui::Separator();
         ImGui::Text("Env Sprites (throwaway test)");
         ImGui::Checkbox("Scatter 2D Env Sprites", &g_productionPreviewSettings.showEnvSprites);
@@ -374,7 +383,32 @@ void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
 
 } // namespace
 
+void drawVisualCaptureUi() {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+
+    constexpr ImGuiWindowFlags rootFlags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+    ImGui::Begin("MeshGenerationVisualCapture", nullptr, rootFlags);
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        drawLandscapeMesh3dPreview(g_landscapeSettings, g_landscapeModel, viewport->WorkSize);
+    }
+    ImGui::End();
+}
+
 void drawUi() {
+    if (visualCaptureEnabled()) {
+        drawVisualCaptureUi();
+        return;
+    }
+
     static bool layoutLogged = false;
 
     ImGuiViewport* viewport = ImGui::GetMainViewport();

@@ -13,6 +13,7 @@ struct ImageRGBA8 {
 };
 
 ImageRGBA8 loadImageRGBA8(const std::filesystem::path& path);
+bool writeRgbaPng(const std::filesystem::path& path, int width, int height, const std::uint8_t* pixels, int strideBytes);
 
 } // namespace render_core
 

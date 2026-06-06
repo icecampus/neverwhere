@@ -4,6 +4,7 @@
 #include "PlaygroundSmokeTest.h"
 #include "PlaygroundState.h"
 #include "PlaygroundUi.h"
+#include "PlaygroundVisualCapture.h"
 #include "RectangleCliffScenario.h"
 
 #include <cstdint>
@@ -110,6 +111,14 @@ void init() {
     spdlog::info("init: simgui_setup() done, imguiOk=true");
 
     initProductionPreviewTextures();
+#if defined(_WIN32) && defined(SOKOL_D3D11)
+    {
+        const sg_environment env = sglue_environment();
+        configureProductionPreviewGpuReadback(
+            const_cast<void*>(env.d3d11.device),
+            const_cast<void*>(env.d3d11.device_context));
+    }
+#endif
 
     spdlog::info("init: calling rebuildRectangleCliffModel()");
     rebuildRectangleCliffModel();
@@ -158,6 +167,8 @@ void frame() {
         return;
     }
 
+    updateVisualCaptureBeforeFrame(frameIndex);
+
     const int width = sapp_width();
     const int height = sapp_height();
 
@@ -197,6 +208,7 @@ void frame() {
 
     sg_end_pass();
     sg_commit();
+    updateVisualCaptureAfterFrame(frameIndex);
 }
 
 void cleanup() {
@@ -242,7 +254,8 @@ void event(const sapp_event* ev) {
 } // namespace meshgen_playground
 
 int main(int argc, char* argv[]) {
-    (void)argc;
+    meshgen_playground::VisualCaptureOptions visualCaptureOptions;
+    meshgen_playground::parseVisualCaptureArgs(argc, argv, visualCaptureOptions);
 
     meshgen_playground::setupLogger(argv[0]);
 
@@ -291,6 +304,11 @@ int main(int argc, char* argv[]) {
 
     spdlog::info("main: sapp_desc configured: window={}x{}, sample_count={}, high_dpi={}, window_title=\"{}\"",
         desc.width, desc.height, desc.sample_count, desc.high_dpi, desc.window_title);
+    if (visualCaptureOptions.enabled) {
+        meshgen_playground::beginVisualCapture(visualCaptureOptions);
+        spdlog::info("main: visual capture mode enabled, output={}", visualCaptureOptions.outputDir);
+    }
+
     spdlog::info("main: calling sapp_run()");
 
     sapp_run(&desc);

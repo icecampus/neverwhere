@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <string>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -23,6 +25,7 @@ struct MeshPreviewQuad {
     float cliffDistance = 1000.0f;
     float relief = 0.0f;        // signed wall displacement: >0 ridge, <0 crevice.
     float heightFraction = 1.0f; // wall vertical position: 0 base, 1 top.
+    float sunShadow = 1.0f;     // 1=lit, 0=full grid shadow; passed via facetUv.x.
     float depth = 0.0f;
 };
 
@@ -35,9 +38,15 @@ struct MeshPreviewRenderParams {
     float isoScaleX = 19.0f;
     float isoScaleY = 9.5f;
     float heightScale = 25.0f;
-    float ambient = 0.98f;
-    float diffuse = 0.30f;
+    float ambient = 0.48f;
+    float diffuse = 0.62f;
     float wallBrightness = 1.05f;
+    float rimStrength = 0.18f;
+    float rimPower = 2.5f;
+    float specularStrength = 0.12f;
+    float shininess = 24.0f;
+    float sunShadowStrength = 0.55f;
+    float shadowTintStrength = 0.35f;
     float textureScale = 1.0f;
     float cliffDarkeningRadius = 1.35f;
     float cliffDarkeningStrength = 0.32f;
@@ -71,6 +80,12 @@ public:
     void init();
     void shutdown();
 
+#if defined(_WIN32)
+    void initWin32Readback(void* d3d11Device, void* d3d11Context);
+#endif
+    bool readOutputRgba8(std::vector<std::uint8_t>& pixels, int& width, int& height) const;
+    bool writeOutputPng(const char* path) const;
+
     bool render(
         const std::vector<MeshPreviewQuad>& quads,
         const MeshPreviewRenderParams& params,
@@ -102,13 +117,16 @@ private:
         float options1[4]; // cliffRadius, cliffStrength, minTopBrightness, edgeDarkness.
         float options2[4]; // macroScale, macroStrength, debugMode, unused.
         float options3[4]; // wallAoStrength, wallEdgeWearStrength, wallCreviceStrength, wallGrainStrength.
-        float options4[4]; // reserved extra mask channel (facet effect), unused by the shader for now.
+        float options4[4]; // wallFacetWearStrength, wallFacetWearWidth, sunShadowStrength, specularStrength.
+        float options5[4]; // shadowTintStrength, unused.
     };
 
     void ensurePipeline();
     void destroyPipeline();
     void ensureTarget(int width, int height);
     void destroyTarget();
+    void destroyWin32ReadbackTextures();
+    bool ensureWin32ReadbackTarget(int width, int height);
     void ensureVertexBuffer(std::size_t vertexCount);
     void destroyVertexBuffer();
 
@@ -125,6 +143,13 @@ private:
     int m_width = 0;
     int m_height = 0;
     bool m_initialized = false;
+#if defined(_WIN32)
+    void* m_d3d11Device = nullptr;
+    void* m_d3d11Context = nullptr;
+    void* m_d3d11ColorTex = nullptr;
+    void* m_d3d11StagingTex = nullptr;
+    bool m_win32ReadbackEnabled = false;
+#endif
 };
 
 } // namespace render_core

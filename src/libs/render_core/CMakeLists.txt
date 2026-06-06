@@ -39,3 +39,7 @@ target_include_directories(render_core
         ${STB_INCLUDE_DIRS}
 )
 
+if(WIN32)
+    target_link_libraries(render_core PRIVATE d3d11)
+endif()
+
