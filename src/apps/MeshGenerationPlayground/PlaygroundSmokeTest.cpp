@@ -14,6 +14,73 @@ namespace meshgen_playground {
 
 namespace {
 
+constexpr float kOutwardWarnDotThreshold = 0.25f;
+
+Vec3 normalizeVec3(const Vec3& value, const Vec3& fallback) {
+    const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+    if (length < 0.0001f) {
+        const float fallbackLength = std::sqrt(
+            fallback.x * fallback.x + fallback.y * fallback.y + fallback.z * fallback.z);
+        if (fallbackLength < 0.0001f) {
+            return {0.0f, 1.0f, 0.0f};
+        }
+        return {
+            fallback.x / fallbackLength,
+            fallback.y / fallbackLength,
+            fallback.z / fallbackLength,
+        };
+    }
+    return {value.x / length, value.y / length, value.z / length};
+}
+
+float dotVec3(const Vec3& lhs, const Vec3& rhs) {
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+struct OutwardOrientationScan {
+    int outwardFailCount = 0;
+    int outwardWarnCount = 0;
+    float minWallOutwardDot = 1.0f;
+};
+
+OutwardOrientationScan scanModelOutwardOrientation(const std::vector<MeshQuad>& quads) {
+    OutwardOrientationScan scan;
+    for (const MeshQuad& quad : quads) {
+        if (!quad.cliffWall) {
+            if (quad.normal.y < 0.0f) {
+                scan.outwardFailCount++;
+            }
+            continue;
+        }
+
+        const Vec3 faceNormal = normalizeVec3(quad.normal, quad.outwardHint);
+        const Vec3 outward = normalizeVec3(quad.outwardHint, faceNormal);
+        const float dot = dotVec3(faceNormal, outward);
+        scan.minWallOutwardDot = std::min(scan.minWallOutwardDot, dot);
+        if (dot < 0.0f) {
+            scan.outwardFailCount++;
+        } else if (dot < kOutwardWarnDotThreshold) {
+            scan.outwardWarnCount++;
+        }
+    }
+    return scan;
+}
+
+void logOutwardOrientationScan(const char* label, const OutwardOrientationScan& scan) {
+    const char* marker = scan.outwardFailCount > 0
+        ? "TEST FAIL"
+        : scan.outwardWarnCount > 0
+            ? "TEST WARN"
+            : "TEST PASS";
+    spdlog::info(
+        "{} {} outward orientation: fail={}, warn={}, minWallDot={:.4f}",
+        marker,
+        label,
+        scan.outwardFailCount,
+        scan.outwardWarnCount,
+        scan.minWallOutwardDot);
+}
+
 Vec3 triNormal(const Vec3& a, const Vec3& b, const Vec3& c) {
     const Vec3 e0{b.x - a.x, b.y - a.y, b.z - a.z};
     const Vec3 e1{c.x - a.x, c.y - a.y, c.z - a.z};
@@ -94,6 +161,16 @@ void scanWallGeometryIntegrity() {
 bool runTestScenario() {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     scanWallGeometryIntegrity();
+    const OutwardOrientationScan rectangleOrientation = scanModelOutwardOrientation(g_rectModel.meshQuads);
+    const OutwardOrientationScan landscapeOrientation = scanModelOutwardOrientation(g_landscapeModel.meshQuads);
+    logOutwardOrientationScan("rectangle mesh", rectangleOrientation);
+    logOutwardOrientationScan("landscape mesh", landscapeOrientation);
+    const bool outwardOk =
+        rectangleOrientation.outwardFailCount == 0 &&
+        landscapeOrientation.outwardFailCount == 0;
+    const bool outwardWarn =
+        rectangleOrientation.outwardWarnCount > 0 ||
+        landscapeOrientation.outwardWarnCount > 0;
     const bool rectangleOk =
         g_rectModel.solidCellCount > 0 &&
         !g_rectModel.boundarySegments.empty() &&
@@ -110,18 +187,34 @@ bool runTestScenario() {
         g_landscapeModel.topQuadCount > 0 &&
         g_landscapeModel.cliffWallQuadCount > 0 &&
         g_landscapeModel.beveledSegmentCount > 0;
-    if (rectangleOk && landscapeOk) {
+    if (rectangleOk && landscapeOk && outwardOk) {
+        if (outwardWarn) {
+            spdlog::warn(
+                "TEST WARN MeshGenerationPlayground outward orientation: rectangle fail/warn/minDot={}/{}/{:.4f}, landscape fail/warn/minDot={}/{}/{:.4f}",
+                rectangleOrientation.outwardFailCount,
+                rectangleOrientation.outwardWarnCount,
+                rectangleOrientation.minWallOutwardDot,
+                landscapeOrientation.outwardFailCount,
+                landscapeOrientation.outwardWarnCount,
+                landscapeOrientation.minWallOutwardDot);
+        }
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             g_rectModel.beveledSegmentCount,
             g_rectModel.cornerCapCount,
+            rectangleOrientation.outwardFailCount,
+            rectangleOrientation.outwardWarnCount,
+            rectangleOrientation.minWallOutwardDot,
             g_landscapeModel.surfaceTileCount,
             g_landscapeModel.wallTileCount,
             g_landscapeModel.uniqueTileMeshCount,
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount,
+            landscapeOrientation.outwardFailCount,
+            landscapeOrientation.outwardWarnCount,
+            landscapeOrientation.minWallOutwardDot,
             g_landscapeModel.maxAdjacentLevelDelta,
             g_landscapeModel.seamCheckedEdges,
             g_landscapeModel.seamMismatchCount,
@@ -130,18 +223,25 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, rectangle quads={}/{}, bevel/caps={}/{}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
+        outwardOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,
         g_rectModel.beveledSegmentCount,
         g_rectModel.cornerCapCount,
+        rectangleOrientation.outwardFailCount,
+        rectangleOrientation.outwardWarnCount,
+        rectangleOrientation.minWallOutwardDot,
         g_landscapeModel.surfaceTileCount,
         g_landscapeModel.wallTileCount,
         g_landscapeModel.uniqueTileMeshCount,
         g_landscapeModel.beveledSegmentCount,
         g_landscapeModel.cornerCapCount,
+        landscapeOrientation.outwardFailCount,
+        landscapeOrientation.outwardWarnCount,
+        landscapeOrientation.minWallOutwardDot,
         g_landscapeModel.maxAdjacentLevelDelta,
         g_landscapeModel.seamCheckedEdges,
         g_landscapeModel.seamMismatchCount,

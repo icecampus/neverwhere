@@ -2,6 +2,8 @@
 
 #include <FastNoise/FastNoise.h>
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -473,6 +475,51 @@ bool topBoundaryNormalForCellPoint(
     return true;
 }
 
+constexpr float kOutwardWarnDotThreshold = 0.25f;
+
+void assignTopQuadMetadata(MeshQuad& quad) {
+    quad.boundarySide = BoundarySide::Top;
+    quad.outwardHint = {0.0f, 1.0f, 0.0f};
+}
+
+void assignWallQuadMetadata(MeshQuad& quad, BoundarySide side, const Vec3& outwardHint) {
+    quad.boundarySide = side;
+    quad.outwardHint = outwardHint;
+}
+
+Vec3 normalizeVec3(const Vec3& value, const Vec3& fallback) {
+    const float length = std::sqrt(dot3(value, value));
+    if (length < 0.0001f) {
+        return fallback;
+    }
+    return scale(value, 1.0f / length);
+}
+
+void mergeNormalOrientation(NormalOrientationStats& dst, const NormalOrientationStats& src) {
+    dst.wallQuadsChecked += src.wallQuadsChecked;
+    dst.topQuadsChecked += src.topQuadsChecked;
+    dst.outwardFailCount += src.outwardFailCount;
+    dst.outwardWarnCount += src.outwardWarnCount;
+    dst.minWallOutwardDot = std::min(dst.minWallOutwardDot, src.minWallOutwardDot);
+}
+
+void logNormalOrientation(const char* context, const NormalOrientationStats& stats) {
+    const char* marker = stats.outwardFailCount > 0
+        ? "TEST FAIL"
+        : stats.outwardWarnCount > 0
+            ? "TEST WARN"
+            : "TEST PASS";
+    spdlog::info(
+        "{} {} normal orientation: wallQuads={}, topQuads={}, fail={}, warn={}, minWallDot={:.4f}",
+        marker,
+        context,
+        stats.wallQuadsChecked,
+        stats.topQuadsChecked,
+        stats.outwardFailCount,
+        stats.outwardWarnCount,
+        stats.minWallOutwardDot);
+}
+
 void addQuad(CompositionResult& result, MeshQuad quad) {
     result.quads.push_back(quad);
     if (quad.cliffWall) {
@@ -512,6 +559,7 @@ void addTopCell(
         top.d = {(float)cellX, height, (float)(cellY + 1)};
         top.color = surfaceColor(mask.zoneAt(cellX, cellY), level, maxLevel);
         top.cliffWall = false;
+        assignTopQuadMetadata(top);
         addQuad(result, top);
         return;
     }
@@ -562,6 +610,7 @@ void addTopCell(
             const float panelNoise = (noise[i00] + noise[i10] + noise[i11] + noise[i01]) * 0.25f;
             top.color = rockTopColor(panelNoise);
             top.cliffWall = false;
+            assignTopQuadMetadata(top);
             addQuad(result, top);
         }
     }
@@ -650,6 +699,7 @@ void addInnerCornerBevelCaps(
         cap.d = b.point;
         cap.color = surfaceColor(cornerSolidZone(mask, a.corner), level, maxLevel);
         cap.cliffWall = false;
+        assignTopQuadMetadata(cap);
         addQuad(result, cap);
         result.stats.cornerCapCount++;
     }
@@ -762,12 +812,42 @@ void addOuterCornerFootCaps(
         cap.d = b.point;
         cap.color = surfaceColor(cornerNonSolidZone(mask, a.corner), lowerLevel, maxLevel);
         cap.cliffWall = false;
+        assignTopQuadMetadata(cap);
         addQuad(result, cap);
         result.stats.cornerCapCount++;
     }
 }
 
+NormalOrientationStats validateNormalOrientationInternal(const std::vector<MeshQuad>& quads) {
+    NormalOrientationStats stats;
+    for (const MeshQuad& quad : quads) {
+        if (quad.cliffWall) {
+            stats.wallQuadsChecked++;
+            const Vec3 faceNormal = normalizeVec3(quad.normal, quad.outwardHint);
+            const Vec3 outward = normalizeVec3(quad.outwardHint, faceNormal);
+            const float dot = dot3(faceNormal, outward);
+            stats.minWallOutwardDot = std::min(stats.minWallOutwardDot, dot);
+            if (dot < 0.0f) {
+                stats.outwardFailCount++;
+            } else if (dot < kOutwardWarnDotThreshold) {
+                stats.outwardWarnCount++;
+            }
+            continue;
+        }
+
+        stats.topQuadsChecked++;
+        if (quad.normal.y < 0.0f) {
+            stats.outwardFailCount++;
+        }
+    }
+    return stats;
+}
+
 } // namespace
+
+NormalOrientationStats validateNormalOrientation(const std::vector<MeshQuad>& quads) {
+    return validateNormalOrientationInternal(quads);
+}
 
 bool SolidMaskGrid::empty() const {
     return width <= 0 || height <= 0 || solidCells.empty();
@@ -1006,6 +1086,7 @@ TileMesh TileMeshCatalog::buildSurfaceMesh(const LandscapeTileKey& key) const {
     quad.d = {0.0f, h, s};
     quad.color = surfaceColor(key.zone, key.level, std::max<std::uint8_t>(1, key.upperLevel));
     quad.cliffWall = false;
+    assignTopQuadMetadata(quad);
     mesh.quads.push_back(quad);
     return mesh;
 }
@@ -1064,6 +1145,7 @@ TileMesh TileMeshCatalog::buildWallMesh(const LandscapeTileKey& key) const {
             quad.heightFraction = std::clamp((y0 + y1) * 0.5f, 0.0f, 1.0f);
             quad.color = wallColor(key.side, (y0 + y1) * 0.5f, (n00 + n10 + n11 + n01) * 0.25f);
             quad.cliffWall = true;
+            assignWallQuadMetadata(quad, key.side, normal);
             mesh.quads.push_back(quad);
         }
     }
@@ -1196,10 +1278,14 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
                 wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
                 wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
                 wall.cliffWall = true;
+                assignWallQuadMetadata(wall, segment.side, segment.normal);
                 addQuad(result, wall);
             }
         }
     }
+
+    result.normalOrientation = validateNormalOrientationInternal(result.quads);
+    logNormalOrientation("composeSolidMaskMesh", result.normalOrientation);
 
     return result;
 }
@@ -1225,6 +1311,7 @@ CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid&
         result.stats.boundarySegmentCount += part.stats.boundarySegmentCount;
         result.stats.beveledSegmentCount += part.stats.beveledSegmentCount;
         result.stats.cornerCapCount += part.stats.cornerCapCount;
+        mergeNormalOrientation(result.normalOrientation, part.normalOrientation);
     };
 
     for (int level = 0; level < grid.levelCount; level++) {
@@ -1272,6 +1359,7 @@ CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid&
     }
 
     result.seams = validateLandscapeSeams(grid, settings);
+    logNormalOrientation("composeLandscapeMesh", result.normalOrientation);
     return result;
 }
 

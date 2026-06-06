@@ -155,6 +155,10 @@ void drawRectangleScenarioControls(float panelWidth) {
         ImGui::Text("Shared bevel segments/caps: %d / %d",
             g_rectModel.beveledSegmentCount,
             g_rectModel.cornerCapCount);
+        ImGui::Text("Outward normals fail/warn/minDot: %d / %d / %.4f",
+            g_rectModel.outwardFailCount,
+            g_rectModel.outwardWarnCount,
+            g_rectModel.minWallOutwardDot);
         ImGui::Text("Rock mode: %s", g_rectSettings.rockEnabled ? "FastNoise2 ridged" : "flat walls");
         ImGui::Text("Vertices E/O/I/D: %d / %d / %d / %d",
             g_rectModel.edgeVertexCount,
@@ -274,6 +278,10 @@ void drawLandscapeScenarioControls(float panelWidth) {
         ImGui::Text("Shared bevel segments/caps: %d / %d",
             g_landscapeModel.beveledSegmentCount,
             g_landscapeModel.cornerCapCount);
+        ImGui::Text("Outward normals fail/warn/minDot: %d / %d / %.4f",
+            g_landscapeModel.outwardFailCount,
+            g_landscapeModel.outwardWarnCount,
+            g_landscapeModel.minWallOutwardDot);
         ImGui::Text("Pyramid max adjacent level delta: %d",
             g_landscapeModel.maxAdjacentLevelDelta);
         ImGui::Text("Seams checked/mismatches/max gap: %d / %d / %.4f",

@@ -49,6 +49,9 @@ struct RectangleCliffModel {
     int cliffWallQuadCount = 0;
     int beveledSegmentCount = 0;
     int cornerCapCount = 0;
+    int outwardFailCount = 0;
+    int outwardWarnCount = 0;
+    float minWallOutwardDot = 1.0f;
 };
 
 void sanitizeSettings(RectangleCliffSettings& settings);

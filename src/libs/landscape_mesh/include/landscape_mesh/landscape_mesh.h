@@ -49,6 +49,8 @@ struct MeshQuad {
     float relief = 0.0f;
     // Vertical position of the wall panel: 0 at the base, 1 at the top.
     float heightFraction = 1.0f;
+    BoundarySide boundarySide = BoundarySide::Top;
+    Vec3 outwardHint{0.0f, 1.0f, 0.0f};
 };
 
 struct TileMesh {
@@ -117,10 +119,19 @@ struct SeamValidation {
     float maxGap = 0.0f;
 };
 
+struct NormalOrientationStats {
+    int wallQuadsChecked = 0;
+    int topQuadsChecked = 0;
+    int outwardFailCount = 0;
+    int outwardWarnCount = 0;
+    float minWallOutwardDot = 1.0f;
+};
+
 struct CompositionResult {
     std::vector<MeshQuad> quads;
     CompositionStats stats;
     SeamValidation seams;
+    NormalOrientationStats normalOrientation;
 };
 
 struct SolidMeshBuildRequest {
@@ -161,6 +172,7 @@ private:
 VertexKind classifyVertex(const SolidMaskGrid& mask, int x, int y);
 std::vector<BoundarySegment> buildBoundarySegments(const SolidMaskGrid& mask);
 BeveledBoundaryResult buildBeveledBoundary(const SolidMaskGrid& mask, const MeshBuildSettings& settings);
+NormalOrientationStats validateNormalOrientation(const std::vector<MeshQuad>& quads);
 CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, const MeshBuildSettings& settings);
 CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& settings);
 SeamValidation validateLandscapeSeams(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& settings);

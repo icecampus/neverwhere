@@ -10,6 +10,7 @@ nw_add_lib_sources(
     LIBS
         landscape_core
         FastNoise2::FastNoise
+        spdlog::spdlog_header_only
 )
 
 target_include_directories(landscape_mesh PUBLIC include)

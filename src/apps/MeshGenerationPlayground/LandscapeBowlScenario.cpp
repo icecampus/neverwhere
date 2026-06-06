@@ -187,6 +187,9 @@ void rebuildLandscapeBowlModel() {
     model.seamMaxGap = composedMesh.seams.maxGap;
     model.beveledSegmentCount = composedMesh.stats.beveledSegmentCount;
     model.cornerCapCount = composedMesh.stats.cornerCapCount;
+    model.outwardFailCount = composedMesh.normalOrientation.outwardFailCount;
+    model.outwardWarnCount = composedMesh.normalOrientation.outwardWarnCount;
+    model.minWallOutwardDot = composedMesh.normalOrientation.minWallOutwardDot;
     for (const landscape_mesh::MeshQuad& quad : composedMesh.quads) {
         addMeshQuad(model, toAppMeshQuad(quad));
     }

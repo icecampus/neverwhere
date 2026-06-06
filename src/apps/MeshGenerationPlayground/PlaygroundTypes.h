@@ -58,6 +58,8 @@ struct MeshQuad {
     float heightFraction = 1.0f;
     float depth = 0.0f;
     float cliffDistance = 1000.0f;
+    BoundarySide boundarySide = BoundarySide::Top;
+    Vec3 outwardHint{0.0f, 1.0f, 0.0f};
 };
 
 enum class LandscapeZone : std::uint8_t {

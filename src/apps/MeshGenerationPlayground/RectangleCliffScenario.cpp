@@ -176,6 +176,9 @@ void rebuildRectangleCliffModel() {
         makeSharedLandscapeMeshSettings(settings.cliffHeight));
     model.beveledSegmentCount = meshResult.stats.beveledSegmentCount;
     model.cornerCapCount = meshResult.stats.cornerCapCount;
+    model.outwardFailCount = meshResult.normalOrientation.outwardFailCount;
+    model.outwardWarnCount = meshResult.normalOrientation.outwardWarnCount;
+    model.minWallOutwardDot = meshResult.normalOrientation.minWallOutwardDot;
     for (const landscape_mesh::MeshQuad& quad : meshResult.quads) {
         addMeshQuad(model, toAppMeshQuad(quad));
     }

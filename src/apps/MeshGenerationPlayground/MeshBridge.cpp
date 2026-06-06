@@ -51,6 +51,8 @@ MeshQuad toAppMeshQuad(const landscape_mesh::MeshQuad& quad) {
     result.cliffWall = quad.cliffWall;
     result.relief = quad.relief;
     result.heightFraction = quad.heightFraction;
+    result.boundarySide = static_cast<BoundarySide>(static_cast<int>(quad.boundarySide));
+    result.outwardHint = {quad.outwardHint.x, quad.outwardHint.y, quad.outwardHint.z};
     return result;
 }
 
