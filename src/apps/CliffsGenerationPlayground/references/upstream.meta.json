@@ -10,7 +10,8 @@
     "venue": "The Visual Computer",
     "year": 2020,
     "project_page": "https://aparis69.github.io/public_html/projects/paris2020_Blocks.html",
-    "pdf": "https://drive.google.com/file/d/1-_rq9KOybtksWPod0lac1LDwlNd0Opkt/view"
+    "pdf_remote": "https://drive.google.com/file/d/1-_rq9KOybtksWPod0lac1LDwlNd0Opkt/view",
+    "pdf_local": "Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf"
   },
   "neverwhere_port": {
     "app": "CliffsGenerationPlayground",

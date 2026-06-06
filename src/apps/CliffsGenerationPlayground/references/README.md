@@ -4,13 +4,15 @@
 
 | Документ | Описание |
 |----------|----------|
+| [Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf](./Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf) | Preprint статьи (TVC 2020), локальная копия |
 | [rock-fracturing-upstream.md](./rock-fracturing-upstream.md) | Закреплённый upstream, карта файлов, gap-анализ «оригинал vs наш порт» |
+| [SCENE_EVOLUTION_ROADMAP.md](./SCENE_EVOLUTION_ROADMAP.md) | План развития до сцен paper (terrain + replication, арки, strata) |
 | [upstream.meta.json](./upstream.meta.json) | Машиночитаемые метаданные репозитория (URL, commit, лицензия, ссылки на статью) |
 
 ## Upstream (canonical)
 
 - **Repository:** [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing)
-- **Paper:** Paris et al., *Modeling Rocky Scenery using Implicit Blocks*, The Visual Computer, 2020
+- **Paper (local PDF):** [Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf](./Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf) — preprint с [project page](https://aparis69.github.io/public_html/projects/paris2020_Blocks.html)
 - **Project page:** https://aparis69.github.io/public_html/projects/paris2020_Blocks.html
 - **Pinned commit (analysis baseline):** `b91965b3011ed269cbc3a051b00c9b284aaa2e36` (2022-05-20)
 

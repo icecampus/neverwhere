@@ -8,13 +8,16 @@
 
 ## Референс
 
-За основу взят подход из статьи *Modeling Rocky Scenery using Implicit Blocks* (Paris et al., TVC 2020). Исходный исследовательский код:
+За основу взят подход из статьи *Modeling Rocky Scenery using Implicit Blocks* (Paris et al., TVC 2020):
 
-- [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) — implicit blocks, SDF, marching cubes, процедурное дробление камня.
+- [Preprint PDF](./references/Paris2020_Modeling_Rocky_Scenery_Implicit_Blocks.pdf) — локальная копия в репозитории
+- [aparis69/Rock-fracturing](https://github.com/aparis69/Rock-fracturing) — implicit blocks, SDF, marching cubes, процедурное дробление камня
 
 Этот playground адаптирует и изучает те же идеи в контексте Neverwhere (Sokol, ImGui, собственный рендер).
 
 **Сравнение с upstream:** [references/rock-fracturing-upstream.md](./references/rock-fracturing-upstream.md) — карта файлов, что портировано, чего нет в оригинале и в paper. Метаданные репозитория: [references/upstream.meta.json](./references/upstream.meta.json).
+
+**План до сцен как в paper (арки, strata, replication):** [references/SCENE_EVOLUTION_ROADMAP.md](./references/SCENE_EVOLUTION_ROADMAP.md).
 
 ## Сборка и запуск
 
