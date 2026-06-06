@@ -150,9 +150,9 @@ void main() {
     float shadowTintStrength = options5.x;
     const float rimPower = 2.5;
     const float shininess = 24.0;
-    const vec3 coolShadow = vec3(0.14, 0.20, 0.22);
-    const vec3 warmSky = vec3(0.42, 0.36, 0.27);
-    const vec3 lightTint = vec3(1.05, 0.96, 0.82);
+    const vec3 coolShadow = vec3(0.18, 0.24, 0.26);
+    const vec3 warmSky = vec3(0.52, 0.44, 0.32);
+    const vec3 lightTint = vec3(1.12, 1.04, 0.90);
     const vec3 viewDir = normalize(vec3(0.35, 0.55, 0.35));
 
     bool wall = v_face_kind > 0.5;
@@ -172,14 +172,14 @@ void main() {
         float wearStrength = options3.y;
         float creviceStrength = options3.z;
 
-        // C1: edge wear on protruding ridges - desaturate and lighten exposed rock.
-        float ridge = smoothstep(0.16, 0.85, relief);
+        // C1: edge wear on protruding ridges - keep subtle so facet relief does not read as zebra stripes.
+        float ridge = smoothstep(0.30, 0.78, relief);
         float lum = dot(albedo.rgb, vec3(0.299, 0.587, 0.114));
-        vec3 worn = mix(albedo.rgb, vec3(lum), 0.5) + vec3(0.10);
+        vec3 worn = mix(albedo.rgb, vec3(lum), 0.35) + vec3(0.06);
         albedo.rgb = mix(albedo.rgb, worn, ridge * wearStrength);
 
         // C2: recessed facets collect dirt/moss - darken and tint.
-        float crevice = smoothstep(0.16, 0.85, -relief);
+        float crevice = smoothstep(0.30, 0.78, -relief);
         vec3 mossy = albedo.rgb * vec3(0.60, 0.68, 0.52);
         albedo.rgb = mix(albedo.rgb, mossy, crevice * creviceStrength);
 
@@ -205,8 +205,9 @@ void main() {
     vec3 lighting;
     float sunShadow = 1.0;
     if (wall) {
-        float facing = lambert;
-        vec3 ambientCol = mix(coolShadow, warmSky, 0.32) * ambient * (0.30 + 0.70 * facing);
+        // Wrap diffuse for stable outwardHint normals: avoids hard lit/shadow bands on displaced facets.
+        float facing = sqrt(clamp(lambert * 0.72 + 0.28, 0.0, 1.0));
+        vec3 ambientCol = mix(coolShadow, warmSky, 0.32) * ambient * (0.52 + 0.48 * facing);
         vec3 diffuseCol = lightTint * diffuseStrength * facing;
         lighting = (ambientCol + diffuseCol) * wallBrightness;
     } else {
@@ -388,9 +389,9 @@ float4 main(PSIn inp): SV_Target0 {
     float shadowTintStrength = options5.x;
     const float rimPower = 2.5;
     const float shininess = 24.0;
-    const float3 coolShadow = float3(0.14, 0.20, 0.22);
-    const float3 warmSky = float3(0.42, 0.36, 0.27);
-    const float3 lightTint = float3(1.05, 0.96, 0.82);
+    const float3 coolShadow = float3(0.18, 0.24, 0.26);
+    const float3 warmSky = float3(0.52, 0.44, 0.32);
+    const float3 lightTint = float3(1.12, 1.04, 0.90);
     const float3 viewDir = normalize(float3(0.35, 0.55, 0.35));
 
     bool wall = inp.faceKind0 > 0.5;
@@ -410,14 +411,14 @@ float4 main(PSIn inp): SV_Target0 {
         float wearStrength = options3.y;
         float creviceStrength = options3.z;
 
-        // C1: edge wear on protruding ridges - desaturate and lighten exposed rock.
-        float ridge = smoothstep(0.16, 0.85, relief);
+        // C1: edge wear on protruding ridges - keep subtle so facet relief does not read as zebra stripes.
+        float ridge = smoothstep(0.30, 0.78, relief);
         float lum = dot(albedo.rgb, float3(0.299, 0.587, 0.114));
-        float3 worn = lerp(albedo.rgb, float3(lum, lum, lum), 0.5) + float3(0.10, 0.10, 0.10);
+        float3 worn = lerp(albedo.rgb, float3(lum, lum, lum), 0.35) + float3(0.06, 0.06, 0.06);
         albedo.rgb = lerp(albedo.rgb, worn, ridge * wearStrength);
 
         // C2: recessed facets collect dirt/moss - darken and tint.
-        float crevice = smoothstep(0.16, 0.85, -relief);
+        float crevice = smoothstep(0.30, 0.78, -relief);
         float3 mossy = albedo.rgb * float3(0.60, 0.68, 0.52);
         albedo.rgb = lerp(albedo.rgb, mossy, crevice * creviceStrength);
 
@@ -443,8 +444,8 @@ float4 main(PSIn inp): SV_Target0 {
     float3 lighting;
     float sunShadow = 1.0;
     if (wall) {
-        float facing = lambert;
-        float3 ambientCol = lerp(coolShadow, warmSky, 0.32) * ambient * (0.30 + 0.70 * facing);
+        float facing = sqrt(saturate(lambert * 0.72 + 0.28));
+        float3 ambientCol = lerp(coolShadow, warmSky, 0.32) * ambient * (0.52 + 0.48 * facing);
         float3 diffuseCol = lightTint * diffuseStrength * facing;
         lighting = (ambientCol + diffuseCol) * wallBrightness;
     } else {

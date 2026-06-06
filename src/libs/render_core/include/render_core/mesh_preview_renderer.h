@@ -38,26 +38,26 @@ struct MeshPreviewRenderParams {
     float isoScaleX = 19.0f;
     float isoScaleY = 9.5f;
     float heightScale = 25.0f;
-    float ambient = 0.48f;
-    float diffuse = 0.62f;
-    float wallBrightness = 1.05f;
+    float ambient = 0.62f;
+    float diffuse = 0.70f;
+    float wallBrightness = 1.08f;
     float rimStrength = 0.18f;
     float rimPower = 2.5f;
     float specularStrength = 0.12f;
     float shininess = 24.0f;
-    float sunShadowStrength = 0.55f;
-    float shadowTintStrength = 0.35f;
+    float sunShadowStrength = 0.38f;
+    float shadowTintStrength = 0.28f;
     float textureScale = 1.0f;
     float cliffDarkeningRadius = 1.35f;
-    float cliffDarkeningStrength = 0.32f;
-    float minTopBrightness = 0.68f;
-    float edgeDarkness = 0.12f;
+    float cliffDarkeningStrength = 0.22f;
+    float minTopBrightness = 0.78f;
+    float edgeDarkness = 0.08f;
     float macroScale = 0.35f;
     float macroStrength = 0.08f;
     int debugMode = 0; // 0=lit, 1=albedo, 2=normal, 3=uv, 4=cliff proximity.
     float wallAoStrength = 0.35f;     // A3: darken wall base and crevices.
-    float wallEdgeWearStrength = 0.4f; // C1: lighten/desaturate protruding facet ridges.
-    float wallCreviceStrength = 0.45f; // C2: darken recessed facets (dirt/moss).
+    float wallEdgeWearStrength = 0.22f; // C1: lighten/desaturate protruding facet ridges.
+    float wallCreviceStrength = 0.24f; // C2: darken recessed facets (dirt/moss).
     float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
     // C3 (reserved): extra mask channel plumbed to the shader (options4) for a future facet effect.
     float wallFacetWearStrength = 0.0f;

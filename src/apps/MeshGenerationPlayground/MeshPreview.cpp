@@ -692,9 +692,9 @@ ImU32 productionLitColor(
         return quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.48f);
     }
 
-    constexpr Vec3 kCoolShadow{0.14f, 0.20f, 0.22f};
-    constexpr Vec3 kWarmSky{0.42f, 0.36f, 0.27f};
-    constexpr Vec3 kLightTint{1.05f, 0.96f, 0.82f};
+    constexpr Vec3 kCoolShadow{0.18f, 0.24f, 0.26f};
+    constexpr Vec3 kWarmSky{0.52f, 0.44f, 0.32f};
+    constexpr Vec3 kLightTint{1.12f, 1.04f, 0.90f};
     const Vec3 viewDir = normalize({0.35f, 0.55f, 0.35f});
 
     const float lambert = std::max(0.0f, dot(normal, lightDirection));
@@ -703,15 +703,16 @@ ImU32 productionLitColor(
     float wallAo = 1.0f;
 
     if (quad.cliffWall) {
-        const float ridge = clampFloat((quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
-        const float crevice = clampFloat((-quad.relief - 0.16f) / 0.69f, 0.0f, 1.0f);
-        baseColor = blendTowardWhite(baseColor, ridge * previewSettings.wallEdgeWearStrength * 0.35f);
+        const float ridge = clampFloat((quad.relief - 0.30f) / 0.48f, 0.0f, 1.0f);
+        const float crevice = clampFloat((-quad.relief - 0.30f) / 0.48f, 0.0f, 1.0f);
+        baseColor = blendTowardWhite(baseColor, ridge * previewSettings.wallEdgeWearStrength * 0.22f);
         baseColor = blendTowardColor(baseColor, IM_COL32(70, 80, 60, 255), crevice * previewSettings.wallCreviceStrength);
 
+        const float facing = std::sqrt(std::max(0.0f, lambert) * 0.72f + 0.28f);
         const Vec3 ambientCol = add(
-            scale(kCoolShadow, 0.68f * previewSettings.ambient * (0.30f + 0.70f * lambert)),
-            scale(kWarmSky, 0.32f * previewSettings.ambient * (0.30f + 0.70f * lambert)));
-        const Vec3 diffuseCol = scale(kLightTint, previewSettings.diffuseStrength * lambert);
+            scale(kCoolShadow, 0.68f * previewSettings.ambient * (0.52f + 0.48f * facing)),
+            scale(kWarmSky, 0.32f * previewSettings.ambient * (0.52f + 0.48f * facing)));
+        const Vec3 diffuseCol = scale(kLightTint, previewSettings.diffuseStrength * facing);
         lightingScalar =
             (ambientCol.x * 0.299f + ambientCol.y * 0.587f + ambientCol.z * 0.114f +
              diffuseCol.x * 0.299f + diffuseCol.y * 0.587f + diffuseCol.z * 0.114f) *
@@ -929,6 +930,162 @@ Vec3 meshQuadCenter(const MeshQuad& quad) {
         (quad.a.x + quad.b.x + quad.c.x + quad.d.x) * 0.25f,
         (quad.a.y + quad.b.y + quad.c.y + quad.d.y) * 0.25f,
         (quad.a.z + quad.b.z + quad.c.z + quad.d.z) * 0.25f,
+    };
+}
+
+void buildOrthonormalBasis(const Vec3& axis, Vec3& tangentU, Vec3& tangentV) {
+    const Vec3 helper = std::abs(axis.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+    tangentU = normalize(cross(helper, axis));
+    tangentV = cross(axis, tangentU);
+}
+
+Vec3 pointOnRevolvedArrow(
+    const Vec3& base,
+    const Vec3& axis,
+    const Vec3& tangentU,
+    const Vec3& tangentV,
+    float distanceAlongAxis,
+    float radius,
+    float angleRadians) {
+
+    const float c = std::cos(angleRadians);
+    const float s = std::sin(angleRadians);
+    return add(
+        add(base, scale(axis, distanceAlongAxis)),
+        add(scale(tangentU, radius * c), scale(tangentV, radius * s)));
+}
+
+float sunBeamProfileRadius(float normalizedT, float shaftRadius, float headRadius, float headLength) {
+    if (normalizedT <= headLength) {
+        const float headT = normalizedT / std::max(0.0001f, headLength);
+        return headRadius + (shaftRadius - headRadius) * headT;
+    }
+    const float tailT = (normalizedT - headLength) / std::max(0.0001f, 1.0f - headLength);
+    return shaftRadius * (1.0f - tailT * 0.65f);
+}
+
+ImU32 sunArrowFacetColor(float normalizedT) {
+    const int warm = clampInt((int)(210.0f + normalizedT * 45.0f), 0, 255);
+    const int cool = clampInt((int)(120.0f + normalizedT * 100.0f), 0, 255);
+    return IM_COL32(255, warm, cool, 235);
+}
+
+float sunArrowFacetDepth(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d) {
+    const auto depthOf = [](const Vec3& p) {
+        return p.x + p.z - p.y * 0.35f;
+    };
+    return (depthOf(a) + depthOf(b) + depthOf(c) + depthOf(d)) * 0.25f;
+}
+
+template<typename ProjectPointFn>
+void drawSunDirectionArrow3d(
+    ImDrawList* drawList,
+    const ProjectPointFn& projectPoint,
+    const Vec3& sceneTarget,
+    const Vec3& lightDirection) {
+
+    // lightDirection points TO the sun (same convention as dot(n, lightDirection) in shading).
+    // The 3D gizmo shows light TRAVEL: sun at the wide end, beam/cone toward the scene.
+    const Vec3 toSun = normalize(lightDirection);
+    const Vec3 toScene = scale(toSun, -1.0f);
+    Vec3 tangentU;
+    Vec3 tangentV;
+    buildOrthonormalBasis(toScene, tangentU, tangentV);
+
+    constexpr int kSlices = 16;
+    constexpr int kStacks = 12;
+    constexpr float kBeamLength = 3.6f;
+    constexpr float kShaftRadius = 0.11f;
+    constexpr float kHeadRadius = 0.38f;
+    constexpr float kHeadLength = 0.24f;
+    constexpr float kTwoPi = 6.283185307179586f;
+    const Vec3 sunWorld = add(sceneTarget, scale(toSun, kBeamLength));
+    const Vec3 beamOrigin = sunWorld;
+
+    struct ArrowFacet {
+        ImVec2 a;
+        ImVec2 b;
+        ImVec2 c;
+        ImVec2 d;
+        float depth = 0.0f;
+        ImU32 color = 0;
+    };
+
+    std::vector<ArrowFacet> facets;
+    facets.reserve((std::size_t)kStacks * (std::size_t)kSlices);
+
+    for (int stack = 0; stack < kStacks; stack++) {
+        const float t0 = (float)stack / (float)kStacks;
+        const float t1 = (float)(stack + 1) / (float)kStacks;
+        const float r0 = sunBeamProfileRadius(t0, kShaftRadius, kHeadRadius, kHeadLength);
+        const float r1 = sunBeamProfileRadius(t1, kShaftRadius, kHeadRadius, kHeadLength);
+        const float d0 = t0 * kBeamLength;
+        const float d1 = t1 * kBeamLength;
+        const ImU32 color = sunArrowFacetColor(1.0f - (t0 + t1) * 0.5f);
+
+        for (int slice = 0; slice < kSlices; slice++) {
+            const float a0 = ((float)slice / (float)kSlices) * kTwoPi;
+            const float a1 = ((float)(slice + 1) / (float)kSlices) * kTwoPi;
+
+            const Vec3 p00 = pointOnRevolvedArrow(beamOrigin, toScene, tangentU, tangentV, d0, r0, a0);
+            const Vec3 p01 = pointOnRevolvedArrow(beamOrigin, toScene, tangentU, tangentV, d0, r0, a1);
+            const Vec3 p10 = pointOnRevolvedArrow(beamOrigin, toScene, tangentU, tangentV, d1, r1, a0);
+            const Vec3 p11 = pointOnRevolvedArrow(beamOrigin, toScene, tangentU, tangentV, d1, r1, a1);
+
+            ArrowFacet facet;
+            facet.a = projectPoint(p00);
+            facet.b = projectPoint(p10);
+            facet.c = projectPoint(p11);
+            facet.d = projectPoint(p01);
+            facet.depth = sunArrowFacetDepth(p00, p10, p11, p01);
+            facet.color = color;
+            facets.push_back(facet);
+        }
+    }
+
+    std::sort(facets.begin(), facets.end(), [](const ArrowFacet& lhs, const ArrowFacet& rhs) {
+        return lhs.depth < rhs.depth;
+    });
+
+    const ImDrawListFlags previousFlags = drawList->Flags;
+    drawList->Flags |= ImDrawListFlags_AntiAliasedFill;
+    for (const ArrowFacet& facet : facets) {
+        drawList->AddQuadFilled(facet.a, facet.b, facet.c, facet.d, facet.color);
+        drawList->AddQuad(facet.a, facet.b, facet.c, facet.d, IM_COL32(120, 88, 24, 120), 1.0f);
+    }
+    drawList->Flags = previousFlags;
+
+    const Vec3 beamTipWorld = add(beamOrigin, scale(toScene, kBeamLength));
+    const ImVec2 sunScreen = projectPoint(sunWorld);
+    const ImVec2 beamTipScreen = projectPoint(beamTipWorld);
+
+    drawList->AddLine(sunScreen, beamTipScreen, IM_COL32(255, 232, 150, 110), 1.4f);
+    drawList->AddCircleFilled(sunScreen, 6.0f, IM_COL32(255, 236, 150, 255));
+    drawList->AddCircleFilled(sunScreen, 3.2f, IM_COL32(255, 255, 230, 255));
+    drawList->AddText({sunScreen.x + 8.0f, sunScreen.y - 10.0f}, IM_COL32(255, 240, 190, 255), "Sun");
+}
+
+Vec3 landscapeSunBeamTarget(const LandscapeBowlSettings& settings, const LandscapeBowlModel& model) {
+    float maxHeight = 0.0f;
+    for (float level : model.heightLevels) {
+        maxHeight = std::max(maxHeight, level);
+    }
+    return {
+        (float)settings.gridWidth * 0.88f,
+        maxHeight + 0.5f,
+        (float)settings.gridHeight * 0.12f,
+    };
+}
+
+Vec3 rectangleSunBeamTarget(const RectangleCliffSettings& settings, const RectangleCliffModel& model) {
+    float maxHeight = 0.0f;
+    for (const MeshQuad& quad : model.meshQuads) {
+        maxHeight = std::max(maxHeight, std::max(std::max(quad.a.y, quad.b.y), std::max(quad.c.y, quad.d.y)));
+    }
+    return {
+        (float)settings.gridWidth * 0.88f,
+        maxHeight + 0.4f,
+        (float)settings.gridHeight * 0.12f,
     };
 }
 
@@ -1378,6 +1535,22 @@ void drawMesh3dPreview(const RectangleCliffSettings& settings, const RectangleCl
         drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(96, 255, 128, 255), "Green: lit (hint) | Red: facet | Yellow: hint | Purple: legacy stable");
     }
 
+    Vec3 lightDirection = defaultProductionLightDirection();
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        lightDirection = normalize(g_productionLightDirection);
+    }
+    {
+        const auto projectPoint = [&](const Vec3& point) {
+            return projectMeshPoint(settings, g_meshCamera, origin, viewportSize, point);
+        };
+        drawSunDirectionArrow3d(
+            drawList,
+            projectPoint,
+            rectangleSunBeamTarget(settings, model),
+            lightDirection);
+    }
+
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Generated 3D mesh: top quads + cliff wall quads");
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, mouse wheel: zoom, double click: reset");
     char cameraText[96];
@@ -1568,6 +1741,17 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
             settings.showTopFaces);
     }
 
+    {
+        const auto projectPoint = [&](const Vec3& point) {
+            return projectLandscapeMeshPoint(settings, g_landscapeCamera, origin, viewportSize, point);
+        };
+        drawSunDirectionArrow3d(
+            drawList,
+            projectPoint,
+            landscapeSunBeamTarget(settings, model),
+            lightDirection);
+    }
+
     if (previewSettings.showEnvSprites && !g_envSprites.empty()) {
         if (g_envReseedRequested || g_envPlacements.empty()) {
             regenerateEnvPlacements(settings, model);
@@ -1613,13 +1797,11 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
     }
 
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Production Preview: shaded landscape mesh");
-    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, Ctrl+LMB drag: rotate sun, mouse wheel: zoom");
+    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan, Ctrl+LMB drag: rotate sun, wheel: zoom");
+    drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), "Yellow beam: light travel; Sun label = source above scene");
     char cameraText[96];
     snprintf(cameraText, sizeof(cameraText), "Camera zoom: %.2fx, pan: %.0f %.0f", g_landscapeCamera.zoom, g_landscapeCamera.pan.x, g_landscapeCamera.pan.y);
-    drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), cameraText);
-    char lightText[128];
-    snprintf(lightText, sizeof(lightText), "Sun dir: %.2f %.2f %.2f", lightDirection.x, lightDirection.y, lightDirection.z);
-    drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(150, 162, 180, 255), lightText);
+    drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(150, 162, 180, 255), cameraText);
     drawList->AddText(
         {origin.x + 12.0f, origin.y + 92.0f},
         renderedWithGpu ? IM_COL32(126, 220, 150, 255) : IM_COL32(235, 186, 90, 255),
