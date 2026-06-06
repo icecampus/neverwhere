@@ -14,6 +14,8 @@
 
 Этот playground адаптирует и изучает те же идеи в контексте Neverwhere (Sokol, ImGui, собственный рендер).
 
+**Сравнение с upstream:** [references/rock-fracturing-upstream.md](./references/rock-fracturing-upstream.md) — карта файлов, что портировано, чего нет в оригинале и в paper. Метаданные репозитория: [references/upstream.meta.json](./references/upstream.meta.json).
+
 ## Сборка и запуск
 
 CMake-таргет: `CliffsGenerationPlayground` (папка `src/apps/CliffsGenerationPlayground`).

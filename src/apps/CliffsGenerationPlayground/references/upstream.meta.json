@@ -1,0 +1,29 @@
+{
+  "name": "Rock-fracturing",
+  "repository": "https://github.com/aparis69/Rock-fracturing",
+  "license": "MIT",
+  "pinned_commit": "b91965b3011ed269cbc3a051b00c9b284aaa2e36",
+  "pinned_commit_date": "2022-05-20",
+  "paper": {
+    "title": "Modeling Rocky Scenery using Implicit Blocks",
+    "authors": "Paris, Peytavie, Guérin, Dischler, Galin",
+    "venue": "The Visual Computer",
+    "year": 2020,
+    "project_page": "https://aparis69.github.io/public_html/projects/paris2020_Blocks.html",
+    "pdf": "https://drive.google.com/file/d/1-_rq9KOybtksWPod0lac1LDwlNd0Opkt/view"
+  },
+  "neverwhere_port": {
+    "app": "CliffsGenerationPlayground",
+    "algorithm_dir": "src/apps/CliffsGenerationPlayground/rock_fracture",
+    "scene_wrapper": "RockFractureScene.cpp",
+    "viewer": "RockFractureRenderer.cpp"
+  },
+  "upstream_entrypoints": {
+    "main": "Code/Source/main.cpp",
+    "core": "Code/Source/blocks.cpp",
+    "sdf_variant": "Code/Source/blocks-sdf.cpp",
+    "reference_objs": "Objs/*.obj",
+    "warp_texture_primary": "Textures/rock1.png",
+    "warp_texture_secondary": "Textures/rock2.png"
+  }
+}
