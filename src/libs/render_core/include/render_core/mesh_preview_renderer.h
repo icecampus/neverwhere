@@ -16,6 +16,10 @@ struct MeshPreviewQuad {
     glm::vec3 c{0.0f};
     glm::vec3 d{0.0f};
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    glm::vec3 normalA{0.0f, 1.0f, 0.0f};
+    glm::vec3 normalB{0.0f, 1.0f, 0.0f};
+    glm::vec3 normalC{0.0f, 1.0f, 0.0f};
+    glm::vec3 normalD{0.0f, 1.0f, 0.0f};
     glm::vec4 color{1.0f};
     glm::vec2 uvA{0.0f};
     glm::vec2 uvB{1.0f, 0.0f};
@@ -26,6 +30,7 @@ struct MeshPreviewQuad {
     float relief = 0.0f;        // signed wall displacement: >0 ridge, <0 crevice.
     float heightFraction = 1.0f; // wall vertical position: 0 base, 1 top.
     float sunShadow = 1.0f;     // 1=lit, 0=full grid shadow; passed via facetUv.x.
+    float wallBlendX = 0.5f;    // X-plane triplanar weight from outwardHint; passed via facetUv.y.
     float depth = 0.0f;
 };
 
@@ -61,9 +66,15 @@ struct MeshPreviewRenderParams {
     float wallEdgeWearStrength = 0.22f; // C1: lighten/desaturate protruding facet ridges.
     float wallCreviceStrength = 0.24f; // C2: darken recessed facets (dirt/moss).
     float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
-    // C3 (reserved): extra mask channel plumbed to the shader (options4) for a future facet effect.
-    float wallFacetWearStrength = 0.0f;
-    float wallFacetWearWidth = 1.4f;
+    float wallDetailNormalInfluence = 0.45f; // Dual-normal mix: outwardHint vs corner geo (options4.x).
+    float wallRidgeSpecularStrength = 0.35f; // Relief ridge specular on walls (options4.y).
+    float wallTopRimStrength = 0.12f;        // Top-edge rim on walls (options5.w).
+    float wallTriplanarScale = 1.0f;         // Wall rock/grass UV scale (options6.x, multiplied by textureScale).
+    float wallTriplanarSharpness = 2.5f;     // Wall X/Z blend sharpness (options6.y).
+    float wallMossStrength = 0.38f;          // Base moss/grass layer strength (options6.z).
+    float wallMossMaxHeight = 0.30f;         // Moss fades above this height fraction (options6.w).
+    float wallDetailBumpStrength = 0.20f;      // Procedural detail normal from rock noise (options7.x).
+    float wallCornerBlend = 0.22f;           // Minimum X/Z mix at wall corners (options7.y).
 };
 
 class MeshPreviewRenderer {
@@ -119,8 +130,10 @@ private:
         float options1[4]; // cliffRadius, cliffStrength, minTopBrightness, edgeDarkness.
         float options2[4]; // macroScale, macroStrength, debugMode, unused.
         float options3[4]; // wallAoStrength, wallEdgeWearStrength, wallCreviceStrength, wallGrainStrength.
-        float options4[4]; // wallFacetWearStrength, wallFacetWearWidth, sunShadowStrength, specularStrength.
-        float options5[4]; // shadowTintStrength, shadowAmbientFloor, shadowSoftness, unused.
+        float options4[4]; // wallDetailNormalInfluence, wallRidgeSpecularStrength, sunShadowStrength, specularStrength.
+        float options5[4]; // shadowTintStrength, shadowAmbientFloor, shadowSoftness, wallTopRimStrength.
+        float options6[4]; // wallTriplanarScale, wallTriplanarSharpness, wallMossStrength, wallMossMaxHeight.
+        float options7[4]; // wallDetailBumpStrength, wallCornerBlend, unused.
     };
 
     void ensurePipeline();

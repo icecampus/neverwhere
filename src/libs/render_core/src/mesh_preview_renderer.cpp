@@ -90,6 +90,8 @@ uniform vec4 options2;
 uniform vec4 options3;
 uniform vec4 options4;
 uniform vec4 options5;
+uniform vec4 options6;
+uniform vec4 options7;
 
 float hash21(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -134,6 +136,62 @@ float wallGrain(vec2 grainUv, float strength) {
     return 1.0 + grain * strength;
 }
 
+// Two-plane wall triplanar (X + Z only, no Y ground projection).
+// facetUv.y stores per-quad X-plane weight from outwardHint; corner floor softens outer corners.
+const float kWallAlongScale = 0.35;
+const float kWallHeightScale = 0.42;
+
+vec2 wallUvX(vec3 worldPos) {
+    return vec2(worldPos.z * kWallAlongScale, -worldPos.y * kWallHeightScale);
+}
+
+vec2 wallUvZ(vec3 worldPos) {
+    return vec2(worldPos.x * kWallAlongScale, -worldPos.y * kWallHeightScale);
+}
+
+vec2 wallBlendWeights(float blendX, float sharpness, float cornerFloor) {
+    float wx = pow(max(blendX, 0.0), max(1.0, sharpness));
+    float wz = pow(max(1.0 - blendX, 0.0), max(1.0, sharpness));
+    float floorW = max(cornerFloor, 0.0);
+    wx = max(wx, floorW);
+    wz = max(wz, floorW);
+    float inv = 1.0 / max(wx + wz, 0.0001);
+    return vec2(wx * inv, wz * inv);
+}
+
+vec3 sampleWallTexture(sampler2D tex, vec3 worldPos, float blendX, float scale, float sharpness, float cornerFloor) {
+    vec2 w = wallBlendWeights(blendX, sharpness, cornerFloor);
+    vec3 sx = texture(tex, wallUvX(worldPos) * scale).rgb;
+    vec3 sz = texture(tex, wallUvZ(worldPos) * scale).rgb;
+    return sx * w.x + sz * w.y;
+}
+
+vec2 blendedWallSurfaceUv(vec3 worldPos, float blendX, float sharpness, float cornerFloor) {
+    vec2 w = wallBlendWeights(blendX, sharpness, cornerFloor);
+    return wallUvX(worldPos) * w.x + wallUvZ(worldPos) * w.y;
+}
+
+float wallRockNoise(vec2 wallUv, float scale) {
+    return fbm(wallUv * scale);
+}
+
+vec3 wallDetailBumpNormal(vec3 baseNormal, vec2 wallUv, float scale, float strength) {
+    if (strength <= 0.0001) {
+        return baseNormal;
+    }
+    vec3 n = normalize(baseNormal);
+    vec3 tangent = normalize(cross(n, vec3(0.0, 1.0, 0.0)));
+    if (dot(tangent, tangent) < 0.01) {
+        tangent = normalize(cross(n, vec3(1.0, 0.0, 0.0)));
+    }
+    vec3 bitangent = cross(n, tangent);
+    const float eps = 0.04;
+    float center = wallRockNoise(wallUv, scale);
+    float du = wallRockNoise(wallUv + vec2(eps, 0.0), scale) - center;
+    float dv = wallRockNoise(wallUv + vec2(0.0, eps), scale) - center;
+    return normalize(n - tangent * du * strength - bitangent * dv * strength);
+}
+
 void main() {
     float ambient = options0.x;
     float diffuseStrength = options0.y;
@@ -145,11 +203,13 @@ void main() {
     float edgeDarkness = options1.w;
     float debugMode = options2.z;
     float rimStrength = options2.w;
+    float wallRidgeSpecular = options4.y;
     float sunShadowStrength = options4.z;
     float specularStrength = options4.w;
     float shadowTintStrength = options5.x;
     float shadowAmbientFloor = options5.y;
     float shadowSoftness = max(0.35, options5.z);
+    float wallTopRim = options5.w;
     const float rimPower = 2.5;
     const float shininess = 24.0;
     const vec3 coolShadow = vec3(0.28, 0.30, 0.26);
@@ -162,17 +222,35 @@ void main() {
     if (!wall) {
         uv = macroWarp(uv, v_world_pos);
     }
-    float wallGrainStrength = options3.w;
-    vec4 wallAlbedo = vec4(v_color.rgb * wallGrain(v_uv, wallGrainStrength), v_color.a);
-    vec4 albedo = wall ? wallAlbedo : texture(grass_tex, uv) * v_color;
 
+    float wallGrainStrength = options3.w;
+    float triplanarScale = max(0.001, options6.x);
+    float triplanarSharpness = max(1.0, options6.y);
+    float mossStrength = clamp(options6.z, 0.0, 1.0);
+    float mossMaxHeight = max(0.02, options6.w);
+    float detailBumpStrength = options7.x;
+    float cornerBlend = clamp(options7.y, 0.0, 0.45);
+
+    vec4 albedo;
     float wallAo = 1.0;
+    vec3 n = normalize(v_normal);
+
     if (wall) {
         float relief = v_wall_detail.x;
         float heightFraction = v_wall_detail.y;
         float aoStrength = options3.x;
         float wearStrength = options3.y;
         float creviceStrength = options3.z;
+
+        float wallBlendX = v_facet_uv.y;
+        vec2 surfaceUv = blendedWallSurfaceUv(v_world_pos, wallBlendX, triplanarSharpness, cornerBlend);
+        vec3 rockRgb = sampleWallTexture(rock_tex, v_world_pos, wallBlendX, triplanarScale, triplanarSharpness, cornerBlend);
+        rockRgb *= v_color.rgb * wallGrain(surfaceUv, wallGrainStrength);
+
+        float mossMask = (1.0 - smoothstep(0.0, mossMaxHeight, heightFraction)) * mossStrength;
+        vec3 grassRgb = sampleWallTexture(grass_tex, v_world_pos, wallBlendX, triplanarScale * 1.15, triplanarSharpness, cornerBlend);
+        vec3 mossRgb = grassRgb * vec3(0.78, 0.96, 0.68);
+        albedo = vec4(mix(rockRgb, mossRgb, mossMask), v_color.a);
 
         // C1: edge wear on protruding ridges - keep subtle so facet relief does not read as zebra stripes.
         float ridge = smoothstep(0.30, 0.78, relief);
@@ -184,21 +262,18 @@ void main() {
         float crevice = smoothstep(0.30, 0.78, -relief);
         vec3 mossy = albedo.rgb * vec3(0.60, 0.68, 0.52);
         albedo.rgb = mix(albedo.rgb, mossy, crevice * creviceStrength);
-
-        // C3 hook (reserved): per-quad facet-local coords (v_facet_uv) and an extra parameter
-        // channel (options4) are plumbed all the way to the fragment shader so a future mask can be
-        // applied here. Intentionally a no-op for now - the naive facet-edge rim read as a brick grid.
-        // float maskParam = options4.x;
-        // vec2 facetLocal = v_facet_uv;
+        albedo.rgb = mix(albedo.rgb, mossRgb, crevice * creviceStrength * mossStrength * 0.55);
 
         // A3: foot darkening only; crevice tint stays in albedo so facets do not modulate light.
         float baseAo = mix(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
         wallAo = baseAo;
-    }
 
-    vec3 n = normalize(v_normal);
-    if (!wall && n.y < 0.0) {
-        n = -n;
+        n = wallDetailBumpNormal(n, surfaceUv, triplanarScale * 4.5, detailBumpStrength);
+    } else {
+        albedo = texture(grass_tex, uv) * v_color;
+        if (n.y < 0.0) {
+            n = -n;
+        }
     }
     vec3 l = normalize(light_dir.xyz);
     float lambert = max(0.0, dot(n, l));
@@ -215,7 +290,12 @@ void main() {
         float facing = sqrt(clamp(lambert * 0.72 + 0.28, 0.0, 1.0));
         vec3 ambientCol = mix(coolShadow, warmSky, 0.32) * ambient * (0.52 + 0.48 * facing);
         vec3 diffuseCol = lightTint * diffuseStrength * facing;
-        lighting = (ambientCol + diffuseCol) * wallBrightness;
+        float ridge = smoothstep(0.30, 0.78, v_wall_detail.x);
+        float heightFraction = v_wall_detail.y;
+        vec3 halfVec = normalize(l + viewDir);
+        float wallSpec = pow(max(dot(n, halfVec), 0.0), shininess) * specularStrength * ridge * wallRidgeSpecular;
+        float topRim = pow(heightFraction, 1.6) * wallTopRim;
+        lighting = (ambientCol + diffuseCol) * wallBrightness + vec3(wallSpec + topRim);
     } else {
         float hemi = n.y * 0.5 + 0.5;
         vec3 ambientCol = mix(coolShadow, warmSky, hemi) * ambient;
@@ -321,6 +401,8 @@ cbuffer fs_params: register(b0) {
     float4 options3;
     float4 options4;
     float4 options5;
+    float4 options6;
+    float4 options7;
 };
 
 struct PSIn {
@@ -376,6 +458,60 @@ float wallGrain(float2 grainUv, float strength) {
     return 1.0 + grain * strength;
 }
 
+static const float kWallAlongScale = 0.35;
+static const float kWallHeightScale = 0.42;
+
+float2 wallUvX(float3 worldPos) {
+    return float2(worldPos.z * kWallAlongScale, -worldPos.y * kWallHeightScale);
+}
+
+float2 wallUvZ(float3 worldPos) {
+    return float2(worldPos.x * kWallAlongScale, -worldPos.y * kWallHeightScale);
+}
+
+float2 wallBlendWeights(float blendX, float sharpness, float cornerFloor) {
+    float wx = pow(max(blendX, 0.0), max(1.0, sharpness));
+    float wz = pow(max(1.0 - blendX, 0.0), max(1.0, sharpness));
+    float floorW = max(cornerFloor, 0.0);
+    wx = max(wx, floorW);
+    wz = max(wz, floorW);
+    float inv = 1.0 / max(wx + wz, 0.0001);
+    return float2(wx * inv, wz * inv);
+}
+
+float3 sampleWallTexture(Texture2D tex, float3 worldPos, float blendX, float scale, float sharpness, float cornerFloor) {
+    float2 w = wallBlendWeights(blendX, sharpness, cornerFloor);
+    float3 sx = tex.Sample(material_smp, wallUvX(worldPos) * scale).rgb;
+    float3 sz = tex.Sample(material_smp, wallUvZ(worldPos) * scale).rgb;
+    return sx * w.x + sz * w.y;
+}
+
+float2 blendedWallSurfaceUv(float3 worldPos, float blendX, float sharpness, float cornerFloor) {
+    float2 w = wallBlendWeights(blendX, sharpness, cornerFloor);
+    return wallUvX(worldPos) * w.x + wallUvZ(worldPos) * w.y;
+}
+
+float wallRockNoise(float2 wallUv, float scale) {
+    return fbm(wallUv * scale);
+}
+
+float3 wallDetailBumpNormal(float3 baseNormal, float2 wallUv, float scale, float strength) {
+    if (strength <= 0.0001) {
+        return normalize(baseNormal);
+    }
+    float3 n = normalize(baseNormal);
+    float3 tangent = normalize(cross(n, float3(0.0, 1.0, 0.0)));
+    if (dot(tangent, tangent) < 0.01) {
+        tangent = normalize(cross(n, float3(1.0, 0.0, 0.0)));
+    }
+    float3 bitangent = cross(n, tangent);
+    const float eps = 0.04;
+    float center = wallRockNoise(wallUv, scale);
+    float du = wallRockNoise(wallUv + float2(eps, 0.0), scale) - center;
+    float dv = wallRockNoise(wallUv + float2(0.0, eps), scale) - center;
+    return normalize(n - tangent * du * strength - bitangent * dv * strength);
+}
+
 float4 main(PSIn inp): SV_Target0 {
     float ambient = options0.x;
     float diffuseStrength = options0.y;
@@ -387,11 +523,13 @@ float4 main(PSIn inp): SV_Target0 {
     float edgeDarkness = options1.w;
     float debugMode = options2.z;
     float rimStrength = options2.w;
+    float wallRidgeSpecular = options4.y;
     float sunShadowStrength = options4.z;
     float specularStrength = options4.w;
     float shadowTintStrength = options5.x;
     float shadowAmbientFloor = options5.y;
     float shadowSoftness = max(0.35, options5.z);
+    float wallTopRim = options5.w;
     const float rimPower = 2.5;
     const float shininess = 24.0;
     const float3 coolShadow = float3(0.28, 0.30, 0.26);
@@ -404,17 +542,35 @@ float4 main(PSIn inp): SV_Target0 {
     if (!wall) {
         uv = macroWarp(uv, inp.worldPos);
     }
-    float wallGrainStrength = options3.w;
-    float4 wallAlbedo = float4(inp.color0.rgb * wallGrain(inp.uv0, wallGrainStrength), inp.color0.a);
-    float4 albedo = wall ? wallAlbedo : grass_tex.Sample(material_smp, uv) * inp.color0;
 
+    float wallGrainStrength = options3.w;
+    float triplanarScale = max(0.001, options6.x);
+    float triplanarSharpness = max(1.0, options6.y);
+    float mossStrength = saturate(options6.z);
+    float mossMaxHeight = max(0.02, options6.w);
+    float detailBumpStrength = options7.x;
+    float cornerBlend = saturate(options7.y);
+
+    float4 albedo;
     float wallAo = 1.0;
+    float3 n = normalize(inp.normal0);
+
     if (wall) {
         float relief = inp.wallDetail0.x;
         float heightFraction = inp.wallDetail0.y;
         float aoStrength = options3.x;
         float wearStrength = options3.y;
         float creviceStrength = options3.z;
+
+        float wallBlendX = inp.facetUv0.y;
+        float2 surfaceUv = blendedWallSurfaceUv(inp.worldPos, wallBlendX, triplanarSharpness, cornerBlend);
+        float3 rockRgb = sampleWallTexture(rock_tex, inp.worldPos, wallBlendX, triplanarScale, triplanarSharpness, cornerBlend);
+        rockRgb *= inp.color0.rgb * wallGrain(surfaceUv, wallGrainStrength);
+
+        float mossMask = (1.0 - smoothstep(0.0, mossMaxHeight, heightFraction)) * mossStrength;
+        float3 grassRgb = sampleWallTexture(grass_tex, inp.worldPos, wallBlendX, triplanarScale * 1.15, triplanarSharpness, cornerBlend);
+        float3 mossRgb = grassRgb * float3(0.78, 0.96, 0.68);
+        albedo = float4(lerp(rockRgb, mossRgb, mossMask), inp.color0.a);
 
         // C1: edge wear on protruding ridges - keep subtle so facet relief does not read as zebra stripes.
         float ridge = smoothstep(0.30, 0.78, relief);
@@ -426,21 +582,18 @@ float4 main(PSIn inp): SV_Target0 {
         float crevice = smoothstep(0.30, 0.78, -relief);
         float3 mossy = albedo.rgb * float3(0.60, 0.68, 0.52);
         albedo.rgb = lerp(albedo.rgb, mossy, crevice * creviceStrength);
-
-        // C3 hook (reserved): per-quad facet-local coords (inp.facetUv0) and an extra parameter
-        // channel (options4) are plumbed to the fragment shader so a future mask can be applied here.
-        // Intentionally a no-op for now - the naive facet-edge rim read as a brick grid.
-        // float maskParam = options4.x;
-        // float2 facetLocal = inp.facetUv0;
+        albedo.rgb = lerp(albedo.rgb, mossRgb, crevice * creviceStrength * mossStrength * 0.55);
 
         // A3: foot darkening only; crevice tint stays in albedo.
         float baseAo = lerp(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
         wallAo = baseAo;
-    }
 
-    float3 n = normalize(inp.normal0);
-    if (!wall && n.y < 0.0) {
-        n = -n;
+        n = wallDetailBumpNormal(n, surfaceUv, triplanarScale * 4.5, detailBumpStrength);
+    } else {
+        albedo = grass_tex.Sample(material_smp, uv) * inp.color0;
+        if (n.y < 0.0) {
+            n = -n;
+        }
     }
     float3 l = normalize(light_dir.xyz);
     float lambert = max(0.0, dot(n, l));
@@ -456,7 +609,12 @@ float4 main(PSIn inp): SV_Target0 {
         float facing = sqrt(saturate(lambert * 0.72 + 0.28));
         float3 ambientCol = lerp(coolShadow, warmSky, 0.32) * ambient * (0.52 + 0.48 * facing);
         float3 diffuseCol = lightTint * diffuseStrength * facing;
-        lighting = (ambientCol + diffuseCol) * wallBrightness;
+        float ridge = smoothstep(0.30, 0.78, inp.wallDetail0.x);
+        float heightFraction = inp.wallDetail0.y;
+        float3 halfVec = normalize(l + viewDir);
+        float wallSpec = pow(max(dot(n, halfVec), 0.0), shininess) * specularStrength * ridge * wallRidgeSpecular;
+        float topRim = pow(heightFraction, 1.6) * wallTopRim;
+        lighting = (ambientCol + diffuseCol) * wallBrightness + float3(wallSpec + topRim, wallSpec + topRim, wallSpec + topRim);
     } else {
         float hemi = n.y * 0.5 + 0.5;
         float3 ambientCol = lerp(coolShadow, warmSky, hemi) * ambient;
@@ -530,6 +688,7 @@ void MeshPreviewRenderer::init() {
         return;
     }
 
+    destroyPipeline();
     ensurePipeline();
     sg_sampler_desc samplerDesc = {};
     samplerDesc.min_filter = SG_FILTER_LINEAR;
@@ -736,12 +895,13 @@ bool MeshPreviewRenderer::render(
 
     for (const MeshPreviewQuad* quad : drawOrder) {
         const float sunShadow = quad->sunShadow;
-        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
-        pushVertex(m_vertices, quad->b, quad->normal, quad->uvB, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
-        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
-        pushVertex(m_vertices, quad->a, quad->normal, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
-        pushVertex(m_vertices, quad->c, quad->normal, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
-        pushVertex(m_vertices, quad->d, quad->normal, quad->uvD, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, 0.0f);
+        const float wallBlendX = quad->wallBlendX;
+        pushVertex(m_vertices, quad->a, quad->normalA, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, wallBlendX);
+        pushVertex(m_vertices, quad->b, quad->normalB, quad->uvB, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, wallBlendX);
+        pushVertex(m_vertices, quad->c, quad->normalC, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, wallBlendX);
+        pushVertex(m_vertices, quad->a, quad->normalA, quad->uvA, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, wallBlendX);
+        pushVertex(m_vertices, quad->c, quad->normalC, quad->uvC, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, wallBlendX);
+        pushVertex(m_vertices, quad->d, quad->normalD, quad->uvD, quad->color, quad->faceKind, quad->cliffDistance, quad->relief, quad->heightFraction, sunShadow, wallBlendX);
     }
 
     ensureVertexBuffer(m_vertices.size());
@@ -805,14 +965,20 @@ bool MeshPreviewRenderer::render(
         fs.options3[1] = params.wallEdgeWearStrength;
         fs.options3[2] = params.wallCreviceStrength;
         fs.options3[3] = params.wallGrainStrength;
-        fs.options4[0] = params.wallFacetWearStrength;
-        fs.options4[1] = params.wallFacetWearWidth;
+        fs.options4[0] = params.wallDetailNormalInfluence;
+        fs.options4[1] = params.wallRidgeSpecularStrength;
         fs.options4[2] = params.sunShadowStrength;
         fs.options4[3] = params.specularStrength;
         fs.options5[0] = params.shadowTintStrength;
         fs.options5[1] = params.shadowAmbientFloor;
         fs.options5[2] = params.shadowSoftness;
-        fs.options5[3] = 0.0f;
+        fs.options5[3] = params.wallTopRimStrength;
+        fs.options6[0] = params.textureScale * params.wallTriplanarScale;
+        fs.options6[1] = params.wallTriplanarSharpness;
+        fs.options6[2] = params.wallMossStrength;
+        fs.options6[3] = params.wallMossMaxHeight;
+        fs.options7[0] = params.wallDetailBumpStrength;
+        fs.options7[1] = params.wallCornerBlend;
         sg_range fsRange = {&fs, sizeof(fs)};
         sg_apply_uniforms(1, &fsRange);
 
@@ -887,6 +1053,10 @@ void MeshPreviewRenderer::ensurePipeline() {
     shdDesc.uniform_blocks[1].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT4;
     shdDesc.uniform_blocks[1].glsl_uniforms[6].glsl_name = "options5";
     shdDesc.uniform_blocks[1].glsl_uniforms[6].type = SG_UNIFORMTYPE_FLOAT4;
+    shdDesc.uniform_blocks[1].glsl_uniforms[7].glsl_name = "options6";
+    shdDesc.uniform_blocks[1].glsl_uniforms[7].type = SG_UNIFORMTYPE_FLOAT4;
+    shdDesc.uniform_blocks[1].glsl_uniforms[8].glsl_name = "options7";
+    shdDesc.uniform_blocks[1].glsl_uniforms[8].type = SG_UNIFORMTYPE_FLOAT4;
 
     const char* glslNames[] = {"grass_tex", "rock_tex"};
     for (int i = 0; i < 2; i++) {

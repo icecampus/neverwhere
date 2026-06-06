@@ -19,6 +19,57 @@ namespace {
 
 constexpr float kViewportSplitterThickness = 10.0f;
 constexpr float kMinStackedViewportHeight = 72.0f;
+constexpr float kMinControlPanelWidth = 380.0f;
+constexpr float kMaxControlPanelWidth = 520.0f;
+constexpr float kControlPanelWidthFraction = 0.38f;
+
+float computeLeftPanelWidth(float layoutWidth) {
+    return std::min(kMaxControlPanelWidth, std::max(kMinControlPanelWidth, layoutWidth * kControlPanelWidthFraction));
+}
+
+bool uiSliderInt(const char* label, int* value, int min, int max) {
+    ImGui::TextUnformatted(label);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool changed = ImGui::SliderInt("##value", value, min, max);
+    ImGui::PopID();
+    return changed;
+}
+
+bool uiSliderFloat(const char* label, float* value, float min, float max, const char* format = "%.3f") {
+    ImGui::TextUnformatted(label);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool changed = ImGui::SliderFloat("##value", value, min, max, format);
+    ImGui::PopID();
+    return changed;
+}
+
+bool uiInputInt(const char* label, int* value) {
+    ImGui::TextUnformatted(label);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool changed = ImGui::InputInt("##value", value);
+    ImGui::PopID();
+    return changed;
+}
+
+bool uiCheckbox(const char* label, bool* value) {
+    ImGui::PushID(label);
+    const bool changed = ImGui::Checkbox("##value", value);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::TextUnformatted(label);
+    ImGui::PopID();
+    return changed;
+}
+
+void uiCombo(const char* label, int* currentItem, const char* const items[], int itemCount) {
+    ImGui::TextUnformatted(label);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::Combo("##value", currentItem, items, itemCount);
+    ImGui::PopID();
+}
 
 struct StackedViewportLayout {
     float topHeight = 0.0f;
@@ -102,8 +153,7 @@ void drawFrameStats() {
     ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
 }
 
-void drawRectangleScenarioControls(float panelWidth) {
-    ImGui::PushItemWidth(panelWidth - 24.0f);
+void drawRectangleScenarioControls() {
     drawFrameStats();
     ImGui::Separator();
 
@@ -113,31 +163,31 @@ void drawRectangleScenarioControls(float panelWidth) {
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        changed |= ImGui::SliderInt("Grid Width", &g_rectSettings.gridWidth, 4, 48);
-        changed |= ImGui::SliderInt("Grid Height", &g_rectSettings.gridHeight, 4, 32);
-        changed |= ImGui::SliderInt("Rect X", &g_rectSettings.rectX, 0, g_rectSettings.gridWidth - 1);
-        changed |= ImGui::SliderInt("Rect Y", &g_rectSettings.rectY, 0, g_rectSettings.gridHeight - 1);
-        changed |= ImGui::SliderInt("Rect Width", &g_rectSettings.rectWidth, 1, g_rectSettings.gridWidth);
-        changed |= ImGui::SliderInt("Rect Height", &g_rectSettings.rectHeight, 1, g_rectSettings.gridHeight);
-        changed |= ImGui::Checkbox("Enable Cutout (inner corners)", &g_rectSettings.enableCutout);
-        changed |= ImGui::SliderInt("Cutout X", &g_rectSettings.cutoutX, 0, g_rectSettings.gridWidth - 1);
-        changed |= ImGui::SliderInt("Cutout Y", &g_rectSettings.cutoutY, 0, g_rectSettings.gridHeight - 1);
-        changed |= ImGui::SliderInt("Cutout Width", &g_rectSettings.cutoutWidth, 1, g_rectSettings.gridWidth);
-        changed |= ImGui::SliderInt("Cutout Height", &g_rectSettings.cutoutHeight, 1, g_rectSettings.gridHeight);
-        changed |= ImGui::SliderFloat("Cliff Height", &g_rectSettings.cliffHeight, 0.25f, 8.0f);
-        changed |= ImGui::SliderFloat("Corner Bevel", &g_rectSettings.cornerBevel, 0.0f, 0.45f);
-        changed |= ImGui::Checkbox("Rock Noise Enabled", &g_rectSettings.rockEnabled);
-        changed |= ImGui::InputInt("Rock Seed", &g_rectSettings.rockSeed);
-        changed |= ImGui::SliderFloat("Rock Scale", &g_rectSettings.rockScale, 0.25f, 24.0f);
-        changed |= ImGui::SliderFloat("Rock Amplitude", &g_rectSettings.rockAmplitude, 0.0f, 1.25f);
-        changed |= ImGui::SliderInt("Wall Horizontal Subdivs", &g_rectSettings.wallHorizontalSubdivisions, 1, 16);
-        changed |= ImGui::SliderInt("Wall Vertical Subdivs", &g_rectSettings.wallVerticalSubdivisions, 1, 16);
-        changed |= ImGui::SliderInt("Terrace Steps", &g_rectSettings.terraceSteps, 0, 12);
-        ImGui::Checkbox("Show Top Faces", &g_rectSettings.showTopFaces);
-        ImGui::Checkbox("Show Cliff Walls", &g_rectSettings.showCliffWalls);
-        ImGui::Checkbox("Show Mesh Wireframe", &g_rectSettings.showMeshWireframe);
-        ImGui::Checkbox("Show Cell Labels", &g_rectSettings.showCellLabels);
-        ImGui::Checkbox("Show Vertex Labels", &g_rectSettings.showVertexLabels);
+        changed |= uiSliderInt("Grid Width", &g_rectSettings.gridWidth, 4, 48);
+        changed |= uiSliderInt("Grid Height", &g_rectSettings.gridHeight, 4, 32);
+        changed |= uiSliderInt("Rect X", &g_rectSettings.rectX, 0, g_rectSettings.gridWidth - 1);
+        changed |= uiSliderInt("Rect Y", &g_rectSettings.rectY, 0, g_rectSettings.gridHeight - 1);
+        changed |= uiSliderInt("Rect Width", &g_rectSettings.rectWidth, 1, g_rectSettings.gridWidth);
+        changed |= uiSliderInt("Rect Height", &g_rectSettings.rectHeight, 1, g_rectSettings.gridHeight);
+        changed |= uiCheckbox("Enable Cutout (inner corners)", &g_rectSettings.enableCutout);
+        changed |= uiSliderInt("Cutout X", &g_rectSettings.cutoutX, 0, g_rectSettings.gridWidth - 1);
+        changed |= uiSliderInt("Cutout Y", &g_rectSettings.cutoutY, 0, g_rectSettings.gridHeight - 1);
+        changed |= uiSliderInt("Cutout Width", &g_rectSettings.cutoutWidth, 1, g_rectSettings.gridWidth);
+        changed |= uiSliderInt("Cutout Height", &g_rectSettings.cutoutHeight, 1, g_rectSettings.gridHeight);
+        changed |= uiSliderFloat("Cliff Height", &g_rectSettings.cliffHeight, 0.25f, 8.0f);
+        changed |= uiSliderFloat("Corner Bevel", &g_rectSettings.cornerBevel, 0.0f, 0.45f);
+        changed |= uiCheckbox("Rock Noise Enabled", &g_rectSettings.rockEnabled);
+        changed |= uiInputInt("Rock Seed", &g_rectSettings.rockSeed);
+        changed |= uiSliderFloat("Rock Scale", &g_rectSettings.rockScale, 0.25f, 24.0f);
+        changed |= uiSliderFloat("Rock Amplitude", &g_rectSettings.rockAmplitude, 0.0f, 1.25f);
+        changed |= uiSliderInt("Wall Horizontal Subdivs", &g_rectSettings.wallHorizontalSubdivisions, 1, 16);
+        changed |= uiSliderInt("Wall Vertical Subdivs", &g_rectSettings.wallVerticalSubdivisions, 1, 16);
+        changed |= uiSliderInt("Terrace Steps", &g_rectSettings.terraceSteps, 0, 12);
+        uiCheckbox("Show Top Faces", &g_rectSettings.showTopFaces);
+        uiCheckbox("Show Cliff Walls", &g_rectSettings.showCliffWalls);
+        uiCheckbox("Show Mesh Wireframe", &g_rectSettings.showMeshWireframe);
+        uiCheckbox("Show Cell Labels", &g_rectSettings.showCellLabels);
+        uiCheckbox("Show Vertex Labels", &g_rectSettings.showVertexLabels);
     }
     if (changed) {
         rebuildRectangleCliffModel();
@@ -171,11 +221,9 @@ void drawRectangleScenarioControls(float panelWidth) {
     ImGui::TextColored(ImVec4(0.98f, 0.77f, 0.28f, 1.0f), "O = outer corner");
     ImGui::TextColored(ImVec4(0.91f, 0.36f, 0.36f, 1.0f), "I = inner corner");
     ImGui::TextColored(ImVec4(0.73f, 0.46f, 1.0f, 1.0f), "D = diagonal join");
-    ImGui::PopItemWidth();
 }
 
-void drawLandscapeScenarioControls(float panelWidth) {
-    ImGui::PushItemWidth(panelWidth - 24.0f);
+void drawLandscapeScenarioControls() {
     drawFrameStats();
     ImGui::Separator();
 
@@ -185,47 +233,57 @@ void drawLandscapeScenarioControls(float panelWidth) {
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        changed |= ImGui::SliderInt("Grid Width", &g_landscapeSettings.gridWidth, 12, 72);
-        changed |= ImGui::SliderInt("Grid Height", &g_landscapeSettings.gridHeight, 10, 56);
-        changed |= ImGui::InputInt("Seed", &g_landscapeSettings.seed);
-        changed |= ImGui::SliderFloat("Clearing Radius", &g_landscapeSettings.clearingRadius, 2.0f, 18.0f);
-        changed |= ImGui::SliderFloat("Clearing Softness", &g_landscapeSettings.clearingSoftness, 0.25f, 8.0f);
-        changed |= ImGui::SliderFloat("High Ground Radius", &g_landscapeSettings.highGroundRadius, 3.0f, 28.0f);
-        changed |= ImGui::SliderFloat("High Ground Width", &g_landscapeSettings.highGroundWidth, 1.0f, 10.0f);
-        changed |= ImGui::SliderFloat("High Ground Height", &g_landscapeSettings.highGroundHeight, 0.5f, 8.0f);
-        changed |= ImGui::SliderInt("Height Levels", &g_landscapeSettings.heightLevels, 2, 6);
-        changed |= ImGui::SliderFloat("Arc Noise Scale", &g_landscapeSettings.arcNoiseScale, 0.5f, 18.0f);
-        changed |= ImGui::SliderFloat("Arc Noise Amplitude", &g_landscapeSettings.arcNoiseAmplitude, 0.0f, 5.0f);
-        changed |= ImGui::SliderInt("Hill Count", &g_landscapeSettings.hillCount, 0, 12);
-        changed |= ImGui::SliderFloat("Hill Height", &g_landscapeSettings.hillHeight, 0.0f, 5.0f);
-        changed |= ImGui::SliderFloat("Hill Radius", &g_landscapeSettings.hillRadius, 0.75f, 8.0f);
-        ImGui::Checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
-        ImGui::Checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
-        ImGui::Checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
+        changed |= uiSliderInt("Grid Width", &g_landscapeSettings.gridWidth, 12, 72);
+        changed |= uiSliderInt("Grid Height", &g_landscapeSettings.gridHeight, 10, 56);
+        changed |= uiInputInt("Seed", &g_landscapeSettings.seed);
+        changed |= uiSliderFloat("Clearing Radius", &g_landscapeSettings.clearingRadius, 2.0f, 18.0f);
+        changed |= uiSliderFloat("Clearing Softness", &g_landscapeSettings.clearingSoftness, 0.25f, 8.0f);
+        changed |= uiSliderFloat("High Ground Radius", &g_landscapeSettings.highGroundRadius, 3.0f, 28.0f);
+        changed |= uiSliderFloat("High Ground Width", &g_landscapeSettings.highGroundWidth, 1.0f, 10.0f);
+        changed |= uiSliderFloat("High Ground Height", &g_landscapeSettings.highGroundHeight, 0.5f, 8.0f);
+        changed |= uiSliderInt("Height Levels", &g_landscapeSettings.heightLevels, 2, 6);
+        changed |= uiSliderFloat("Arc Noise Scale", &g_landscapeSettings.arcNoiseScale, 0.5f, 18.0f);
+        changed |= uiSliderFloat("Arc Noise Amplitude", &g_landscapeSettings.arcNoiseAmplitude, 0.0f, 5.0f);
+        changed |= uiSliderInt("Hill Count", &g_landscapeSettings.hillCount, 0, 12);
+        changed |= uiSliderFloat("Hill Height", &g_landscapeSettings.hillHeight, 0.0f, 5.0f);
+        changed |= uiSliderFloat("Hill Radius", &g_landscapeSettings.hillRadius, 0.75f, 8.0f);
+        uiCheckbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
+        uiCheckbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
+        uiCheckbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
         ImGui::Separator();
         ImGui::Text("Rendering");
-        ImGui::Checkbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
-        ImGui::SliderFloat("Ambient", &g_productionPreviewSettings.ambient, 0.35f, 1.35f);
-        ImGui::SliderFloat("Diffuse Strength", &g_productionPreviewSettings.diffuseStrength, 0.0f, 0.85f);
-        ImGui::SliderFloat("Rim Strength", &g_productionPreviewSettings.rimStrength, 0.0f, 0.5f);
-        ImGui::SliderFloat("Specular Strength", &g_productionPreviewSettings.specularStrength, 0.0f, 0.4f);
-        ImGui::SliderFloat("Sun Shadow Strength", &g_productionPreviewSettings.sunShadowStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Shadow Tint", &g_productionPreviewSettings.shadowTintStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Shadow Ambient Floor", &g_productionPreviewSettings.shadowAmbientFloor, 0.15f, 0.75f);
-        ImGui::SliderFloat("Shadow Softness", &g_productionPreviewSettings.shadowSoftness, 0.6f, 3.0f);
-        ImGui::SliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
-        ImGui::SliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
-        ImGui::SliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
-        ImGui::SliderFloat("Macro Strength", &g_productionPreviewSettings.macroStrength, 0.0f, 0.35f);
-        ImGui::SliderFloat("Cliff Dark Radius", &g_productionPreviewSettings.cliffDarkeningRadius, 0.05f, 4.0f);
-        ImGui::SliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
-        ImGui::SliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
-        ImGui::SliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
+        uiCheckbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
+        uiSliderFloat("Ambient", &g_productionPreviewSettings.ambient, 0.35f, 1.35f);
+        uiSliderFloat("Diffuse Strength", &g_productionPreviewSettings.diffuseStrength, 0.0f, 0.85f);
+        uiSliderFloat("Rim Strength", &g_productionPreviewSettings.rimStrength, 0.0f, 0.5f);
+        uiSliderFloat("Specular Strength", &g_productionPreviewSettings.specularStrength, 0.0f, 0.4f);
+        uiSliderFloat("Sun Shadow Strength", &g_productionPreviewSettings.sunShadowStrength, 0.0f, 1.0f);
+        uiSliderFloat("Shadow Tint", &g_productionPreviewSettings.shadowTintStrength, 0.0f, 1.0f);
+        uiSliderFloat("Shadow Ambient Floor", &g_productionPreviewSettings.shadowAmbientFloor, 0.15f, 0.75f);
+        uiSliderFloat("Shadow Softness", &g_productionPreviewSettings.shadowSoftness, 0.6f, 3.0f);
+        uiSliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
+        uiSliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
+        uiSliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
+        uiSliderFloat("Macro Strength", &g_productionPreviewSettings.macroStrength, 0.0f, 0.35f);
+        uiSliderFloat("Cliff Dark Radius", &g_productionPreviewSettings.cliffDarkeningRadius, 0.05f, 4.0f);
+        uiSliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
+        uiSliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
+        uiSliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
         ImGui::Text("Cliff Surface");
-        ImGui::SliderFloat("Wall AO", &g_productionPreviewSettings.wallAoStrength, 0.0f, 0.85f);
-        ImGui::SliderFloat("Edge Wear", &g_productionPreviewSettings.wallEdgeWearStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Crevice Darken", &g_productionPreviewSettings.wallCreviceStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Wall Grain", &g_productionPreviewSettings.wallGrainStrength, 0.0f, 0.6f);
+        uiSliderFloat("Wall AO", &g_productionPreviewSettings.wallAoStrength, 0.0f, 0.85f);
+        uiSliderFloat("Edge Wear", &g_productionPreviewSettings.wallEdgeWearStrength, 0.0f, 1.0f);
+        uiSliderFloat("Crevice Darken", &g_productionPreviewSettings.wallCreviceStrength, 0.0f, 1.0f);
+        uiSliderFloat("Wall Grain", &g_productionPreviewSettings.wallGrainStrength, 0.0f, 0.6f);
+        uiSliderFloat("Wall Detail Normal", &g_productionPreviewSettings.wallDetailNormalInfluence, 0.0f, 0.45f);
+        uiSliderFloat("Wall Ridge Specular", &g_productionPreviewSettings.wallRidgeSpecularStrength, 0.0f, 1.0f);
+        uiSliderFloat("Wall Top Rim", &g_productionPreviewSettings.wallTopRimStrength, 0.0f, 0.35f);
+        ImGui::Text("Wall Materials");
+        uiSliderFloat("Rock UV Scale", &g_productionPreviewSettings.wallTriplanarScale, 0.5f, 3.0f);
+        uiSliderFloat("Corner Blend", &g_productionPreviewSettings.wallCornerBlend, 0.0f, 0.45f);
+        uiSliderFloat("Blend Sharpness", &g_productionPreviewSettings.wallTriplanarSharpness, 1.0f, 6.0f);
+        uiSliderFloat("Base Moss Strength", &g_productionPreviewSettings.wallMossStrength, 0.0f, 1.0f);
+        uiSliderFloat("Moss Max Height", &g_productionPreviewSettings.wallMossMaxHeight, 0.05f, 0.65f);
+        uiSliderFloat("Detail Bump Strength", &g_productionPreviewSettings.wallDetailBumpStrength, 0.0f, 0.55f);
         const char* debugModes[] = {
             "Lit",
             "Albedo",
@@ -238,13 +296,13 @@ void drawLandscapeScenarioControls(float panelWidth) {
             "Sun Shadow",
             "Normal Vectors",
         };
-        ImGui::Combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
+        uiCombo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
         if (g_productionPreviewSettings.debugMode == (int)ProductionPreviewDebugMode::NormalVectors) {
-            ImGui::SliderFloat("Normal Arrow Scale", &g_productionPreviewSettings.normalVectorScale, 0.1f, 1.5f);
+            uiSliderFloat("Normal Arrow Scale", &g_productionPreviewSettings.normalVectorScale, 0.1f, 1.5f);
         }
         ImGui::Separator();
         ImGui::Text("Env Sprites (throwaway test)");
-        ImGui::Checkbox("Scatter 2D Env Sprites", &g_productionPreviewSettings.showEnvSprites);
+        uiCheckbox("Scatter 2D Env Sprites", &g_productionPreviewSettings.showEnvSprites);
         ImGui::SameLine();
         if (ImGui::Button("Reseed")) {
             requestEnvSpriteReseed();
@@ -308,7 +366,6 @@ void drawLandscapeScenarioControls(float panelWidth) {
     ImGui::TextColored(ImVec4(0.43f, 0.63f, 0.35f, 1.0f), "Green = clearing / lowland");
     ImGui::TextColored(ImVec4(0.58f, 0.68f, 0.40f, 1.0f), "Olive = hills");
     ImGui::TextColored(ImVec4(0.70f, 0.72f, 0.50f, 1.0f), "Bright = upper high ground");
-    ImGui::PopItemWidth();
 }
 
 void drawScenarioPanelBackground(const ImVec2& layoutOrigin, const ImVec2& layoutSize, float leftPanelWidth) {
@@ -327,7 +384,7 @@ void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
     static float viewportTopFraction = 0.2f;
 
     const float gutter = 12.0f;
-    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float leftPanelWidth = computeLeftPanelWidth(layoutSize.x);
     const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
     const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
     const StackedViewportLayout viewportLayout = layoutStackedViewports(
@@ -338,10 +395,15 @@ void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
         "RectViewportSplit");
 
     drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
-    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
-    ImGui::BeginGroup();
-    drawRectangleScenarioControls(leftPanelWidth);
-    ImGui::EndGroup();
+
+    const ImVec2 panelOrigin{layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f};
+    const ImVec2 panelSize{leftPanelWidth - 24.0f, std::max(1.0f, layoutSize.y - 24.0f)};
+    ImGui::SetCursorScreenPos(panelOrigin);
+    ImGui::PushID("RectangleScenario");
+    ImGui::BeginChild("##rectangle_controls", panelSize, true);
+    drawRectangleScenarioControls();
+    ImGui::EndChild();
+    ImGui::PopID();
 
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
@@ -357,7 +419,7 @@ void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
     static float viewportTopFraction = 0.2f;
 
     const float gutter = 12.0f;
-    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float leftPanelWidth = computeLeftPanelWidth(layoutSize.x);
     const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
     const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
     const StackedViewportLayout viewportLayout = layoutStackedViewports(
@@ -368,10 +430,15 @@ void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
         "LandscapeViewportSplit");
 
     drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
-    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
-    ImGui::BeginGroup();
-    drawLandscapeScenarioControls(leftPanelWidth);
-    ImGui::EndGroup();
+
+    const ImVec2 panelOrigin{layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f};
+    const ImVec2 panelSize{leftPanelWidth - 24.0f, std::max(1.0f, layoutSize.y - 24.0f)};
+    ImGui::SetCursorScreenPos(panelOrigin);
+    ImGui::PushID("LandscapeScenario");
+    ImGui::BeginChild("##landscape_controls", panelSize, true);
+    drawLandscapeScenarioControls();
+    ImGui::EndChild();
+    ImGui::PopID();
 
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
@@ -428,6 +495,7 @@ void drawUi() {
 
     if (ImGui::BeginTabBar("ScenarioTabs", ImGuiTabBarFlags_None)) {
         if (ImGui::BeginTabItem("Debug Scene")) {
+            ImGui::PushID("DebugSceneTab");
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             if (!layoutLogged) {
@@ -442,14 +510,17 @@ void drawUi() {
             }
             drawRectangleScenarioTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::PopID();
             ImGui::EndTabItem();
         }
 
         if (ImGui::BeginTabItem("Production Preview")) {
+            ImGui::PushID("ProductionPreviewTab");
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawLandscapeScenarioTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::PopID();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
