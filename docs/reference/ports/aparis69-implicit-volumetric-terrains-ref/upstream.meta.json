@@ -1,0 +1,29 @@
+{
+  "name": "Implicit-Volumetric-Terrains",
+  "repository": "https://github.com/aparis69/Implicit-Volumetric-Terrains",
+  "license": "MIT",
+  "pinned_commit": "2e7bb3ee79b8d8ffabdeb0958a55c6171f2791fe",
+  "pinned_commit_date": "2022-05-20",
+  "paper": {
+    "title": "Terrain Amplification with Implicit 3D Features",
+    "authors": "Paris, Galin, Peytavie, Guérin, Gain",
+    "venue": "ACM Transactions on Graphics (SIGGRAPH Asia 2019)",
+    "year": 2019,
+    "project_page": "https://aparis69.github.io/public_html/projects/paris2019_3D.html",
+    "pdf_local": "../../papers/paris-2019-terrain-amplification/Paris2019_Terrain_Amplification_Implicit_3D_Features.pdf"
+  },
+  "neverwhere_port": {
+    "app": "aparis69-implicit-volumetric-terrains-ref",
+    "algorithm_dir": "src/refs/aparis69-implicit-volumetric-terrains-ref/ivt",
+    "entrypoint": "main.cpp"
+  },
+  "upstream_entrypoints": {
+    "main": "Code/Source/main.cpp",
+    "scenes": [
+      "Code/Source/sea-scene.cpp",
+      "Code/Source/island-scene.cpp",
+      "Code/Source/karst-scene.cpp"
+    ],
+    "reference_objs": "Objs/*.obj"
+  }
+}

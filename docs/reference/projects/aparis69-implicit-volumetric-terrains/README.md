@@ -23,4 +23,8 @@ Console app exporting **OBJ scenes** from *Terrain Amplification with Implicit 3
 
 **Primary candidate to port for macro terrain `f`** before combining with Rock-fracturing blocks (`fe = max(f, t)`).
 
-Roadmap: [../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md](../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md)
+Ported to `src/refs/aparis69-implicit-volumetric-terrains-ref/ivt/` (batch OBJ exporter).
+
+Port notes: [../../ports/aparis69-implicit-volumetric-terrains-ref/](../../ports/aparis69-implicit-volumetric-terrains-ref/)
+
+Roadmap (combined scenes): [../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md](../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md)

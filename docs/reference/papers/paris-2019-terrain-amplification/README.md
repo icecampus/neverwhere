@@ -30,4 +30,7 @@
 
 This is the **macro layer `f`** missing from Rock-fracturing alone. Pair with TVC 2020 for `fe = max(f, t)`.
 
-See [../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md](../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md).
+- Code: `src/refs/aparis69-implicit-volumetric-terrains-ref/ivt/`
+- Port notes: [../../ports/aparis69-implicit-volumetric-terrains-ref/](../../ports/aparis69-implicit-volumetric-terrains-ref/)
+
+Combined cliff roadmap: [../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md](../../ports/aparis69-rock-fracturing-ref/SCENE_EVOLUTION_ROADMAP.md).

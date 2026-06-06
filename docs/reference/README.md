@@ -30,6 +30,7 @@ Curated papers, open-source projects, and Neverwhere-specific notes for **volume
 | Reference code | Docs | Upstream |
 |----------------|------|----------|
 | `src/refs/aparis69-rock-fracturing-ref/` | [ports/aparis69-rock-fracturing-ref](./ports/aparis69-rock-fracturing-ref/) | [projects/aparis69-rock-fracturing](./projects/aparis69-rock-fracturing/) |
+| `src/refs/aparis69-implicit-volumetric-terrains-ref/` | [ports/aparis69-implicit-volumetric-terrains-ref](./ports/aparis69-implicit-volumetric-terrains-ref/) | [projects/aparis69-implicit-volumetric-terrains](./projects/aparis69-implicit-volumetric-terrains/) |
 
 Related apps in the monorepo (no dedicated port yet):
 
