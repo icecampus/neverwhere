@@ -335,7 +335,9 @@ std::vector<BlockCluster> ComputeBlockClusters(PointSet3& set, const FractureSet
     return clusters;
 }
 
-SDFNode* ComputeBlockSDF(const std::vector<BlockCluster>& clusters) {
+SDFNode* ComputeBlockSDF(const std::vector<BlockCluster>& clusters,
+    double blockSmoothingRadius,
+    double bvhTransitionRadius) {
     std::vector<SDFNode*> primitives;
     for (size_t k = 0; k < clusters.size(); k++) {
         std::vector<Vector3> allPts = clusters[k].pts;
@@ -363,14 +365,13 @@ SDFNode* ComputeBlockSDF(const std::vector<BlockCluster>& clusters) {
 
         auto convex = Plane::ConvexPoints(planes);
         if (convex.size() > 0) {
-            const double smoothRadius = 0.25;
-            primitives.push_back(new SDFGradientWarp(new SDFBlock(planes, smoothRadius)));
+            primitives.push_back(new SDFGradientWarp(new SDFBlock(planes, blockSmoothingRadius)));
         }
 
         delete[] vertices;
         delete[] faceIndices;
     }
-    return SDFUnionSphereLOD::OptimizedBVH(primitives, 0.5);
+    return SDFUnionSphereLOD::OptimizedBVH(primitives, bvhTransitionRadius);
 }
 
 MC::mcMesh PolygonizeSDF(const Box& box, SDFNode* node, int resolution) {

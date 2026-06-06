@@ -31,3 +31,16 @@ cmake --build --preset debug --target CliffsGenerationPlayground
 ## Статус
 
 Активная экспериментальная площадка; API и сценарии могут меняться по мере освоения алгоритма.
+
+### Режимы генерации
+
+| Режим | Описание |
+|-------|----------|
+| **Single tile** | Один cubic tile (upstream workflow) — Poisson → fractures → SDF → MC |
+| **Cliff scene** | Macro-terrain `f` (плато + vertical wall) + опционально replication `t` → `fe = max(f,t)` |
+
+Cliff scene: без **Enable block replication** — только macro mesh; с replication — blocky стены по Paris 2020 §5 (slope presence v1).
+
+Smoke-test: `--smoke-test` (без UI).
+
+Export: кнопка **Export OBJ** → `export_cliffs_mesh.obj`.

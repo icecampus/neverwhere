@@ -86,7 +86,9 @@ void GenerateProceduralWarpingField(double frequency, int octaves, int seed);
 PointSet3 PoissonSamplingBox(const Box& box, double r, int n);
 FractureSet GenerateFractures(FractureType type, const Box& box, double r);
 std::vector<BlockCluster> ComputeBlockClusters(PointSet3& set, const FractureSet& frac);
-SDFNode* ComputeBlockSDF(const std::vector<BlockCluster>& clusters);
+SDFNode* ComputeBlockSDF(const std::vector<BlockCluster>& clusters,
+    double blockSmoothingRadius = 0.25,
+    double bvhTransitionRadius = 0.5);
 MC::mcMesh PolygonizeSDF(const Box& box, SDFNode* node, int resolution);
 
 } // namespace rock_fracture

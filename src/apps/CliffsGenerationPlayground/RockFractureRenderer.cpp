@@ -47,7 +47,7 @@ struct CameraBasis {
     Vec3 forward; // from camera toward the scene (world space)
 };
 
-// Standard orbit camera: orthonormal view frame in world space. Vertices are never rotated.
+// World space is Z-up (matches rock_fracture SDF and cliff heightfield).
 inline CameraBasis orbitCameraBasis(float yaw, float pitch) {
     const float cp = std::cos(pitch);
     const float sp = std::sin(pitch);
@@ -57,7 +57,7 @@ inline CameraBasis orbitCameraBasis(float yaw, float pitch) {
     CameraBasis basis{};
     basis.forward = normalizeVec({-cp * sy, -sp, -cp * cy});
 
-    const Vec3 worldUp{0.0f, 1.0f, 0.0f};
+    const Vec3 worldUp{0.0f, 0.0f, 1.0f};
     basis.right = crossVec(worldUp, basis.forward);
     const float rightLen = lengthVec(basis.right);
     if (rightLen < 1e-5f) {
@@ -69,49 +69,39 @@ inline CameraBasis orbitCameraBasis(float yaw, float pitch) {
     return basis;
 }
 
-inline float triangleViewDepth(const Vec3& v0, const Vec3& v1, const Vec3& v2, const Vec3& target, const Vec3& forward) {
-    const float z0 = dotVec(subVec(v0, target), forward);
-    const float z1 = dotVec(subVec(v1, target), forward);
-    const float z2 = dotVec(subVec(v2, target), forward);
-    return (z0 + z1 + z2) / 3.0f;
+inline float pointViewDepth(const Vec3& p, const Vec3& cameraPos, const Vec3& cameraForward) {
+    return dotVec(subVec(p, cameraPos), cameraForward);
 }
 
-inline float segmentViewDepth(const Vec3& a, const Vec3& b, const Vec3& target, const Vec3& forward) {
-    return (dotVec(subVec(a, target), forward) + dotVec(subVec(b, target), forward)) * 0.5f;
+inline float triangleViewDepthCam(const Vec3& v0, const Vec3& v1, const Vec3& v2,
+    const Vec3& cameraPos, const Vec3& cameraForward) {
+    const Vec3 centroid{
+        (v0.x + v1.x + v2.x) / 3.0f,
+        (v0.y + v1.y + v2.y) / 3.0f,
+        (v0.z + v1.z + v2.z) / 3.0f,
+    };
+    return pointViewDepth(centroid, cameraPos, cameraForward);
 }
 
 enum class SceneDrawKind : std::uint8_t {
-    GridLine = 0,
-    MeshTriangle = 1,
+    MeshTriangle = 0,
 };
 
 struct SceneDrawItem {
     float depth = 0.0f;
-    SceneDrawKind kind = SceneDrawKind::MeshTriangle;
     int triIndex = -1;
-    Vec3 gridA{};
-    Vec3 gridB{};
-    ImU32 lineColor = 0;
-    float lineThickness = 1.0f;
 };
 
-template<typename EnqueueFn>
-void enqueueWorldGrid(const EnqueueFn& enqueue, const Vec3& target, const Vec3& forward,
-                      float extent, float cellSize, int majorEvery) {
+template<typename ProjectFn>
+void drawWorldGridImmediate(ImDrawList* drawList, const ProjectFn& project,
+    float extent, float cellSize, int majorEvery) {
     if (cellSize <= 0.0f || extent <= 0.0f || majorEvery < 1) return;
 
     const int minCell = (int)std::floor(-extent / cellSize);
     const int maxCell = (int)std::ceil(extent / cellSize);
 
-    const auto pushLine = [&](const Vec3& a, const Vec3& b, ImU32 color, float thickness) {
-        SceneDrawItem item{};
-        item.kind = SceneDrawKind::GridLine;
-        item.depth = segmentViewDepth(a, b, target, forward);
-        item.gridA = a;
-        item.gridB = b;
-        item.lineColor = color;
-        item.lineThickness = thickness;
-        enqueue(item);
+    const auto drawLine = [&](const Vec3& a, const Vec3& b, ImU32 color, float thickness) {
+        drawList->AddLine(project(a), project(b), color, thickness);
     };
 
     for (int i = minCell; i <= maxCell; i++) {
@@ -120,13 +110,27 @@ void enqueueWorldGrid(const EnqueueFn& enqueue, const Vec3& target, const Vec3& 
         const bool major = (i % majorEvery) == 0;
         const ImU32 color = major ? IM_COL32(88, 98, 112, 210) : IM_COL32(40, 46, 56, 150);
         const float thickness = major ? 1.15f : 0.75f;
-        pushLine({coord, 0.0f, -extent}, {coord, 0.0f, extent}, color, thickness);
-        pushLine({-extent, 0.0f, coord}, {extent, 0.0f, coord}, color, thickness);
+        drawLine({coord, -extent, 0.0f}, {coord, extent, 0.0f}, color, thickness);
+        drawLine({-extent, coord, 0.0f}, {extent, coord, 0.0f}, color, thickness);
     }
 
-    pushLine({-extent, 0.0f, 0.0f}, {extent, 0.0f, 0.0f}, IM_COL32(220, 92, 92, 235), 1.8f);
-    pushLine({0.0f, 0.0f, -extent}, {0.0f, 0.0f, extent}, IM_COL32(96, 140, 230, 235), 1.8f);
-    pushLine({0.0f, 0.0f, 0.0f}, {0.0f, extent * 0.45f, 0.0f}, IM_COL32(118, 210, 118, 235), 1.8f);
+    drawLine({-extent, 0.0f, 0.0f}, {extent, 0.0f, 0.0f}, IM_COL32(220, 92, 92, 235), 1.8f);
+    drawLine({0.0f, -extent, 0.0f}, {0.0f, extent, 0.0f}, IM_COL32(96, 140, 230, 235), 1.8f);
+    drawLine({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, extent * 0.45f}, IM_COL32(118, 210, 118, 235), 1.8f);
+}
+
+template<typename ProjectFn>
+void drawGroundShadowPlate(ImDrawList* drawList, const ProjectFn& project, const RockFractureModel& model) {
+    if (model.meshVertices.empty()) {
+        return;
+    }
+    const float z = model.boundsMin.z - 0.02f;
+    const float pad = 0.35f;
+    const Vec3 p0{model.boundsMin.x - pad, model.boundsMin.y - pad, z};
+    const Vec3 p1{model.boundsMax.x + pad, model.boundsMin.y - pad, z};
+    const Vec3 p2{model.boundsMax.x + pad, model.boundsMax.y + pad, z};
+    const Vec3 p3{model.boundsMin.x - pad, model.boundsMax.y + pad, z};
+    drawList->AddQuadFilled(project(p0), project(p1), project(p2), project(p3), IM_COL32(14, 16, 20, 255));
 }
 
 struct WorldGridParams {
@@ -145,21 +149,28 @@ WorldGridParams computeWorldGridParams(const RockFractureModel& model) {
         return std::max(kMinExtent, std::ceil(halfExtent / cellSize) * cellSize);
     };
 
-    float halfFootprint = 10.0f; // default tile half-size (tileSize=20)
+    const float halfSpanX = (model.boundsMax.x - model.boundsMin.x) * 0.5f;
+    const float halfSpanY = (model.boundsMax.y - model.boundsMin.y) * 0.5f;
+    float halfFootprint = std::max(halfSpanX, halfSpanY);
+
     if (!model.meshVertices.empty()) {
         float minX = model.meshVertices[0].x;
         float maxX = minX;
-        float minZ = model.meshVertices[0].z;
-        float maxZ = minZ;
+        float minY = model.meshVertices[0].y;
+        float maxY = minY;
         for (const Vec3& v : model.meshVertices) {
             minX = std::min(minX, v.x);
             maxX = std::max(maxX, v.x);
-            minZ = std::min(minZ, v.z);
-            maxZ = std::max(maxZ, v.z);
+            minY = std::min(minY, v.y);
+            maxY = std::max(maxY, v.y);
         }
         halfFootprint = std::max(
-            std::max(std::abs(minX), std::abs(maxX)),
-            std::max(std::abs(minZ), std::abs(maxZ)));
+            std::max(maxX - minX, maxY - minY) * 0.5f,
+            halfFootprint);
+    }
+
+    if (halfFootprint < 1.0f) {
+        halfFootprint = 10.0f;
     }
 
     float cellSize = 1.0f;
@@ -189,6 +200,26 @@ inline ImU32 packColor(const Vec3& c) {
         std::clamp((int)(c.y * 255.0f), 0, 255),
         std::clamp((int)(c.z * 255.0f), 0, 255),
         255);
+}
+
+inline Vec3 triangleNormal(const RockFractureModel& model, int triIndex, bool flatNormals) {
+    const std::uint32_t i0 = model.meshIndices[(std::size_t)triIndex * 3 + 0];
+    const std::uint32_t i1 = model.meshIndices[(std::size_t)triIndex * 3 + 1];
+    const std::uint32_t i2 = model.meshIndices[(std::size_t)triIndex * 3 + 2];
+    const Vec3& v0 = model.meshVertices[(std::size_t)i0];
+    const Vec3& v1 = model.meshVertices[(std::size_t)i1];
+    const Vec3& v2 = model.meshVertices[(std::size_t)i2];
+    Vec3 n = triNormal(v0, v1, v2);
+    if (!flatNormals && i0 < model.meshNormals.size() && i1 < model.meshNormals.size() && i2 < model.meshNormals.size()) {
+        const Vec3 n0 = model.meshNormals[(std::size_t)i0];
+        const Vec3 n1 = model.meshNormals[(std::size_t)i1];
+        const Vec3 n2 = model.meshNormals[(std::size_t)i2];
+        const Vec3 avg = normalizeVec({(n0.x + n1.x + n2.x) / 3.0f, (n0.y + n1.y + n2.y) / 3.0f, (n0.z + n1.z + n2.z) / 3.0f});
+        if (lengthVec(avg) > 0.0f) {
+            n = avg;
+        }
+    }
+    return n;
 }
 
 } // namespace
@@ -236,8 +267,14 @@ void RockFractureRenderer::drawDebugView(const RockFractureModel& model, const I
         return;
     }
 
-    const float halfTile = 10.0f; // default; size of debug view doesn't change with tileSize to keep legend stable.
-    const float worldHalf = std::max(halfTile, 0.5f);
+    const float halfSpanX = (model.boundsMax.x - model.boundsMin.x) * 0.5f;
+    const float halfSpanZ = (model.boundsMax.z - model.boundsMin.z) * 0.5f;
+    const float centerX = (model.boundsMin.x + model.boundsMax.x) * 0.5f;
+    const float centerZ = (model.boundsMin.z + model.boundsMax.z) * 0.5f;
+    float worldHalf = std::max(halfSpanX, halfSpanZ);
+    if (worldHalf < 1.0f) {
+        worldHalf = 10.0f;
+    }
     const float padTop = 32.0f;
     const float padLeft = 12.0f;
     const float availableW = std::max(1.0f, viewportSize.x - padLeft * 2.0f);
@@ -249,38 +286,72 @@ void RockFractureRenderer::drawDebugView(const RockFractureModel& model, const I
     };
     auto worldToScreen = [&](float x, float z) {
         return ImVec2{
-            gridOrigin.x + (x + worldHalf) * cellSize,
-            gridOrigin.y + (z + worldHalf) * cellSize,
+            gridOrigin.x + (x - centerX + worldHalf) * cellSize,
+            gridOrigin.y + (z - centerZ + worldHalf) * cellSize,
         };
     };
 
-    const ImVec2 a = worldToScreen(-worldHalf, -worldHalf);
-    const ImVec2 b = worldToScreen(worldHalf, -worldHalf);
-    const ImVec2 c = worldToScreen(worldHalf, worldHalf);
-    const ImVec2 d = worldToScreen(-worldHalf, worldHalf);
+    const ImVec2 a = worldToScreen(centerX - worldHalf, centerZ - worldHalf);
+    const ImVec2 b = worldToScreen(centerX + worldHalf, centerZ - worldHalf);
+    const ImVec2 c = worldToScreen(centerX + worldHalf, centerZ + worldHalf);
+    const ImVec2 d = worldToScreen(centerX - worldHalf, centerZ + worldHalf);
     drawList->AddQuad(a, b, c, d, IM_COL32(54, 60, 70, 200), 1.2f);
-    const ImVec2 ox0 = worldToScreen(-worldHalf, 0);
-    const ImVec2 ox1 = worldToScreen(worldHalf, 0);
-    const ImVec2 oz0 = worldToScreen(0, -worldHalf);
-    const ImVec2 oz1 = worldToScreen(0, worldHalf);
+    const ImVec2 ox0 = worldToScreen(centerX - worldHalf, centerZ);
+    const ImVec2 ox1 = worldToScreen(centerX + worldHalf, centerZ);
+    const ImVec2 oz0 = worldToScreen(centerX, centerZ - worldHalf);
+    const ImVec2 oz1 = worldToScreen(centerX, centerZ + worldHalf);
     drawList->AddLine(ox0, ox1, IM_COL32(58, 64, 78, 180), 1.0f);
     drawList->AddLine(oz0, oz1, IM_COL32(58, 64, 78, 180), 1.0f);
 
-    if (m_shading.showFractures2d) {
+    if (m_shading.showFractures2d && model.generationMode != GenerationMode::CliffScene) {
         for (int i = 0; i < model.fractureCount; i++) {
             const Vec3& p = model.fractureCenters[(std::size_t)i];
             drawList->AddCircleFilled(worldToScreen(p.x, p.z), 2.0f, IM_COL32(220, 168, 90, 220));
         }
     }
-    if (m_shading.showSamples2d) {
+    if (m_shading.showSamples2d && model.generationMode != GenerationMode::CliffScene) {
         for (int i = 0; i < model.sampleCount; i++) {
             const Vec3& p = model.samples[(std::size_t)i];
             drawList->AddCircleFilled(worldToScreen(p.x, p.z), 1.3f, IM_COL32(150, 200, 255, 200));
         }
     }
-    for (int i = 0; i < model.clusterCount; i++) {
-        const Vec3& p = model.clusterCenters[(std::size_t)i];
-        drawList->AddCircle(worldToScreen(p.x, p.z), 8.0f, IM_COL32(126, 220, 150, 220), 12, 1.4f);
+    if (model.generationMode == GenerationMode::CliffScene) {
+        const ImU32 cliffColor = IM_COL32(255, 120, 90, 230);
+        const float z0 = model.boundsMin.z;
+        const float z1 = model.boundsMax.z;
+
+        if (model.replicationMode == CliffReplicationMode::AllVerticalFaces) {
+            const ImVec2 negX0 = worldToScreen(model.boundsMin.x, z0);
+            const ImVec2 negX1 = worldToScreen(model.boundsMin.x, z1);
+            const ImVec2 posX0 = worldToScreen(model.boundsMax.x, z0);
+            const ImVec2 posX1 = worldToScreen(model.boundsMax.x, z1);
+            drawList->AddLine(negX0, negX1, cliffColor, 2.0f);
+            drawList->AddLine(posX0, posX1, cliffColor, 2.0f);
+            drawList->AddText({origin.x + 12.0f, origin.y + 48.0f}, IM_COL32(255, 180, 120, 255),
+                "Orange lines = stone cliff target walls (4 vertical faces, XZ profile)");
+        } else {
+            float cliffLineX = model.cliffInset;
+            if (model.cliffFace == CliffFace::PosX) {
+                cliffLineX = model.boundsMax.x;
+            }
+            if (model.cliffFace == CliffFace::NegX || model.cliffFace == CliffFace::PosX) {
+                const ImVec2 wallBase = worldToScreen(cliffLineX, z0);
+                const ImVec2 wallTop = worldToScreen(cliffLineX, z1);
+                drawList->AddLine(wallBase, wallTop, cliffColor, 2.0f);
+            }
+            drawList->AddText({origin.x + 12.0f, origin.y + 48.0f}, IM_COL32(255, 180, 120, 255),
+                "Orange line = single debug cliff face (XZ profile)");
+        }
+    }
+    if (model.generationMode == GenerationMode::CliffScene && (m_shading.showSamples2d || m_shading.showFractures2d)) {
+        drawList->AddText({origin.x + 12.0f, origin.y + 64.0f}, IM_COL32(150, 162, 180, 255),
+            "Top view: tile samples hidden in Cliff scene mode");
+    }
+    if (model.generationMode != GenerationMode::CliffScene) {
+        for (int i = 0; i < model.clusterCount; i++) {
+            const Vec3& p = model.clusterCenters[(std::size_t)i];
+            drawList->AddCircle(worldToScreen(p.x, p.z), 8.0f, IM_COL32(126, 220, 150, 220), 12, 1.4f);
+        }
     }
 
     char legend[192];
@@ -334,19 +405,31 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
 
     const Vec3 viewDir = normalizeVec({-basis.forward.x, -basis.forward.y, -basis.forward.z});
     const Vec3 lightDir = normalizeVec(m_shading.lightDir);
+    const float orbitDistance = std::max(8.0f, 48.0f / std::max(0.1f, zoom));
+    const Vec3 cameraPos{
+        m_camera.target.x - basis.forward.x * orbitDistance,
+        m_camera.target.y - basis.forward.y * orbitDistance,
+        m_camera.target.z - basis.forward.z * orbitDistance,
+    };
 
-    std::vector<SceneDrawItem> drawItems;
+    // Pass 1: background (grid + shadow plate). Never interleave with mesh — that caused see-through.
     if (m_shading.showWorldGrid) {
         const WorldGridParams grid = computeWorldGridParams(model);
-        enqueueWorldGrid(
-            [&](const SceneDrawItem& item) { drawItems.push_back(item); },
-            m_camera.target, basis.forward, grid.extent, grid.cellSize, grid.majorEvery);
+        drawWorldGridImmediate(drawList, project, grid.extent, grid.cellSize, grid.majorEvery);
     }
+    drawGroundShadowPlate(drawList, project, model);
 
     const int triCount = model.meshIndices.size() >= 3
         ? static_cast<int>(model.meshIndices.size() / 3)
         : 0;
-    drawItems.reserve(drawItems.size() + (std::size_t)std::max(0, triCount));
+
+    const bool drawWireframe = m_shading.showWireframe && triCount <= 12000;
+
+    const bool flatNormals = model.generationMode == GenerationMode::CliffScene && model.enableBlockReplication;
+
+    // Pass 2: mesh only, painter sorted from far to near along the view ray.
+    std::vector<SceneDrawItem> meshItems;
+    meshItems.reserve((std::size_t)triCount);
     for (int i = 0; i < triCount; i++) {
         const std::uint32_t i0 = model.meshIndices[(std::size_t)i * 3 + 0];
         const std::uint32_t i1 = model.meshIndices[(std::size_t)i * 3 + 1];
@@ -357,20 +440,23 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
         const Vec3& v0 = model.meshVertices[(std::size_t)i0];
         const Vec3& v1 = model.meshVertices[(std::size_t)i1];
         const Vec3& v2 = model.meshVertices[(std::size_t)i2];
+
+        const Vec3 n = triangleNormal(model, i, flatNormals);
+        if (dotVec(n, viewDir) <= 1e-5f) {
+            continue;
+        }
+
         SceneDrawItem item{};
-        item.kind = SceneDrawKind::MeshTriangle;
-        item.depth = triangleViewDepth(v0, v1, v2, m_camera.target, basis.forward);
+        item.depth = triangleViewDepthCam(v0, v1, v2, cameraPos, basis.forward);
         item.triIndex = i;
-        drawItems.push_back(item);
+        meshItems.push_back(item);
     }
 
-    std::sort(drawItems.begin(), drawItems.end(), [](const SceneDrawItem& a, const SceneDrawItem& b) {
-        if (a.depth != b.depth) return a.depth < b.depth;
-        // Grid before mesh at equal depth so coplanar ground stays under the rock.
-        return static_cast<std::uint8_t>(a.kind) < static_cast<std::uint8_t>(b.kind);
+    std::sort(meshItems.begin(), meshItems.end(), [](const SceneDrawItem& a, const SceneDrawItem& b) {
+        return a.depth > b.depth;
     });
 
-    if (triCount == 0 && drawItems.empty()) {
+    if (triCount == 0 && !m_shading.showWorldGrid) {
         if (building) {
             char line[192];
             std::snprintf(line, sizeof(line), "Building mesh, please wait... %.1fs (%s)", buildElapsed, buildStage ? buildStage : "");
@@ -398,13 +484,7 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
     const Vec3 sky = m_shading.skyColor;
     const Vec3 ground = m_shading.groundColor;
 
-    for (const SceneDrawItem& item : drawItems) {
-        if (item.kind == SceneDrawKind::GridLine) {
-            drawList->AddLine(
-                project(item.gridA), project(item.gridB), item.lineColor, item.lineThickness);
-            continue;
-        }
-
+    for (const SceneDrawItem& item : meshItems) {
         const int index = item.triIndex;
         const std::uint32_t i0 = model.meshIndices[(std::size_t)index * 3 + 0];
         const std::uint32_t i1 = model.meshIndices[(std::size_t)index * 3 + 1];
@@ -413,18 +493,10 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
         const Vec3& v1 = model.meshVertices[(std::size_t)i1];
         const Vec3& v2 = model.meshVertices[(std::size_t)i2];
 
-        Vec3 n = triNormal(v0, v1, v2);
-        // If MC gave us per-vertex normals, use the mean for a smoother look.
-        if (i0 < model.meshNormals.size() && i1 < model.meshNormals.size() && i2 < model.meshNormals.size()) {
-            const Vec3 n0 = model.meshNormals[(std::size_t)i0];
-            const Vec3 n1 = model.meshNormals[(std::size_t)i1];
-            const Vec3 n2 = model.meshNormals[(std::size_t)i2];
-            const Vec3 avg = normalizeVec({(n0.x + n1.x + n2.x) / 3.0f, (n0.y + n1.y + n2.y) / 3.0f, (n0.z + n1.z + n2.z) / 3.0f});
-            if (lengthVec(avg) > 0.0f) n = avg;
-        }
+        const Vec3 n = triangleNormal(model, index, flatNormals);
 
-        // Hemispheric ambient: sky color from above, ground color from below.
-        const float upDot = std::max(0.0f, n.y * 0.5f + 0.5f);
+        // Hemispheric ambient: sky color from above (+Z), ground color from below.
+        const float upDot = std::max(0.0f, n.z * 0.5f + 0.5f);
         Vec3 ambient{sky.x * upDot + ground.x * (1.0f - upDot),
                      sky.y * upDot + ground.y * (1.0f - upDot),
                      sky.z * upDot + ground.z * (1.0f - upDot)};
@@ -444,9 +516,11 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
         // Rim: bright at silhouette edges.
         const float rim = std::pow(1.0f - std::max(0.0f, dotVec(n, viewDir)), rimP) * rimK;
 
-        // Fake ground shadow: lerp toward ground color in the lower half of the bounding box.
-        const float avgY = (v0.y + v1.y + v2.y) / 3.0f;
-        const float groundFactor = clampFloat((avgY + 10.0f) / 20.0f, 0.0f, 1.0f);
+        // Fake ground shadow: lerp toward ground color in the lower half of the bounding box (Z-up).
+        const float avgZ = (v0.z + v1.z + v2.z) / 3.0f;
+        const float boundsMidZ = (model.boundsMin.z + model.boundsMax.z) * 0.5f;
+        const float boundsHalfZ = std::max(0.5f, (model.boundsMax.z - model.boundsMin.z) * 0.5f);
+        const float groundFactor = clampFloat((avgZ - boundsMidZ + boundsHalfZ) / (2.0f * boundsHalfZ), 0.0f, 1.0f);
         const float shadowFactor = (1.0f - groundFactor) * groundShadow;
         Vec3 shaded{
             ambient.x * ambientK + diffuse.x + specular.x + rim,
@@ -475,7 +549,7 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
 
         const ImU32 color = packColor(shaded);
         drawList->AddTriangleFilled(s0, s1, s2, color);
-        if (m_shading.showWireframe) {
+        if (drawWireframe) {
             // Polyline path: 3 unique corners + closing back to s0 = 3 verts/indices per triangle
             drawList->PathLineTo(s0);
             drawList->PathLineTo(s1);
@@ -493,8 +567,8 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
     s_drawnCount++;
 
     char titleText[160];
-    std::snprintf(titleText, sizeof(titleText), "Rock Fracture mesh (tri=%d, v=%d)",
-        model.triangleCount, model.vertexCount);
+    std::snprintf(titleText, sizeof(titleText), "Rock Fracture mesh (tri=%d, v=%d, drawn=%zu)",
+        model.triangleCount, model.vertexCount, meshItems.size());
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), titleText);
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255),
         "LMB: pan view, Ctrl+LMB: orbit camera, wheel: zoom, dbl-click: reset");

@@ -1,17 +1,23 @@
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
+#include "MeshExport.h"
 #include "RockFractureRenderer.h"
 #include "RockFractureScene.h"
 #include "RenderTypes.h"
+#include "rock_scene/CliffSceneBuilder.h"
+#include "TileBuild.h"
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -51,6 +57,7 @@ render_playground::RockFractureScene g_scene;
 render_playground::RockFractureRenderer g_renderer;
 
 bool g_rebuildRequested = true;
+bool g_resetViewForModel = false;
 bool g_showControls = true;
 bool g_showDebugView = true;
 bool g_showMeshView = true;
@@ -113,9 +120,73 @@ bool kKindCombo(int& kindIndex) {
     return changed;
 }
 
-void drawSceneControls() {
-    if (!ImGui::CollapsingHeader("Rock Fracture", ImGuiTreeNodeFlags_DefaultOpen)) return;
+bool modeCombo(int& modeIndex) {
+    bool changed = false;
+    const auto mode = static_cast<render_playground::GenerationMode>(modeIndex);
+    if (ImGui::BeginCombo("Generation mode", render_playground::RockFractureScene::modeName(mode))) {
+        for (int i = 0; i < 2; i++) {
+            const bool selected = i == modeIndex;
+            const auto m = static_cast<render_playground::GenerationMode>(i);
+            if (ImGui::Selectable(render_playground::RockFractureScene::modeName(m), selected)) {
+                modeIndex = i;
+                g_settings.mode = m;
+                if (m == render_playground::GenerationMode::CliffScene) {
+                    g_settings.enableBlockReplication = true;
+                }
+                changed = true;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
 
+bool replicationModeCombo(int& modeIndex) {
+    bool changed = false;
+    const char* names[] = {"Single face (debug)", "All vertical faces"};
+    if (modeIndex < 0 || modeIndex > 1) modeIndex = 1;
+    if (ImGui::BeginCombo("Replication mode", names[modeIndex])) {
+        for (int i = 0; i < 2; i++) {
+            const bool selected = i == modeIndex;
+            if (ImGui::Selectable(names[i], selected)) {
+                modeIndex = i;
+                g_settings.scene.replicationMode = static_cast<render_playground::CliffReplicationMode>(i);
+                changed = true;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
+bool cliffFaceCombo(int& faceIndex) {
+    bool changed = false;
+    const char* names[] = {"NegX", "PosX", "NegY", "PosY"};
+    if (faceIndex < 0 || faceIndex > 3) faceIndex = 0;
+    if (ImGui::BeginCombo("Cliff face", names[faceIndex])) {
+        for (int i = 0; i < 4; i++) {
+            const bool selected = i == faceIndex;
+            if (ImGui::Selectable(names[i], selected)) {
+                faceIndex = i;
+                g_settings.scene.cliffFace = static_cast<render_playground::CliffFace>(i);
+                changed = true;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
+void drawSingleTileControls() {
     int kindIndex = static_cast<int>(g_settings.kind);
     if (kKindCombo(kindIndex)) g_rebuildRequested = true;
 
@@ -128,6 +199,53 @@ void drawSceneControls() {
 
     ImGui::Separator();
     if (ImGui::SliderInt("MC resolution", &g_settings.mcResolution, 40, 200)) g_rebuildRequested = true;
+}
+
+void drawCliffSceneControls() {
+    int kindIndex = static_cast<int>(g_settings.kind);
+    if (kKindCombo(kindIndex)) g_rebuildRequested = true;
+
+    ImGui::Separator();
+    if (ImGui::SliderFloat("Cube size", &g_settings.scene.cubeSize, 6.0f, 60.0f)) g_rebuildRequested = true;
+    ImGui::TextDisabled("MC domain = cube + %.0f m padding per side", g_settings.scene.scenePadding);
+
+    int repModeIndex = static_cast<int>(g_settings.scene.replicationMode);
+    if (replicationModeCombo(repModeIndex)) g_rebuildRequested = true;
+
+    if (g_settings.scene.replicationMode == render_playground::CliffReplicationMode::SingleFace) {
+        int faceIndex = static_cast<int>(g_settings.scene.cliffFace);
+        if (cliffFaceCombo(faceIndex)) g_rebuildRequested = true;
+    }
+
+    if (ImGui::SliderInt("Scene MC resolution", &g_settings.scene.mcResolution, 32, 160)) g_rebuildRequested = true;
+    if (ImGui::SliderFloat("Block face band", &g_settings.scene.surfaceBand, 0.5f, 6.0f)) g_rebuildRequested = true;
+    if (ImGui::SliderFloat("Gap fill", &g_settings.scene.gapFill, 0.0f, 0.3f)) g_rebuildRequested = true;
+
+    ImGui::Separator();
+    if (ImGui::Checkbox("Stone cliffs (block replication)", &g_settings.enableBlockReplication)) g_rebuildRequested = true;
+    ImGui::TextDisabled("Top/bottom stay smooth; vertical walls use fracture tile.");
+
+    if (g_settings.enableBlockReplication) {
+        if (ImGui::SliderFloat("Tile size", &g_settings.tileSize, 6.0f, 60.0f)) g_rebuildRequested = true;
+        if (ImGui::SliderFloat("Poisson radius", &g_settings.poissonRadius, 0.1f, 2.0f)) g_rebuildRequested = true;
+        if (ImGui::SliderInt("Poisson tries", &g_settings.poissonTries, 100, 50000)) g_rebuildRequested = true;
+        if (ImGui::InputInt("Seed", &g_settings.seed)) g_rebuildRequested = true;
+    }
+}
+
+void drawSceneControls() {
+    if (!ImGui::CollapsingHeader("Rock Fracture", ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+    int modeIndex = static_cast<int>(g_settings.mode);
+    if (modeCombo(modeIndex)) g_rebuildRequested = true;
+
+    ImGui::Separator();
+    if (g_settings.mode == render_playground::GenerationMode::SingleTile) {
+        drawSingleTileControls();
+    } else {
+        drawCliffSceneControls();
+    }
+
     static const double smoothMin = 0.05;
     static const double smoothMax = 1.5;
     static const double bvhMin = 0.1;
@@ -148,7 +266,18 @@ void drawSceneControls() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset View")) {
-        g_renderer.resetView();
+        g_resetViewForModel = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Paper quality")) {
+        render_playground::applyPaperQualityPreset(g_settings);
+        g_rebuildRequested = true;
+    }
+    if (ImGui::Button("Export OBJ")) {
+        g_scene.withModel([&](const render_playground::RockFractureModel& model) {
+            const std::string path = "export_cliffs_mesh.obj";
+            render_playground::exportModelToObj(model, path);
+        });
     }
 }
 
@@ -178,6 +307,23 @@ void drawStats(const render_playground::RockFractureModel& m) {
             "Building... %.1fs (%s)", elapsed, g_scene.buildStage());
     } else {
         ImGui::Text("Build: %.2f s", m.buildSeconds);
+    }
+    ImGui::Text("Mode: %s", render_playground::RockFractureScene::modeName(m.generationMode));
+    if (m.generationMode == render_playground::GenerationMode::CliffScene) {
+        if (m.enableBlockReplication) {
+            if (m.replicationMode == render_playground::CliffReplicationMode::AllVerticalFaces) {
+                ImGui::Text("Replication: all-vertical stone cliffs");
+            } else {
+                const char* faceNames[] = {"NegX", "PosX", "NegY", "PosY"};
+                const int fi = static_cast<int>(m.cliffFace);
+                ImGui::Text("Replication: single face %s", faceNames[fi >= 0 && fi <= 3 ? fi : 0]);
+            }
+        } else {
+            ImGui::Text("Replication: macro cube only");
+        }
+        ImGui::Text("Bounds: [%.0f,%.0f,%.0f] - [%.0f,%.0f,%.0f]",
+            m.boundsMin.x, m.boundsMin.y, m.boundsMin.z,
+            m.boundsMax.x, m.boundsMax.y, m.boundsMax.z);
     }
     ImGui::Text("Samples: %d",         m.sampleCount);
     ImGui::Text("Fractures: %d",       m.fractureCount);
@@ -287,6 +433,11 @@ void init() {
     simgui_setup(&imguiDesc);
     g_state.imguiOk = true;
     spdlog::info("CliffsGenerationPlayground: simgui_setup() done, max_vertices=8M");
+
+    render_playground::applyCliffSceneDefaults(g_settings);
+    spdlog::info("CliffsGenerationPlayground: defaults cliff scene, replication={}, scene MC={}",
+        g_settings.enableBlockReplication ? "on" : "off",
+        g_settings.scene.mcResolution);
 }
 
 void frame() {
@@ -298,6 +449,28 @@ void frame() {
     if (g_rebuildRequested) {
         g_rebuildRequested = false;
         g_scene.requestAsyncRebuild(g_settings);
+    }
+
+    if (g_resetViewForModel) {
+        g_resetViewForModel = false;
+        g_scene.withModel([&](const render_playground::RockFractureModel& model) {
+            g_renderer.resetViewForModel(model);
+        });
+    }
+
+    static std::uint64_t s_lastModelRevision = 0;
+    const std::uint64_t modelRevision = g_scene.modelRevision();
+    if (modelRevision != s_lastModelRevision && !g_scene.isBuilding()) {
+        s_lastModelRevision = modelRevision;
+        g_scene.withModel([&](const render_playground::RockFractureModel& model) {
+            if (model.generationMode == render_playground::GenerationMode::CliffScene
+                && model.triangleCount > 0 && !model.generationFailed) {
+                g_renderer.resetViewForModel(model);
+                spdlog::info(
+                    "CliffsGenerationPlayground: auto-framed cliff scene (tri={}, replication={})",
+                    model.triangleCount, model.enableBlockReplication ? "yes" : "no");
+            }
+        });
     }
 
     // Periodic status heartbeat (every 60 frames ≈ 1s) for visibility.
@@ -362,8 +535,52 @@ void event(const sapp_event* ev) {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    bool smokeTest = false;
+    bool cliffReplicationTest = false;
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "--smoke-test") == 0) {
+            smokeTest = true;
+        }
+        if (std::strcmp(argv[i], "--cliff-replication-test") == 0) {
+            cliffReplicationTest = true;
+        }
+    }
+
+    if (smokeTest || cliffReplicationTest) {
+        spdlog::set_level(spdlog::level::info);
+        if (cliffReplicationTest) {
+            const bool ok = render_playground::CliffSceneBuilder::runCliffReplicationBuildTest();
+            return ok ? 0 : 1;
+        }
+        const bool ok = render_playground::CliffSceneBuilder::runTestScenario();
+        return ok ? 0 : 1;
+    }
+
+    bool asyncCliffTest = false;
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "--async-cliff-test") == 0) {
+            asyncCliffTest = true;
+        }
+    }
+    if (asyncCliffTest) {
+        spdlog::set_level(spdlog::level::info);
+        render_playground::RockFractureSettings settings;
+        settings.mode = render_playground::GenerationMode::CliffScene;
+        settings.enableBlockReplication = true;
+        render_playground::RockFractureScene scene;
+        scene.requestAsyncRebuild(settings);
+        while (scene.isBuilding()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        bool failed = false;
+        int tris = 0;
+        scene.withModel([&](const render_playground::RockFractureModel& m) {
+            failed = m.generationFailed;
+            tris = m.triangleCount;
+            spdlog::info("async-cliff-test: failed={} tri={} msg={}", failed, tris, m.failureMessage);
+        });
+        return (failed || tris <= 0) ? 1 : 0;
+    }
 
     sapp_desc desc = {};
     desc.init_cb = init;

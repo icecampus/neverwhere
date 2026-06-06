@@ -3,6 +3,7 @@
 #include "RenderTypes.h"
 #include "RockFractureScene.h"
 
+#include <algorithm>
 #include <imgui.h>
 
 namespace render_playground {
@@ -18,7 +19,7 @@ struct RockFractureCamera {
 
 // Shading parameters (Tier 1 CPU lighting; GPU path can read the same struct later).
 struct RockFractureShading {
-    Vec3 lightDir{-0.45f, 0.85f, -0.35f};
+    Vec3 lightDir{-0.45f, -0.35f, 0.85f};
     Vec3 skyColor{0.42f, 0.46f, 0.52f};
     Vec3 groundColor{0.18f, 0.16f, 0.14f};
     Vec3 rockTint{0.66f, 0.61f, 0.54f};
@@ -30,7 +31,7 @@ struct RockFractureShading {
     float rimPower = 3.0f;
     float groundShadowStrength = 0.35f;
     float fogStrength = 0.18f;
-    bool showWireframe = true;
+    bool showWireframe = false;
     bool showWorldGrid = true;
     bool showSamples2d = true;
     bool showFractures2d = true;
@@ -57,6 +58,22 @@ public:
         m_camera.yaw = 0.785398163f;
         m_camera.pitch = 0.615479708f;
         m_camera.zoom = 1.0f;
+        m_camera.pan = {0.0f, 0.0f};
+    }
+
+    void resetViewForModel(const RockFractureModel& model) {
+        m_camera.target = {
+            (model.boundsMin.x + model.boundsMax.x) * 0.5f,
+            (model.boundsMin.y + model.boundsMax.y) * 0.5f,
+            (model.boundsMin.z + model.boundsMax.z) * 0.5f,
+        };
+        m_camera.yaw = 0.785398163f;
+        m_camera.pitch = 0.615479708f;
+        const float spanX = model.boundsMax.x - model.boundsMin.x;
+        const float spanY = model.boundsMax.y - model.boundsMin.y;
+        const float spanZ = model.boundsMax.z - model.boundsMin.z;
+        const float maxSpan = std::max({spanX, spanY, spanZ, 1.0f});
+        m_camera.zoom = clampFloat(24.0f / maxSpan, 0.05f, 16.0f);
         m_camera.pan = {0.0f, 0.0f};
     }
 

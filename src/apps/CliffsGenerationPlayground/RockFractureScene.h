@@ -2,16 +2,20 @@
 
 #include "RenderTypes.h"
 #include "rock_fracture/Blocks.h"
+#include "rock_scene/SceneSpec.h"
 
 #include <atomic>
 #include <cstdint>
-#include <utility>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace render_playground {
+
+class TileLibrary;
 
 enum class RockFractureKind : int {
     Equidimensional = 0,
@@ -20,7 +24,13 @@ enum class RockFractureKind : int {
     Tabular         = 3,
 };
 
+enum class GenerationMode : int {
+    SingleTile = 0,
+    CliffScene = 1,
+};
+
 struct RockFractureSettings {
+    GenerationMode mode = GenerationMode::CliffScene;
     RockFractureKind kind = RockFractureKind::Equidimensional;
     int seed = 1234;
     float tileSize = 20.0f;
@@ -32,6 +42,8 @@ struct RockFractureSettings {
     double bvhTransitionRadius = 0.5;
     bool useOpenMP = true;
     bool useTextureWarp = true;
+    bool enableBlockReplication = true;
+    SceneSpec scene;
 };
 
 struct RockFractureModel {
@@ -54,6 +66,14 @@ struct RockFractureModel {
     bool usedFallbackTexture = false;
     bool generationFailed = false;
     std::string failureMessage;
+    GenerationMode generationMode = GenerationMode::SingleTile;
+    bool enableBlockReplication = true;
+    Vec3 boundsMin{0.0f, 0.0f, 0.0f};
+    Vec3 boundsMax{20.0f, 20.0f, 20.0f};
+    CliffFace cliffFace = CliffFace::NegX;
+    CliffReplicationMode replicationMode = CliffReplicationMode::AllVerticalFaces;
+    float cliffInset = 2.0f;
+    float plateauHeight = 12.0f;
 };
 
 class RockFractureScene {
@@ -64,18 +84,13 @@ public:
     RockFractureScene(const RockFractureScene&) = delete;
     RockFractureScene& operator=(const RockFractureScene&) = delete;
 
-    // Synchronous rebuild (blocks the calling thread).
     void rebuild(const RockFractureSettings& settings);
-
-    // Asynchronous rebuild: spawns a worker thread that calls rebuild().
-    // Old worker (if any) is left to finish; the latest completed result wins.
     void requestAsyncRebuild(const RockFractureSettings& settings);
 
     bool isBuilding() const { return m_isBuilding.load(); }
     double buildElapsedSeconds() const;
     const char* buildStage() const;
 
-    // Call fn while holding the model mutex — required for any mesh/samples read during render.
     template<typename Fn>
     void withModel(Fn&& fn) const {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -88,18 +103,23 @@ public:
 
     static int kindCount();
     static const char* kindName(RockFractureKind kind);
+    static const char* modeName(GenerationMode mode);
     static void sanitize(RockFractureSettings& settings);
 
 private:
+    void rebuildSingleTile(const RockFractureSettings& settings);
+    void rebuildCliffScene(const RockFractureSettings& settings);
+
     mutable std::mutex m_mutex;
     RockFractureModel m_model;
+    std::unique_ptr<TileLibrary> m_tileLibrary;
     std::atomic<std::uint64_t> m_modelRevision{0};
     RockFractureKind m_pendingKind = RockFractureKind::Equidimensional;
     int m_pendingSeed = 1234;
     std::atomic<bool> m_isBuilding{false};
     std::atomic<int64_t> m_buildStartSteadyNs{0};
     std::atomic<double> m_buildFinalSeconds{0.0};
-    std::atomic<int> m_buildStage{0}; // 0..4, mapped to label by buildStage()
+    std::atomic<int> m_buildStage{0};
     std::thread m_worker;
 };
 
