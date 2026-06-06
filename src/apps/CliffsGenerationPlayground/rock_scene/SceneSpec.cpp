@@ -6,7 +6,8 @@ void sanitizeSceneSpec(SceneSpec& spec) {
     spec.cubeSize = clampFloat(spec.cubeSize, 4.0f, 120.0f);
     spec.scenePadding = clampFloat(spec.scenePadding, 1.0f, 20.0f);
 
-    const float domain = spec.cubeSize + 2.0f * spec.scenePadding;
+    const float outer = spec.scenePadding + spec.protrusionMargin;
+    const float domain = spec.cubeSize + 2.0f * outer;
     spec.sceneSizeX = domain;
     spec.sceneSizeY = domain;
     spec.sceneSizeZ = domain;
@@ -21,7 +22,8 @@ void sanitizeSceneSpec(SceneSpec& spec) {
     }
     spec.mcResolution = clampInt(spec.mcResolution, 32, 160);
     spec.maxSlope = clampFloat(spec.maxSlope, 0.05f, 0.95f);
-    spec.surfaceBand = clampFloat(spec.surfaceBand, 0.5f, 8.0f);
+    spec.surfaceBand = clampFloat(spec.surfaceBand, 0.5f, 12.0f);
+    spec.protrusionMargin = clampFloat(spec.protrusionMargin, 0.0f, 4.0f);
     spec.gapFill = clampFloat(spec.gapFill, 0.0f, 0.5f);
 }
 

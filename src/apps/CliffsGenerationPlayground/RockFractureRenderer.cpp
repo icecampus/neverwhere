@@ -1,4 +1,5 @@
 #include "RockFractureRenderer.h"
+#include "RockMeshGpuRenderer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,15 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+
+#if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE)
+    #if defined(_WIN32)
+        #define SOKOL_D3D11
+    #endif
+#endif
+#include <sokol_app.h>
+#include <sokol_gfx.h>
+#include <util/sokol_imgui.h>
 
 #include <spdlog/spdlog.h>
 
@@ -47,15 +57,15 @@ struct CameraBasis {
     Vec3 forward; // from camera toward the scene (world space)
 };
 
-// World space is Z-up (matches rock_fracture SDF and cliff heightfield).
-inline CameraBasis orbitCameraBasis(float yaw, float pitch) {
+// Z-up turntable: yaw around +Z, pitch lifts camera above the XY plane.
+inline CameraBasis turntableBasisZUp(float yaw, float pitch) {
     const float cp = std::cos(pitch);
     const float sp = std::sin(pitch);
     const float cy = std::cos(yaw);
     const float sy = std::sin(yaw);
 
     CameraBasis basis{};
-    basis.forward = normalizeVec({-cp * sy, -sp, -cp * cy});
+    basis.forward = normalizeVec({-cp * cy, -cp * sy, -sp});
 
     const Vec3 worldUp{0.0f, 0.0f, 1.0f};
     basis.right = crossVec(worldUp, basis.forward);
@@ -68,6 +78,64 @@ inline CameraBasis orbitCameraBasis(float yaw, float pitch) {
     basis.up = normalizeVec(crossVec(basis.forward, basis.right));
     return basis;
 }
+
+constexpr float kOrthoScale = 42.0f;
+
+void computeMeshBounds(const RockFractureModel& model, Vec3& outMin, Vec3& outMax) {
+    if (model.meshVertices.empty()) {
+        outMin = model.boundsMin;
+        outMax = model.boundsMax;
+        return;
+    }
+
+    outMin = model.meshVertices[0];
+    outMax = model.meshVertices[0];
+    for (const Vec3& v : model.meshVertices) {
+        outMin.x = std::min(outMin.x, v.x);
+        outMin.y = std::min(outMin.y, v.y);
+        outMin.z = std::min(outMin.z, v.z);
+        outMax.x = std::max(outMax.x, v.x);
+        outMax.y = std::max(outMax.y, v.y);
+        outMax.z = std::max(outMax.z, v.z);
+    }
+}
+
+} // namespace
+
+void RockFractureRenderer::resetViewForModel(const RockFractureModel& model) {
+    Vec3 bmin{};
+    Vec3 bmax{};
+    computeMeshBounds(model, bmin, bmax);
+
+    m_camera.target = {
+        (bmin.x + bmax.x) * 0.5f,
+        (bmin.y + bmax.y) * 0.5f,
+        (bmin.z + bmax.z) * 0.5f,
+    };
+    m_camera.yaw = 0.785398163f;
+    m_camera.pitch = 0.698131700f;
+
+    const float spanX = bmax.x - bmin.x;
+    const float spanY = bmax.y - bmin.y;
+    const float spanZ = bmax.z - bmin.z;
+    const float maxSpan = std::max({spanX, spanY, spanZ, 1.0f});
+    m_camera.zoom = clampFloat(30.0f / maxSpan, 0.05f, 16.0f);
+}
+
+void RockFractureRenderer::initGpu() {
+    m_gpuMesh.init();
+}
+
+void RockFractureRenderer::shutdownGpu() {
+    m_gpuMesh.shutdown();
+}
+
+void RockFractureRenderer::invalidateGpuMeshCache() {
+    m_gpuMesh.invalidateMeshCache();
+    m_gpuMeshRevision = 0;
+}
+
+namespace {
 
 inline float pointViewDepth(const Vec3& p, const Vec3& cameraPos, const Vec3& cameraForward) {
     return dotVec(subVec(p, cameraPos), cameraForward);
@@ -94,7 +162,7 @@ struct SceneDrawItem {
 
 template<typename ProjectFn>
 void drawWorldGridImmediate(ImDrawList* drawList, const ProjectFn& project,
-    float extent, float cellSize, int majorEvery) {
+    float extent, float cellSize, int majorEvery, const Vec3& center, float groundZ) {
     if (cellSize <= 0.0f || extent <= 0.0f || majorEvery < 1) return;
 
     const int minCell = (int)std::floor(-extent / cellSize);
@@ -110,13 +178,13 @@ void drawWorldGridImmediate(ImDrawList* drawList, const ProjectFn& project,
         const bool major = (i % majorEvery) == 0;
         const ImU32 color = major ? IM_COL32(88, 98, 112, 210) : IM_COL32(40, 46, 56, 150);
         const float thickness = major ? 1.15f : 0.75f;
-        drawLine({coord, -extent, 0.0f}, {coord, extent, 0.0f}, color, thickness);
-        drawLine({-extent, coord, 0.0f}, {extent, coord, 0.0f}, color, thickness);
+        drawLine({center.x + coord, center.y - extent, groundZ}, {center.x + coord, center.y + extent, groundZ}, color, thickness);
+        drawLine({center.x - extent, center.y + coord, groundZ}, {center.x + extent, center.y + coord, groundZ}, color, thickness);
     }
 
-    drawLine({-extent, 0.0f, 0.0f}, {extent, 0.0f, 0.0f}, IM_COL32(220, 92, 92, 235), 1.8f);
-    drawLine({0.0f, -extent, 0.0f}, {0.0f, extent, 0.0f}, IM_COL32(96, 140, 230, 235), 1.8f);
-    drawLine({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, extent * 0.45f}, IM_COL32(118, 210, 118, 235), 1.8f);
+    drawLine({center.x - extent, center.y, groundZ}, {center.x + extent, center.y, groundZ}, IM_COL32(220, 92, 92, 235), 1.8f);
+    drawLine({center.x, center.y - extent, groundZ}, {center.x, center.y + extent, groundZ}, IM_COL32(96, 140, 230, 235), 1.8f);
+    drawLine({center.x, center.y, groundZ}, {center.x, center.y, groundZ + extent * 0.45f}, IM_COL32(118, 210, 118, 235), 1.8f);
 }
 
 template<typename ProjectFn>
@@ -224,22 +292,30 @@ inline Vec3 triangleNormal(const RockFractureModel& model, int triIndex, bool fl
 
 } // namespace
 
-void RockFractureRenderer::handleInput(const ImVec2& viewportSize, bool hovered, bool dragging, float wheel) {
+void RockFractureRenderer::handleInput(const ImVec2& viewportSize, bool hovered, bool orbiting, bool panning, float wheel) {
     ImGuiIO& io = ImGui::GetIO();
     if (hovered && wheel != 0.0f) {
         m_camera.zoom = clampFloat(m_camera.zoom * (1.0f + wheel * 0.12f), 0.05f, 16.0f);
     }
-    if (dragging) {
-        if (io.KeyCtrl) {
-            constexpr float kOrbitSensitivity = 0.012f;
-            m_camera.yaw += io.MouseDelta.x * kOrbitSensitivity;
-            m_camera.pitch = clampFloat(
-                m_camera.pitch - io.MouseDelta.y * kOrbitSensitivity, -1.35f, 1.35f);
-        } else {
-            m_camera.pan.x += io.MouseDelta.x;
-            m_camera.pan.y += io.MouseDelta.y;
-        }
+
+    const CameraBasis basis = turntableBasisZUp(m_camera.yaw, m_camera.pitch);
+    const float worldPerPixel = 1.0f / std::max(1.0f, kOrthoScale * m_camera.zoom);
+
+    if (hovered && panning) {
+        const float dx = io.MouseDelta.x * worldPerPixel;
+        const float dy = io.MouseDelta.y * worldPerPixel;
+        m_camera.target.x += basis.right.x * (-dx) + basis.up.x * dy;
+        m_camera.target.y += basis.right.y * (-dx) + basis.up.y * dy;
+        m_camera.target.z += basis.right.z * (-dx) + basis.up.z * dy;
     }
+
+    if (hovered && orbiting) {
+        constexpr float kOrbitSensitivity = 0.008f;
+        m_camera.yaw += io.MouseDelta.x * kOrbitSensitivity;
+        m_camera.pitch = clampFloat(
+            m_camera.pitch - io.MouseDelta.y * kOrbitSensitivity, -1.25f, 1.35f);
+    }
+
     if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         resetView();
     }
@@ -368,9 +444,15 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("##RockFractureMeshViewport", viewportSize);
     const bool hovered = ImGui::IsItemHovered();
-    const bool dragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left);
-    const float wheel = ImGui::GetIO().MouseWheel;
-    handleInput(viewportSize, hovered, dragging, wheel);
+    const ImGuiIO& io = ImGui::GetIO();
+    const bool shiftHeld = io.KeyShift;
+    const bool orbiting = hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left) && !shiftHeld;
+    const bool panning = hovered && (
+        ImGui::IsMouseDragging(ImGuiMouseButton_Middle)
+        || (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && shiftHeld)
+        || ImGui::IsMouseDragging(ImGuiMouseButton_Right));
+    const float wheel = io.MouseWheel;
+    handleInput(viewportSize, hovered, orbiting, panning, wheel);
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(18, 21, 27, 255));
@@ -388,9 +470,8 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
     }
     s_callCount++;
 
-    const ImVec2 viewCenter{origin.x + viewportSize.x * 0.5f, origin.y + viewportSize.y * 0.55f};
-    constexpr float kOrthoScale = 42.0f;
-    const CameraBasis basis = orbitCameraBasis(m_camera.yaw, m_camera.pitch);
+    const ImVec2 viewCenter{origin.x + viewportSize.x * 0.5f, origin.y + viewportSize.y * 0.5f};
+    const CameraBasis basis = turntableBasisZUp(m_camera.yaw, m_camera.pitch);
     const float zoom = m_camera.zoom;
 
     auto project = [&](const Vec3& point) {
@@ -398,8 +479,8 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
         const float viewX = dotVec(local, basis.right);
         const float viewY = dotVec(local, basis.up);
         return ImVec2{
-            viewCenter.x + m_camera.pan.x + viewX * kOrthoScale * zoom,
-            viewCenter.y + m_camera.pan.y - viewY * kOrthoScale * zoom,
+            viewCenter.x + viewX * kOrthoScale * zoom,
+            viewCenter.y - viewY * kOrthoScale * zoom,
         };
     };
 
@@ -415,7 +496,9 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
     // Pass 1: background (grid + shadow plate). Never interleave with mesh — that caused see-through.
     if (m_shading.showWorldGrid) {
         const WorldGridParams grid = computeWorldGridParams(model);
-        drawWorldGridImmediate(drawList, project, grid.extent, grid.cellSize, grid.majorEvery);
+        const float groundZ = model.meshVertices.empty() ? 0.0f : model.boundsMin.z;
+        drawWorldGridImmediate(drawList, project, grid.extent, grid.cellSize, grid.majorEvery,
+            m_camera.target, groundZ);
     }
     drawGroundShadowPlate(drawList, project, model);
 
@@ -423,38 +506,124 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
         ? static_cast<int>(model.meshIndices.size() / 3)
         : 0;
 
-    const bool drawWireframe = m_shading.showWireframe && triCount <= 12000;
-
     const bool flatNormals = model.generationMode == GenerationMode::CliffScene && model.enableBlockReplication;
+    (void)flatNormals;
 
-    // Pass 2: mesh only, painter sorted from far to near along the view ray.
-    std::vector<SceneDrawItem> meshItems;
-    meshItems.reserve((std::size_t)triCount);
-    for (int i = 0; i < triCount; i++) {
-        const std::uint32_t i0 = model.meshIndices[(std::size_t)i * 3 + 0];
-        const std::uint32_t i1 = model.meshIndices[(std::size_t)i * 3 + 1];
-        const std::uint32_t i2 = model.meshIndices[(std::size_t)i * 3 + 2];
-        if (i0 >= model.meshVertices.size() || i1 >= model.meshVertices.size() || i2 >= model.meshVertices.size()) {
-            continue;
-        }
-        const Vec3& v0 = model.meshVertices[(std::size_t)i0];
-        const Vec3& v1 = model.meshVertices[(std::size_t)i1];
-        const Vec3& v2 = model.meshVertices[(std::size_t)i2];
-
-        const Vec3 n = triangleNormal(model, i, flatNormals);
-        if (dotVec(n, viewDir) <= 1e-5f) {
-            continue;
-        }
-
-        SceneDrawItem item{};
-        item.depth = triangleViewDepthCam(v0, v1, v2, cameraPos, basis.forward);
-        item.triIndex = i;
-        meshItems.push_back(item);
+    static double s_lastMeshBuildSeconds = -1.0;
+    if (model.buildSeconds != s_lastMeshBuildSeconds) {
+        m_gpuMesh.invalidateMeshCache();
+        s_lastMeshBuildSeconds = model.buildSeconds;
     }
 
-    std::sort(meshItems.begin(), meshItems.end(), [](const SceneDrawItem& a, const SceneDrawItem& b) {
-        return a.depth > b.depth;
-    });
+    RockMeshGpuCamera gpuCam{};
+    gpuCam.target[0] = m_camera.target.x;
+    gpuCam.target[1] = m_camera.target.y;
+    gpuCam.target[2] = m_camera.target.z;
+    gpuCam.cameraPos[0] = cameraPos.x;
+    gpuCam.cameraPos[1] = cameraPos.y;
+    gpuCam.cameraPos[2] = cameraPos.z;
+    gpuCam.orthoHalfHeight = viewportSize.y * 0.5f / std::max(1.0f, kOrthoScale * zoom);
+    gpuCam.aspect = viewportSize.x / std::max(1.0f, viewportSize.y);
+
+    const int vpW = std::max(1, (int)viewportSize.x);
+    const int vpH = std::max(1, (int)viewportSize.y);
+    const bool gpuOk = m_gpuMesh.render(model, m_shading, gpuCam, vpW, vpH);
+
+    if (gpuOk && m_gpuMesh.validOutput()) {
+        const ImTextureID texId = (ImTextureID)simgui_imtextureid_with_sampler(
+            m_gpuMesh.outputView(), m_gpuMesh.outputSampler());
+        drawList->AddImage(texId, origin, {origin.x + viewportSize.x, origin.y + viewportSize.y});
+    } else {
+        static bool s_loggedGpuFallback = false;
+        if (!s_loggedGpuFallback) {
+            spdlog::warn("drawMeshView: GPU mesh renderer unavailable (init={} pipeline={}), using CPU painter — expect see-through on dense meshes",
+                m_gpuMesh.validOutput() ? "ok" : "no-output",
+                gpuOk ? "render-failed" : "not-ready");
+            s_loggedGpuFallback = true;
+        }
+        // Fallback: CPU painter (may show sorting artifacts on dense cliff meshes).
+        std::vector<SceneDrawItem> meshItems;
+        meshItems.reserve((std::size_t)triCount);
+        for (int i = 0; i < triCount; i++) {
+            const std::uint32_t i0 = model.meshIndices[(std::size_t)i * 3 + 0];
+            const std::uint32_t i1 = model.meshIndices[(std::size_t)i * 3 + 1];
+            const std::uint32_t i2 = model.meshIndices[(std::size_t)i * 3 + 2];
+            if (i0 >= model.meshVertices.size() || i1 >= model.meshVertices.size() || i2 >= model.meshVertices.size()) {
+                continue;
+            }
+            const Vec3& v0 = model.meshVertices[(std::size_t)i0];
+            const Vec3& v1 = model.meshVertices[(std::size_t)i1];
+            const Vec3& v2 = model.meshVertices[(std::size_t)i2];
+
+            const Vec3 n = triangleNormal(model, i, flatNormals);
+            if (dotVec(n, viewDir) <= 1e-5f) {
+                continue;
+            }
+
+            SceneDrawItem item{};
+            item.depth = triangleViewDepthCam(v0, v1, v2, cameraPos, basis.forward);
+            item.triIndex = i;
+            meshItems.push_back(item);
+        }
+
+        std::sort(meshItems.begin(), meshItems.end(), [](const SceneDrawItem& a, const SceneDrawItem& b) {
+            return a.depth > b.depth;
+        });
+
+        const float ambientK = m_shading.ambientStrength;
+        const float diffuseK = m_shading.diffuseStrength;
+        const float specK = m_shading.specularStrength;
+        const float shininess = std::max(1.0f, m_shading.shininess);
+        const float rimK = m_shading.rimStrength;
+        const float rimP = std::max(0.5f, m_shading.rimPower);
+        const float groundShadow = m_shading.groundShadowStrength;
+        const float fog = m_shading.fogStrength;
+        const Vec3 sky = m_shading.skyColor;
+        const Vec3 ground = m_shading.groundColor;
+
+        for (const SceneDrawItem& item : meshItems) {
+            const int index = item.triIndex;
+            const std::uint32_t i0 = model.meshIndices[(std::size_t)index * 3 + 0];
+            const std::uint32_t i1 = model.meshIndices[(std::size_t)index * 3 + 1];
+            const std::uint32_t i2 = model.meshIndices[(std::size_t)index * 3 + 2];
+            const Vec3& v0 = model.meshVertices[(std::size_t)i0];
+            const Vec3& v1 = model.meshVertices[(std::size_t)i1];
+            const Vec3& v2 = model.meshVertices[(std::size_t)i2];
+            const Vec3 n = triangleNormal(model, index, flatNormals);
+            const float upDot = std::max(0.0f, n.z * 0.5f + 0.5f);
+            Vec3 ambient{sky.x * upDot + ground.x * (1.0f - upDot),
+                         sky.y * upDot + ground.y * (1.0f - upDot),
+                         sky.z * upDot + ground.z * (1.0f - upDot)};
+            const float ndotl = std::max(0.0f, dotVec(n, lightDir));
+            Vec3 diffuse{m_shading.rockTint.x * diffuseK * ndotl,
+                         m_shading.rockTint.y * diffuseK * ndotl,
+                         m_shading.rockTint.z * diffuseK * ndotl};
+            const Vec3 halfVec = normalizeVec({lightDir.x + viewDir.x, lightDir.y + viewDir.y, lightDir.z + viewDir.z});
+            const float ndoth = std::max(0.0f, dotVec(n, halfVec));
+            const float specAmount = std::pow(ndoth, shininess) * specK;
+            Vec3 specular{specAmount, specAmount, specAmount};
+            const float rim = std::pow(1.0f - std::max(0.0f, dotVec(n, viewDir)), rimP) * rimK;
+            const float avgZ = (v0.z + v1.z + v2.z) / 3.0f;
+            const float boundsMidZ = (model.boundsMin.z + model.boundsMax.z) * 0.5f;
+            const float boundsHalfZ = std::max(0.5f, (model.boundsMax.z - model.boundsMin.z) * 0.5f);
+            const float groundFactor = clampFloat((avgZ - boundsMidZ + boundsHalfZ) / (2.0f * boundsHalfZ), 0.0f, 1.0f);
+            const float shadowFactor = (1.0f - groundFactor) * groundShadow;
+            Vec3 shaded{
+                ambient.x * ambientK + diffuse.x + specular.x + rim,
+                ambient.y * ambientK + diffuse.y + specular.y + rim,
+                ambient.z * ambientK + diffuse.z + specular.z + rim,
+            };
+            shaded = {
+                shaded.x * (1.0f - shadowFactor) + ground.x * shadowFactor,
+                shaded.y * (1.0f - shadowFactor) + ground.y * shadowFactor,
+                shaded.z * (1.0f - shadowFactor) + ground.z * shadowFactor,
+            };
+            const ImVec2 s0 = project(v0);
+            const ImVec2 s1 = project(v1);
+            const ImVec2 s2 = project(v2);
+            drawList->AddTriangleFilled(s0, s1, s2, packColor(shaded));
+        }
+    }
 
     if (triCount == 0 && !m_shading.showWorldGrid) {
         if (building) {
@@ -473,105 +642,20 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
         return;
     }
 
-    const float ambientK = m_shading.ambientStrength;
-    const float diffuseK = m_shading.diffuseStrength;
-    const float specK = m_shading.specularStrength;
-    const float shininess = std::max(1.0f, m_shading.shininess);
-    const float rimK = m_shading.rimStrength;
-    const float rimP = std::max(0.5f, m_shading.rimPower);
-    const float groundShadow = m_shading.groundShadowStrength;
-    const float fog = m_shading.fogStrength;
-    const Vec3 sky = m_shading.skyColor;
-    const Vec3 ground = m_shading.groundColor;
-
-    for (const SceneDrawItem& item : meshItems) {
-        const int index = item.triIndex;
-        const std::uint32_t i0 = model.meshIndices[(std::size_t)index * 3 + 0];
-        const std::uint32_t i1 = model.meshIndices[(std::size_t)index * 3 + 1];
-        const std::uint32_t i2 = model.meshIndices[(std::size_t)index * 3 + 2];
-        const Vec3& v0 = model.meshVertices[(std::size_t)i0];
-        const Vec3& v1 = model.meshVertices[(std::size_t)i1];
-        const Vec3& v2 = model.meshVertices[(std::size_t)i2];
-
-        const Vec3 n = triangleNormal(model, index, flatNormals);
-
-        // Hemispheric ambient: sky color from above (+Z), ground color from below.
-        const float upDot = std::max(0.0f, n.z * 0.5f + 0.5f);
-        Vec3 ambient{sky.x * upDot + ground.x * (1.0f - upDot),
-                     sky.y * upDot + ground.y * (1.0f - upDot),
-                     sky.z * upDot + ground.z * (1.0f - upDot)};
-
-        // Diffuse (Lambert).
-        const float ndotl = std::max(0.0f, dotVec(n, lightDir));
-        Vec3 diffuse{m_shading.rockTint.x * diffuseK * ndotl,
-                     m_shading.rockTint.y * diffuseK * ndotl,
-                     m_shading.rockTint.z * diffuseK * ndotl};
-
-        // Specular (Blinn-Phong). For an orthographic view the half-vector reduces to the light.
-        const Vec3 halfVec = normalizeVec({lightDir.x + viewDir.x, lightDir.y + viewDir.y, lightDir.z + viewDir.z});
-        const float ndoth = std::max(0.0f, dotVec(n, halfVec));
-        const float specAmount = std::pow(ndoth, shininess) * specK;
-        Vec3 specular{specAmount, specAmount, specAmount};
-
-        // Rim: bright at silhouette edges.
-        const float rim = std::pow(1.0f - std::max(0.0f, dotVec(n, viewDir)), rimP) * rimK;
-
-        // Fake ground shadow: lerp toward ground color in the lower half of the bounding box (Z-up).
-        const float avgZ = (v0.z + v1.z + v2.z) / 3.0f;
-        const float boundsMidZ = (model.boundsMin.z + model.boundsMax.z) * 0.5f;
-        const float boundsHalfZ = std::max(0.5f, (model.boundsMax.z - model.boundsMin.z) * 0.5f);
-        const float groundFactor = clampFloat((avgZ - boundsMidZ + boundsHalfZ) / (2.0f * boundsHalfZ), 0.0f, 1.0f);
-        const float shadowFactor = (1.0f - groundFactor) * groundShadow;
-        Vec3 shaded{
-            ambient.x * ambientK + diffuse.x + specular.x + rim,
-            ambient.y * ambientK + diffuse.y + specular.y + rim,
-            ambient.z * ambientK + diffuse.z + specular.z + rim,
-        };
-        shaded = {
-            shaded.x * (1.0f - shadowFactor) + ground.x * shadowFactor,
-            shaded.y * (1.0f - shadowFactor) + ground.y * shadowFactor,
-            shaded.z * (1.0f - shadowFactor) + ground.z * shadowFactor,
-        };
-
-        // Distance fog toward the ground center to fade the silhouette into the plate.
-        const ImVec2 s0 = project(v0);
-        const ImVec2 s1 = project(v1);
-        const ImVec2 s2 = project(v2);
-        const float centroidDist = (std::abs((s0.x + s1.x + s2.x) / 3.0f - viewCenter.x)
-            + std::abs((s0.y + s1.y + s2.y) / 3.0f - viewCenter.y)) / 600.0f;
-        const float fogFactor = clampFloat(centroidDist * fog, 0.0f, 1.0f);
-        const Vec3 fogColor = {0.06f, 0.07f, 0.09f};
-        shaded = {
-            shaded.x * (1.0f - fogFactor) + fogColor.x * fogFactor,
-            shaded.y * (1.0f - fogFactor) + fogColor.y * fogFactor,
-            shaded.z * (1.0f - fogFactor) + fogColor.z * fogFactor,
-        };
-
-        const ImU32 color = packColor(shaded);
-        drawList->AddTriangleFilled(s0, s1, s2, color);
-        if (drawWireframe) {
-            // Polyline path: 3 unique corners + closing back to s0 = 3 verts/indices per triangle
-            drawList->PathLineTo(s0);
-            drawList->PathLineTo(s1);
-            drawList->PathLineTo(s2);
-            drawList->PathStroke(IM_COL32(20, 28, 36, 220), ImDrawFlags_Closed, 0.9f);
-        }
-    }
-
-    // Per-frame visibility log: confirm triangles were actually issued to the drawlist.
     static int s_drawnCount = 0;
     if (s_drawnCount < 1) {
-        spdlog::info("drawMeshView: emitted {} triangle fills (wireframe={}) | zoom={} pan=({}, {})",
-            triCount, m_shading.showWireframe ? "on" : "off", m_camera.zoom, m_camera.pan.x, m_camera.pan.y);
+        spdlog::info("drawMeshView: gpu={} tri={} zoom={} target=({:.1f},{:.1f},{:.1f})",
+            gpuOk ? "yes" : "no", triCount, m_camera.zoom,
+            m_camera.target.x, m_camera.target.y, m_camera.target.z);
     }
     s_drawnCount++;
 
     char titleText[160];
-    std::snprintf(titleText, sizeof(titleText), "Rock Fracture mesh (tri=%d, v=%d, drawn=%zu)",
-        model.triangleCount, model.vertexCount, meshItems.size());
+    std::snprintf(titleText, sizeof(titleText), "Rock mesh (tri=%d, v=%d, renderer=%s)",
+        model.triangleCount, model.vertexCount, gpuOk ? "GPU+depth" : "CPU painter");
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), titleText);
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255),
-        "LMB: pan view, Ctrl+LMB: orbit camera, wheel: zoom, dbl-click: reset");
+        "LMB drag: orbit | Shift+LMB / MMB / RMB: pan | wheel: zoom | dbl-click: reset pivot");
     char statsText[256];
     std::snprintf(statsText, sizeof(statsText),
         "build=%.2fs, zoom=%.2fx, target=(%.1f, %.1f, %.1f), yaw=%.0f pitch=%.0f",

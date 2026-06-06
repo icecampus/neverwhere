@@ -26,12 +26,14 @@ struct SceneSpec {
     float scenePadding = 2.0f;
     CliffFace cliffFace = CliffFace::NegX;
     CliffReplicationMode replicationMode = CliffReplicationMode::AllVerticalFaces;
-    int mcResolution = 120;
+    int mcResolution = 140;
     float maxSlope = 0.35f;
-    // Thickness (m) of the cliff wall slab where block tiles are applied.
-    float surfaceBand = 6.0f;
-    // Pull fracture gaps closed (meters) before union — reduces hole artifacts in the deep band.
-    float gapFill = 0.06f;
+    // Thickness (m) of the cliff wall slab where block tiles are applied (inward from each vertical face).
+    float surfaceBand = 8.0f;
+    // How far block SDF may extend outward past the macro cube face (avoids flat clipping).
+    float protrusionMargin = 2.0f;
+    // Optional shrink of tile voids before max(f,t); 0 = full fracture depth.
+    float gapFill = 0.0f;
 
     // Legacy fields kept for debug overlay compatibility (derived from macro box).
     float plateauHeight = 20.0f;

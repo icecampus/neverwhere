@@ -2,19 +2,20 @@
 
 #include "RenderTypes.h"
 #include "RockFractureScene.h"
+#include "RockMeshGpuRenderer.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <imgui.h>
 
 namespace render_playground {
 
-// Orbit camera around a scene pivot (Blender-style: object stays in world space).
+// Turntable orbit around target (Z-up world). Pan moves target on the view plane.
 struct RockFractureCamera {
     Vec3 target{0.0f, 0.0f, 0.0f};
-    float yaw = 0.785398163f;    // 45 deg — default iso-like orbit
-    float pitch = 0.615479708f;  // ~35.26 deg
+    float yaw = 0.785398163f;    // radians around +Z
+    float pitch = 0.698131700f;  // ~40 deg elevation
     float zoom = 1.0f;
-    ImVec2 pan{0.0f, 0.0f};
 };
 
 // Shading parameters (Tier 1 CPU lighting; GPU path can read the same struct later).
@@ -45,7 +46,7 @@ public:
 
     void drawDebugView(const RockFractureModel& model, const ImVec2& viewportSize, bool building, double buildElapsed, const char* buildStage);
     void drawMeshView(const RockFractureModel& model, const ImVec2& viewportSize, bool building, double buildElapsed, const char* buildStage);
-    void handleInput(const ImVec2& viewportSize, bool hovered, bool dragging, float wheel);
+    void handleInput(const ImVec2& viewportSize, bool hovered, bool orbiting, bool panning, float wheel);
 
     RockFractureCamera& camera() { return m_camera; }
     const RockFractureCamera& camera() const { return m_camera; }
@@ -56,30 +57,21 @@ public:
     void resetView() {
         m_camera.target = {0.0f, 0.0f, 0.0f};
         m_camera.yaw = 0.785398163f;
-        m_camera.pitch = 0.615479708f;
+        m_camera.pitch = 0.698131700f;
         m_camera.zoom = 1.0f;
-        m_camera.pan = {0.0f, 0.0f};
     }
 
-    void resetViewForModel(const RockFractureModel& model) {
-        m_camera.target = {
-            (model.boundsMin.x + model.boundsMax.x) * 0.5f,
-            (model.boundsMin.y + model.boundsMax.y) * 0.5f,
-            (model.boundsMin.z + model.boundsMax.z) * 0.5f,
-        };
-        m_camera.yaw = 0.785398163f;
-        m_camera.pitch = 0.615479708f;
-        const float spanX = model.boundsMax.x - model.boundsMin.x;
-        const float spanY = model.boundsMax.y - model.boundsMin.y;
-        const float spanZ = model.boundsMax.z - model.boundsMin.z;
-        const float maxSpan = std::max({spanX, spanY, spanZ, 1.0f});
-        m_camera.zoom = clampFloat(24.0f / maxSpan, 0.05f, 16.0f);
-        m_camera.pan = {0.0f, 0.0f};
-    }
+    void resetViewForModel(const RockFractureModel& model);
+
+    void initGpu();
+    void shutdownGpu();
+    void invalidateGpuMeshCache();
 
 private:
     RockFractureCamera m_camera;
     RockFractureShading m_shading;
+    RockMeshGpuRenderer m_gpuMesh;
+    std::uint64_t m_gpuMeshRevision = 0;
 };
 
 } // namespace render_playground

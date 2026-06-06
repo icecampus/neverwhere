@@ -104,16 +104,18 @@ void applyCliffSceneDefaults(RockFractureSettings& settings) {
     settings.mode = GenerationMode::CliffScene;
     settings.enableBlockReplication = true;
     settings.scene.replicationMode = CliffReplicationMode::AllVerticalFaces;
-    settings.scene.surfaceBand = 6.0f;
-    settings.scene.gapFill = 0.06f;
+    settings.scene.surfaceBand = 8.0f;
+    settings.scene.protrusionMargin = 2.0f;
+    settings.scene.gapFill = 0.0f;
     if (settings.scene.mcResolution < 32) {
-        settings.scene.mcResolution = 120;
+        settings.scene.mcResolution = 140;
     }
     const int sceneMc = settings.scene.mcResolution;
     applyPaperTilePreset(settings);
-    settings.blockSmoothingRadius = 0.12;
-    settings.bvhTransitionRadius = 0.35;
-    settings.fractureInflate = 3.5f;
+    settings.poissonRadius = 0.38f;
+    settings.blockSmoothingRadius = 0.06;
+    settings.bvhTransitionRadius = 0.22;
+    settings.fractureInflate = 4.5f;
     settings.scene.mcResolution = sceneMc;
     settings.mcResolution = sceneMc;
 }

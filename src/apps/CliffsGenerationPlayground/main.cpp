@@ -218,7 +218,8 @@ void drawCliffSceneControls() {
     }
 
     if (ImGui::SliderInt("Scene MC resolution", &g_settings.scene.mcResolution, 32, 160)) g_rebuildRequested = true;
-    if (ImGui::SliderFloat("Block face band", &g_settings.scene.surfaceBand, 0.5f, 6.0f)) g_rebuildRequested = true;
+    if (ImGui::SliderFloat("Block face band", &g_settings.scene.surfaceBand, 0.5f, 12.0f)) g_rebuildRequested = true;
+    if (ImGui::SliderFloat("Protrusion margin", &g_settings.scene.protrusionMargin, 0.0f, 4.0f)) g_rebuildRequested = true;
     if (ImGui::SliderFloat("Gap fill", &g_settings.scene.gapFill, 0.0f, 0.3f)) g_rebuildRequested = true;
 
     ImGui::Separator();
@@ -435,6 +436,7 @@ void init() {
     spdlog::info("CliffsGenerationPlayground: simgui_setup() done, max_vertices=8M");
 
     render_playground::applyCliffSceneDefaults(g_settings);
+    g_renderer.initGpu();
     spdlog::info("CliffsGenerationPlayground: defaults cliff scene, replication={}, scene MC={}",
         g_settings.enableBlockReplication ? "on" : "off",
         g_settings.scene.mcResolution);
@@ -517,6 +519,7 @@ void frame() {
 
 void cleanup() {
     spdlog::info("CliffsGenerationPlayground: cleanup()");
+    g_renderer.shutdownGpu();
     if (g_state.imguiOk) {
         simgui_shutdown();
         g_state.imguiOk = false;
