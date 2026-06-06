@@ -270,6 +270,7 @@ void RockFractureScene::rebuild(const RockFractureSettings& settings) {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_model = std::move(model);
+        m_modelRevision.fetch_add(1, std::memory_order_release);
     }
 
     spdlog::info(

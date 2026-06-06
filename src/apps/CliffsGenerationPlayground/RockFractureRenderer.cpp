@@ -129,6 +129,47 @@ void enqueueWorldGrid(const EnqueueFn& enqueue, const Vec3& target, const Vec3& 
     pushLine({0.0f, 0.0f, 0.0f}, {0.0f, extent * 0.45f, 0.0f}, IM_COL32(118, 210, 118, 235), 1.8f);
 }
 
+struct WorldGridParams {
+    float extent = 20.0f;
+    float cellSize = 1.0f;
+    int majorEvery = 5;
+};
+
+// Match grid footprint to generated mesh; fixed ±24 m was too small for fracture radii up to ~15 m.
+WorldGridParams computeWorldGridParams(const RockFractureModel& model) {
+    constexpr float kMinExtent = 16.0f;
+    constexpr float kPadding = 1.25f;
+    constexpr int kMajorEvery = 5;
+
+    auto roundUpToCell = [](float halfExtent, float cellSize) {
+        return std::max(kMinExtent, std::ceil(halfExtent / cellSize) * cellSize);
+    };
+
+    float halfFootprint = 10.0f; // default tile half-size (tileSize=20)
+    if (!model.meshVertices.empty()) {
+        float minX = model.meshVertices[0].x;
+        float maxX = minX;
+        float minZ = model.meshVertices[0].z;
+        float maxZ = minZ;
+        for (const Vec3& v : model.meshVertices) {
+            minX = std::min(minX, v.x);
+            maxX = std::max(maxX, v.x);
+            minZ = std::min(minZ, v.z);
+            maxZ = std::max(maxZ, v.z);
+        }
+        halfFootprint = std::max(
+            std::max(std::abs(minX), std::abs(maxX)),
+            std::max(std::abs(minZ), std::abs(maxZ)));
+    }
+
+    float cellSize = 1.0f;
+    if (halfFootprint > 35.0f) cellSize = 2.0f;
+    if (halfFootprint > 70.0f) cellSize = 5.0f;
+
+    const float extent = roundUpToCell(halfFootprint * kPadding, cellSize);
+    return {extent, cellSize, kMajorEvery};
+}
+
 inline Vec3 triNormal(const Vec3& a, const Vec3& b, const Vec3& c) {
     const Vec3 e0 = subVec(b, a);
     const Vec3 e1 = subVec(c, a);
@@ -296,15 +337,15 @@ void RockFractureRenderer::drawMeshView(const RockFractureModel& model, const Im
 
     std::vector<SceneDrawItem> drawItems;
     if (m_shading.showWorldGrid) {
-        constexpr float kGridExtent = 24.0f;
-        constexpr float kGridCell = 1.0f;
-        constexpr int kGridMajorEvery = 5;
+        const WorldGridParams grid = computeWorldGridParams(model);
         enqueueWorldGrid(
             [&](const SceneDrawItem& item) { drawItems.push_back(item); },
-            m_camera.target, basis.forward, kGridExtent, kGridCell, kGridMajorEvery);
+            m_camera.target, basis.forward, grid.extent, grid.cellSize, grid.majorEvery);
     }
 
-    const int triCount = model.triangleCount;
+    const int triCount = model.meshIndices.size() >= 3
+        ? static_cast<int>(model.meshIndices.size() / 3)
+        : 0;
     drawItems.reserve(drawItems.size() + (std::size_t)std::max(0, triCount));
     for (int i = 0; i < triCount; i++) {
         const std::uint32_t i0 = model.meshIndices[(std::size_t)i * 3 + 0];

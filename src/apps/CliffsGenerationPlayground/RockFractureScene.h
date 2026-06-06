@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <utility>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -74,7 +75,14 @@ public:
     double buildElapsedSeconds() const;
     const char* buildStage() const;
 
-    const RockFractureModel& model() const { return m_model; }
+    // Call fn while holding the model mutex — required for any mesh/samples read during render.
+    template<typename Fn>
+    void withModel(Fn&& fn) const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        fn(m_model);
+    }
+
+    std::uint64_t modelRevision() const { return m_modelRevision.load(std::memory_order_acquire); }
     RockFractureKind kind() const { return m_pendingKind; }
     int seed() const { return m_pendingSeed; }
 
@@ -83,8 +91,9 @@ public:
     static void sanitize(RockFractureSettings& settings);
 
 private:
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     RockFractureModel m_model;
+    std::atomic<std::uint64_t> m_modelRevision{0};
     RockFractureKind m_pendingKind = RockFractureKind::Equidimensional;
     int m_pendingSeed = 1234;
     std::atomic<bool> m_isBuilding{false};

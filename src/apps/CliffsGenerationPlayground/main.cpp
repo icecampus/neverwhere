@@ -169,9 +169,8 @@ void drawShadingControls() {
     if (ImGui::SliderFloat ("Fog",           &s.fogStrength,       0.0f,  1.0f)) {}
 }
 
-void drawStats() {
+void drawStats(const render_playground::RockFractureModel& m) {
     if (!ImGui::CollapsingHeader("Stats", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    const auto& m = g_scene.model();
     ImGui::Text("Frame: %d (%.2f ms)", g_state.frameIndex, 1000.0f * g_state.dt);
     if (g_scene.isBuilding()) {
         const double elapsed = g_scene.buildElapsedSeconds();
@@ -222,7 +221,9 @@ void drawUi() {
     ImGui::BeginChild("##controlPanel", ImVec2(leftPanelWidth, fullHeight), true);
     drawSceneControls();
     drawShadingControls();
-    drawStats();
+    g_scene.withModel([&](const render_playground::RockFractureModel& model) {
+        drawStats(model);
+    });
     ImGui::EndChild();
 
     ImGui::SetCursorScreenPos(ImVec2(rightX, viewport->WorkPos.y));
@@ -231,33 +232,35 @@ void drawUi() {
     const double buildElapsed = g_scene.buildElapsedSeconds();
     const char* buildStage = g_scene.buildStage();
 
-    if (g_showDebugView && g_showMeshView) {
-        float debugHeight = clampDebugViewHeight(g_debugViewHeightRatio * fullHeight, fullHeight);
-        const ImVec2 debugSize(rightWidth, debugHeight);
-        ImGui::BeginChild("##debugView", debugSize, true);
-        g_renderer.drawDebugView(g_scene.model(), debugSize, building, buildElapsed, buildStage);
-        ImGui::EndChild();
+    g_scene.withModel([&](const render_playground::RockFractureModel& model) {
+        if (g_showDebugView && g_showMeshView) {
+            float debugHeight = clampDebugViewHeight(g_debugViewHeightRatio * fullHeight, fullHeight);
+            const ImVec2 debugSize(rightWidth, debugHeight);
+            ImGui::BeginChild("##debugView", debugSize, true);
+            g_renderer.drawDebugView(model, debugSize, building, buildElapsed, buildStage);
+            ImGui::EndChild();
 
-        const float splitterY = viewport->WorkPos.y + debugHeight;
-        drawVerticalSplitter("##debugMeshSplitter", rightX, splitterY, rightWidth, fullHeight, debugHeight);
+            const float splitterY = viewport->WorkPos.y + debugHeight;
+            drawVerticalSplitter("##debugMeshSplitter", rightX, splitterY, rightWidth, fullHeight, debugHeight);
 
-        ImGui::SetCursorScreenPos(ImVec2(rightX, splitterY + kDebugMeshSplitterHeight));
-        const float meshHeight = std::max(1.0f, fullHeight - debugHeight - kDebugMeshSplitterHeight);
-        const ImVec2 meshSize(rightWidth, meshHeight);
-        ImGui::BeginChild("##meshView", meshSize, true);
-        g_renderer.drawMeshView(g_scene.model(), meshSize, building, buildElapsed, buildStage);
-        ImGui::EndChild();
-    } else if (g_showMeshView) {
-        const ImVec2 meshSize(rightWidth, fullHeight);
-        ImGui::BeginChild("##meshView", meshSize, true);
-        g_renderer.drawMeshView(g_scene.model(), meshSize, building, buildElapsed, buildStage);
-        ImGui::EndChild();
-    } else if (g_showDebugView) {
-        const ImVec2 debugSize(rightWidth, fullHeight);
-        ImGui::BeginChild("##debugView", debugSize, true);
-        g_renderer.drawDebugView(g_scene.model(), debugSize, building, buildElapsed, buildStage);
-        ImGui::EndChild();
-    }
+            ImGui::SetCursorScreenPos(ImVec2(rightX, splitterY + kDebugMeshSplitterHeight));
+            const float meshHeight = std::max(1.0f, fullHeight - debugHeight - kDebugMeshSplitterHeight);
+            const ImVec2 meshSize(rightWidth, meshHeight);
+            ImGui::BeginChild("##meshView", meshSize, true);
+            g_renderer.drawMeshView(model, meshSize, building, buildElapsed, buildStage);
+            ImGui::EndChild();
+        } else if (g_showMeshView) {
+            const ImVec2 meshSize(rightWidth, fullHeight);
+            ImGui::BeginChild("##meshView", meshSize, true);
+            g_renderer.drawMeshView(model, meshSize, building, buildElapsed, buildStage);
+            ImGui::EndChild();
+        } else if (g_showDebugView) {
+            const ImVec2 debugSize(rightWidth, fullHeight);
+            ImGui::BeginChild("##debugView", debugSize, true);
+            g_renderer.drawDebugView(model, debugSize, building, buildElapsed, buildStage);
+            ImGui::EndChild();
+        }
+    });
 
     ImGui::End();
 }
@@ -299,12 +302,13 @@ void frame() {
 
     // Periodic status heartbeat (every 60 frames ≈ 1s) for visibility.
     if (g_state.frameIndex % 60 == 0) {
-        const auto& m = g_scene.model();
-        spdlog::info(
-            "frame: idx={} building={} stage={} elapsed={:.1f}s | model: tri={} v={} buildSec={:.2f}",
-            g_state.frameIndex, g_scene.isBuilding() ? "yes" : "no",
-            g_scene.buildStage(), g_scene.buildElapsedSeconds(),
-            m.triangleCount, m.vertexCount, m.buildSeconds);
+        g_scene.withModel([&](const render_playground::RockFractureModel& m) {
+            spdlog::info(
+                "frame: idx={} building={} stage={} elapsed={:.1f}s | model: tri={} v={} buildSec={:.2f}",
+                g_state.frameIndex, g_scene.isBuilding() ? "yes" : "no",
+                g_scene.buildStage(), g_scene.buildElapsedSeconds(),
+                m.triangleCount, m.vertexCount, m.buildSeconds);
+        });
     }
 
     if (!g_state.gfxOk) return;
