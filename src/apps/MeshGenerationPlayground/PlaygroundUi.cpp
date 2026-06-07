@@ -455,8 +455,13 @@ void drawSingleQuadLabControls(float panelWidth) {
                 &g_singleQuadLabSettings.extrudeTopHeightSpread,
                 0.0f,
                 1.0f);
-            changed |= panel.inputInt("Height Seed", &g_singleQuadLabSettings.extrudeHeightSeed);
-            if (ImGui::Button("Reseed Top Heights")) {
+            changed |= panel.sliderFloat(
+                "Top Scale Spread",
+                &g_singleQuadLabSettings.extrudeTopScaleSpread,
+                0.0f,
+                1.0f);
+            changed |= panel.inputInt("Extrude Seed", &g_singleQuadLabSettings.extrudeHeightSeed);
+            if (ImGui::Button("Reseed Extrude")) {
                 ++g_singleQuadLabSettings.extrudeHeightSeed;
                 changed = true;
             }
@@ -464,7 +469,8 @@ void drawSingleQuadLabControls(float panelWidth) {
             ImGui::TextDisabled("(?)");
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
-                    "Each top corner extrudes along the face normal by depth * random(1-spread, 1+spread).");
+                    "Per top corner: height uses depth * random(1-hSpread, 1+hSpread), "
+                    "pinch scale uses topScale * random(1-sSpread, 1+sSpread).");
             }
         }
 

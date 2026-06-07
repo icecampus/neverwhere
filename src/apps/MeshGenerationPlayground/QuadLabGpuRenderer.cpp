@@ -1,6 +1,7 @@
 #include "QuadLabGpuRenderer.h"
 
 #include "MeshPreview.h"
+#include "PlaygroundTypes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -284,14 +285,47 @@ bool QuadLabGpuRenderer::render(
     lineVertices.reserve(quads.size() * 8);
 
     const glm::vec4 wireColor(0.08f, 0.08f, 0.08f, 0.85f);
+    const auto pushTriangle = [&](const Vec3& p0, const Vec3& p1, const Vec3& p2, const Vec3& normal, const glm::vec4& color) {
+        pushTriangleVertex(triangleVertices, p0, normal, color);
+        pushTriangleVertex(triangleVertices, p1, normal, color);
+        pushTriangleVertex(triangleVertices, p2, normal, color);
+    };
+    const auto pushOrientedTriangle = [&](
+        const Vec3& p0,
+        const Vec3& p1,
+        const Vec3& p2,
+        const Vec3& outward,
+        const glm::vec4& color) {
+        pushTriangle(p0, p1, p2, meshTriangleNormalOriented(p0, p1, p2, outward), color);
+    };
+    const auto pushTriangleEdgeLines = [&](const Vec3& p0, const Vec3& p1, const Vec3& p2) {
+        pushLineVertex(lineVertices, p0, wireColor);
+        pushLineVertex(lineVertices, p1, wireColor);
+        pushLineVertex(lineVertices, p1, wireColor);
+        pushLineVertex(lineVertices, p2, wireColor);
+        pushLineVertex(lineVertices, p2, wireColor);
+        pushLineVertex(lineVertices, p0, wireColor);
+    };
+
     for (const MeshQuad& quad : quads) {
         const glm::vec4 faceColor = imguiColorToGlm(quad.color);
-        pushTriangleVertex(triangleVertices, quad.a, quad.normal, faceColor);
-        pushTriangleVertex(triangleVertices, quad.b, quad.normal, faceColor);
-        pushTriangleVertex(triangleVertices, quad.c, quad.normal, faceColor);
-        pushTriangleVertex(triangleVertices, quad.a, quad.normal, faceColor);
-        pushTriangleVertex(triangleVertices, quad.c, quad.normal, faceColor);
-        pushTriangleVertex(triangleVertices, quad.d, quad.normal, faceColor);
+        const Vec3 outward = meshTriangleNormalOriented(quad.a, quad.b, quad.c, quad.normal);
+
+        if (meshQuadIsTrianglePanel(quad)) {
+            pushOrientedTriangle(quad.a, quad.b, quad.c, outward, faceColor);
+            if (options.showWireframe) {
+                pushTriangleEdgeLines(quad.a, quad.b, quad.c);
+            }
+            continue;
+        }
+
+        if (meshQuadPreferAcDiagonal(quad.a, quad.b, quad.c, quad.d, outward)) {
+            pushOrientedTriangle(quad.a, quad.b, quad.c, outward, faceColor);
+            pushOrientedTriangle(quad.a, quad.c, quad.d, outward, faceColor);
+        } else {
+            pushOrientedTriangle(quad.a, quad.b, quad.d, outward, faceColor);
+            pushOrientedTriangle(quad.b, quad.c, quad.d, outward, faceColor);
+        }
 
         if (options.showWireframe) {
             pushLineVertex(lineVertices, quad.a, wireColor);

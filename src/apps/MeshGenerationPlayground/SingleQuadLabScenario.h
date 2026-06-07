@@ -21,9 +21,10 @@ struct SingleQuadLabSettings {
     float centerZ = 0.0f;
 
     QuadLabOperation operation = QuadLabOperation::Extrude;
-    float extrudeDepth = 0.25f;
-    float extrudeTopScale = 0.9f;
-    float extrudeTopHeightSpread = 0.0f;
+    float extrudeDepth = 0.218f;
+    float extrudeTopScale = 0.644f;
+    float extrudeTopHeightSpread = 0.892f;
+    float extrudeTopScaleSpread = 0.322f;
     int extrudeHeightSeed = 1337;
 
     bool showWireframe = true;

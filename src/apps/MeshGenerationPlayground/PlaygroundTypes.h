@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -156,6 +157,145 @@ inline float meshQuadDepth(const MeshQuad& quad) {
     const float y = (quad.a.y + quad.b.y + quad.c.y + quad.d.y) * 0.25f;
     const float z = (quad.a.z + quad.b.z + quad.c.z + quad.d.z) * 0.25f;
     return x + z - y * 0.25f;
+}
+
+inline bool meshQuadIsTrianglePanel(const MeshQuad& quad) {
+    const float dx = quad.c.x - quad.d.x;
+    const float dy = quad.c.y - quad.d.y;
+    const float dz = quad.c.z - quad.d.z;
+    return dx * dx + dy * dy + dz * dz <= 1e-8f;
+}
+
+inline Vec3 meshTriangleNormalRaw(const Vec3& a, const Vec3& b, const Vec3& c) {
+    const float abx = b.x - a.x;
+    const float aby = b.y - a.y;
+    const float abz = b.z - a.z;
+    const float acx = c.x - a.x;
+    const float acy = c.y - a.y;
+    const float acz = c.z - a.z;
+    return {
+        aby * acz - abz * acy,
+        abz * acx - abx * acz,
+        abx * acy - aby * acx,
+    };
+}
+
+inline Vec3 meshTriangleNormalOriented(
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& outward) {
+    Vec3 normal = meshTriangleNormalRaw(a, b, c);
+    const float lengthSq = normal.x * normal.x + normal.y * normal.y + normal.z * normal.z;
+    if (lengthSq <= 1e-8f) {
+        return outward;
+    }
+    const float invLength = 1.0f / std::sqrt(lengthSq);
+    normal.x *= invLength;
+    normal.y *= invLength;
+    normal.z *= invLength;
+    if (normal.x * outward.x + normal.y * outward.y + normal.z * outward.z < 0.0f) {
+        normal.x = -normal.x;
+        normal.y = -normal.y;
+        normal.z = -normal.z;
+    }
+    return normal;
+}
+
+inline bool meshQuadIsAcDiagonalCornerPair(int lhs, int rhs) {
+    return (lhs == 0 && rhs == 2) || (lhs == 2 && rhs == 0);
+}
+
+inline bool meshQuadIsBdDiagonalCornerPair(int lhs, int rhs) {
+    return (lhs == 1 && rhs == 3) || (lhs == 3 && rhs == 1);
+}
+
+inline void meshQuadFindTwoExtremeCornerIndices(const float heights[4], bool highest, int outIndices[2]) {
+    int first = 0;
+    int second = 1;
+    if (heights[1] > heights[first]) {
+        first = 1;
+        second = 0;
+    }
+    if (heights[2] > heights[first]) {
+        second = first;
+        first = 2;
+    } else if (heights[2] > heights[second]) {
+        second = 2;
+    }
+    if (heights[3] > heights[first]) {
+        second = first;
+        first = 3;
+    } else if (heights[3] > heights[second]) {
+        second = 3;
+    }
+
+    if (highest) {
+        outIndices[0] = first;
+        outIndices[1] = second;
+        return;
+    }
+
+    int minFirst = 0;
+    int minSecond = 1;
+    if (heights[1] < heights[minFirst]) {
+        minFirst = 1;
+        minSecond = 0;
+    }
+    if (heights[2] < heights[minFirst]) {
+        minSecond = minFirst;
+        minFirst = 2;
+    } else if (heights[2] < heights[minSecond]) {
+        minSecond = 2;
+    }
+    if (heights[3] < heights[minFirst]) {
+        minSecond = minFirst;
+        minFirst = 3;
+    } else if (heights[3] < heights[minSecond]) {
+        minSecond = 3;
+    }
+    outIndices[0] = minFirst;
+    outIndices[1] = minSecond;
+}
+
+inline bool meshQuadPreferAcDiagonalFromHeights(const float heights[4]) {
+    int extremeIndices[2];
+    meshQuadFindTwoExtremeCornerIndices(heights, true, extremeIndices);
+    if (meshQuadIsAcDiagonalCornerPair(extremeIndices[0], extremeIndices[1])) {
+        return true;
+    }
+    if (meshQuadIsBdDiagonalCornerPair(extremeIndices[0], extremeIndices[1])) {
+        return false;
+    }
+
+    int lowIndices[2];
+    meshQuadFindTwoExtremeCornerIndices(heights, false, lowIndices);
+    if (meshQuadIsAcDiagonalCornerPair(lowIndices[0], lowIndices[1])) {
+        return true;
+    }
+    if (meshQuadIsBdDiagonalCornerPair(lowIndices[0], lowIndices[1])) {
+        return false;
+    }
+
+    return heights[0] + heights[2] >= heights[1] + heights[3];
+}
+
+inline bool meshQuadPreferAcDiagonal(
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d,
+    const Vec3& outward) {
+    const float centerX = (a.x + b.x + c.x + d.x) * 0.25f;
+    const float centerY = (a.y + b.y + c.y + d.y) * 0.25f;
+    const float centerZ = (a.z + b.z + c.z + d.z) * 0.25f;
+    const float heights[4] = {
+        (a.x - centerX) * outward.x + (a.y - centerY) * outward.y + (a.z - centerZ) * outward.z,
+        (b.x - centerX) * outward.x + (b.y - centerY) * outward.y + (b.z - centerZ) * outward.z,
+        (c.x - centerX) * outward.x + (c.y - centerY) * outward.y + (c.z - centerZ) * outward.z,
+        (d.x - centerX) * outward.x + (d.y - centerY) * outward.y + (d.z - centerZ) * outward.z,
+    };
+    return meshQuadPreferAcDiagonalFromHeights(heights);
 }
 
 } // namespace meshgen_playground

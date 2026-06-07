@@ -145,6 +145,7 @@ MeshQuad orientedSideQuad(
         areaNormal = scaleVec(areaNormal, -1.0f);
     }
     side.normal = normalizeVec(areaNormal, source.normal);
+    side.outwardHint = side.normal;
     side.depth = meshQuadDepth(side);
     return side;
 }
@@ -157,6 +158,20 @@ float cornerExtrudeDepth(float baseDepth, float heightSpread, std::mt19937& rng)
     return baseDepth * heightFactor(rng);
 }
 
+float cornerExtrudeScale(float baseScale, float scaleSpread, std::mt19937& rng) {
+    if (scaleSpread <= 0.0001f) {
+        return baseScale;
+    }
+    std::uniform_real_distribution<float> scaleFactor(1.0f - scaleSpread, 1.0f + scaleSpread);
+    return clampFloat(baseScale * scaleFactor(rng), 0.01f, 1.0f);
+}
+
+Vec3 projectOntoPlane(const Vec3& point, const Vec3& planeOrigin, const Vec3& planeNormal) {
+    const Vec3 offset = subtractVec(point, planeOrigin);
+    const float alongNormal = dotVec(offset, planeNormal);
+    return subtractVec(point, scaleVec(planeNormal, alongNormal));
+}
+
 Vec3 liftCorner(
     const Vec3& corner,
     const Vec3& center,
@@ -166,6 +181,103 @@ Vec3 liftCorner(
     return addVec(pinchCornerTowardCenter(corner, center, topScale), scaleVec(extrudeDir, liftDepth));
 }
 
+MeshQuad makeTrianglePanel(
+    const Vec3& p0,
+    const Vec3& p1,
+    const Vec3& p2,
+    const Vec3& outwardDir,
+    ImU32 color,
+    const MeshQuad& source) {
+    MeshQuad tri = source;
+    tri.a = p0;
+    tri.b = p1;
+    tri.c = p2;
+    tri.d = p2;
+    tri.color = color;
+
+    Vec3 normal = crossVec(subtractVec(p1, p0), subtractVec(p2, p0));
+    normal = normalizeVec(normal, outwardDir);
+    if (dotVec(normal, outwardDir) < 0.0f) {
+        tri.b = p2;
+        tri.c = p1;
+        normal = scaleVec(normal, -1.0f);
+        normal = normalizeVec(normal, outwardDir);
+    }
+    tri.normal = normal;
+    tri.depth = meshQuadDepth(tri);
+    return tri;
+}
+
+void appendConvexTopCap(
+    std::vector<MeshQuad>& out,
+    const Vec3& topA,
+    const Vec3& topB,
+    const Vec3& topC,
+    const Vec3& topD,
+    const Vec3& referenceCenter,
+    const Vec3& extrudeDir,
+    ImU32 color,
+    const MeshQuad& source) {
+    const auto heightAlongExtrude = [&](const Vec3& point) {
+        const Vec3 delta = subtractVec(point, referenceCenter);
+        return dotVec(delta, extrudeDir);
+    };
+    const float topHeights[4] = {
+        heightAlongExtrude(topA),
+        heightAlongExtrude(topB),
+        heightAlongExtrude(topC),
+        heightAlongExtrude(topD),
+    };
+
+    if (meshQuadPreferAcDiagonalFromHeights(topHeights)) {
+        out.push_back(makeTrianglePanel(topA, topB, topC, extrudeDir, color, source));
+        out.push_back(makeTrianglePanel(topA, topC, topD, extrudeDir, color, source));
+    } else {
+        out.push_back(makeTrianglePanel(topA, topB, topD, extrudeDir, color, source));
+        out.push_back(makeTrianglePanel(topB, topC, topD, extrudeDir, color, source));
+    }
+}
+
+bool assignTopCapCornersFromPanels(
+    const MeshQuad& baseQuad,
+    const MeshQuad& topTri0,
+    const MeshQuad& topTri1,
+    Vec3& outA,
+    Vec3& outB,
+    Vec3& outC,
+    Vec3& outD) {
+    const Vec3 center = quadCentroid(baseQuad);
+    const Vec3 extrudeDir = normalizeVec(baseQuad.normal, baseQuad.outwardHint);
+    const Vec3 baseCorners[4] = {baseQuad.a, baseQuad.b, baseQuad.c, baseQuad.d};
+    const Vec3 candidates[6] = {topTri0.a, topTri0.b, topTri0.c, topTri1.a, topTri1.b, topTri1.c};
+    bool used[6] = {};
+
+    Vec3* outputs[4] = {&outA, &outB, &outC, &outD};
+    for (int cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
+        const Vec3 baseFlat = projectOntoPlane(baseCorners[cornerIndex], center, extrudeDir);
+        int bestCandidate = -1;
+        float bestScore = -1.0f;
+        for (int candidateIndex = 0; candidateIndex < 6; candidateIndex++) {
+            if (used[candidateIndex]) {
+                continue;
+            }
+            const Vec3 candidateFlat = projectOntoPlane(candidates[candidateIndex], center, extrudeDir);
+            const Vec3 delta = subtractVec(candidateFlat, baseFlat);
+            const float score = -dotVec(delta, delta);
+            if (score > bestScore) {
+                bestScore = score;
+                bestCandidate = candidateIndex;
+            }
+        }
+        if (bestCandidate < 0) {
+            return false;
+        }
+        used[bestCandidate] = true;
+        *outputs[cornerIndex] = candidates[bestCandidate];
+    }
+    return true;
+}
+
 void appendExtrudedQuad(
     std::vector<MeshQuad>& out,
     const MeshQuad& quad,
@@ -173,6 +285,7 @@ void appendExtrudedQuad(
     float depth,
     float topCornerScale,
     float topHeightSpread,
+    float topScaleSpread,
     int heightSeed,
     bool colorizeFaces) {
 
@@ -185,17 +298,23 @@ void appendExtrudedQuad(
     const Vec3 center = quadCentroid(quad);
     const float topScale = clampFloat(topCornerScale, 0.01f, 1.0f);
     const float heightSpread = clampFloat(topHeightSpread, 0.0f, 1.0f);
+    const float scaleSpread = clampFloat(topScaleSpread, 0.0f, 1.0f);
 
     std::mt19937 heightRng((unsigned)heightSeed * 2654435761u + 424242u);
+    std::mt19937 scaleRng((unsigned)heightSeed * 2654435761u + 818181u);
     const float liftDepthA = cornerExtrudeDepth(depth, heightSpread, heightRng);
     const float liftDepthB = cornerExtrudeDepth(depth, heightSpread, heightRng);
     const float liftDepthC = cornerExtrudeDepth(depth, heightSpread, heightRng);
     const float liftDepthD = cornerExtrudeDepth(depth, heightSpread, heightRng);
+    const float cornerScaleA = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
+    const float cornerScaleB = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
+    const float cornerScaleC = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
+    const float cornerScaleD = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
 
-    const Vec3 topA = liftCorner(quad.a, center, topScale, extrudeDir, liftDepthA);
-    const Vec3 topB = liftCorner(quad.b, center, topScale, extrudeDir, liftDepthB);
-    const Vec3 topC = liftCorner(quad.c, center, topScale, extrudeDir, liftDepthC);
-    const Vec3 topD = liftCorner(quad.d, center, topScale, extrudeDir, liftDepthD);
+    const Vec3 topA = liftCorner(quad.a, center, cornerScaleA, extrudeDir, liftDepthA);
+    const Vec3 topB = liftCorner(quad.b, center, cornerScaleB, extrudeDir, liftDepthB);
+    const Vec3 topC = liftCorner(quad.c, center, cornerScaleC, extrudeDir, liftDepthC);
+    const Vec3 topD = liftCorner(quad.d, center, cornerScaleD, extrudeDir, liftDepthD);
 
     const ImU32 bottomColor = colorizeFaces ? IM_COL32(118, 126, 138, 255) : quad.color;
     const ImU32 topColor = colorizeFaces ? IM_COL32(168, 176, 188, 255) : quad.color;
@@ -209,19 +328,11 @@ void appendExtrudedQuad(
     MeshQuad bottom = quad;
     bottom.color = bottomColor;
     ensureOutwardWinding(bottom, extrudeDir);
+    bottom.outwardHint = bottom.normal;
     bottom.depth = meshQuadDepth(bottom);
     out.push_back(bottom);
 
-    MeshQuad top;
-    top = quad;
-    top.a = topA;
-    top.b = topB;
-    top.c = topC;
-    top.d = topD;
-    top.color = topColor;
-    ensureOutwardWinding(top, extrudeDir);
-    top.depth = meshQuadDepth(top);
-    out.push_back(top);
+    appendConvexTopCap(out, topA, topB, topC, topD, center, extrudeDir, topColor, quad);
 
     out.push_back(orientedSideQuad(quad.a, quad.b, topB, topA, center, quad, sideColors[0]));
     out.push_back(orientedSideQuad(quad.b, quad.c, topC, topB, center, quad, sideColors[1]));
@@ -247,6 +358,7 @@ void sanitizeSingleQuadLabSettings(SingleQuadLabSettings& settings) {
     settings.extrudeDepth = clampFloat(settings.extrudeDepth, 0.0f, 2.0f);
     settings.extrudeTopScale = clampFloat(settings.extrudeTopScale, 0.1f, 1.0f);
     settings.extrudeTopHeightSpread = clampFloat(settings.extrudeTopHeightSpread, 0.0f, 1.0f);
+    settings.extrudeTopScaleSpread = clampFloat(settings.extrudeTopScaleSpread, 0.0f, 1.0f);
 }
 
 void rebuildSingleQuadLabModel() {
@@ -264,6 +376,7 @@ void rebuildSingleQuadLabModel() {
             settings.extrudeDepth,
             settings.extrudeTopScale,
             settings.extrudeTopHeightSpread,
+            settings.extrudeTopScaleSpread,
             settings.extrudeHeightSeed,
             settings.colorizeFaces);
     } else {
@@ -279,12 +392,13 @@ void rebuildSingleQuadLabModel() {
     }
 
     spdlog::info(
-        "rebuildSingleQuadLabModel: operation={}, panels={}, extrudeDepth={:.3f}, topScale={:.3f}, heightSpread={:.3f}",
+        "rebuildSingleQuadLabModel: operation={}, panels={}, extrudeDepth={:.3f}, topScale={:.3f}, heightSpread={:.3f}, scaleSpread={:.3f}",
         settings.operation == QuadLabOperation::Extrude ? "extrude" : "flat",
         g_singleQuadLabModel.panelCount,
         settings.extrudeDepth,
         settings.extrudeTopScale,
-        settings.extrudeTopHeightSpread);
+        settings.extrudeTopHeightSpread,
+        settings.extrudeTopScaleSpread);
 }
 
 bool runSingleQuadLabSmokeTest() {
@@ -295,6 +409,7 @@ bool runSingleQuadLabSmokeTest() {
     testSettings.extrudeDepth = 0.25f;
     testSettings.extrudeTopScale = 0.9f;
     testSettings.extrudeTopHeightSpread = 0.35f;
+    testSettings.extrudeTopScaleSpread = 0.35f;
     testSettings.extrudeHeightSeed = 1337;
     g_singleQuadLabSettings = testSettings;
     rebuildSingleQuadLabModel();
@@ -302,23 +417,63 @@ bool runSingleQuadLabSmokeTest() {
     const int panelCount = g_singleQuadLabModel.panelCount;
     bool bowTieDetected = false;
     bool uniformTopHeights = true;
-    if (panelCount >= 2) {
+    bool uniformTopScales = true;
+    Vec3 topA;
+    Vec3 topB;
+    Vec3 topC;
+    Vec3 topD;
+    if (panelCount >= 3
+        && meshQuadIsTrianglePanel(g_singleQuadLabModel.quads[1])
+        && meshQuadIsTrianglePanel(g_singleQuadLabModel.quads[2])
+        && assignTopCapCornersFromPanels(
+            g_singleQuadLabModel.baseQuad,
+            g_singleQuadLabModel.quads[1],
+            g_singleQuadLabModel.quads[2],
+            topA,
+            topB,
+            topC,
+            topD)) {
         const MeshQuad& baseQuad = g_singleQuadLabModel.baseQuad;
-        const MeshQuad& topQuad = g_singleQuadLabModel.quads[1];
+        const Vec3 center = quadCentroid(baseQuad);
         const Vec3 extrudeDir = normalizeVec(baseQuad.normal, baseQuad.outwardHint);
         const auto liftAlongExtrude = [&](const Vec3& baseCorner, const Vec3& topCorner) {
             return dotVec(subtractVec(topCorner, baseCorner), extrudeDir);
         };
-        const float liftA = liftAlongExtrude(baseQuad.a, topQuad.a);
-        const float liftB = liftAlongExtrude(baseQuad.b, topQuad.b);
-        const float liftC = liftAlongExtrude(baseQuad.c, topQuad.c);
-        const float liftD = liftAlongExtrude(baseQuad.d, topQuad.d);
+        const auto pinchRatio = [&](const Vec3& baseCorner, const Vec3& topCorner) {
+            const Vec3 baseFlat = projectOntoPlane(baseCorner, center, extrudeDir);
+            const Vec3 topFlat = projectOntoPlane(topCorner, center, extrudeDir);
+            const Vec3 baseVec = subtractVec(baseFlat, center);
+            const Vec3 topVec = subtractVec(topFlat, center);
+            const float baseLenSq = dotVec(baseVec, baseVec);
+            const float topLenSq = dotVec(topVec, topVec);
+            if (baseLenSq <= 0.0001f) {
+                return 1.0f;
+            }
+            return std::sqrt(topLenSq / baseLenSq);
+        };
+
+        const float liftA = liftAlongExtrude(baseQuad.a, topA);
+        const float liftB = liftAlongExtrude(baseQuad.b, topB);
+        const float liftC = liftAlongExtrude(baseQuad.c, topC);
+        const float liftD = liftAlongExtrude(baseQuad.d, topD);
         uniformTopHeights =
             std::fabs(liftB - liftA) <= 0.0001f
             && std::fabs(liftC - liftA) <= 0.0001f
             && std::fabs(liftD - liftA) <= 0.0001f;
+
+        const float pinchA = pinchRatio(baseQuad.a, topA);
+        const float pinchB = pinchRatio(baseQuad.b, topB);
+        const float pinchC = pinchRatio(baseQuad.c, topC);
+        const float pinchD = pinchRatio(baseQuad.d, topD);
+        uniformTopScales =
+            std::fabs(pinchB - pinchA) <= 0.0001f
+            && std::fabs(pinchC - pinchA) <= 0.0001f
+            && std::fabs(pinchD - pinchA) <= 0.0001f;
     }
     for (const MeshQuad& quad : g_singleQuadLabModel.quads) {
+        if (meshQuadIsTrianglePanel(quad)) {
+            continue;
+        }
         const Vec3 diagonalAc = subtractVec(quad.c, quad.a);
         const Vec3 diagonalBd = subtractVec(quad.d, quad.b);
         if (dotVec(crossVec(diagonalAc, diagonalBd), quad.normal) < 0.0f) {
@@ -330,13 +485,14 @@ bool runSingleQuadLabSmokeTest() {
     g_singleQuadLabSettings = previousSettings;
     rebuildSingleQuadLabModel();
 
-    const bool ok = panelCount == 6 && !bowTieDetected && !uniformTopHeights;
+    const bool ok = panelCount == 7 && !bowTieDetected && !uniformTopHeights && !uniformTopScales;
     spdlog::info(
-        "{} single quad lab extrude: panels={}, bowTie={}, uniformTopHeights={}",
+        "{} single quad lab extrude: panels={}, bowTie={}, uniformTopHeights={}, uniformTopScales={}",
         ok ? "TEST PASS" : "TEST FAIL",
         panelCount,
         bowTieDetected,
-        uniformTopHeights);
+        uniformTopHeights,
+        uniformTopScales);
     return ok;
 }
 
