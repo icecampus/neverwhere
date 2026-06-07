@@ -1,7 +1,9 @@
 #include "PlaygroundSmokeTest.h"
 
 #include "MeshBridge.h"
+#include "MeshPreview.h"
 #include "PlaygroundState.h"
+#include "SingleQuadLabScenario.h"
 
 #include <algorithm>
 #include <cmath>
@@ -213,6 +215,9 @@ void scanWallGeometryIntegrity() {
 } // namespace
 
 bool runTestScenario() {
+    const bool singleQuadLabOk = runSingleQuadLabSmokeTest();
+    const bool quadLabGpuOk = warmupQuadLabGpuPreview();
+
     std::lock_guard<std::mutex> lock(g_modelMutex);
     scanWallGeometryIntegrity();
     const OutwardOrientationScan rectangleOrientation = scanModelOutwardOrientation(g_rectModel.meshQuads);
@@ -258,7 +263,7 @@ bool runTestScenario() {
         g_landscapeModel.topQuadCount > 0 &&
         g_landscapeModel.cliffWallQuadCount > 0 &&
         g_landscapeModel.beveledSegmentCount > 0;
-    if (rectangleOk && landscapeOk && outwardOk && litNormalsOk) {
+    if (rectangleOk && landscapeOk && outwardOk && litNormalsOk && singleQuadLabOk && quadLabGpuOk) {
         if (outwardWarn) {
             spdlog::warn(
                 "TEST WARN MeshGenerationPlayground outward orientation: rectangle fail/warn/minDot={}/{}/{:.4f}, landscape fail/warn/minDot={}/{}/{:.4f}",
@@ -298,11 +303,13 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, singleQuadLabOk={}, quadLabGpuOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
         outwardOk,
         litNormalsOk,
+        singleQuadLabOk,
+        quadLabGpuOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,
         g_rectModel.beveledSegmentCount,

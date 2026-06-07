@@ -6,6 +6,7 @@
 #include "PlaygroundUi.h"
 #include "PlaygroundVisualCapture.h"
 #include "RectangleCliffScenario.h"
+#include "SingleQuadLabScenario.h"
 
 #include <cstdint>
 #include <mutex>
@@ -111,6 +112,7 @@ void init() {
     spdlog::info("init: simgui_setup() done, imguiOk=true");
 
     initProductionPreviewTextures();
+    initQuadLabGpuPreview();
 #if defined(_WIN32) && defined(SOKOL_D3D11)
     {
         const sg_environment env = sglue_environment();
@@ -124,6 +126,8 @@ void init() {
     rebuildRectangleCliffModel();
     spdlog::info("init: calling rebuildLandscapeBowlModel()");
     rebuildLandscapeBowlModel();
+    spdlog::info("init: calling rebuildSingleQuadLabModel()");
+    rebuildSingleQuadLabModel();
     warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");

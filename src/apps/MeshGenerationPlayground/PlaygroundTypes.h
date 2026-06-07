@@ -76,6 +76,13 @@ struct MeshPreviewCamera {
     ImVec2 pan{0.0f, 0.0f};
 };
 
+struct QuadLabPreviewCamera {
+    float zoom = 1.0f;
+    ImVec2 pan{0.0f, 0.0f};
+    float orbitYawDegrees = 35.0f;
+    float orbitPitchDegrees = 28.0f;
+};
+
 enum class ProductionPreviewDebugMode : int {
     Lit = 0,
     Albedo = 1,

@@ -1,6 +1,7 @@
 ﻿#include "MeshPreview.h"
 
 #include "MeshBridge.h"
+#include "QuadLabGpuRenderer.h"
 #include "PlaygroundState.h"
 #include "PlaygroundVisualCapture.h"
 
@@ -49,6 +50,7 @@ struct ProductionTextureState {
 
 ProductionTextureState g_textures;
 render_core::MeshPreviewRenderer g_gpuPreviewRenderer;
+QuadLabGpuRenderer g_quadLabGpuRenderer;
 
 // ---- Throwaway test: 2D environment sprites placed on the 3D landscape ----
 struct EnvSprite {
@@ -390,6 +392,13 @@ ImVec2 gridPointToScreen(const ImVec2& origin, float cellSize, const Int2& point
 }
 
 ImVec2 meshProjectionAnchor(const ImVec2& origin, const ImVec2& canvasSize, const MeshPreviewCamera& camera) {
+    return {
+        origin.x + canvasSize.x * 0.5f + camera.pan.x,
+        origin.y + 130.0f + camera.pan.y,
+    };
+}
+
+ImVec2 meshProjectionAnchor(const ImVec2& origin, const ImVec2& canvasSize, const QuadLabPreviewCamera& camera) {
     return {
         origin.x + canvasSize.x * 0.5f + camera.pan.x,
         origin.y + 130.0f + camera.pan.y,
@@ -1241,6 +1250,44 @@ ImU32 colorForLandscapeZone(LandscapeZone zone, float height, float minHeight, f
 
 } // namespace
 
+void initQuadLabGpuPreview() {
+    g_quadLabGpuRenderer.init();
+    spdlog::info("initQuadLabGpuPreview: renderer initialized");
+}
+
+bool warmupQuadLabGpuPreview() {
+    MeshQuadsPreviewOptions options;
+    QuadLabPreviewCamera camera;
+    std::vector<MeshQuad> quads;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        options.projectionCenterX = g_singleQuadLabSettings.centerX;
+        options.projectionCenterY = g_singleQuadLabSettings.centerY;
+        options.projectionCenterZ = g_singleQuadLabSettings.centerZ;
+        options.showWireframe = g_singleQuadLabSettings.showWireframe;
+        camera = g_singleQuadLabCamera;
+        quads = g_singleQuadLabModel.quads;
+    }
+
+    const bool ok = g_quadLabGpuRenderer.render(quads, camera, options, 640, 360);
+    if (ok) {
+        sg_commit();
+    }
+
+    if (ok && g_quadLabGpuRenderer.validOutput()) {
+        spdlog::info(
+            "TEST PASS Quad Lab GPU preview warmup: panels={}, output=640x360",
+            quads.size());
+        return true;
+    }
+
+    spdlog::error(
+        "TEST FAIL Quad Lab GPU preview warmup: panels={}, outputValid={}",
+        quads.size(),
+        g_quadLabGpuRenderer.validOutput());
+    return false;
+}
+
 void initProductionPreviewTextures() {
     static constexpr std::uint8_t grassFallback[] = {
         88, 137, 73, 255, 108, 158, 86, 255,
@@ -1281,6 +1328,7 @@ void configureProductionPreviewGpuReadback(void* d3d11Device, void* d3d11Context
 }
 
 void shutdownProductionPreviewTextures() {
+    g_quadLabGpuRenderer.shutdown();
     g_gpuPreviewRenderer.shutdown();
     destroyTexture(g_textures.grass);
     destroyTexture(g_textures.rock);
@@ -1819,4 +1867,98 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
     }
     drawList->PopClipRect();
 }
+
+void drawMeshQuadsPreview(
+    const std::vector<MeshQuad>& quads,
+    QuadLabPreviewCamera& camera,
+    const MeshQuadsPreviewOptions& options,
+    const ImVec2& viewportSize) {
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##MeshQuadsViewport", viewportSize);
+    const bool hovered = ImGui::IsItemHovered();
+    ImGuiIO& io = ImGui::GetIO();
+    const bool leftDragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left);
+    const bool orbitDragging = leftDragging && io.KeyCtrl;
+    const bool panDragging = leftDragging && !io.KeyCtrl;
+
+    if (hovered && io.MouseWheel != 0.0f) {
+        const float previousZoom = camera.zoom;
+        const float nextZoom = clampFloat(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.35f, 12.0f);
+        if (nextZoom != previousZoom) {
+            const ImVec2 anchor = meshProjectionAnchor(origin, viewportSize, camera);
+            const ImVec2 mouseLocal{
+                io.MousePos.x - anchor.x,
+                io.MousePos.y - anchor.y,
+            };
+            const float zoomRatio = nextZoom / previousZoom;
+            camera.pan.x += mouseLocal.x * (1.0f - zoomRatio);
+            camera.pan.y += mouseLocal.y * (1.0f - zoomRatio);
+            camera.zoom = nextZoom;
+        }
+    }
+
+    if (panDragging) {
+        camera.pan.x += io.MouseDelta.x;
+        camera.pan.y += io.MouseDelta.y;
+    }
+
+    if (orbitDragging) {
+        camera.orbitYawDegrees += io.MouseDelta.x * 0.4f;
+        camera.orbitPitchDegrees -= io.MouseDelta.y * 0.4f;
+        camera.orbitPitchDegrees = clampFloat(camera.orbitPitchDegrees, -89.0f, 89.0f);
+    }
+
+    if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && io.KeyCtrl) {
+        camera.orbitYawDegrees = 35.0f;
+        camera.orbitPitchDegrees = 28.0f;
+    } else if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        camera.zoom = 1.0f;
+        camera.pan = {0.0f, 0.0f};
+    }
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(18, 21, 27, 255));
+    drawList->AddRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(70, 78, 92, 255));
+    drawList->PushClipRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, true);
+
+    const int renderWidth = (int)std::max(1.0f, viewportSize.x);
+    const int renderHeight = (int)std::max(1.0f, viewportSize.y);
+    const bool renderedWithGpu = g_quadLabGpuRenderer.render(quads, camera, options, renderWidth, renderHeight);
+
+    if (renderedWithGpu && g_quadLabGpuRenderer.validOutput()) {
+        drawList->AddImage(
+            textureId(g_quadLabGpuRenderer.outputView(), g_quadLabGpuRenderer.outputSampler()),
+            origin,
+            {origin.x + viewportSize.x, origin.y + viewportSize.y});
+    } else {
+        drawList->AddText(
+            {origin.x + 24.0f, origin.y + 48.0f},
+            IM_COL32(255, 96, 96, 255),
+            "Quad Lab GPU renderer failed. Check logs and restart after graphics init.");
+        static bool gpuFailLogged = false;
+        if (!gpuFailLogged) {
+            spdlog::error("drawMeshQuadsPreview: Quad Lab GPU render failed");
+            gpuFailLogged = true;
+        }
+    }
+
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Quad Lab: GPU mesh preview");
+    drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan | Ctrl+LMB drag: orbit | wheel: zoom");
+    drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), "Double-click LMB: reset pan/zoom | Ctrl+double-click LMB: reset orbit");
+    char cameraText[128];
+    snprintf(
+        cameraText,
+        sizeof(cameraText),
+        "Panels: %d | zoom: %.2fx | orbit: %.0f / %.0f | GPU depth",
+        (int)quads.size(),
+        camera.zoom,
+        camera.orbitYawDegrees,
+        camera.orbitPitchDegrees);
+    drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(150, 162, 180, 255), cameraText);
+
+    drawList->PopClipRect();
+    ImGui::Dummy(viewportSize);
+}
+
 } // namespace meshgen_playground

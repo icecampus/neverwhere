@@ -6,6 +6,7 @@
 #include "PlaygroundState.h"
 #include "PlaygroundVisualCapture.h"
 #include "RectangleCliffScenario.h"
+#include "SingleQuadLabScenario.h"
 
 #include <algorithm>
 #include <mutex>
@@ -353,6 +354,92 @@ void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
     }
 }
 
+void drawSingleQuadLabControls(float panelWidth) {
+    ImGui::PushItemWidth(panelWidth - 24.0f);
+    drawFrameStats();
+    ImGui::Separator();
+
+    ImGui::Text("Quad Lab");
+    ImGui::TextWrapped(
+        "Sandbox for learning mesh operations on a single quad. Start with extrude, then add more steps here.");
+
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        changed |= ImGui::SliderFloat("Quad Width", &g_singleQuadLabSettings.quadWidth, 0.1f, 4.0f);
+        changed |= ImGui::SliderFloat("Quad Height", &g_singleQuadLabSettings.quadHeight, 0.1f, 4.0f);
+        changed |= ImGui::SliderFloat("Yaw", &g_singleQuadLabSettings.yawDegrees, -180.0f, 180.0f);
+        changed |= ImGui::SliderFloat("Pitch", &g_singleQuadLabSettings.pitchDegrees, -89.0f, 89.0f);
+        changed |= ImGui::SliderFloat("Center X", &g_singleQuadLabSettings.centerX, -4.0f, 4.0f);
+        changed |= ImGui::SliderFloat("Center Y", &g_singleQuadLabSettings.centerY, -2.0f, 4.0f);
+        changed |= ImGui::SliderFloat("Center Z", &g_singleQuadLabSettings.centerZ, -4.0f, 4.0f);
+
+        int operation = (int)g_singleQuadLabSettings.operation;
+        changed |= ImGui::Combo(
+            "Operation",
+            &operation,
+            "Flat quad\0Extrude shell\0");
+        g_singleQuadLabSettings.operation = (QuadLabOperation)operation;
+
+        if (g_singleQuadLabSettings.operation == QuadLabOperation::Extrude) {
+            changed |= ImGui::SliderFloat("Extrude Depth", &g_singleQuadLabSettings.extrudeDepth, 0.0f, 2.0f);
+            changed |= ImGui::SliderFloat("Extrude Top Scale", &g_singleQuadLabSettings.extrudeTopScale, 0.1f, 1.0f);
+        }
+
+        changed |= ImGui::Checkbox("Colorize Faces", &g_singleQuadLabSettings.colorizeFaces);
+        ImGui::Checkbox("Show Wireframe", &g_singleQuadLabSettings.showWireframe);
+
+        ImGui::Separator();
+        ImGui::Text("Preview Camera");
+        ImGui::TextWrapped("GPU mesh preview with depth buffer. Ctrl+LMB drag: orbit. LMB drag: pan.");
+        ImGui::SliderFloat("Camera Yaw", &g_singleQuadLabCamera.orbitYawDegrees, -180.0f, 180.0f);
+        ImGui::SliderFloat("Camera Pitch", &g_singleQuadLabCamera.orbitPitchDegrees, -89.0f, 89.0f);
+        if (ImGui::Button("Reset Camera")) {
+            g_singleQuadLabCamera.zoom = 1.0f;
+            g_singleQuadLabCamera.pan = {0.0f, 0.0f};
+            g_singleQuadLabCamera.orbitYawDegrees = 35.0f;
+            g_singleQuadLabCamera.orbitPitchDegrees = 28.0f;
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Panels: %d", g_singleQuadLabModel.panelCount);
+        if (g_singleQuadLabSettings.operation == QuadLabOperation::Extrude && g_singleQuadLabSettings.extrudeDepth > 0.0001f) {
+            ImGui::TextColored(ImVec4(0.66f, 0.72f, 0.78f, 1.0f), "Gray = base/top, orange = sides");
+        }
+    }
+    if (changed) {
+        rebuildSingleQuadLabModel();
+    }
+    ImGui::PopItemWidth();
+}
+
+void drawSingleQuadLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawSingleQuadLabControls(leftPanelWidth);
+    ImGui::EndGroup();
+
+    MeshQuadsPreviewOptions previewOptions;
+    std::vector<MeshQuad> quads;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        previewOptions.projectionCenterX = g_singleQuadLabSettings.centerX;
+        previewOptions.projectionCenterY = g_singleQuadLabSettings.centerY;
+        previewOptions.projectionCenterZ = g_singleQuadLabSettings.centerZ;
+        previewOptions.showWireframe = g_singleQuadLabSettings.showWireframe;
+        quads = g_singleQuadLabModel.quads;
+    }
+
+    ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
+    drawMeshQuadsPreview(quads, g_singleQuadLabCamera, previewOptions, {rightWidth, layoutSize.y});
+}
+
 void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
     static float viewportTopFraction = 0.2f;
 
@@ -449,6 +536,14 @@ void drawUi() {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawLandscapeScenarioTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Quad Lab")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            drawSingleQuadLabTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
             ImGui::EndTabItem();
         }
