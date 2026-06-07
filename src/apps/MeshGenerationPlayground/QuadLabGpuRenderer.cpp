@@ -1,7 +1,10 @@
 #include "QuadLabGpuRenderer.h"
 
+#include "MeshBridge.h"
 #include "MeshPreview.h"
 #include "PlaygroundTypes.h"
+
+#include <landscape_mesh/landscape_mesh.h>
 
 #include <algorithm>
 #include <cmath>
@@ -179,6 +182,14 @@ void pushTriangleVertex(
     vertices.push_back(vertex);
 }
 
+Vec3 flatShadeNormalForQuad(const MeshQuad& quad) {
+    if (quad.cliffWall) {
+        const landscape_mesh::Vec3 lit = landscape_mesh::litWallNormal(toLandscapeMeshQuad(quad));
+        return {lit.x, lit.y, lit.z};
+    }
+    return quad.normal;
+}
+
 void pushLineVertex(
     std::vector<LineVertex>& vertices,
     const Vec3& position,
@@ -309,17 +320,28 @@ bool QuadLabGpuRenderer::render(
 
     for (const MeshQuad& quad : quads) {
         const glm::vec4 faceColor = imguiColorToGlm(quad.color);
+        const bool useFlatQuadShading = options.flatQuadShading || quad.cliffWall;
         const Vec3 outward = meshTriangleNormalOriented(quad.a, quad.b, quad.c, quad.normal);
 
         if (meshQuadIsTrianglePanel(quad)) {
-            pushOrientedTriangle(quad.a, quad.b, quad.c, outward, faceColor);
+            if (useFlatQuadShading) {
+                const Vec3 flatNormal = flatShadeNormalForQuad(quad);
+                pushTriangle(quad.a, quad.b, quad.c, flatNormal, faceColor);
+            } else {
+                pushOrientedTriangle(quad.a, quad.b, quad.c, outward, faceColor);
+            }
             if (options.showWireframe) {
                 pushTriangleEdgeLines(quad.a, quad.b, quad.c);
             }
             continue;
         }
 
-        if (meshQuadPreferAcDiagonal(quad.a, quad.b, quad.c, quad.d, outward)) {
+        if (useFlatQuadShading) {
+            const Vec3 flatNormal = flatShadeNormalForQuad(quad);
+            // Same triangulation as render_core::MeshPreviewRenderer (a-b-c + a-c-d).
+            pushTriangle(quad.a, quad.b, quad.c, flatNormal, faceColor);
+            pushTriangle(quad.a, quad.c, quad.d, flatNormal, faceColor);
+        } else if (meshQuadPreferAcDiagonal(quad.a, quad.b, quad.c, quad.d, outward)) {
             pushOrientedTriangle(quad.a, quad.b, quad.c, outward, faceColor);
             pushOrientedTriangle(quad.a, quad.c, quad.d, outward, faceColor);
         } else {

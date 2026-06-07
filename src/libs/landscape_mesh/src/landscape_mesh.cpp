@@ -1233,70 +1233,15 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
     const float wallMaxOffset = 0.7f * std::max(0.0001f, std::min(minHSpacing, vSpacing));
 
     for (const MeshBoundarySegment& segment : boundary.beveledSegments) {
-        const Vec3 topA{segment.a.x, request.topHeight, segment.a.z};
-        const Vec3 topB{segment.b.x, request.topHeight, segment.b.z};
-        const Vec3 bottomA{segment.a.x, request.baseHeight, segment.a.z};
-        const Vec3 bottomB{segment.b.x, request.baseHeight, segment.b.z};
-        const int vertexColumns = settings.wallHorizontalSubdivisions + 1;
-        const int vertexRows = settings.wallVerticalSubdivisions + 1;
-        std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
-        std::vector<Vec3> wallNormals((std::size_t)vertexColumns * (std::size_t)vertexRows);
-        std::vector<float> wallNoise;
-
-        for (int row = 0; row < vertexRows; row++) {
-            const float v = (float)row / (float)settings.wallVerticalSubdivisions;
-            const float topT = 1.0f - v;
-            const Vec3 rowA = lerp(bottomA, topA, topT);
-            const Vec3 rowB = lerp(bottomB, topB, topT);
-            for (int column = 0; column < vertexColumns; column++) {
-                const float u = (float)column / (float)settings.wallHorizontalSubdivisions;
-                const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
-                wallPoints[index] = lerp(rowA, rowB, u);
-                if (column == 0) {
-                    wallNormals[index] = segment.startNormal;
-                } else if (column == vertexColumns - 1) {
-                    wallNormals[index] = segment.endNormal;
-                } else {
-                    wallNormals[index] = segment.normal;
-                }
-            }
-        }
-
-        sampleRockNoiseBatch(rockNoise, settings, wallPoints, wallNoise);
-
-        for (int sy = 0; sy < settings.wallVerticalSubdivisions; sy++) {
-            const float v0 = (float)sy / (float)settings.wallVerticalSubdivisions;
-            const float v1 = (float)(sy + 1) / (float)settings.wallVerticalSubdivisions;
-            const float topT0 = 1.0f - v0;
-            const float topT1 = 1.0f - v1;
-            for (int sx = 0; sx < settings.wallHorizontalSubdivisions; sx++) {
-                const std::size_t i00 = (std::size_t)sy * (std::size_t)vertexColumns + (std::size_t)sx;
-                const std::size_t i10 = i00 + 1;
-                const std::size_t i01 = (std::size_t)(sy + 1) * (std::size_t)vertexColumns + (std::size_t)sx;
-                const std::size_t i11 = i01 + 1;
-
-                MeshQuad wall;
-                wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], request.fadeWallDisplacementAtBottom, wallMaxOffset);
-                wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], request.fadeWallDisplacementAtBottom, wallMaxOffset);
-                wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], request.fadeWallDisplacementAtBottom, wallMaxOffset);
-                wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], request.fadeWallDisplacementAtBottom, wallMaxOffset);
-                const Vec3 quadOutward = normalizeHorizontal(
-                    add(
-                        add(wallNormals[i00], wallNormals[i10]),
-                        add(wallNormals[i01], wallNormals[i11])),
-                    segment.normal);
-                wall.normal = displacedFaceNormal(
-                    wall.a, wall.b, wall.c, wall.d,
-                    wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],
-                    quadOutward);
-                const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
-                wall.relief = std::clamp(panelNoise, -1.0f, 1.0f);
-                wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
-                wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
-                wall.cliffWall = true;
-                assignWallQuadMetadata(wall, segment.side, quadOutward);
-                addQuad(result, wall);
-            }
+        std::vector<MeshQuad> segmentQuads = buildWallQuadsFromBoundarySegment(
+            segment,
+            request.baseHeight,
+            request.topHeight,
+            request.fadeWallDisplacementAtBottom,
+            wallMaxOffset,
+            settings);
+        for (const MeshQuad& wall : segmentQuads) {
+            addQuad(result, wall);
         }
     }
 
@@ -1304,6 +1249,126 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
     logNormalOrientation("composeSolidMaskMesh", result.normalOrientation);
 
     return result;
+}
+
+std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
+    const MeshBoundarySegment& segment,
+    float baseHeight,
+    float topHeight,
+    bool fadeWallDisplacementAtBottom,
+    float wallMaxOffset,
+    const MeshBuildSettings& inputSettings) {
+
+    std::vector<MeshQuad> quads;
+    MeshBuildSettings settings = inputSettings;
+    settings.wallHorizontalSubdivisions = std::clamp(settings.wallHorizontalSubdivisions, 1, 32);
+    settings.wallVerticalSubdivisions = std::clamp(settings.wallVerticalSubdivisions, 1, 32);
+    settings.rockScale = std::max(0.001f, settings.rockScale);
+    settings.rockAmplitude = std::max(0.0f, settings.rockAmplitude);
+    settings.terraceSteps = std::clamp(settings.terraceSteps, 0, 12);
+
+    const Vec3 topA{segment.a.x, topHeight, segment.a.z};
+    const Vec3 topB{segment.b.x, topHeight, segment.b.z};
+    const Vec3 bottomA{segment.a.x, baseHeight, segment.a.z};
+    const Vec3 bottomB{segment.b.x, baseHeight, segment.b.z};
+    const int vertexColumns = settings.wallHorizontalSubdivisions + 1;
+    const int vertexRows = settings.wallVerticalSubdivisions + 1;
+    std::vector<Vec3> wallPoints((std::size_t)vertexColumns * (std::size_t)vertexRows);
+    std::vector<Vec3> wallNormals((std::size_t)vertexColumns * (std::size_t)vertexRows);
+    std::vector<float> wallNoise;
+
+    for (int row = 0; row < vertexRows; row++) {
+        const float v = (float)row / (float)settings.wallVerticalSubdivisions;
+        const float topT = 1.0f - v;
+        const Vec3 rowA = lerp(bottomA, topA, topT);
+        const Vec3 rowB = lerp(bottomB, topB, topT);
+        for (int column = 0; column < vertexColumns; column++) {
+            const float u = (float)column / (float)settings.wallHorizontalSubdivisions;
+            const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
+            wallPoints[index] = lerp(rowA, rowB, u);
+            if (column == 0) {
+                wallNormals[index] = segment.startNormal;
+            } else if (column == vertexColumns - 1) {
+                wallNormals[index] = segment.endNormal;
+            } else {
+                wallNormals[index] = segment.normal;
+            }
+        }
+    }
+
+    const FastNoise::SmartNode<> rockNoise = settings.rockEnabled ? makeRockNoiseNode(settings) : nullptr;
+    sampleRockNoiseBatch(rockNoise, settings, wallPoints, wallNoise);
+
+    float resolvedWallMaxOffset = wallMaxOffset;
+    if (resolvedWallMaxOffset <= 0.0f) {
+        const float vSpacing = (topHeight - baseHeight) / (float)settings.wallVerticalSubdivisions;
+        const float segmentLength = horizontalLength(subtract(segment.b, segment.a));
+        const float hSpacing = segmentLength > 0.0001f
+            ? segmentLength / (float)settings.wallHorizontalSubdivisions
+            : vSpacing;
+        resolvedWallMaxOffset = 0.7f * std::max(0.0001f, std::min(hSpacing, vSpacing));
+    }
+
+    for (int sy = 0; sy < settings.wallVerticalSubdivisions; sy++) {
+        const float v0 = (float)sy / (float)settings.wallVerticalSubdivisions;
+        const float v1 = (float)(sy + 1) / (float)settings.wallVerticalSubdivisions;
+        const float topT0 = 1.0f - v0;
+        const float topT1 = 1.0f - v1;
+        for (int sx = 0; sx < settings.wallHorizontalSubdivisions; sx++) {
+            const std::size_t i00 = (std::size_t)sy * (std::size_t)vertexColumns + (std::size_t)sx;
+            const std::size_t i10 = i00 + 1;
+            const std::size_t i01 = (std::size_t)(sy + 1) * (std::size_t)vertexColumns + (std::size_t)sx;
+            const std::size_t i11 = i01 + 1;
+
+            MeshQuad wall;
+            wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            const Vec3 quadOutward = normalizeHorizontal(
+                add(
+                    add(wallNormals[i00], wallNormals[i10]),
+                    add(wallNormals[i01], wallNormals[i11])),
+                segment.normal);
+            wall.normal = displacedFaceNormal(
+                wall.a, wall.b, wall.c, wall.d,
+                wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],
+                quadOutward);
+            const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
+            wall.relief = std::clamp(panelNoise, -1.0f, 1.0f);
+            wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
+            wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
+            wall.cliffWall = true;
+            assignWallQuadMetadata(wall, segment.side, quadOutward);
+            quads.push_back(wall);
+        }
+    }
+
+    return quads;
+}
+
+std::vector<MeshQuad> buildDisplacedWallPanel(const WallPanelBuildRequest& request, const MeshBuildSettings& inputSettings) {
+    const float width = std::max(0.1f, request.width);
+    const float height = std::max(0.1f, request.height);
+    const float baseHeight = -height * 0.5f;
+    const float topHeight = height * 0.5f;
+    const Vec3 sideNormal = outwardNormalForSide(BoundarySide::Bottom);
+
+    MeshBoundarySegment segment;
+    segment.a = {-width * 0.5f, 0.0f, 0.0f};
+    segment.b = {width * 0.5f, 0.0f, 0.0f};
+    segment.normal = sideNormal;
+    segment.startNormal = sideNormal;
+    segment.endNormal = sideNormal;
+    segment.side = BoundarySide::Bottom;
+
+    return buildWallQuadsFromBoundarySegment(
+        segment,
+        baseHeight,
+        topHeight,
+        request.fadeDisplacementAtBottom,
+        0.0f,
+        inputSettings);
 }
 
 CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& inputSettings) {

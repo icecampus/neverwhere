@@ -17,5 +17,8 @@ ProductionPreviewSettings g_productionPreviewSettings;
 SingleQuadLabSettings g_singleQuadLabSettings;
 SingleQuadLabModel g_singleQuadLabModel;
 QuadLabPreviewCamera g_singleQuadLabCamera;
+WallSeriesLabSettings g_wallSeriesLabSettings;
+WallSeriesLabModel g_wallSeriesLabModel;
+QuadLabPreviewCamera g_wallSeriesLabCamera;
 
 } // namespace meshgen_playground

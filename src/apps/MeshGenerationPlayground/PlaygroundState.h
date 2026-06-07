@@ -3,6 +3,7 @@
 #include "LandscapeBowlScenario.h"
 #include "RectangleCliffScenario.h"
 #include "SingleQuadLabScenario.h"
+#include "WallSeriesLabScenario.h"
 
 #include <cstdint>
 #include <mutex>
@@ -33,5 +34,8 @@ extern ProductionPreviewSettings g_productionPreviewSettings;
 extern SingleQuadLabSettings g_singleQuadLabSettings;
 extern SingleQuadLabModel g_singleQuadLabModel;
 extern QuadLabPreviewCamera g_singleQuadLabCamera;
+extern WallSeriesLabSettings g_wallSeriesLabSettings;
+extern WallSeriesLabModel g_wallSeriesLabModel;
+extern QuadLabPreviewCamera g_wallSeriesLabCamera;
 
 } // namespace meshgen_playground

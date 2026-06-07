@@ -1943,7 +1943,8 @@ void drawMeshQuadsPreview(
         }
     }
 
-    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), "Quad Lab: GPU mesh preview");
+    const char* previewTitle = options.previewTitle ? options.previewTitle : "Quad Lab: GPU mesh preview";
+    drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), previewTitle);
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan | Ctrl+LMB drag: orbit | wheel: zoom");
     drawList->AddText({origin.x + 12.0f, origin.y + 52.0f}, IM_COL32(150, 162, 180, 255), "Double-click LMB: reset pan/zoom | Ctrl+double-click LMB: reset orbit");
     char cameraText[128];

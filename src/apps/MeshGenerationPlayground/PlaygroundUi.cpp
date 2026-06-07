@@ -7,6 +7,7 @@
 #include "PlaygroundVisualCapture.h"
 #include "RectangleCliffScenario.h"
 #include "SingleQuadLabScenario.h"
+#include "WallSeriesLabScenario.h"
 
 #include <algorithm>
 #include <mutex>
@@ -500,6 +501,71 @@ void drawSingleQuadLabControls(float panelWidth) {
     }
 }
 
+void drawWallLabControls(float panelWidth) {
+    PanelControls panel;
+    panel.begin(panelWidth);
+    drawFrameStats();
+    ImGui::Separator();
+
+    ImGui::Text("Wall Lab");
+    ImGui::TextWrapped(
+        "Uses composeSolidMaskMesh cliff wall code: one boundary segment, rock noise, production subdivisions.");
+
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        changed |= panel.sliderFloat("Wall Width", &g_wallSeriesLabSettings.wallWidth, 0.5f, 12.0f);
+        changed |= panel.sliderFloat("Wall Height", &g_wallSeriesLabSettings.wallHeight, 0.5f, 8.0f);
+        changed |= panel.sliderInt(
+            "Wall Horizontal Subdivs",
+            &g_wallSeriesLabSettings.wallHorizontalSubdivisions,
+            1,
+            24);
+        changed |= panel.sliderInt(
+            "Wall Vertical Subdivs",
+            &g_wallSeriesLabSettings.wallVerticalSubdivisions,
+            1,
+            24);
+
+        changed |= panel.sliderFloat("Wall Center X", &g_wallSeriesLabSettings.wallCenterX, -4.0f, 4.0f);
+        changed |= panel.sliderFloat("Wall Center Y", &g_wallSeriesLabSettings.wallCenterY, -2.0f, 4.0f);
+        changed |= panel.sliderFloat("Wall Center Z", &g_wallSeriesLabSettings.wallCenterZ, -4.0f, 4.0f);
+        changed |= panel.sliderFloat("Yaw", &g_wallSeriesLabSettings.yawDegrees, -180.0f, 180.0f);
+        changed |= panel.sliderFloat("Pitch", &g_wallSeriesLabSettings.pitchDegrees, -89.0f, 89.0f);
+
+        changed |= panel.checkbox("Rock Noise Enabled", &g_wallSeriesLabSettings.rockEnabled);
+        changed |= panel.inputInt("Rock Seed", &g_wallSeriesLabSettings.rockSeed);
+        changed |= panel.sliderFloat("Rock Scale", &g_wallSeriesLabSettings.rockScale, 0.25f, 24.0f);
+        changed |= panel.sliderFloat("Rock Amplitude", &g_wallSeriesLabSettings.rockAmplitude, 0.0f, 1.25f);
+        changed |= panel.sliderInt("Terrace Steps", &g_wallSeriesLabSettings.terraceSteps, 0, 12);
+        changed |= panel.checkbox("Fade Displacement At Bottom", &g_wallSeriesLabSettings.fadeDisplacementAtBottom);
+        panel.checkbox("Show Wireframe", &g_wallSeriesLabSettings.showWireframe);
+
+        ImGui::Separator();
+        ImGui::Text("Preview Camera");
+        ImGui::TextWrapped("GPU mesh preview with depth buffer. Ctrl+LMB drag: orbit. LMB drag: pan.");
+        panel.sliderFloat("Camera Yaw", &g_wallSeriesLabCamera.orbitYawDegrees, -180.0f, 180.0f);
+        panel.sliderFloat("Camera Pitch", &g_wallSeriesLabCamera.orbitPitchDegrees, -89.0f, 89.0f);
+        if (ImGui::Button("Reset Camera")) {
+            g_wallSeriesLabCamera.zoom = 1.0f;
+            g_wallSeriesLabCamera.pan = {0.0f, 0.0f};
+            g_wallSeriesLabCamera.orbitYawDegrees = 35.0f;
+            g_wallSeriesLabCamera.orbitPitchDegrees = 28.0f;
+        }
+
+        ImGui::Separator();
+        ImGui::Text(
+            "Wall quads: %d (%d x %d)",
+            g_wallSeriesLabModel.quadCount,
+            g_wallSeriesLabSettings.wallHorizontalSubdivisions,
+            g_wallSeriesLabSettings.wallVerticalSubdivisions);
+        ImGui::TextColored(ImVec4(0.66f, 0.72f, 0.78f, 1.0f), "Production cliff wall mesh (composeSolidMaskMesh path)");
+    }
+    if (changed) {
+        rebuildWallSeriesLabModel();
+    }
+}
+
 void drawSingleQuadLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
     const float gutter = 12.0f;
     const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
@@ -520,11 +586,41 @@ void drawSingleQuadLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) 
         previewOptions.projectionCenterY = g_singleQuadLabSettings.centerY;
         previewOptions.projectionCenterZ = g_singleQuadLabSettings.centerZ;
         previewOptions.showWireframe = g_singleQuadLabSettings.showWireframe;
+        previewOptions.previewTitle = "Quad Lab: GPU mesh preview";
         quads = g_singleQuadLabModel.quads;
     }
 
     ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
     drawMeshQuadsPreview(quads, g_singleQuadLabCamera, previewOptions, {rightWidth, layoutSize.y});
+}
+
+void drawWallLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawWallLabControls(leftPanelWidth);
+    ImGui::EndGroup();
+
+    MeshQuadsPreviewOptions previewOptions;
+    std::vector<MeshQuad> quads;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        previewOptions.projectionCenterX = g_wallSeriesLabSettings.wallCenterX;
+        previewOptions.projectionCenterY = g_wallSeriesLabSettings.wallCenterY;
+        previewOptions.projectionCenterZ = g_wallSeriesLabSettings.wallCenterZ;
+        previewOptions.showWireframe = g_wallSeriesLabSettings.showWireframe;
+        previewOptions.flatQuadShading = true;
+        previewOptions.previewTitle = "Wall Lab: GPU mesh preview";
+        quads = g_wallSeriesLabModel.quads;
+    }
+
+    ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
+    drawMeshQuadsPreview(quads, g_wallSeriesLabCamera, previewOptions, {rightWidth, layoutSize.y});
 }
 
 void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
@@ -631,6 +727,14 @@ void drawUi() {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawSingleQuadLabTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Wall Lab")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            drawWallLabTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
             ImGui::EndTabItem();
         }

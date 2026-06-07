@@ -144,6 +144,12 @@ struct SolidMeshBuildRequest {
     bool fadeWallDisplacementAtBottom = false;
 };
 
+struct WallPanelBuildRequest {
+    float width = 4.0f;
+    float height = 3.0f;
+    bool fadeDisplacementAtBottom = true;
+};
+
 struct BeveledBoundaryResult {
     std::vector<BoundarySegment> boundarySegments;
     std::vector<MeshBoundarySegment> beveledSegments;
@@ -178,5 +184,15 @@ Vec3 litWallNormal(const MeshQuad& quad);
 CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, const MeshBuildSettings& settings);
 CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& settings);
 SeamValidation validateLandscapeSeams(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& settings);
+// Production cliff wall mesh for one straight boundary segment (same code path as composeSolidMaskMesh).
+std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
+    const MeshBoundarySegment& segment,
+    float baseHeight,
+    float topHeight,
+    bool fadeWallDisplacementAtBottom,
+    float wallMaxOffset,
+    const MeshBuildSettings& settings);
+// Lab helper: one rectangular cliff face built through buildWallQuadsFromBoundarySegment.
+std::vector<MeshQuad> buildDisplacedWallPanel(const WallPanelBuildRequest& request, const MeshBuildSettings& settings);
 
 } // namespace landscape_mesh

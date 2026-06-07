@@ -33,6 +33,9 @@ struct MeshQuadsPreviewOptions {
     float projectionCenterY = 0.0f;
     float projectionCenterZ = 0.0f;
     bool showWireframe = true;
+    // Match production wall preview: one lighting normal per quad, fixed a-c diagonal (no visible facet split).
+    bool flatQuadShading = false;
+    const char* previewTitle = "Quad Lab: GPU mesh preview";
 };
 
 void drawMeshQuadsPreview(

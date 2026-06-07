@@ -7,6 +7,7 @@
 #include "PlaygroundVisualCapture.h"
 #include "RectangleCliffScenario.h"
 #include "SingleQuadLabScenario.h"
+#include "WallSeriesLabScenario.h"
 
 #include <cstdint>
 #include <mutex>
@@ -128,6 +129,8 @@ void init() {
     rebuildLandscapeBowlModel();
     spdlog::info("init: calling rebuildSingleQuadLabModel()");
     rebuildSingleQuadLabModel();
+    spdlog::info("init: calling rebuildWallSeriesLabModel()");
+    rebuildWallSeriesLabModel();
     warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");
