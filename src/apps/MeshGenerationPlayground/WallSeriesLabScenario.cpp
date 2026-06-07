@@ -76,6 +76,14 @@ landscape_mesh::MeshBuildSettings makeWallLabMeshSettings(const WallSeriesLabSet
 
 } // namespace
 
+void resetWallSeriesLabCamera(QuadLabPreviewCamera& camera) {
+    camera.zoom = 1.0f;
+    camera.pan = {0.0f, 0.0f};
+    // Wall mesh faces +Z; camera on -Z looks toward the outward cliff face.
+    camera.orbitYawDegrees = 180.0f;
+    camera.orbitPitchDegrees = 18.0f;
+}
+
 void sanitizeWallSeriesLabSettings(WallSeriesLabSettings& settings) {
     settings.wallWidth = clampFloat(settings.wallWidth, 0.5f, 16.0f);
     settings.wallHeight = clampFloat(settings.wallHeight, 0.5f, 12.0f);

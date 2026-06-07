@@ -1910,8 +1910,8 @@ void drawMeshQuadsPreview(
     }
 
     if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && io.KeyCtrl) {
-        camera.orbitYawDegrees = 35.0f;
-        camera.orbitPitchDegrees = 28.0f;
+        camera.orbitYawDegrees = options.orbitResetYawDegrees;
+        camera.orbitPitchDegrees = options.orbitResetPitchDegrees;
     } else if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         camera.zoom = 1.0f;
         camera.pan = {0.0f, 0.0f};

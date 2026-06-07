@@ -547,10 +547,7 @@ void drawWallLabControls(float panelWidth) {
         panel.sliderFloat("Camera Yaw", &g_wallSeriesLabCamera.orbitYawDegrees, -180.0f, 180.0f);
         panel.sliderFloat("Camera Pitch", &g_wallSeriesLabCamera.orbitPitchDegrees, -89.0f, 89.0f);
         if (ImGui::Button("Reset Camera")) {
-            g_wallSeriesLabCamera.zoom = 1.0f;
-            g_wallSeriesLabCamera.pan = {0.0f, 0.0f};
-            g_wallSeriesLabCamera.orbitYawDegrees = 35.0f;
-            g_wallSeriesLabCamera.orbitPitchDegrees = 28.0f;
+            resetWallSeriesLabCamera(g_wallSeriesLabCamera);
         }
 
         ImGui::Separator();
@@ -615,6 +612,8 @@ void drawWallLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
         previewOptions.projectionCenterZ = g_wallSeriesLabSettings.wallCenterZ;
         previewOptions.showWireframe = g_wallSeriesLabSettings.showWireframe;
         previewOptions.flatQuadShading = true;
+        previewOptions.orbitResetYawDegrees = 180.0f;
+        previewOptions.orbitResetPitchDegrees = 18.0f;
         previewOptions.previewTitle = "Wall Lab: GPU mesh preview";
         quads = g_wallSeriesLabModel.quads;
     }

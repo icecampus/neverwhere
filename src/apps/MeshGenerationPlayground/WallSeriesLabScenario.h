@@ -36,6 +36,7 @@ struct WallSeriesLabModel {
 };
 
 void sanitizeWallSeriesLabSettings(WallSeriesLabSettings& settings);
+void resetWallSeriesLabCamera(QuadLabPreviewCamera& camera);
 void rebuildWallSeriesLabModel();
 bool runWallSeriesLabSmokeTest();
 

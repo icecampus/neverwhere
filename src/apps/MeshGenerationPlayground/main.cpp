@@ -131,6 +131,7 @@ void init() {
     rebuildSingleQuadLabModel();
     spdlog::info("init: calling rebuildWallSeriesLabModel()");
     rebuildWallSeriesLabModel();
+    resetWallSeriesLabCamera(g_wallSeriesLabCamera);
     warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");
