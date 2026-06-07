@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <mutex>
+#include <random>
 
 #include <spdlog/spdlog.h>
 
@@ -148,12 +149,31 @@ MeshQuad orientedSideQuad(
     return side;
 }
 
+float cornerExtrudeDepth(float baseDepth, float heightSpread, std::mt19937& rng) {
+    if (heightSpread <= 0.0001f) {
+        return baseDepth;
+    }
+    std::uniform_real_distribution<float> heightFactor(1.0f - heightSpread, 1.0f + heightSpread);
+    return baseDepth * heightFactor(rng);
+}
+
+Vec3 liftCorner(
+    const Vec3& corner,
+    const Vec3& center,
+    float topScale,
+    const Vec3& extrudeDir,
+    float liftDepth) {
+    return addVec(pinchCornerTowardCenter(corner, center, topScale), scaleVec(extrudeDir, liftDepth));
+}
+
 void appendExtrudedQuad(
     std::vector<MeshQuad>& out,
     const MeshQuad& quad,
     const Vec3& extrudeNormal,
     float depth,
     float topCornerScale,
+    float topHeightSpread,
+    int heightSeed,
     bool colorizeFaces) {
 
     if (depth <= 0.0001f) {
@@ -164,12 +184,18 @@ void appendExtrudedQuad(
     const Vec3 extrudeDir = normalizeVec(extrudeNormal, quad.outwardHint);
     const Vec3 center = quadCentroid(quad);
     const float topScale = clampFloat(topCornerScale, 0.01f, 1.0f);
-    const Vec3 lift = scaleVec(extrudeDir, depth);
+    const float heightSpread = clampFloat(topHeightSpread, 0.0f, 1.0f);
 
-    const Vec3 topA = addVec(pinchCornerTowardCenter(quad.a, center, topScale), lift);
-    const Vec3 topB = addVec(pinchCornerTowardCenter(quad.b, center, topScale), lift);
-    const Vec3 topC = addVec(pinchCornerTowardCenter(quad.c, center, topScale), lift);
-    const Vec3 topD = addVec(pinchCornerTowardCenter(quad.d, center, topScale), lift);
+    std::mt19937 heightRng((unsigned)heightSeed * 2654435761u + 424242u);
+    const float liftDepthA = cornerExtrudeDepth(depth, heightSpread, heightRng);
+    const float liftDepthB = cornerExtrudeDepth(depth, heightSpread, heightRng);
+    const float liftDepthC = cornerExtrudeDepth(depth, heightSpread, heightRng);
+    const float liftDepthD = cornerExtrudeDepth(depth, heightSpread, heightRng);
+
+    const Vec3 topA = liftCorner(quad.a, center, topScale, extrudeDir, liftDepthA);
+    const Vec3 topB = liftCorner(quad.b, center, topScale, extrudeDir, liftDepthB);
+    const Vec3 topC = liftCorner(quad.c, center, topScale, extrudeDir, liftDepthC);
+    const Vec3 topD = liftCorner(quad.d, center, topScale, extrudeDir, liftDepthD);
 
     const ImU32 bottomColor = colorizeFaces ? IM_COL32(118, 126, 138, 255) : quad.color;
     const ImU32 topColor = colorizeFaces ? IM_COL32(168, 176, 188, 255) : quad.color;
@@ -220,6 +246,7 @@ void sanitizeSingleQuadLabSettings(SingleQuadLabSettings& settings) {
     settings.centerZ = clampFloat(settings.centerZ, -8.0f, 8.0f);
     settings.extrudeDepth = clampFloat(settings.extrudeDepth, 0.0f, 2.0f);
     settings.extrudeTopScale = clampFloat(settings.extrudeTopScale, 0.1f, 1.0f);
+    settings.extrudeTopHeightSpread = clampFloat(settings.extrudeTopHeightSpread, 0.0f, 1.0f);
 }
 
 void rebuildSingleQuadLabModel() {
@@ -236,6 +263,8 @@ void rebuildSingleQuadLabModel() {
             model.baseQuad.normal,
             settings.extrudeDepth,
             settings.extrudeTopScale,
+            settings.extrudeTopHeightSpread,
+            settings.extrudeHeightSeed,
             settings.colorizeFaces);
     } else {
         addMeshQuad(model, model.baseQuad);
@@ -250,11 +279,12 @@ void rebuildSingleQuadLabModel() {
     }
 
     spdlog::info(
-        "rebuildSingleQuadLabModel: operation={}, panels={}, extrudeDepth={:.3f}, topScale={:.3f}",
+        "rebuildSingleQuadLabModel: operation={}, panels={}, extrudeDepth={:.3f}, topScale={:.3f}, heightSpread={:.3f}",
         settings.operation == QuadLabOperation::Extrude ? "extrude" : "flat",
         g_singleQuadLabModel.panelCount,
         settings.extrudeDepth,
-        settings.extrudeTopScale);
+        settings.extrudeTopScale,
+        settings.extrudeTopHeightSpread);
 }
 
 bool runSingleQuadLabSmokeTest() {
@@ -264,11 +294,30 @@ bool runSingleQuadLabSmokeTest() {
     testSettings.operation = QuadLabOperation::Extrude;
     testSettings.extrudeDepth = 0.25f;
     testSettings.extrudeTopScale = 0.9f;
+    testSettings.extrudeTopHeightSpread = 0.35f;
+    testSettings.extrudeHeightSeed = 1337;
     g_singleQuadLabSettings = testSettings;
     rebuildSingleQuadLabModel();
 
     const int panelCount = g_singleQuadLabModel.panelCount;
     bool bowTieDetected = false;
+    bool uniformTopHeights = true;
+    if (panelCount >= 2) {
+        const MeshQuad& baseQuad = g_singleQuadLabModel.baseQuad;
+        const MeshQuad& topQuad = g_singleQuadLabModel.quads[1];
+        const Vec3 extrudeDir = normalizeVec(baseQuad.normal, baseQuad.outwardHint);
+        const auto liftAlongExtrude = [&](const Vec3& baseCorner, const Vec3& topCorner) {
+            return dotVec(subtractVec(topCorner, baseCorner), extrudeDir);
+        };
+        const float liftA = liftAlongExtrude(baseQuad.a, topQuad.a);
+        const float liftB = liftAlongExtrude(baseQuad.b, topQuad.b);
+        const float liftC = liftAlongExtrude(baseQuad.c, topQuad.c);
+        const float liftD = liftAlongExtrude(baseQuad.d, topQuad.d);
+        uniformTopHeights =
+            std::fabs(liftB - liftA) <= 0.0001f
+            && std::fabs(liftC - liftA) <= 0.0001f
+            && std::fabs(liftD - liftA) <= 0.0001f;
+    }
     for (const MeshQuad& quad : g_singleQuadLabModel.quads) {
         const Vec3 diagonalAc = subtractVec(quad.c, quad.a);
         const Vec3 diagonalBd = subtractVec(quad.d, quad.b);
@@ -281,12 +330,13 @@ bool runSingleQuadLabSmokeTest() {
     g_singleQuadLabSettings = previousSettings;
     rebuildSingleQuadLabModel();
 
-    const bool ok = panelCount == 6 && !bowTieDetected;
+    const bool ok = panelCount == 6 && !bowTieDetected && !uniformTopHeights;
     spdlog::info(
-        "{} single quad lab extrude: panels={}, bowTie={}",
+        "{} single quad lab extrude: panels={}, bowTie={}, uniformTopHeights={}",
         ok ? "TEST PASS" : "TEST FAIL",
         panelCount,
-        bowTieDetected);
+        bowTieDetected,
+        uniformTopHeights);
     return ok;
 }
 

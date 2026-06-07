@@ -20,6 +20,74 @@ namespace {
 
 constexpr float kViewportSplitterThickness = 10.0f;
 constexpr float kMinStackedViewportHeight = 72.0f;
+constexpr float kPanelHorizontalPadding = 24.0f;
+
+struct PanelControls {
+    float labelColumnX = 0.0f;
+    float widgetWidth = 0.0f;
+
+    void begin(float panelWidth) {
+        const float contentWidth = std::max(1.0f, panelWidth - kPanelHorizontalPadding);
+        const float labelWidth = std::clamp(contentWidth * 0.50f, 132.0f, 190.0f);
+        labelColumnX = labelWidth;
+        widgetWidth = std::max(72.0f, contentWidth - labelWidth - ImGui::GetStyle().ItemInnerSpacing.x);
+    }
+
+    void drawLabel(const char* text) const {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(text);
+        ImGui::SameLine(labelColumnX);
+        ImGui::SetNextItemWidth(widgetWidth);
+    }
+
+    bool sliderFloat(const char* label, float* value, float minValue, float maxValue) const {
+        drawLabel(label);
+        ImGui::PushID(label);
+        const bool changed = ImGui::SliderFloat("##value", value, minValue, maxValue);
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool sliderInt(const char* label, int* value, int minValue, int maxValue) const {
+        drawLabel(label);
+        ImGui::PushID(label);
+        const bool changed = ImGui::SliderInt("##value", value, minValue, maxValue);
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool inputInt(const char* label, int* value) const {
+        drawLabel(label);
+        ImGui::PushID(label);
+        const bool changed = ImGui::InputInt("##value", value);
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool combo(const char* label, int* value, const char* const items[], int itemCount) const {
+        drawLabel(label);
+        ImGui::PushID(label);
+        const bool changed = ImGui::Combo("##value", value, items, itemCount);
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool combo(const char* label, int* value, const char* items) const {
+        drawLabel(label);
+        ImGui::PushID(label);
+        const bool changed = ImGui::Combo("##value", value, items);
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool checkbox(const char* label, bool* value) const {
+        drawLabel(label);
+        ImGui::PushID(label);
+        const bool changed = ImGui::Checkbox("##value", value);
+        ImGui::PopID();
+        return changed;
+    }
+};
 
 struct StackedViewportLayout {
     float topHeight = 0.0f;
@@ -104,7 +172,8 @@ void drawFrameStats() {
 }
 
 void drawRectangleScenarioControls(float panelWidth) {
-    ImGui::PushItemWidth(panelWidth - 24.0f);
+    PanelControls panel;
+    panel.begin(panelWidth);
     drawFrameStats();
     ImGui::Separator();
 
@@ -114,31 +183,31 @@ void drawRectangleScenarioControls(float panelWidth) {
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        changed |= ImGui::SliderInt("Grid Width", &g_rectSettings.gridWidth, 4, 48);
-        changed |= ImGui::SliderInt("Grid Height", &g_rectSettings.gridHeight, 4, 32);
-        changed |= ImGui::SliderInt("Rect X", &g_rectSettings.rectX, 0, g_rectSettings.gridWidth - 1);
-        changed |= ImGui::SliderInt("Rect Y", &g_rectSettings.rectY, 0, g_rectSettings.gridHeight - 1);
-        changed |= ImGui::SliderInt("Rect Width", &g_rectSettings.rectWidth, 1, g_rectSettings.gridWidth);
-        changed |= ImGui::SliderInt("Rect Height", &g_rectSettings.rectHeight, 1, g_rectSettings.gridHeight);
-        changed |= ImGui::Checkbox("Enable Cutout (inner corners)", &g_rectSettings.enableCutout);
-        changed |= ImGui::SliderInt("Cutout X", &g_rectSettings.cutoutX, 0, g_rectSettings.gridWidth - 1);
-        changed |= ImGui::SliderInt("Cutout Y", &g_rectSettings.cutoutY, 0, g_rectSettings.gridHeight - 1);
-        changed |= ImGui::SliderInt("Cutout Width", &g_rectSettings.cutoutWidth, 1, g_rectSettings.gridWidth);
-        changed |= ImGui::SliderInt("Cutout Height", &g_rectSettings.cutoutHeight, 1, g_rectSettings.gridHeight);
-        changed |= ImGui::SliderFloat("Cliff Height", &g_rectSettings.cliffHeight, 0.25f, 8.0f);
-        changed |= ImGui::SliderFloat("Corner Bevel", &g_rectSettings.cornerBevel, 0.0f, 0.45f);
-        changed |= ImGui::Checkbox("Rock Noise Enabled", &g_rectSettings.rockEnabled);
-        changed |= ImGui::InputInt("Rock Seed", &g_rectSettings.rockSeed);
-        changed |= ImGui::SliderFloat("Rock Scale", &g_rectSettings.rockScale, 0.25f, 24.0f);
-        changed |= ImGui::SliderFloat("Rock Amplitude", &g_rectSettings.rockAmplitude, 0.0f, 1.25f);
-        changed |= ImGui::SliderInt("Wall Horizontal Subdivs", &g_rectSettings.wallHorizontalSubdivisions, 1, 16);
-        changed |= ImGui::SliderInt("Wall Vertical Subdivs", &g_rectSettings.wallVerticalSubdivisions, 1, 16);
-        changed |= ImGui::SliderInt("Terrace Steps", &g_rectSettings.terraceSteps, 0, 12);
-        ImGui::Checkbox("Show Top Faces", &g_rectSettings.showTopFaces);
-        ImGui::Checkbox("Show Cliff Walls", &g_rectSettings.showCliffWalls);
-        ImGui::Checkbox("Show Mesh Wireframe", &g_rectSettings.showMeshWireframe);
-        ImGui::Checkbox("Show Cell Labels", &g_rectSettings.showCellLabels);
-        ImGui::Checkbox("Show Vertex Labels", &g_rectSettings.showVertexLabels);
+        changed |= panel.sliderInt("Grid Width", &g_rectSettings.gridWidth, 4, 48);
+        changed |= panel.sliderInt("Grid Height", &g_rectSettings.gridHeight, 4, 32);
+        changed |= panel.sliderInt("Rect X", &g_rectSettings.rectX, 0, g_rectSettings.gridWidth - 1);
+        changed |= panel.sliderInt("Rect Y", &g_rectSettings.rectY, 0, g_rectSettings.gridHeight - 1);
+        changed |= panel.sliderInt("Rect Width", &g_rectSettings.rectWidth, 1, g_rectSettings.gridWidth);
+        changed |= panel.sliderInt("Rect Height", &g_rectSettings.rectHeight, 1, g_rectSettings.gridHeight);
+        changed |= panel.checkbox("Enable Cutout (inner corners)", &g_rectSettings.enableCutout);
+        changed |= panel.sliderInt("Cutout X", &g_rectSettings.cutoutX, 0, g_rectSettings.gridWidth - 1);
+        changed |= panel.sliderInt("Cutout Y", &g_rectSettings.cutoutY, 0, g_rectSettings.gridHeight - 1);
+        changed |= panel.sliderInt("Cutout Width", &g_rectSettings.cutoutWidth, 1, g_rectSettings.gridWidth);
+        changed |= panel.sliderInt("Cutout Height", &g_rectSettings.cutoutHeight, 1, g_rectSettings.gridHeight);
+        changed |= panel.sliderFloat("Cliff Height", &g_rectSettings.cliffHeight, 0.25f, 8.0f);
+        changed |= panel.sliderFloat("Corner Bevel", &g_rectSettings.cornerBevel, 0.0f, 0.45f);
+        changed |= panel.checkbox("Rock Noise Enabled", &g_rectSettings.rockEnabled);
+        changed |= panel.inputInt("Rock Seed", &g_rectSettings.rockSeed);
+        changed |= panel.sliderFloat("Rock Scale", &g_rectSettings.rockScale, 0.25f, 24.0f);
+        changed |= panel.sliderFloat("Rock Amplitude", &g_rectSettings.rockAmplitude, 0.0f, 1.25f);
+        changed |= panel.sliderInt("Wall Horizontal Subdivs", &g_rectSettings.wallHorizontalSubdivisions, 1, 16);
+        changed |= panel.sliderInt("Wall Vertical Subdivs", &g_rectSettings.wallVerticalSubdivisions, 1, 16);
+        changed |= panel.sliderInt("Terrace Steps", &g_rectSettings.terraceSteps, 0, 12);
+        panel.checkbox("Show Top Faces", &g_rectSettings.showTopFaces);
+        panel.checkbox("Show Cliff Walls", &g_rectSettings.showCliffWalls);
+        panel.checkbox("Show Mesh Wireframe", &g_rectSettings.showMeshWireframe);
+        panel.checkbox("Show Cell Labels", &g_rectSettings.showCellLabels);
+        panel.checkbox("Show Vertex Labels", &g_rectSettings.showVertexLabels);
     }
     if (changed) {
         rebuildRectangleCliffModel();
@@ -172,11 +241,11 @@ void drawRectangleScenarioControls(float panelWidth) {
     ImGui::TextColored(ImVec4(0.98f, 0.77f, 0.28f, 1.0f), "O = outer corner");
     ImGui::TextColored(ImVec4(0.91f, 0.36f, 0.36f, 1.0f), "I = inner corner");
     ImGui::TextColored(ImVec4(0.73f, 0.46f, 1.0f, 1.0f), "D = diagonal join");
-    ImGui::PopItemWidth();
 }
 
 void drawLandscapeScenarioControls(float panelWidth) {
-    ImGui::PushItemWidth(panelWidth - 24.0f);
+    PanelControls panel;
+    panel.begin(panelWidth);
     drawFrameStats();
     ImGui::Separator();
 
@@ -186,47 +255,47 @@ void drawLandscapeScenarioControls(float panelWidth) {
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        changed |= ImGui::SliderInt("Grid Width", &g_landscapeSettings.gridWidth, 12, 72);
-        changed |= ImGui::SliderInt("Grid Height", &g_landscapeSettings.gridHeight, 10, 56);
-        changed |= ImGui::InputInt("Seed", &g_landscapeSettings.seed);
-        changed |= ImGui::SliderFloat("Clearing Radius", &g_landscapeSettings.clearingRadius, 2.0f, 18.0f);
-        changed |= ImGui::SliderFloat("Clearing Softness", &g_landscapeSettings.clearingSoftness, 0.25f, 8.0f);
-        changed |= ImGui::SliderFloat("High Ground Radius", &g_landscapeSettings.highGroundRadius, 3.0f, 28.0f);
-        changed |= ImGui::SliderFloat("High Ground Width", &g_landscapeSettings.highGroundWidth, 1.0f, 10.0f);
-        changed |= ImGui::SliderFloat("High Ground Height", &g_landscapeSettings.highGroundHeight, 0.5f, 8.0f);
-        changed |= ImGui::SliderInt("Height Levels", &g_landscapeSettings.heightLevels, 2, 6);
-        changed |= ImGui::SliderFloat("Arc Noise Scale", &g_landscapeSettings.arcNoiseScale, 0.5f, 18.0f);
-        changed |= ImGui::SliderFloat("Arc Noise Amplitude", &g_landscapeSettings.arcNoiseAmplitude, 0.0f, 5.0f);
-        changed |= ImGui::SliderInt("Hill Count", &g_landscapeSettings.hillCount, 0, 12);
-        changed |= ImGui::SliderFloat("Hill Height", &g_landscapeSettings.hillHeight, 0.0f, 5.0f);
-        changed |= ImGui::SliderFloat("Hill Radius", &g_landscapeSettings.hillRadius, 0.75f, 8.0f);
-        ImGui::Checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
-        ImGui::Checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
-        ImGui::Checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
+        changed |= panel.sliderInt("Grid Width", &g_landscapeSettings.gridWidth, 12, 72);
+        changed |= panel.sliderInt("Grid Height", &g_landscapeSettings.gridHeight, 10, 56);
+        changed |= panel.inputInt("Seed", &g_landscapeSettings.seed);
+        changed |= panel.sliderFloat("Clearing Radius", &g_landscapeSettings.clearingRadius, 2.0f, 18.0f);
+        changed |= panel.sliderFloat("Clearing Softness", &g_landscapeSettings.clearingSoftness, 0.25f, 8.0f);
+        changed |= panel.sliderFloat("High Ground Radius", &g_landscapeSettings.highGroundRadius, 3.0f, 28.0f);
+        changed |= panel.sliderFloat("High Ground Width", &g_landscapeSettings.highGroundWidth, 1.0f, 10.0f);
+        changed |= panel.sliderFloat("High Ground Height", &g_landscapeSettings.highGroundHeight, 0.5f, 8.0f);
+        changed |= panel.sliderInt("Height Levels", &g_landscapeSettings.heightLevels, 2, 6);
+        changed |= panel.sliderFloat("Arc Noise Scale", &g_landscapeSettings.arcNoiseScale, 0.5f, 18.0f);
+        changed |= panel.sliderFloat("Arc Noise Amplitude", &g_landscapeSettings.arcNoiseAmplitude, 0.0f, 5.0f);
+        changed |= panel.sliderInt("Hill Count", &g_landscapeSettings.hillCount, 0, 12);
+        changed |= panel.sliderFloat("Hill Height", &g_landscapeSettings.hillHeight, 0.0f, 5.0f);
+        changed |= panel.sliderFloat("Hill Radius", &g_landscapeSettings.hillRadius, 0.75f, 8.0f);
+        panel.checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
+        panel.checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
+        panel.checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
         ImGui::Separator();
         ImGui::Text("Rendering");
-        ImGui::Checkbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
-        ImGui::SliderFloat("Ambient", &g_productionPreviewSettings.ambient, 0.35f, 1.35f);
-        ImGui::SliderFloat("Diffuse Strength", &g_productionPreviewSettings.diffuseStrength, 0.0f, 0.85f);
-        ImGui::SliderFloat("Rim Strength", &g_productionPreviewSettings.rimStrength, 0.0f, 0.5f);
-        ImGui::SliderFloat("Specular Strength", &g_productionPreviewSettings.specularStrength, 0.0f, 0.4f);
-        ImGui::SliderFloat("Sun Shadow Strength", &g_productionPreviewSettings.sunShadowStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Shadow Tint", &g_productionPreviewSettings.shadowTintStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Shadow Ambient Floor", &g_productionPreviewSettings.shadowAmbientFloor, 0.15f, 0.75f);
-        ImGui::SliderFloat("Shadow Softness", &g_productionPreviewSettings.shadowSoftness, 0.6f, 3.0f);
-        ImGui::SliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
-        ImGui::SliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
-        ImGui::SliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
-        ImGui::SliderFloat("Macro Strength", &g_productionPreviewSettings.macroStrength, 0.0f, 0.35f);
-        ImGui::SliderFloat("Cliff Dark Radius", &g_productionPreviewSettings.cliffDarkeningRadius, 0.05f, 4.0f);
-        ImGui::SliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
-        ImGui::SliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
-        ImGui::SliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
+        panel.checkbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
+        panel.sliderFloat("Ambient", &g_productionPreviewSettings.ambient, 0.35f, 1.35f);
+        panel.sliderFloat("Diffuse Strength", &g_productionPreviewSettings.diffuseStrength, 0.0f, 0.85f);
+        panel.sliderFloat("Rim Strength", &g_productionPreviewSettings.rimStrength, 0.0f, 0.5f);
+        panel.sliderFloat("Specular Strength", &g_productionPreviewSettings.specularStrength, 0.0f, 0.4f);
+        panel.sliderFloat("Sun Shadow Strength", &g_productionPreviewSettings.sunShadowStrength, 0.0f, 1.0f);
+        panel.sliderFloat("Shadow Tint", &g_productionPreviewSettings.shadowTintStrength, 0.0f, 1.0f);
+        panel.sliderFloat("Shadow Ambient Floor", &g_productionPreviewSettings.shadowAmbientFloor, 0.15f, 0.75f);
+        panel.sliderFloat("Shadow Softness", &g_productionPreviewSettings.shadowSoftness, 0.6f, 3.0f);
+        panel.sliderFloat("Wall Brightness", &g_productionPreviewSettings.wallBrightness, 0.45f, 1.65f);
+        panel.sliderFloat("Texture Scale", &g_productionPreviewSettings.textureScale, 0.25f, 4.0f);
+        panel.sliderFloat("Macro Scale", &g_productionPreviewSettings.macroScale, 0.05f, 2.0f);
+        panel.sliderFloat("Macro Strength", &g_productionPreviewSettings.macroStrength, 0.0f, 0.35f);
+        panel.sliderFloat("Cliff Dark Radius", &g_productionPreviewSettings.cliffDarkeningRadius, 0.05f, 4.0f);
+        panel.sliderFloat("Cliff Dark Strength", &g_productionPreviewSettings.cliffDarkeningStrength, 0.0f, 0.75f);
+        panel.sliderFloat("Min Top Brightness", &g_productionPreviewSettings.minTopBrightness, 0.35f, 1.0f);
+        panel.sliderFloat("Edge Darkness", &g_productionPreviewSettings.edgeDarkness, 0.0f, 0.45f);
         ImGui::Text("Cliff Surface");
-        ImGui::SliderFloat("Wall AO", &g_productionPreviewSettings.wallAoStrength, 0.0f, 0.85f);
-        ImGui::SliderFloat("Edge Wear", &g_productionPreviewSettings.wallEdgeWearStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Crevice Darken", &g_productionPreviewSettings.wallCreviceStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Wall Grain", &g_productionPreviewSettings.wallGrainStrength, 0.0f, 0.6f);
+        panel.sliderFloat("Wall AO", &g_productionPreviewSettings.wallAoStrength, 0.0f, 0.85f);
+        panel.sliderFloat("Edge Wear", &g_productionPreviewSettings.wallEdgeWearStrength, 0.0f, 1.0f);
+        panel.sliderFloat("Crevice Darken", &g_productionPreviewSettings.wallCreviceStrength, 0.0f, 1.0f);
+        panel.sliderFloat("Wall Grain", &g_productionPreviewSettings.wallGrainStrength, 0.0f, 0.6f);
         const char* debugModes[] = {
             "Lit",
             "Albedo",
@@ -239,13 +308,13 @@ void drawLandscapeScenarioControls(float panelWidth) {
             "Sun Shadow",
             "Normal Vectors",
         };
-        ImGui::Combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
+        panel.combo("Debug Mode", &g_productionPreviewSettings.debugMode, debugModes, IM_ARRAYSIZE(debugModes));
         if (g_productionPreviewSettings.debugMode == (int)ProductionPreviewDebugMode::NormalVectors) {
-            ImGui::SliderFloat("Normal Arrow Scale", &g_productionPreviewSettings.normalVectorScale, 0.1f, 1.5f);
+            panel.sliderFloat("Normal Arrow Scale", &g_productionPreviewSettings.normalVectorScale, 0.1f, 1.5f);
         }
         ImGui::Separator();
         ImGui::Text("Env Sprites (throwaway test)");
-        ImGui::Checkbox("Scatter 2D Env Sprites", &g_productionPreviewSettings.showEnvSprites);
+        panel.checkbox("Scatter 2D Env Sprites", &g_productionPreviewSettings.showEnvSprites);
         ImGui::SameLine();
         if (ImGui::Button("Reseed")) {
             requestEnvSpriteReseed();
@@ -309,7 +378,6 @@ void drawLandscapeScenarioControls(float panelWidth) {
     ImGui::TextColored(ImVec4(0.43f, 0.63f, 0.35f, 1.0f), "Green = clearing / lowland");
     ImGui::TextColored(ImVec4(0.58f, 0.68f, 0.40f, 1.0f), "Olive = hills");
     ImGui::TextColored(ImVec4(0.70f, 0.72f, 0.50f, 1.0f), "Bright = upper high ground");
-    ImGui::PopItemWidth();
 }
 
 void drawScenarioPanelBackground(const ImVec2& layoutOrigin, const ImVec2& layoutSize, float leftPanelWidth) {
@@ -355,7 +423,8 @@ void drawRectangleScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSi
 }
 
 void drawSingleQuadLabControls(float panelWidth) {
-    ImGui::PushItemWidth(panelWidth - 24.0f);
+    PanelControls panel;
+    panel.begin(panelWidth);
     drawFrameStats();
     ImGui::Separator();
 
@@ -366,34 +435,47 @@ void drawSingleQuadLabControls(float panelWidth) {
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        changed |= ImGui::SliderFloat("Quad Width", &g_singleQuadLabSettings.quadWidth, 0.1f, 4.0f);
-        changed |= ImGui::SliderFloat("Quad Height", &g_singleQuadLabSettings.quadHeight, 0.1f, 4.0f);
-        changed |= ImGui::SliderFloat("Yaw", &g_singleQuadLabSettings.yawDegrees, -180.0f, 180.0f);
-        changed |= ImGui::SliderFloat("Pitch", &g_singleQuadLabSettings.pitchDegrees, -89.0f, 89.0f);
-        changed |= ImGui::SliderFloat("Center X", &g_singleQuadLabSettings.centerX, -4.0f, 4.0f);
-        changed |= ImGui::SliderFloat("Center Y", &g_singleQuadLabSettings.centerY, -2.0f, 4.0f);
-        changed |= ImGui::SliderFloat("Center Z", &g_singleQuadLabSettings.centerZ, -4.0f, 4.0f);
+        changed |= panel.sliderFloat("Quad Width", &g_singleQuadLabSettings.quadWidth, 0.1f, 4.0f);
+        changed |= panel.sliderFloat("Quad Height", &g_singleQuadLabSettings.quadHeight, 0.1f, 4.0f);
+        changed |= panel.sliderFloat("Yaw", &g_singleQuadLabSettings.yawDegrees, -180.0f, 180.0f);
+        changed |= panel.sliderFloat("Pitch", &g_singleQuadLabSettings.pitchDegrees, -89.0f, 89.0f);
+        changed |= panel.sliderFloat("Center X", &g_singleQuadLabSettings.centerX, -4.0f, 4.0f);
+        changed |= panel.sliderFloat("Center Y", &g_singleQuadLabSettings.centerY, -2.0f, 4.0f);
+        changed |= panel.sliderFloat("Center Z", &g_singleQuadLabSettings.centerZ, -4.0f, 4.0f);
 
         int operation = (int)g_singleQuadLabSettings.operation;
-        changed |= ImGui::Combo(
-            "Operation",
-            &operation,
-            "Flat quad\0Extrude shell\0");
+        changed |= panel.combo("Operation", &operation, "Flat quad\0Extrude shell\0");
         g_singleQuadLabSettings.operation = (QuadLabOperation)operation;
 
         if (g_singleQuadLabSettings.operation == QuadLabOperation::Extrude) {
-            changed |= ImGui::SliderFloat("Extrude Depth", &g_singleQuadLabSettings.extrudeDepth, 0.0f, 2.0f);
-            changed |= ImGui::SliderFloat("Extrude Top Scale", &g_singleQuadLabSettings.extrudeTopScale, 0.1f, 1.0f);
+            changed |= panel.sliderFloat("Extrude Depth", &g_singleQuadLabSettings.extrudeDepth, 0.0f, 2.0f);
+            changed |= panel.sliderFloat("Extrude Top Scale", &g_singleQuadLabSettings.extrudeTopScale, 0.1f, 1.0f);
+            changed |= panel.sliderFloat(
+                "Top Height Spread",
+                &g_singleQuadLabSettings.extrudeTopHeightSpread,
+                0.0f,
+                1.0f);
+            changed |= panel.inputInt("Height Seed", &g_singleQuadLabSettings.extrudeHeightSeed);
+            if (ImGui::Button("Reseed Top Heights")) {
+                ++g_singleQuadLabSettings.extrudeHeightSeed;
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Each top corner extrudes along the face normal by depth * random(1-spread, 1+spread).");
+            }
         }
 
-        changed |= ImGui::Checkbox("Colorize Faces", &g_singleQuadLabSettings.colorizeFaces);
-        ImGui::Checkbox("Show Wireframe", &g_singleQuadLabSettings.showWireframe);
+        changed |= panel.checkbox("Colorize Faces", &g_singleQuadLabSettings.colorizeFaces);
+        panel.checkbox("Show Wireframe", &g_singleQuadLabSettings.showWireframe);
 
         ImGui::Separator();
         ImGui::Text("Preview Camera");
         ImGui::TextWrapped("GPU mesh preview with depth buffer. Ctrl+LMB drag: orbit. LMB drag: pan.");
-        ImGui::SliderFloat("Camera Yaw", &g_singleQuadLabCamera.orbitYawDegrees, -180.0f, 180.0f);
-        ImGui::SliderFloat("Camera Pitch", &g_singleQuadLabCamera.orbitPitchDegrees, -89.0f, 89.0f);
+        panel.sliderFloat("Camera Yaw", &g_singleQuadLabCamera.orbitYawDegrees, -180.0f, 180.0f);
+        panel.sliderFloat("Camera Pitch", &g_singleQuadLabCamera.orbitPitchDegrees, -89.0f, 89.0f);
         if (ImGui::Button("Reset Camera")) {
             g_singleQuadLabCamera.zoom = 1.0f;
             g_singleQuadLabCamera.pan = {0.0f, 0.0f};
@@ -410,7 +492,6 @@ void drawSingleQuadLabControls(float panelWidth) {
     if (changed) {
         rebuildSingleQuadLabModel();
     }
-    ImGui::PopItemWidth();
 }
 
 void drawSingleQuadLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
