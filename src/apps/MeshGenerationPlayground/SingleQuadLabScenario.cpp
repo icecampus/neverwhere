@@ -117,37 +117,34 @@ void ensureOutwardWinding(MeshQuad& quad, const Vec3& outwardDir) {
     quad.normal = normalizeVec(areaNormal, outwardDir);
 }
 
-MeshQuad orientedSideQuad(
+Vec3 resolveSideOutwardDir(
     const Vec3& a,
     const Vec3& b,
     const Vec3& c,
     const Vec3& d,
-    const Vec3& centroid,
+    const Vec3& shellCentroid,
     const MeshQuad& source,
-    ImU32 color) {
+    Vec3& outA,
+    Vec3& outB,
+    Vec3& outC,
+    Vec3& outD) {
+    outA = a;
+    outB = b;
+    outC = c;
+    outD = d;
 
-    MeshQuad side = source;
-    side.a = a;
-    side.b = b;
-    side.c = c;
-    side.d = d;
-    side.color = color;
-
-    Vec3 areaNormal = quadAreaNormal(a, b, c, d);
-    const Vec3 sideMid = scaleVec(addVec(addVec(a, b), addVec(c, d)), 0.25f);
-    const Vec3 outwardHint = subtractVec(sideMid, centroid);
+    Vec3 areaNormal = quadAreaNormal(outA, outB, outC, outD);
+    const Vec3 sideMid = scaleVec(addVec(addVec(outA, outB), addVec(outC, outD)), 0.25f);
+    const Vec3 outwardHint = subtractVec(sideMid, shellCentroid);
     areaNormal = normalizeVec(areaNormal, source.normal);
     if (dotVec(areaNormal, outwardHint) < 0.0f) {
-        const Vec3 reversedB = side.d;
-        const Vec3 reversedD = side.b;
-        side.b = reversedB;
-        side.d = reversedD;
+        const Vec3 reversedB = outD;
+        const Vec3 reversedD = outB;
+        outB = reversedB;
+        outD = reversedD;
         areaNormal = scaleVec(areaNormal, -1.0f);
     }
-    side.normal = normalizeVec(areaNormal, source.normal);
-    side.outwardHint = side.normal;
-    side.depth = meshQuadDepth(side);
-    return side;
+    return normalizeVec(areaNormal, source.normal);
 }
 
 float cornerExtrudeDepth(float baseDepth, float heightSpread, std::mt19937& rng) {
@@ -204,8 +201,38 @@ MeshQuad makeTrianglePanel(
         normal = normalizeVec(normal, outwardDir);
     }
     tri.normal = normal;
+    tri.outwardHint = normal;
     tri.depth = meshQuadDepth(tri);
     return tri;
+}
+
+void appendConvexQuadAsTrianglePanels(
+    std::vector<MeshQuad>& out,
+    const Vec3& cornerA,
+    const Vec3& cornerB,
+    const Vec3& cornerC,
+    const Vec3& cornerD,
+    const Vec3& referenceCenter,
+    const Vec3& outwardDir,
+    ImU32 color,
+    const MeshQuad& source) {
+    const auto heightAlongOutward = [&](const Vec3& point) {
+        return dotVec(subtractVec(point, referenceCenter), outwardDir);
+    };
+    const float cornerHeights[4] = {
+        heightAlongOutward(cornerA),
+        heightAlongOutward(cornerB),
+        heightAlongOutward(cornerC),
+        heightAlongOutward(cornerD),
+    };
+
+    if (meshQuadPreferAcDiagonalFromHeights(cornerHeights)) {
+        out.push_back(makeTrianglePanel(cornerA, cornerB, cornerC, outwardDir, color, source));
+        out.push_back(makeTrianglePanel(cornerA, cornerC, cornerD, outwardDir, color, source));
+    } else {
+        out.push_back(makeTrianglePanel(cornerA, cornerB, cornerD, outwardDir, color, source));
+        out.push_back(makeTrianglePanel(cornerB, cornerC, cornerD, outwardDir, color, source));
+    }
 }
 
 void appendConvexTopCap(
@@ -218,24 +245,34 @@ void appendConvexTopCap(
     const Vec3& extrudeDir,
     ImU32 color,
     const MeshQuad& source) {
-    const auto heightAlongExtrude = [&](const Vec3& point) {
-        const Vec3 delta = subtractVec(point, referenceCenter);
-        return dotVec(delta, extrudeDir);
-    };
-    const float topHeights[4] = {
-        heightAlongExtrude(topA),
-        heightAlongExtrude(topB),
-        heightAlongExtrude(topC),
-        heightAlongExtrude(topD),
-    };
+    appendConvexQuadAsTrianglePanels(out, topA, topB, topC, topD, referenceCenter, extrudeDir, color, source);
+}
 
-    if (meshQuadPreferAcDiagonalFromHeights(topHeights)) {
-        out.push_back(makeTrianglePanel(topA, topB, topC, extrudeDir, color, source));
-        out.push_back(makeTrianglePanel(topA, topC, topD, extrudeDir, color, source));
-    } else {
-        out.push_back(makeTrianglePanel(topA, topB, topD, extrudeDir, color, source));
-        out.push_back(makeTrianglePanel(topB, topC, topD, extrudeDir, color, source));
-    }
+void appendOrientedConvexSidePanels(
+    std::vector<MeshQuad>& out,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d,
+    const Vec3& shellCentroid,
+    const MeshQuad& source,
+    ImU32 color) {
+    Vec3 cornerA;
+    Vec3 cornerB;
+    Vec3 cornerC;
+    Vec3 cornerD;
+    const Vec3 outwardDir = resolveSideOutwardDir(a, b, c, d, shellCentroid, source, cornerA, cornerB, cornerC, cornerD);
+    const Vec3 sideCenter = scaleVec(addVec(addVec(cornerA, cornerB), addVec(cornerC, cornerD)), 0.25f);
+    appendConvexQuadAsTrianglePanels(
+        out,
+        cornerA,
+        cornerB,
+        cornerC,
+        cornerD,
+        sideCenter,
+        outwardDir,
+        color,
+        source);
 }
 
 bool assignTopCapCornersFromPanels(
@@ -334,10 +371,10 @@ void appendExtrudedQuad(
 
     appendConvexTopCap(out, topA, topB, topC, topD, center, extrudeDir, topColor, quad);
 
-    out.push_back(orientedSideQuad(quad.a, quad.b, topB, topA, center, quad, sideColors[0]));
-    out.push_back(orientedSideQuad(quad.b, quad.c, topC, topB, center, quad, sideColors[1]));
-    out.push_back(orientedSideQuad(quad.c, quad.d, topD, topC, center, quad, sideColors[2]));
-    out.push_back(orientedSideQuad(quad.a, quad.d, topD, topA, center, quad, sideColors[3]));
+    appendOrientedConvexSidePanels(out, quad.a, quad.b, topB, topA, center, quad, sideColors[0]);
+    appendOrientedConvexSidePanels(out, quad.b, quad.c, topC, topB, center, quad, sideColors[1]);
+    appendOrientedConvexSidePanels(out, quad.c, quad.d, topD, topC, center, quad, sideColors[2]);
+    appendOrientedConvexSidePanels(out, quad.a, quad.d, topD, topA, center, quad, sideColors[3]);
 }
 
 void addMeshQuad(SingleQuadLabModel& model, MeshQuad quad) {
@@ -485,7 +522,7 @@ bool runSingleQuadLabSmokeTest() {
     g_singleQuadLabSettings = previousSettings;
     rebuildSingleQuadLabModel();
 
-    const bool ok = panelCount == 7 && !bowTieDetected && !uniformTopHeights && !uniformTopScales;
+    const bool ok = panelCount == 11 && !bowTieDetected && !uniformTopHeights && !uniformTopScales;
     spdlog::info(
         "{} single quad lab extrude: panels={}, bowTie={}, uniformTopHeights={}, uniformTopScales={}",
         ok ? "TEST PASS" : "TEST FAIL",
