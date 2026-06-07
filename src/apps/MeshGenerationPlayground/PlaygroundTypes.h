@@ -112,15 +112,9 @@ struct ProductionPreviewSettings {
     float wallEdgeWearStrength = 0.22f; // C1: lighten/desaturate protruding facet ridges.
     float wallCreviceStrength = 0.24f; // C2: darken recessed facets (dirt/moss).
     float wallGrainStrength = 0.22f;   // B2: procedural fbm rock grain amount.
-    float wallDetailNormalInfluence = 0.45f; // GPU: outwardHint + corner geo dual-normal mix.
-    float wallRidgeSpecularStrength = 0.35f; // GPU: relief ridge specular on walls.
-    float wallTopRimStrength = 0.12f;        // GPU: bright rim at wall top edge.
-    float wallTriplanarScale = 1.0f;         // Wall rock/grass UV scale (multiplied by textureScale).
-    float wallTriplanarSharpness = 2.5f;     // Wall X/Z blend sharpness.
-    float wallMossStrength = 0.38f;          // Moss/grass layer at wall base.
-    float wallMossMaxHeight = 0.30f;         // Moss fades above this height fraction.
-    float wallDetailBumpStrength = 0.20f;      // Procedural detail normal from rock noise.
-    float wallCornerBlend = 0.22f;           // Minimum X/Z mix at wall corners.
+    // C3 (reserved): extra mask channel plumbed to the shader (options4) for a future facet effect.
+    float wallFacetWearStrength = 0.0f;
+    float wallFacetWearWidth = 1.4f;
     int debugMode = (int)ProductionPreviewDebugMode::Lit;
     float normalVectorScale = 0.5f;
     bool useGpuRenderer = true;

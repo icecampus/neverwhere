@@ -638,72 +638,6 @@ Vec3 wallLightingNormal(const MeshQuad& quad) {
     return {lit.x, lit.y, lit.z};
 }
 
-Vec3 triangleNormal(const Vec3& p0, const Vec3& p1, const Vec3& p2) {
-    return normalize(cross(subtract(p1, p0), subtract(p2, p0)));
-}
-
-Vec3 wallCornerGeoNormal(const MeshQuad& quad, char corner, const Vec3& stable) {
-    const Vec3& a = quad.a;
-    const Vec3& b = quad.b;
-    const Vec3& c = quad.c;
-    const Vec3& d = quad.d;
-    Vec3 geo;
-    switch (corner) {
-    case 'a':
-        geo = normalize(add(triangleNormal(a, b, c), triangleNormal(a, c, d)));
-        break;
-    case 'b':
-        geo = triangleNormal(a, b, c);
-        break;
-    case 'c':
-        geo = normalize(add(triangleNormal(a, b, c), triangleNormal(a, c, d)));
-        break;
-    case 'd':
-    default:
-        geo = triangleNormal(a, c, d);
-        break;
-    }
-    if (dot(geo, stable) < 0.0f) {
-        geo = scale(geo, -1.0f);
-    }
-    return geo;
-}
-
-Vec3 blendWallLitNormal(const Vec3& stable, const Vec3& geo, float influence) {
-    influence = clampFloat(influence, 0.0f, 1.0f);
-    if (influence <= 0.0001f) {
-        return stable;
-    }
-    Vec3 alignedGeo = geo;
-    if (dot(alignedGeo, stable) < 0.0f) {
-        alignedGeo = scale(alignedGeo, -1.0f);
-    }
-    return normalize(add(scale(stable, 1.0f - influence), scale(alignedGeo, influence)));
-}
-
-bool usesPerVertexWallLitNormals(const ProductionPreviewSettings& previewSettings) {
-    const ProductionPreviewDebugMode debugMode = (ProductionPreviewDebugMode)previewSettings.debugMode;
-    return debugMode != ProductionPreviewDebugMode::RawNormals &&
-        debugMode != ProductionPreviewDebugMode::StableNormals &&
-        debugMode != ProductionPreviewDebugMode::BlendedNormals;
-}
-
-void fillWallLitCornerNormals(
-    const MeshQuad& quad,
-    const ProductionPreviewSettings& previewSettings,
-    Vec3& normalA,
-    Vec3& normalB,
-    Vec3& normalC,
-    Vec3& normalD) {
-
-    const Vec3 stable = wallLightingNormal(quad);
-    const float influence = previewSettings.wallDetailNormalInfluence;
-    normalA = blendWallLitNormal(stable, wallCornerGeoNormal(quad, 'a', stable), influence);
-    normalB = blendWallLitNormal(stable, wallCornerGeoNormal(quad, 'b', stable), influence);
-    normalC = blendWallLitNormal(stable, wallCornerGeoNormal(quad, 'c', stable), influence);
-    normalD = blendWallLitNormal(stable, wallCornerGeoNormal(quad, 'd', stable), influence);
-}
-
 Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings& previewSettings) {
     const ProductionPreviewDebugMode debugMode = (ProductionPreviewDebugMode)previewSettings.debugMode;
     if (debugMode == ProductionPreviewDebugMode::RawNormals) {
@@ -721,18 +655,6 @@ Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings&
         return blendedWallNormal(quad);
     }
     return wallLightingNormal(quad);
-}
-
-Vec3 wallLitNormalAtCenter(const MeshQuad& quad, const ProductionPreviewSettings& previewSettings) {
-    if (!quad.cliffWall || !usesPerVertexWallLitNormals(previewSettings)) {
-        return previewNormalForQuad(quad, previewSettings);
-    }
-    Vec3 normalA;
-    Vec3 normalB;
-    Vec3 normalC;
-    Vec3 normalD;
-    fillWallLitCornerNormals(quad, previewSettings, normalA, normalB, normalC, normalD);
-    return normalize(add(add(normalA, normalB), add(normalC, normalD)));
 }
 
 ImU32 productionLitColor(
@@ -876,39 +798,13 @@ render_core::MeshPreviewQuad toRenderQuad(const MeshQuad& quad, const Production
     result.b = toGlm(quad.b);
     result.c = toGlm(quad.c);
     result.d = toGlm(quad.d);
-
-    const Vec3 previewNormal = previewNormalForQuad(quad, previewSettings);
-    if (quad.cliffWall && usesPerVertexWallLitNormals(previewSettings)) {
-        Vec3 normalA;
-        Vec3 normalB;
-        Vec3 normalC;
-        Vec3 normalD;
-        fillWallLitCornerNormals(quad, previewSettings, normalA, normalB, normalC, normalD);
-        result.normalA = toGlm(normalA);
-        result.normalB = toGlm(normalB);
-        result.normalC = toGlm(normalC);
-        result.normalD = toGlm(normalD);
-        result.normal = result.normalA;
-    } else {
-        const glm::vec3 sharedNormal = toGlm(previewNormal);
-        result.normal = sharedNormal;
-        result.normalA = sharedNormal;
-        result.normalB = sharedNormal;
-        result.normalC = sharedNormal;
-        result.normalD = sharedNormal;
-    }
+    result.normal = toGlm(previewNormalForQuad(quad, previewSettings));
     result.color = colorToVec4(quad.cliffWall ? previewWallColor(quad.color) : blendTowardWhite(quad.color, 0.50f));
     result.uvA = toGlm(quad.cliffWall ? wallUv(quad, quad.a) : grassUv(quad.a));
     result.uvB = toGlm(quad.cliffWall ? wallUv(quad, quad.b) : grassUv(quad.b));
     result.uvC = toGlm(quad.cliffWall ? wallUv(quad, quad.c) : grassUv(quad.c));
     result.uvD = toGlm(quad.cliffWall ? wallUv(quad, quad.d) : grassUv(quad.d));
     result.faceKind = quad.cliffWall ? 1.0f : 0.0f;
-    if (quad.cliffWall) {
-        const float hintX = std::fabs(quad.outwardHint.x);
-        const float hintZ = std::fabs(quad.outwardHint.z);
-        const float hintSum = hintX + hintZ;
-        result.wallBlendX = hintSum > 0.001f ? hintX / hintSum : 0.5f;
-    }
     result.cliffDistance = quad.cliffDistance;
     result.relief = quad.relief;
     result.heightFraction = quad.heightFraction;
@@ -983,15 +879,8 @@ render_core::MeshPreviewRenderParams makeRenderParams(
     params.wallEdgeWearStrength = previewSettings.wallEdgeWearStrength;
     params.wallCreviceStrength = previewSettings.wallCreviceStrength;
     params.wallGrainStrength = previewSettings.wallGrainStrength;
-    params.wallDetailNormalInfluence = previewSettings.wallDetailNormalInfluence;
-    params.wallRidgeSpecularStrength = previewSettings.wallRidgeSpecularStrength;
-    params.wallTopRimStrength = previewSettings.wallTopRimStrength;
-    params.wallTriplanarScale = previewSettings.wallTriplanarScale;
-    params.wallTriplanarSharpness = previewSettings.wallTriplanarSharpness;
-    params.wallMossStrength = previewSettings.wallMossStrength;
-    params.wallMossMaxHeight = previewSettings.wallMossMaxHeight;
-    params.wallDetailBumpStrength = previewSettings.wallDetailBumpStrength;
-    params.wallCornerBlend = previewSettings.wallCornerBlend;
+    params.wallFacetWearStrength = previewSettings.wallFacetWearStrength;
+    params.wallFacetWearWidth = previewSettings.wallFacetWearWidth;
     params.rimStrength = previewSettings.rimStrength;
     params.rimPower = previewSettings.rimPower;
     params.specularStrength = previewSettings.specularStrength;
@@ -1255,9 +1144,7 @@ void drawMeshQuadNormalVectors(
 
         const Vec3 center = meshQuadCenter(quad);
         const ImVec2 centerScreen = projectPoint(center);
-        const Vec3 litNormal = quad.cliffWall
-            ? wallLitNormalAtCenter(quad, previewSettings)
-            : previewNormalForQuad(quad, previewSettings);
+        const Vec3 litNormal = previewNormalForQuad(quad, previewSettings);
         const ImVec2 litTip = projectPoint(add(center, scale(litNormal, arrowScale)));
         drawNormalArrow(drawList, centerScreen, litTip, kLitColor, 1.6f);
 
@@ -1925,7 +1812,7 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
         renderedWithGpu ? IM_COL32(126, 220, 150, 255) : IM_COL32(235, 186, 90, 255),
         renderedWithGpu ? "Renderer: Sokol GPU offscreen" : "Renderer: ImGui CPU fallback");
     if (normalVectorsMode) {
-        drawList->AddText({origin.x + 12.0f, origin.y + 112.0f}, IM_COL32(96, 255, 128, 255), "Green: lit normal (outwardHint + corner detail on walls)");
+        drawList->AddText({origin.x + 12.0f, origin.y + 112.0f}, IM_COL32(96, 255, 128, 255), "Green: lit normal (outwardHint-based)");
         drawList->AddText({origin.x + 12.0f, origin.y + 132.0f}, IM_COL32(255, 96, 96, 255), "Red: raw facet normal (quad.normal, albedo only)");
         drawList->AddText({origin.x + 12.0f, origin.y + 152.0f}, IM_COL32(255, 220, 72, 255), "Yellow: outwardHint mesh metadata");
         drawList->AddText({origin.x + 12.0f, origin.y + 172.0f}, IM_COL32(196, 128, 255, 255), "Purple: legacy stableWallNormal (debug compare)");
