@@ -509,7 +509,7 @@ void drawWallLabControls(float panelWidth) {
 
     ImGui::Text("Wall Lab");
     ImGui::TextWrapped(
-        "Rectangle split into four quads (2x2). Shared center can bulge forward, then each facet gets Quad Lab extrude.");
+        "Rectangle split into 4x4 quads. Shared grid vertices get chaotic forward push, then each facet gets Quad Lab extrude.");
 
     bool changed = false;
     {
@@ -522,7 +522,12 @@ void drawWallLabControls(float panelWidth) {
         changed |= panel.sliderFloat("Center Z", &g_wallSeriesLabSettings.wallCenterZ, -4.0f, 4.0f);
         changed |= panel.sliderFloat("Yaw", &g_wallSeriesLabSettings.yawDegrees, -180.0f, 180.0f);
         changed |= panel.sliderFloat("Pitch", &g_wallSeriesLabSettings.pitchDegrees, -89.0f, 89.0f);
-        changed |= panel.sliderFloat("Center Push Forward", &g_wallSeriesLabSettings.centerPushForward, 0.0f, 1.5f);
+        changed |= panel.sliderFloat("Vertex Push Max", &g_wallSeriesLabSettings.vertexPushMax, 0.0f, 1.5f);
+        changed |= panel.inputInt("Vertex Push Seed", &g_wallSeriesLabSettings.vertexPushSeed);
+        if (ImGui::Button("Reseed Vertex Push")) {
+            ++g_wallSeriesLabSettings.vertexPushSeed;
+            changed = true;
+        }
 
         ImGui::Separator();
         ImGui::Text("Quad Lab Extrude");
@@ -564,8 +569,10 @@ void drawWallLabControls(float panelWidth) {
 
         ImGui::Separator();
         ImGui::Text(
-            "Base quads: %d | mesh panels: %d",
+            "Base quads: %d (%d x %d) | mesh panels: %d",
             g_wallSeriesLabModel.baseQuadCount,
+            g_wallSeriesLabModel.gridColumns,
+            g_wallSeriesLabModel.gridRows,
             g_wallSeriesLabModel.meshPanelCount);
         if (g_wallSeriesLabSettings.quadLabOperation == QuadLabOperation::Extrude
             && g_wallSeriesLabSettings.extrudeDepth > 0.0001f) {

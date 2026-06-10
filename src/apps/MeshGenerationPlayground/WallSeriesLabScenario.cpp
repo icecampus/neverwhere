@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstddef>
 #include <mutex>
+#include <random>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 
@@ -14,6 +16,8 @@ namespace meshgen_playground {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
+constexpr int kGridColumns = 4;
+constexpr int kGridRows = 4;
 
 Vec3 rotateYawPitchPoint(const Vec3& value, float yawRadians, float pitchRadians) {
     const float cosYaw = std::cos(yawRadians);
@@ -75,8 +79,40 @@ Vec3 wallOutwardHint(const WallSeriesLabSettings& settings) {
     return normalizeVec3(rotateYawPitchPoint(localNormal, yaw, pitch), localNormal);
 }
 
-Vec3 localSharedCenter(const WallSeriesLabSettings& settings) {
-    return {0.0f, 0.0f, -settings.centerPushForward};
+bool isOuterWallCorner(int gridX, int gridY) {
+    const bool onLeft = gridX == 0;
+    const bool onRight = gridX == kGridColumns;
+    const bool onBottom = gridY == 0;
+    const bool onTop = gridY == kGridRows;
+    return (onLeft || onRight) && (onBottom || onTop);
+}
+
+float chaoticForwardPush(int gridX, int gridY, const WallSeriesLabSettings& settings) {
+    if (isOuterWallCorner(gridX, gridY) || settings.vertexPushMax <= 0.0001f) {
+        return 0.0f;
+    }
+
+    std::mt19937 rng((unsigned)settings.vertexPushSeed * 2654435761u +
+                     (unsigned)gridX * 73856093u +
+                     (unsigned)gridY * 19349663u);
+    std::uniform_real_distribution<float> pushAmount(0.0f, settings.vertexPushMax);
+    return pushAmount(rng);
+}
+
+Vec3 localGridVertex(int gridX, int gridY, const WallSeriesLabSettings& settings) {
+    const float halfWidth = settings.wallWidth * 0.5f;
+    const float halfHeight = settings.wallHeight * 0.5f;
+    const float u = (float)gridX / (float)kGridColumns;
+    const float v = (float)gridY / (float)kGridRows;
+    return {
+        -halfWidth + u * settings.wallWidth,
+        -halfHeight + v * settings.wallHeight,
+        -chaoticForwardPush(gridX, gridY, settings),
+    };
+}
+
+int gridVertexIndex(int gridX, int gridY) {
+    return gridY * (kGridColumns + 1) + gridX;
 }
 
 void assignFacetNormal(MeshQuad& quad, const Vec3& outwardHint) {
@@ -95,66 +131,68 @@ void assignFacetNormal(MeshQuad& quad, const Vec3& outwardHint) {
     quad.outwardHint = outwardHint;
 }
 
-MeshQuad makeWallLabQuad(
-    const Vec3& localA,
-    const Vec3& localB,
-    const Vec3& localC,
-    const Vec3& localD,
-    const WallSeriesLabSettings& settings,
+MeshQuad makeWallLabQuadFromGrid(
+    int gridAx,
+    int gridAy,
+    int gridBx,
+    int gridBy,
+    int gridCx,
+    int gridCy,
+    int gridDx,
+    int gridDy,
+    const std::vector<Vec3>& worldVertices,
+    const Vec3& outwardHint,
     ImU32 color) {
     MeshQuad quad;
-    quad.a = transformLocalPoint(localA, settings);
-    quad.b = transformLocalPoint(localB, settings);
-    quad.c = transformLocalPoint(localC, settings);
-    quad.d = transformLocalPoint(localD, settings);
-    assignFacetNormal(quad, wallOutwardHint(settings));
+    quad.a = worldVertices[(std::size_t)gridVertexIndex(gridAx, gridAy)];
+    quad.b = worldVertices[(std::size_t)gridVertexIndex(gridBx, gridBy)];
+    quad.c = worldVertices[(std::size_t)gridVertexIndex(gridCx, gridCy)];
+    quad.d = worldVertices[(std::size_t)gridVertexIndex(gridDx, gridDy)];
+    assignFacetNormal(quad, outwardHint);
     quad.color = color;
     quad.cliffWall = false;
     quad.depth = meshQuadDepth(quad);
     return quad;
 }
 
+void buildWallLabVertexGrid(const WallSeriesLabSettings& settings, std::vector<Vec3>& worldVertices) {
+    const int vertexColumns = kGridColumns + 1;
+    const int vertexRows = kGridRows + 1;
+    worldVertices.resize((std::size_t)vertexColumns * (std::size_t)vertexRows);
+
+    for (int gridY = 0; gridY <= kGridRows; gridY++) {
+        for (int gridX = 0; gridX <= kGridColumns; gridX++) {
+            worldVertices[(std::size_t)gridVertexIndex(gridX, gridY)] =
+                transformLocalPoint(localGridVertex(gridX, gridY, settings), settings);
+        }
+    }
+}
+
 void appendWallLabBaseQuads(std::vector<MeshQuad>& baseQuads, const WallSeriesLabSettings& settings) {
-    const float halfWidth = settings.wallWidth * 0.5f;
-    const float halfHeight = settings.wallHeight * 0.5f;
-    const Vec3 center = localSharedCenter(settings);
+    std::vector<Vec3> worldVertices;
+    buildWallLabVertexGrid(settings, worldVertices);
+    const Vec3 outwardHint = wallOutwardHint(settings);
 
-    constexpr ImU32 kQuadColors[4] = {
-        IM_COL32(108, 116, 128, 255),
-        IM_COL32(138, 146, 158, 255),
-        IM_COL32(158, 166, 178, 255),
-        IM_COL32(188, 196, 208, 255),
-    };
-
-    // Shared bulge vertex is always c; CCW for -Z camera.
-    baseQuads.push_back(makeWallLabQuad(
-        {-halfWidth, -halfHeight, 0.0f},
-        {-halfWidth, 0.0f, 0.0f},
-        center,
-        {0.0f, -halfHeight, 0.0f},
-        settings,
-        kQuadColors[0]));
-    baseQuads.push_back(makeWallLabQuad(
-        {halfWidth, -halfHeight, 0.0f},
-        {halfWidth, 0.0f, 0.0f},
-        center,
-        {0.0f, -halfHeight, 0.0f},
-        settings,
-        kQuadColors[1]));
-    baseQuads.push_back(makeWallLabQuad(
-        {-halfWidth, halfHeight, 0.0f},
-        {-halfWidth, 0.0f, 0.0f},
-        center,
-        {0.0f, halfHeight, 0.0f},
-        settings,
-        kQuadColors[2]));
-    baseQuads.push_back(makeWallLabQuad(
-        {halfWidth, halfHeight, 0.0f},
-        {0.0f, halfHeight, 0.0f},
-        center,
-        {halfWidth, 0.0f, 0.0f},
-        settings,
-        kQuadColors[3]));
+    baseQuads.reserve((std::size_t)kGridColumns * (std::size_t)kGridRows);
+    for (int cellY = 0; cellY < kGridRows; cellY++) {
+        for (int cellX = 0; cellX < kGridColumns; cellX++) {
+            const int quadIndex = cellY * kGridColumns + cellX;
+            const ImU32 color = quadLabPanelTintColor(quadIndex, kGridColumns * kGridRows);
+            // CCW from -Z: bottom-left, top-left, top-right, bottom-right.
+            baseQuads.push_back(makeWallLabQuadFromGrid(
+                cellX,
+                cellY,
+                cellX,
+                cellY + 1,
+                cellX + 1,
+                cellY + 1,
+                cellX + 1,
+                cellY,
+                worldVertices,
+                outwardHint,
+                color));
+        }
+    }
 }
 
 int extrudeSeedForWallQuad(const WallSeriesLabSettings& settings, int quadIndex) {
@@ -181,7 +219,7 @@ void sanitizeWallSeriesLabSettings(WallSeriesLabSettings& settings) {
     settings.wallCenterZ = clampFloat(settings.wallCenterZ, -8.0f, 8.0f);
     settings.yawDegrees = clampFloat(settings.yawDegrees, -180.0f, 180.0f);
     settings.pitchDegrees = clampFloat(settings.pitchDegrees, -89.0f, 89.0f);
-    settings.centerPushForward = clampFloat(settings.centerPushForward, 0.0f, 2.0f);
+    settings.vertexPushMax = clampFloat(settings.vertexPushMax, 0.0f, 2.0f);
     settings.extrudeDepth = clampFloat(settings.extrudeDepth, 0.0f, 2.0f);
     settings.extrudeTopScale = clampFloat(settings.extrudeTopScale, 0.1f, 1.0f);
     settings.extrudeTopHeightSpread = clampFloat(settings.extrudeTopHeightSpread, 0.0f, 1.0f);
@@ -193,13 +231,14 @@ void rebuildWallSeriesLabModel() {
     sanitizeWallSeriesLabSettings(settings);
 
     std::vector<MeshQuad> baseQuads;
-    baseQuads.reserve(4);
     appendWallLabBaseQuads(baseQuads, settings);
 
     const bool applyQuadLabExtrude =
         settings.quadLabOperation == QuadLabOperation::Extrude && settings.extrudeDepth > 0.0001f;
 
     WallSeriesLabModel model;
+    model.gridColumns = kGridColumns;
+    model.gridRows = kGridRows;
     model.baseQuadCount = (int)baseQuads.size();
     model.quads.reserve(applyQuadLabExtrude ? baseQuads.size() * 11 : baseQuads.size());
 
@@ -233,10 +272,12 @@ void rebuildWallSeriesLabModel() {
     }
 
     spdlog::info(
-        "rebuildWallSeriesLabModel: size={:.2f}x{:.2f}, centerPush={:.3f}, baseQuads={}, meshPanels={}, extrude={}",
+        "rebuildWallSeriesLabModel: size={:.2f}x{:.2f}, grid={}x{}, vertexPushMax={:.3f}, baseQuads={}, meshPanels={}, extrude={}",
         g_wallSeriesLabSettings.wallWidth,
         g_wallSeriesLabSettings.wallHeight,
-        g_wallSeriesLabSettings.centerPushForward,
+        g_wallSeriesLabModel.gridColumns,
+        g_wallSeriesLabModel.gridRows,
+        g_wallSeriesLabSettings.vertexPushMax,
         g_wallSeriesLabModel.baseQuadCount,
         g_wallSeriesLabModel.meshPanelCount,
         applyQuadLabExtrude ? "on" : "off");
@@ -248,7 +289,8 @@ bool runWallSeriesLabSmokeTest() {
     WallSeriesLabSettings testSettings = previousSettings;
     testSettings.wallWidth = 2.0f;
     testSettings.wallHeight = 1.5f;
-    testSettings.centerPushForward = 0.18f;
+    testSettings.vertexPushMax = 0.18f;
+    testSettings.vertexPushSeed = 4242;
     testSettings.quadLabOperation = QuadLabOperation::Extrude;
     testSettings.extrudeDepth = 0.22f;
     testSettings.extrudeTopHeightSpread = 0.35f;
@@ -257,15 +299,17 @@ bool runWallSeriesLabSmokeTest() {
     g_wallSeriesLabSettings = testSettings;
     rebuildWallSeriesLabModel();
 
+    const int expectedBaseQuads = kGridColumns * kGridRows;
+    const int expectedMeshPanels = expectedBaseQuads * 11;
     const int actualBaseQuads = g_wallSeriesLabModel.baseQuadCount;
     const int actualMeshPanels = g_wallSeriesLabModel.meshPanelCount;
-    const bool ok = actualBaseQuads == 4 && actualMeshPanels == 44;
+    const bool ok = actualBaseQuads == expectedBaseQuads && actualMeshPanels == expectedMeshPanels;
 
     g_wallSeriesLabSettings = previousSettings;
     rebuildWallSeriesLabModel();
 
     spdlog::info(
-        "{} wall lab four-quad extrude: baseQuads={}, meshPanels={}",
+        "{} wall lab 4x4 chaotic vertex push + extrude: baseQuads={}, meshPanels={}",
         ok ? "TEST PASS" : "TEST FAIL",
         actualBaseQuads,
         actualMeshPanels);
