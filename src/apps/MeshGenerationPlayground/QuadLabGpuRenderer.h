@@ -2,6 +2,7 @@
 
 #include "PlaygroundTypes.h"
 
+#include <imgui.h>
 #include <vector>
 
 #if !defined(SOKOL_D3D11) && !defined(SOKOL_METAL) && !defined(SOKOL_GLES3) && !defined(SOKOL_GLCORE)
@@ -21,6 +22,13 @@
 namespace meshgen_playground {
 
 struct MeshQuadsPreviewOptions;
+
+ImVec2 projectQuadLabMeshPoint(
+    const Vec3& point,
+    const QuadLabPreviewCamera& camera,
+    const MeshQuadsPreviewOptions& options,
+    const ImVec2& origin,
+    const ImVec2& viewportSize);
 
 class QuadLabGpuRenderer {
 public:

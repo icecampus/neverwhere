@@ -35,6 +35,8 @@ struct MeshQuadsPreviewOptions {
     bool showWireframe = true;
     // Match production wall preview: one lighting normal per quad, fixed a-c diagonal (no visible facet split).
     bool flatQuadShading = false;
+    bool showNormalVectors = false;
+    float normalVectorScale = 0.35f;
     float orbitResetYawDegrees = 35.0f;
     float orbitResetPitchDegrees = 28.0f;
     const char* previewTitle = "Quad Lab: GPU mesh preview";

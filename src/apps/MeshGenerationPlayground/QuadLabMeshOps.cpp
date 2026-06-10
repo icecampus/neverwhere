@@ -283,6 +283,74 @@ Vec3 projectOntoPlane(const Vec3& point, const Vec3& planeOrigin, const Vec3& pl
     return subtractVec(point, scaleVec(planeNormal, alongNormal));
 }
 
+Vec3 liftExtrudeCornerFromSeed(
+    const Vec3& corner,
+    const Vec3& shellCentroid,
+    const Vec3& extrudeDir,
+    float depth,
+    float topCornerScale,
+    float topHeightSpread,
+    float topScaleSpread,
+    int cornerSeed) {
+
+    const float topScale = clampFloat(topCornerScale, 0.01f, 1.0f);
+    const float heightSpread = clampFloat(topHeightSpread, 0.0f, 1.0f);
+    const float scaleSpread = clampFloat(topScaleSpread, 0.0f, 1.0f);
+
+    std::mt19937 heightRng((unsigned)cornerSeed * 2654435761u + 424242u);
+    std::mt19937 scaleRng((unsigned)cornerSeed * 2654435761u + 818181u);
+    const float liftDepth = cornerExtrudeDepth(depth, heightSpread, heightRng);
+    const float cornerScale = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
+    return liftCorner(corner, shellCentroid, cornerScale, extrudeDir, liftDepth);
+}
+
+void appendExtrudedQuadWithShell(
+    std::vector<MeshQuad>& out,
+    const MeshQuad& quad,
+    const Vec3& extrudeNormal,
+    const Vec3& topA,
+    const Vec3& topB,
+    const Vec3& topC,
+    const Vec3& topD,
+    const Vec3& shellCentroid,
+    bool colorizeFaces,
+    const bool emitSides[4],
+    const ExtrudeQuadColors* customColors) {
+
+    const Vec3 extrudeDir = normalizeVec(extrudeNormal, quad.outwardHint);
+
+    ExtrudeQuadColors colors = customColors ? *customColors : defaultExtrudeColors();
+    if (!colorizeFaces) {
+        colors.bottom = quad.color;
+        colors.top = quad.color;
+        for (int i = 0; i < 4; i++) {
+            colors.sides[i] = quad.color;
+        }
+    }
+
+    MeshQuad bottom = quad;
+    bottom.color = colors.bottom;
+    bottom.normal = normalizeVec(extrudeDir, quad.normal);
+    bottom.outwardHint = quad.outwardHint;
+    bottom.depth = meshQuadDepth(bottom);
+    out.push_back(bottom);
+
+    appendConvexTopCap(out, topA, topB, topC, topD, shellCentroid, extrudeDir, colors.top, quad);
+
+    if (emitSides[0]) {
+        appendOrientedConvexSidePanels(out, quad.a, quad.b, topB, topA, shellCentroid, quad, colors.sides[0]);
+    }
+    if (emitSides[1]) {
+        appendOrientedConvexSidePanels(out, quad.b, quad.c, topC, topB, shellCentroid, quad, colors.sides[1]);
+    }
+    if (emitSides[2]) {
+        appendOrientedConvexSidePanels(out, quad.c, quad.d, topD, topC, shellCentroid, quad, colors.sides[2]);
+    }
+    if (emitSides[3]) {
+        appendOrientedConvexSidePanels(out, quad.a, quad.d, topD, topA, shellCentroid, quad, colors.sides[3]);
+    }
+}
+
 void appendExtrudedQuad(
     std::vector<MeshQuad>& out,
     const MeshQuad& quad,
@@ -302,48 +370,66 @@ void appendExtrudedQuad(
 
     const Vec3 extrudeDir = normalizeVec(extrudeNormal, quad.outwardHint);
     const Vec3 center = quadCentroid(quad);
-    const float topScale = clampFloat(topCornerScale, 0.01f, 1.0f);
-    const float heightSpread = clampFloat(topHeightSpread, 0.0f, 1.0f);
-    const float scaleSpread = clampFloat(topScaleSpread, 0.0f, 1.0f);
+    const Vec3 topA = liftExtrudeCornerFromSeed(
+        quad.a, center, extrudeDir, depth, topCornerScale, topHeightSpread, topScaleSpread, heightSeed + 0);
+    const Vec3 topB = liftExtrudeCornerFromSeed(
+        quad.b, center, extrudeDir, depth, topCornerScale, topHeightSpread, topScaleSpread, heightSeed + 1);
+    const Vec3 topC = liftExtrudeCornerFromSeed(
+        quad.c, center, extrudeDir, depth, topCornerScale, topHeightSpread, topScaleSpread, heightSeed + 2);
+    const Vec3 topD = liftExtrudeCornerFromSeed(
+        quad.d, center, extrudeDir, depth, topCornerScale, topHeightSpread, topScaleSpread, heightSeed + 3);
 
-    std::mt19937 heightRng((unsigned)heightSeed * 2654435761u + 424242u);
-    std::mt19937 scaleRng((unsigned)heightSeed * 2654435761u + 818181u);
-    const float liftDepthA = cornerExtrudeDepth(depth, heightSpread, heightRng);
-    const float liftDepthB = cornerExtrudeDepth(depth, heightSpread, heightRng);
-    const float liftDepthC = cornerExtrudeDepth(depth, heightSpread, heightRng);
-    const float liftDepthD = cornerExtrudeDepth(depth, heightSpread, heightRng);
-    const float cornerScaleA = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
-    const float cornerScaleB = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
-    const float cornerScaleC = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
-    const float cornerScaleD = cornerExtrudeScale(topScale, scaleSpread, scaleRng);
+    const bool emitAllSides[4] = {true, true, true, true};
+    appendExtrudedQuadWithShell(
+        out,
+        quad,
+        extrudeNormal,
+        topA,
+        topB,
+        topC,
+        topD,
+        center,
+        colorizeFaces,
+        emitAllSides,
+        customColors);
+}
 
-    const Vec3 topA = liftCorner(quad.a, center, cornerScaleA, extrudeDir, liftDepthA);
-    const Vec3 topB = liftCorner(quad.b, center, cornerScaleB, extrudeDir, liftDepthB);
-    const Vec3 topC = liftCorner(quad.c, center, cornerScaleC, extrudeDir, liftDepthC);
-    const Vec3 topD = liftCorner(quad.d, center, cornerScaleD, extrudeDir, liftDepthD);
+void appendExtrudedQuadWithDisplacedBottom(
+    std::vector<MeshQuad>& out,
+    const MeshQuad& baseQuad,
+    const MeshQuad& displacedBottom,
+    const Vec3& extrudeNormal,
+    float depth,
+    float topCornerScale,
+    float topHeightSpread,
+    float topScaleSpread,
+    int heightSeed,
+    bool colorizeFaces,
+    const ExtrudeQuadColors* customColors) {
 
-    ExtrudeQuadColors colors = customColors ? *customColors : defaultExtrudeColors();
-    if (!colorizeFaces) {
-        colors.bottom = quad.color;
-        colors.top = quad.color;
-        for (int i = 0; i < 4; i++) {
-            colors.sides[i] = quad.color;
-        }
+    const std::size_t panelStart = out.size();
+    appendExtrudedQuad(
+        out,
+        baseQuad,
+        extrudeNormal,
+        depth,
+        topCornerScale,
+        topHeightSpread,
+        topScaleSpread,
+        heightSeed,
+        colorizeFaces,
+        customColors);
+    if (out.size() <= panelStart) {
+        return;
     }
 
-    MeshQuad bottom = quad;
-    bottom.color = colors.bottom;
-    ensureOutwardWinding(bottom, extrudeDir);
-    bottom.outwardHint = bottom.normal;
+    MeshQuad bottom = displacedBottom;
+    if (colorizeFaces) {
+        const ExtrudeQuadColors colors = customColors ? *customColors : defaultExtrudeColors();
+        bottom.color = colors.bottom;
+    }
     bottom.depth = meshQuadDepth(bottom);
-    out.push_back(bottom);
-
-    appendConvexTopCap(out, topA, topB, topC, topD, center, extrudeDir, colors.top, quad);
-
-    appendOrientedConvexSidePanels(out, quad.a, quad.b, topB, topA, center, quad, colors.sides[0]);
-    appendOrientedConvexSidePanels(out, quad.b, quad.c, topC, topB, center, quad, colors.sides[1]);
-    appendOrientedConvexSidePanels(out, quad.c, quad.d, topD, topC, center, quad, colors.sides[2]);
-    appendOrientedConvexSidePanels(out, quad.a, quad.d, topD, topA, center, quad, colors.sides[3]);
+    out[panelStart] = bottom;
 }
 
 bool assignTopCapCornersFromPanels(

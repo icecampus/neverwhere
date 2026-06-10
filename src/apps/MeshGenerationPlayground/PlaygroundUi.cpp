@@ -509,41 +509,53 @@ void drawWallLabControls(float panelWidth) {
 
     ImGui::Text("Wall Lab");
     ImGui::TextWrapped(
-        "Uses composeSolidMaskMesh cliff wall code: one boundary segment, rock noise, production subdivisions.");
+        "Rectangle split into four quads (2x2). Shared center can bulge forward, then each facet gets Quad Lab extrude.");
 
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        changed |= panel.sliderFloat("Wall Width", &g_wallSeriesLabSettings.wallWidth, 0.5f, 12.0f);
-        changed |= panel.sliderFloat("Wall Height", &g_wallSeriesLabSettings.wallHeight, 0.5f, 8.0f);
-        changed |= panel.sliderInt(
-            "Wall Horizontal Subdivs",
-            &g_wallSeriesLabSettings.wallHorizontalSubdivisions,
-            1,
-            24);
-        changed |= panel.sliderInt(
-            "Wall Vertical Subdivs",
-            &g_wallSeriesLabSettings.wallVerticalSubdivisions,
-            1,
-            24);
+        changed |= panel.sliderFloat("Width", &g_wallSeriesLabSettings.wallWidth, 0.5f, 12.0f);
+        changed |= panel.sliderFloat("Height", &g_wallSeriesLabSettings.wallHeight, 0.5f, 8.0f);
 
-        changed |= panel.sliderFloat("Wall Center X", &g_wallSeriesLabSettings.wallCenterX, -4.0f, 4.0f);
-        changed |= panel.sliderFloat("Wall Center Y", &g_wallSeriesLabSettings.wallCenterY, -2.0f, 4.0f);
-        changed |= panel.sliderFloat("Wall Center Z", &g_wallSeriesLabSettings.wallCenterZ, -4.0f, 4.0f);
+        changed |= panel.sliderFloat("Center X", &g_wallSeriesLabSettings.wallCenterX, -4.0f, 4.0f);
+        changed |= panel.sliderFloat("Center Y", &g_wallSeriesLabSettings.wallCenterY, -2.0f, 4.0f);
+        changed |= panel.sliderFloat("Center Z", &g_wallSeriesLabSettings.wallCenterZ, -4.0f, 4.0f);
         changed |= panel.sliderFloat("Yaw", &g_wallSeriesLabSettings.yawDegrees, -180.0f, 180.0f);
         changed |= panel.sliderFloat("Pitch", &g_wallSeriesLabSettings.pitchDegrees, -89.0f, 89.0f);
+        changed |= panel.sliderFloat("Center Push Forward", &g_wallSeriesLabSettings.centerPushForward, 0.0f, 1.5f);
 
-        changed |= panel.checkbox("Rock Noise Enabled", &g_wallSeriesLabSettings.rockEnabled);
-        changed |= panel.inputInt("Rock Seed", &g_wallSeriesLabSettings.rockSeed);
-        changed |= panel.sliderFloat("Rock Scale", &g_wallSeriesLabSettings.rockScale, 0.25f, 24.0f);
-        changed |= panel.sliderFloat("Rock Amplitude", &g_wallSeriesLabSettings.rockAmplitude, 0.0f, 1.25f);
-        changed |= panel.sliderInt("Terrace Steps", &g_wallSeriesLabSettings.terraceSteps, 0, 12);
-        changed |= panel.checkbox("Fade Displacement At Bottom", &g_wallSeriesLabSettings.fadeDisplacementAtBottom);
+        ImGui::Separator();
+        ImGui::Text("Quad Lab Extrude");
+        int quadLabOperation = (int)g_wallSeriesLabSettings.quadLabOperation;
+        changed |= panel.combo("Operation", &quadLabOperation, "Flat quad\0Extrude shell\0");
+        g_wallSeriesLabSettings.quadLabOperation = (QuadLabOperation)quadLabOperation;
+
+        if (g_wallSeriesLabSettings.quadLabOperation == QuadLabOperation::Extrude) {
+            changed |= panel.sliderFloat("Extrude Depth", &g_wallSeriesLabSettings.extrudeDepth, 0.0f, 2.0f);
+            changed |= panel.sliderFloat("Extrude Top Scale", &g_wallSeriesLabSettings.extrudeTopScale, 0.1f, 1.0f);
+            changed |= panel.sliderFloat(
+                "Top Height Spread",
+                &g_wallSeriesLabSettings.extrudeTopHeightSpread,
+                0.0f,
+                1.0f);
+            changed |= panel.sliderFloat(
+                "Top Scale Spread",
+                &g_wallSeriesLabSettings.extrudeTopScaleSpread,
+                0.0f,
+                1.0f);
+            changed |= panel.inputInt("Extrude Seed", &g_wallSeriesLabSettings.extrudeHeightSeed);
+            changed |= panel.checkbox("Vary Seed Per Quad", &g_wallSeriesLabSettings.extrudeVaryPerQuad);
+            if (ImGui::Button("Reseed Extrude")) {
+                ++g_wallSeriesLabSettings.extrudeHeightSeed;
+                changed = true;
+            }
+        }
+
+        changed |= panel.checkbox("Colorize Faces", &g_wallSeriesLabSettings.colorizeFaces);
         panel.checkbox("Show Wireframe", &g_wallSeriesLabSettings.showWireframe);
 
         ImGui::Separator();
         ImGui::Text("Preview Camera");
-        ImGui::TextWrapped("GPU mesh preview with depth buffer. Ctrl+LMB drag: orbit. LMB drag: pan.");
         panel.sliderFloat("Camera Yaw", &g_wallSeriesLabCamera.orbitYawDegrees, -180.0f, 180.0f);
         panel.sliderFloat("Camera Pitch", &g_wallSeriesLabCamera.orbitPitchDegrees, -89.0f, 89.0f);
         if (ImGui::Button("Reset Camera")) {
@@ -552,11 +564,13 @@ void drawWallLabControls(float panelWidth) {
 
         ImGui::Separator();
         ImGui::Text(
-            "Wall quads: %d (%d x %d)",
-            g_wallSeriesLabModel.quadCount,
-            g_wallSeriesLabSettings.wallHorizontalSubdivisions,
-            g_wallSeriesLabSettings.wallVerticalSubdivisions);
-        ImGui::TextColored(ImVec4(0.66f, 0.72f, 0.78f, 1.0f), "Production cliff wall mesh (composeSolidMaskMesh path)");
+            "Base quads: %d | mesh panels: %d",
+            g_wallSeriesLabModel.baseQuadCount,
+            g_wallSeriesLabModel.meshPanelCount);
+        if (g_wallSeriesLabSettings.quadLabOperation == QuadLabOperation::Extrude
+            && g_wallSeriesLabSettings.extrudeDepth > 0.0001f) {
+            ImGui::TextColored(ImVec4(0.66f, 0.72f, 0.78f, 1.0f), "Gray = base/top, orange = sides");
+        }
     }
     if (changed) {
         rebuildWallSeriesLabModel();
@@ -611,7 +625,6 @@ void drawWallLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
         previewOptions.projectionCenterY = g_wallSeriesLabSettings.wallCenterY;
         previewOptions.projectionCenterZ = g_wallSeriesLabSettings.wallCenterZ;
         previewOptions.showWireframe = g_wallSeriesLabSettings.showWireframe;
-        previewOptions.flatQuadShading = true;
         previewOptions.orbitResetYawDegrees = 180.0f;
         previewOptions.orbitResetPitchDegrees = 18.0f;
         previewOptions.previewTitle = "Wall Lab: GPU mesh preview";

@@ -206,6 +206,8 @@ void pushLineVertex(
     vertices.push_back(vertex);
 }
 
+} // namespace
+
 glm::mat4 makeQuadLabMvp(
     const QuadLabPreviewCamera& camera,
     const MeshQuadsPreviewOptions& options,
@@ -243,7 +245,27 @@ glm::mat4 makeQuadLabMvp(
     return projection * view;
 }
 
-} // namespace
+ImVec2 projectQuadLabMeshPoint(
+    const Vec3& point,
+    const QuadLabPreviewCamera& camera,
+    const MeshQuadsPreviewOptions& options,
+    const ImVec2& origin,
+    const ImVec2& viewportSize) {
+
+    const float aspect = viewportSize.x / std::max(1.0f, viewportSize.y);
+    const glm::mat4 mvp = makeQuadLabMvp(camera, options, aspect);
+    const glm::vec4 clip = mvp * glm::vec4(point.x, point.y, point.z, 1.0f);
+    if (clip.w <= 0.0001f) {
+        return {-10000.0f, -10000.0f};
+    }
+    const float invW = 1.0f / clip.w;
+    const float ndcX = clip.x * invW;
+    const float ndcY = clip.y * invW;
+    return {
+        origin.x + (ndcX * 0.5f + 0.5f) * viewportSize.x,
+        origin.y + (1.0f - (ndcY * 0.5f + 0.5f)) * viewportSize.y,
+    };
+}
 
 void QuadLabGpuRenderer::init() {
     if (m_initialized) {

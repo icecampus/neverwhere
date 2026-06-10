@@ -1257,7 +1257,8 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
     float topHeight,
     bool fadeWallDisplacementAtBottom,
     float wallMaxOffset,
-    const MeshBuildSettings& inputSettings) {
+    const MeshBuildSettings& inputSettings,
+    std::vector<MeshQuad>* outBaseQuads) {
 
     std::vector<MeshQuad> quads;
     MeshBuildSettings settings = inputSettings;
@@ -1320,24 +1321,42 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
             const std::size_t i01 = (std::size_t)(sy + 1) * (std::size_t)vertexColumns + (std::size_t)sx;
             const std::size_t i11 = i01 + 1;
 
-            MeshQuad wall;
-            wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
-            wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
-            wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
-            wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
             const Vec3 quadOutward = normalizeHorizontal(
                 add(
                     add(wallNormals[i00], wallNormals[i10]),
                     add(wallNormals[i01], wallNormals[i11])),
                 segment.normal);
+            const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
+            const float panelHeightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
+            const ColorRgba panelColor = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
+
+            if (outBaseQuads != nullptr) {
+                MeshQuad base;
+                base.a = wallPoints[i00];
+                base.b = wallPoints[i10];
+                base.c = wallPoints[i11];
+                base.d = wallPoints[i01];
+                base.normal = quadOutward;
+                base.relief = std::clamp(panelNoise, -1.0f, 1.0f);
+                base.heightFraction = panelHeightFraction;
+                base.color = panelColor;
+                base.cliffWall = true;
+                assignWallQuadMetadata(base, segment.side, quadOutward);
+                outBaseQuads->push_back(base);
+            }
+
+            MeshQuad wall;
+            wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
             wall.normal = displacedFaceNormal(
                 wall.a, wall.b, wall.c, wall.d,
                 wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],
                 quadOutward);
-            const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
             wall.relief = std::clamp(panelNoise, -1.0f, 1.0f);
-            wall.heightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
-            wall.color = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
+            wall.heightFraction = panelHeightFraction;
+            wall.color = panelColor;
             wall.cliffWall = true;
             assignWallQuadMetadata(wall, segment.side, quadOutward);
             quads.push_back(wall);
@@ -1345,6 +1364,33 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
     }
 
     return quads;
+}
+
+WallPanelMesh buildWallPanelMesh(const WallPanelBuildRequest& request, const MeshBuildSettings& inputSettings) {
+    const float width = std::max(0.1f, request.width);
+    const float height = std::max(0.1f, request.height);
+    const float baseHeight = -height * 0.5f;
+    const float topHeight = height * 0.5f;
+    const Vec3 sideNormal = outwardNormalForSide(BoundarySide::Bottom);
+
+    MeshBoundarySegment segment;
+    segment.a = {-width * 0.5f, 0.0f, 0.0f};
+    segment.b = {width * 0.5f, 0.0f, 0.0f};
+    segment.normal = sideNormal;
+    segment.startNormal = sideNormal;
+    segment.endNormal = sideNormal;
+    segment.side = BoundarySide::Bottom;
+
+    WallPanelMesh result;
+    result.displacedQuads = buildWallQuadsFromBoundarySegment(
+        segment,
+        baseHeight,
+        topHeight,
+        request.fadeDisplacementAtBottom,
+        0.0f,
+        inputSettings,
+        &result.baseQuads);
+    return result;
 }
 
 std::vector<MeshQuad> buildDisplacedWallPanel(const WallPanelBuildRequest& request, const MeshBuildSettings& inputSettings) {
@@ -1362,13 +1408,7 @@ std::vector<MeshQuad> buildDisplacedWallPanel(const WallPanelBuildRequest& reque
     segment.endNormal = sideNormal;
     segment.side = BoundarySide::Bottom;
 
-    return buildWallQuadsFromBoundarySegment(
-        segment,
-        baseHeight,
-        topHeight,
-        request.fadeDisplacementAtBottom,
-        0.0f,
-        inputSettings);
+    return buildWallPanelMesh(request, inputSettings).displacedQuads;
 }
 
 CompositionResult composeLandscapeMesh(const landscape_core::LandscapeLevelGrid& grid, const MeshBuildSettings& inputSettings) {

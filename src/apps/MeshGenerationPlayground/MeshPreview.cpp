@@ -1103,6 +1103,55 @@ Vec3 rectangleSunBeamTarget(const RectangleCliffSettings& settings, const Rectan
     };
 }
 
+void drawNormalArrow(ImDrawList* drawList, const ImVec2& start, const ImVec2& end, ImU32 color, float thickness);
+
+Vec3 meshQuadCentroid(const MeshQuad& quad) {
+    return {
+        (quad.a.x + quad.b.x + quad.c.x + quad.d.x) * 0.25f,
+        (quad.a.y + quad.b.y + quad.c.y + quad.d.y) * 0.25f,
+        (quad.a.z + quad.b.z + quad.c.z + quad.d.z) * 0.25f,
+    };
+}
+
+void drawQuadLabNormalVectors(
+    ImDrawList* drawList,
+    const std::vector<MeshQuad>& quads,
+    const QuadLabPreviewCamera& camera,
+    const MeshQuadsPreviewOptions& options,
+    const ImVec2& origin,
+    const ImVec2& viewportSize) {
+
+    const float arrowScale = std::max(0.05f, options.normalVectorScale);
+    constexpr ImU32 kNormalColor = IM_COL32(96, 255, 128, 255);
+    constexpr ImU32 kHintColor = IM_COL32(255, 220, 72, 255);
+
+    const auto projectPoint = [&](const Vec3& point) {
+        return projectQuadLabMeshPoint(point, camera, options, origin, viewportSize);
+    };
+
+    for (const MeshQuad& quad : quads) {
+        const Vec3 center = meshQuadCentroid(quad);
+        const ImVec2 centerScreen = projectPoint(center);
+        if (centerScreen.x < -5000.0f) {
+            continue;
+        }
+
+        const Vec3 faceNormal = normalize(quad.normal);
+        const ImVec2 normalTip = projectPoint(add(center, scale(faceNormal, arrowScale)));
+        drawNormalArrow(drawList, centerScreen, normalTip, kNormalColor, 2.0f);
+
+        const float hintLength = std::sqrt(dot(quad.outwardHint, quad.outwardHint));
+        if (hintLength > 0.0001f) {
+            const Vec3 hint = scale(quad.outwardHint, 1.0f / hintLength);
+            const float hintDot = dot(faceNormal, hint);
+            if (std::fabs(hintDot - 1.0f) > 0.01f) {
+                const ImVec2 hintTip = projectPoint(add(center, scale(hint, arrowScale * 0.85f)));
+                drawNormalArrow(drawList, centerScreen, hintTip, kHintColor, 1.4f);
+            }
+        }
+    }
+}
+
 void drawNormalArrow(ImDrawList* drawList, const ImVec2& start, const ImVec2& end, ImU32 color, float thickness) {
     const float dx = end.x - start.x;
     const float dy = end.y - start.y;
@@ -1943,6 +1992,10 @@ void drawMeshQuadsPreview(
         }
     }
 
+    if (options.showNormalVectors && !quads.empty()) {
+        drawQuadLabNormalVectors(drawList, quads, camera, options, origin, viewportSize);
+    }
+
     const char* previewTitle = options.previewTitle ? options.previewTitle : "Quad Lab: GPU mesh preview";
     drawList->AddText({origin.x + 12.0f, origin.y + 12.0f}, IM_COL32(220, 228, 240, 255), previewTitle);
     drawList->AddText({origin.x + 12.0f, origin.y + 32.0f}, IM_COL32(150, 162, 180, 255), "LMB drag: pan | Ctrl+LMB drag: orbit | wheel: zoom");
@@ -1957,6 +2010,9 @@ void drawMeshQuadsPreview(
         camera.orbitYawDegrees,
         camera.orbitPitchDegrees);
     drawList->AddText({origin.x + 12.0f, origin.y + 72.0f}, IM_COL32(150, 162, 180, 255), cameraText);
+    if (options.showNormalVectors) {
+        drawList->AddText({origin.x + 12.0f, origin.y + 92.0f}, IM_COL32(96, 255, 128, 255), "Green: quad normal");
+    }
 
     drawList->PopClipRect();
     ImGui::Dummy(viewportSize);

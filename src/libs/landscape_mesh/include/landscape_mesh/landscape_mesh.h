@@ -150,6 +150,11 @@ struct WallPanelBuildRequest {
     bool fadeDisplacementAtBottom = true;
 };
 
+struct WallPanelMesh {
+    std::vector<MeshQuad> baseQuads;
+    std::vector<MeshQuad> displacedQuads;
+};
+
 struct BeveledBoundaryResult {
     std::vector<BoundarySegment> boundarySegments;
     std::vector<MeshBoundarySegment> beveledSegments;
@@ -191,8 +196,11 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
     float topHeight,
     bool fadeWallDisplacementAtBottom,
     float wallMaxOffset,
-    const MeshBuildSettings& settings);
+    const MeshBuildSettings& settings,
+    std::vector<MeshQuad>* outBaseQuads = nullptr);
 // Lab helper: one rectangular cliff face built through buildWallQuadsFromBoundarySegment.
 std::vector<MeshQuad> buildDisplacedWallPanel(const WallPanelBuildRequest& request, const MeshBuildSettings& settings);
+// Flat undisplaced quads plus displaced cliff quads for the same wall panel grid.
+WallPanelMesh buildWallPanelMesh(const WallPanelBuildRequest& request, const MeshBuildSettings& settings);
 
 } // namespace landscape_mesh
