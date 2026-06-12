@@ -483,8 +483,8 @@ def ensure_surface_materials():
 # Grass lip tucks UNDER the stone rim: it must stay shorter than the smallest
 # block forward protrusion (>=0.10) and sit below the raised block tops
 # (zt + 0.06) so stones always overhang the grass and it never pokes past them.
-OVER = 0.08       # grass overhang past cell edge (< min block front protrusion)
-LIP_DROP = 0.12   # how far the lip outer edge dips below the cap height
+OVER = 0.05       # grass overhang past cell edge (< apron forward depth 0.07)
+LIP_DROP = 0.14   # how far the lip outer edge dips below the cap height
 
 
 def build_surface(g, wm, surf_mats):
@@ -671,13 +671,18 @@ def build_cliffs(g, wm, rock_mats):
                 up_u = (0.0, 0.0, 1.0)
                 out_u = out
 
-                # SOLID APRON behind blocks (kills see-through gaps)
+                # SOLID APRON behind blocks. Sits just BEHIND the block fronts
+                # (not deep) so the thin seams read as shallow mortar joints
+                # instead of see-through wells. Kept strictly within the block
+                # silhouette - flush to the cell width [0, cs] and capped at the
+                # raised block-top height - so it never pokes past corners or
+                # above the grass surface.
                 def AP(u, w, t):
                     return (base0[0] + along_u[0] * u + out_u[0] * t,
                             base0[1] + along_u[1] * u + out_u[1] * t,
                             base0[2] + w)
 
-                ap_t = -0.04
+                ap_t = 0.07
                 add_quad(AP(0.0, -0.12, ap_t), AP(cs, -0.12, ap_t),
                          AP(cs, drop + 0.06, ap_t), AP(0.0, drop + 0.06, ap_t), 0)
 
@@ -686,30 +691,87 @@ def build_cliffs(g, wm, rock_mats):
                 cols = 2
                 levels_spanned = max(1, int(round(drop / zh)))
                 rows = levels_spanned * ROWS_PER_LEVEL
-                for iz in range(rows):
-                    w0 = (iz / rows) * drop
-                    w1 = ((iz + 1) / rows) * drop
-                    is_top = (iz == rows - 1)
-                    gap_w = random.uniform(0.03, 0.07)
-                    ww0 = w0 + gap_w * 0.5
-                    ww1 = (drop + 0.06) if is_top else (w1 - gap_w * 0.5)
-                    edges_u = [0.0, cs * 0.5 + random.uniform(-0.10, 0.10), cs]
-                    for icur in range(cols):
-                        u0 = edges_u[icur]
-                        u1 = edges_u[icur + 1]
-                        gap_u = random.uniform(0.03, 0.08)
-                        uu0 = u0 + gap_u * 0.5
-                        uu1 = u1 - gap_u * 0.5
-                        if uu1 - uu0 < 0.18 or ww1 - ww0 < 0.12:
-                            continue
-                        zc = zb + 0.5 * (ww0 + ww1)
+
+                # Shared jitter lattice: neighbouring blocks read the SAME node
+                # positions (u, w and front depth t), so the touching edges of
+                # adjacent stones stay parallel through one thin uniform gap
+                # instead of two independently jittered edges that leave holes.
+                nu = cols + 1
+                nw = rows + 1
+                latU = [[0.0] * nw for _ in range(nu)]
+                latW = [[0.0] * nw for _ in range(nu)]
+                latT = [[0.0] * nw for _ in range(nu)]
+                for iu in range(nu):
+                    for iw in range(nw):
+                        u = (iu / cols) * cs
+                        w = (iw / rows) * drop
+                        # Interior nodes wiggle; boundary nodes stay put so the
+                        # wall lines up with the neighbour cells and base/top.
+                        if 0 < iu < cols:
+                            u += random.uniform(-0.13, 0.13)
+                        if 0 < iw < nw - 1:
+                            w += random.uniform(-0.10, 0.10)
+                        if iw == nw - 1:
+                            w = drop + 0.06  # raised clean top rim
+                        latU[iu][iw] = u
+                        latW[iu][iw] = w
+                        latT[iu][iw] = random.uniform(0.12, 0.22)
+
+                def EP(u, w, t):
+                    return (base0[0] + along_u[0] * u + up_u[0] * w + out_u[0] * t,
+                            base0[1] + along_u[1] * u + up_u[1] * w + out_u[1] * t,
+                            base0[2] + along_u[2] * u + up_u[2] * w + out_u[2] * t)
+
+                def add_block(uu, ww, tt, back, mi):
+                    b = len(verts)
+                    fpts = [EP(uu[k], ww[k], tt[k]) for k in range(4)]
+                    bpts = [EP(uu[k], ww[k], -back) for k in range(4)]
+                    verts.extend(fpts)
+                    verts.extend(bpts)
+                    faces.extend([
+                        (b, b + 1, b + 2, b + 3),          # front
+                        (b + 7, b + 6, b + 5, b + 4),      # back
+                        (b + 4, b, b + 3, b + 7),          # left
+                        (b + 1, b + 5, b + 6, b + 2),      # right
+                        (b + 3, b + 2, b + 6, b + 7),      # top
+                        (b + 4, b + 5, b + 1, b),          # bottom
+                    ])
+                    dark = max(0, mi - 1)
+                    fmats.extend([mi, dark, dark, dark, mi, dark])
+
+                GAP = 0.04  # uniform seam between neighbouring stones
+                for irow in range(rows):
+                    for icol in range(cols):
+                        # Corner order: BL, BR, TR, TL (shared lattice nodes).
+                        cu = [latU[icol][irow], latU[icol + 1][irow],
+                              latU[icol + 1][irow + 1], latU[icol][irow + 1]]
+                        cw = [latW[icol][irow], latW[icol + 1][irow],
+                              latW[icol + 1][irow + 1], latW[icol][irow + 1]]
+                        ct = [latT[icol][irow], latT[icol + 1][irow],
+                              latT[icol + 1][irow + 1], latT[icol][irow + 1]]
+                        ucen = sum(cu) / 4.0
+                        wcen = sum(cw) / 4.0
+                        # Pull each corner toward the block centre by a constant
+                        # half-gap, leaving a thin uniform slot between stones.
+                        # EXCEPTION: the very top corners of the top row are NOT
+                        # inset, so neighbouring top stones touch along the rim -
+                        # the vertical seam closes to zero at the top (opening
+                        # downward) and no apron/grass shows above the wall.
+                        is_top_row = (irow == rows - 1)
+                        top_corner = (False, False, is_top_row, is_top_row)
+                        insU = []
+                        insW = []
+                        for k in range(4):
+                            if top_corner[k]:
+                                insU.append(cu[k])
+                                insW.append(cw[k])
+                            else:
+                                insU.append(cu[k] + (GAP * 0.5 if cu[k] < ucen else -GAP * 0.5))
+                                insW.append(cw[k] + (GAP * 0.5 if cw[k] < wcen else -GAP * 0.5))
+                        zc = zb + wcen
                         mi = band_for_z(zc, random.choice([-1, 0, 0, 0, 1]) * 0.5)
-                        front = random.uniform(0.10, 0.22)
                         back = random.uniform(0.45, 0.7)
-                        rough = min(0.14, 0.05 + (uu1 - uu0) * 0.05)
-                        add_rock_basis(base0, along_u, up_u, out_u, uu0, uu1, ww0, ww1,
-                                       front, back, rough, random.uniform(-0.05, 0.05),
-                                       mi, top_clean=is_top)
+                        add_block(insU, insW, ct, back, mi)
                 if drop >= zh * 0.9 and random.random() < 0.07:
                     boulder_count += 1
                     bw = random.uniform(0.35, 0.7) * cs
