@@ -44,6 +44,9 @@ SETTINGS = {
 CELL_SIZE = 1.0
 EXAG = 1.4  # height exaggeration
 
+# Cliff masonry density: stacked stone rows generated per single level rise.
+ROWS_PER_LEVEL = 3
+
 # Zones
 LOWLAND, CLEARING, SLOPE, HIGHGROUND, HILL = 0, 1, 2, 3, 4
 ZONE_ORDER = [LOWLAND, CLEARING, SLOPE, HIGHGROUND, HILL]
@@ -477,7 +480,11 @@ def ensure_surface_materials():
 # ---------------------------------------------------------------------------
 # Geometry: surface (caps + horizontal grass lips, no vertical skirts)
 # ---------------------------------------------------------------------------
-OVER = 0.18  # horizontal grass overhang past cell edge over the wall top
+# Grass lip tucks UNDER the stone rim: it must stay shorter than the smallest
+# block forward protrusion (>=0.10) and sit below the raised block tops
+# (zt + 0.06) so stones always overhang the grass and it never pokes past them.
+OVER = 0.08       # grass overhang past cell edge (< min block front protrusion)
+LIP_DROP = 0.12   # how far the lip outer edge dips below the cap height
 
 
 def build_surface(g, wm, surf_mats):
@@ -518,18 +525,19 @@ def build_surface(g, wm, surf_mats):
             for name, dx, dy in sides:
                 if g.lvl(x + dx, y + dy) >= lv:
                     continue
+                zl = z - LIP_DROP
                 if name == "L":
                     lx = x0
-                    add_quad((lx - OVER, y0, z), (lx, y0, z), (lx, y1, z), (lx - OVER, y1, z), slot)
+                    add_quad((lx - OVER, y0, zl), (lx, y0, z), (lx, y1, z), (lx - OVER, y1, zl), slot)
                 elif name == "R":
                     lx = x1
-                    add_quad((lx, y0, z), (lx + OVER, y0, z), (lx + OVER, y1, z), (lx, y1, z), slot)
+                    add_quad((lx, y0, z), (lx + OVER, y0, zl), (lx + OVER, y1, zl), (lx, y1, z), slot)
                 elif name == "D":
                     ly = y0
-                    add_quad((x0, ly - OVER, z), (x1, ly - OVER, z), (x1, ly, z), (x0, ly, z), slot)
+                    add_quad((x0, ly - OVER, zl), (x1, ly - OVER, zl), (x1, ly, z), (x0, ly, z), slot)
                 else:
                     ly = y1
-                    add_quad((x0, ly, z), (x1, ly, z), (x1, ly + OVER, z), (x0, ly + OVER, z), slot)
+                    add_quad((x0, ly, z), (x1, ly, z), (x1, ly + OVER, zl), (x0, ly + OVER, zl), slot)
 
     old = bpy.data.objects.get("NW_BowlSurface")
     parent = old.parent if old else None
@@ -676,7 +684,8 @@ def build_cliffs(g, wm, rock_mats):
                 seed = (x * 73856093) ^ (y * 19349663) ^ (SIDE_SEED[name] * 83492791) ^ 0x5bd1e995
                 random.seed(seed & 0x7fffffff)
                 cols = 2
-                rows = max(1, int(round(drop / 0.7)))
+                levels_spanned = max(1, int(round(drop / zh)))
+                rows = levels_spanned * ROWS_PER_LEVEL
                 for iz in range(rows):
                     w0 = (iz / rows) * drop
                     w1 = ((iz + 1) / rows) * drop
@@ -695,22 +704,24 @@ def build_cliffs(g, wm, rock_mats):
                             continue
                         zc = zb + 0.5 * (ww0 + ww1)
                         mi = band_for_z(zc, random.choice([-1, 0, 0, 0, 1]) * 0.5)
-                        front = random.uniform(0.10, 0.28)
-                        back = random.uniform(0.35, 0.6)
+                        front = random.uniform(0.10, 0.22)
+                        back = random.uniform(0.45, 0.7)
                         rough = min(0.14, 0.05 + (uu1 - uu0) * 0.05)
                         add_rock_basis(base0, along_u, up_u, out_u, uu0, uu1, ww0, ww1,
                                        front, back, rough, random.uniform(-0.05, 0.05),
                                        mi, top_clean=is_top)
-                if drop >= zh * 0.9 and random.random() < 0.10:
+                if drop >= zh * 0.9 and random.random() < 0.07:
                     boulder_count += 1
                     bw = random.uniform(0.35, 0.7) * cs
                     u0 = random.uniform(0.1, cs - bw - 0.1)
                     w0 = random.uniform(0.15 * drop, 0.5 * drop)
                     bh = random.uniform(0.25, 0.45) * drop
                     zc = zb + w0 + bh * 0.5
+                    # Keep the boulder anchored in the wall mass: modest forward
+                    # bulge, deep back face reaching past the apron, low splay.
                     add_rock_basis(base0, along_u, up_u, out_u, u0, u0 + bw, w0, w0 + bh,
-                                   random.uniform(0.45, 0.75), 0.3, 0.20,
-                                   random.uniform(-0.15, 0.15), band_for_z(zc))
+                                   random.uniform(0.22, 0.34), random.uniform(0.7, 0.95), 0.18,
+                                   random.uniform(-0.06, 0.06), band_for_z(zc))
 
     old = bpy.data.objects.get("NW_BowlCliffs")
     parent = old.parent if old else None
