@@ -111,6 +111,29 @@ flowchart TB
 - тестовый инвентарь/прогресс
 - временное хранилище (in-memory) на время сессии плейтеста
 
+## Утилиты (`utils/`)
+Вспомогательные Python-скрипты для генерации ассетов и проверки рендера. Подробности — в README каждой папки.
+
+### Генерация атласов ландшафта — `utils/asset_generator/`
+Стабильная техническая генерация тайлсета **4×6**, публикация в `resources/assets/landscape/TechnicalGrass*`. Зависимость: `Pillow`.
+```bash
+python utils/asset_generator/technical/generate_atlas_ridge.py --run-id <id>   # Ridge/Hybrid
+python utils/asset_generator/technical/generate_atlas_valley.py --run-id <id>  # Valley/Concave
+python utils/asset_generator/technical/generate_atlas_ridge.py --no-publish    # только temp, без записи в resources/
+```
+См. `utils/asset_generator/README.md` и `utils/asset_generator/technical/TILE_MASKS.md`.
+
+### Blender-прототипы — `utils/blender/`
+Python-порты C++-логики ландшафта (`landscape_core::generateLandscapeBowl`) для визуальной проверки в Blender. Запуск из Scripting-воркспейса, идемпотентны:
+- `nw_bowl_rebuild.py`, `nw_bowl_rock_rebuild.py` — реконструкция block-cliff bowl-прототипа.
+
+### Визуальные smoke-тесты — `utils/visual_tests/`
+Запускает `MeshGenerationPlayground` со снятием скриншотов и гоняет OpenCV-эвристики по ним. Зависимости: см. `requirements.txt`.
+```powershell
+# предварительно собрать MeshGenerationPlayground
+utils\visual_tests\run_visual_tests.ps1
+```
+
 ## Разработка
 - **Как работать с репозиторием** (сборка, конвенции, макросы, прототипы) — см. [`AGENTS.md`](./AGENTS.md).
 - **Видение и статусы фич** — [`docs/ROADMAP_VISION.md`](./docs/ROADMAP_VISION.md).

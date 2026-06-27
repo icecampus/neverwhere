@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$CapturesDir = Join-Path $RepoRoot "tools\visual_tests\captures"
+$CapturesDir = Join-Path $RepoRoot "utils\visual_tests\captures"
 $ExePath = Join-Path $RepoRoot "_intermediate_64\Debug\MeshGenerationPlayground.exe"
-$PythonScript = Join-Path $RepoRoot "tools\visual_tests\check_mesh_preview.py"
+$PythonScript = Join-Path $RepoRoot "utils\visual_tests\check_mesh_preview.py"
 
 if (-not (Test-Path $ExePath)) {
     throw "Build MeshGenerationPlayground first: $ExePath"
