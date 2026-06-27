@@ -3,6 +3,7 @@
 #include "PlaygroundState.h"
 #include "RectangleCliffScenario.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <landscape_core/sun_shadow.h>
@@ -126,6 +127,15 @@ landscape_mesh::MeshBuildSettings makeSharedLandscapeMeshSettings(float levelHei
     meshSettings.wallStyle = g_productionWallStyle == 1
         ? landscape_mesh::WallStyleId::Cyclopean
         : landscape_mesh::WallStyleId::BlockCliff;
+
+    // Cyclopean stones are ~0.5 world units; the default 5x6 wall grid is far too
+    // coarse to resolve them. 16 (the production cap) is the practical sweet spot:
+    // fine enough that each stone spans several quads (so per-stone colour reads),
+    // without the heavy rebuild cost of a very dense grid.
+    if (meshSettings.wallStyle == landscape_mesh::WallStyleId::Cyclopean) {
+        meshSettings.wallHorizontalSubdivisions = std::max(meshSettings.wallHorizontalSubdivisions, 16);
+        meshSettings.wallVerticalSubdivisions = std::max(meshSettings.wallVerticalSubdivisions, 16);
+    }
     return meshSettings;
 }
 

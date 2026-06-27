@@ -195,19 +195,26 @@ private:
     FastNoise::SmartNode<> m_node;
 };
 
-// Cyclopean masonry: blocky layered Perlin relief cut by Voronoi cell-edge
-// grooves, so the wall reads as stacked irregular stones. Magnitude reuses
-// rockAmplitude and the shared seam fade so it stays watertight and within the
-// anti-fold clamp.
+// Cyclopean masonry: irregular polygonal stones (Voronoi cells) raised into
+// FLAT-topped blocks, separated by thin recessed grooves, with subtle per-course
+// banding and a slow whole-wall tilt. Matched to the Blender cyclopean mesh, which
+// is discrete beveled blocks with hardened normals -- so here each cell gets one
+// constant height (no within-stone perlin lumpiness) and the mortar line is a
+// narrow cubic recess. Feature sizes are in WORLD units sized for ~1-unit walls,
+// and the cells are sampled in full 3D so stones stay coherent across adjacent
+// boundary segments. Magnitude reuses rockAmplitude and the shared seam fade so the
+// band stays watertight and within the anti-fold clamp.
 class CyclopeanStyle : public IWallStyle {
 public:
     void prepare(const WallStyleContext& ctx) override {
         m_settings = ctx.settings;
         m_seed = ctx.seed;
         m_macro = makePerlinFractal(kMacroScale, 2);
-        m_mid = makePerlinFractal(kMidScale, 4);
-        m_layer = makePerlinFractal(kLayerScale, 1);
+        m_warpA = makePerlinFractal(kWarpScale, 2);
+        m_warpB = makePerlinFractal(kWarpScale, 2);
+        m_layer = makePerlinFractal(kLayerNoiseScale, 1);
         m_crack = makeCellularEdge(kCellScale);
+        m_cellValue = makeCellularValue(kCellScale);
     }
 
     void shade(const std::vector<WallStyleSample>& samples, std::vector<WallShade>& out) const override {
@@ -215,6 +222,7 @@ public:
         if (samples.empty()) {
             return;
         }
+        const std::size_t count = samples.size();
 
         std::vector<float> xs;
         std::vector<float> ys;
@@ -222,23 +230,66 @@ public:
         extractPositions(samples, xs, ys, zs);
 
         std::vector<float> macro;
-        std::vector<float> mid;
-        std::vector<float> layer;
-        std::vector<float> crack;
+        std::vector<float> warpA;
+        std::vector<float> warpB;
         sampleNode(m_macro, xs, ys, zs, m_seed + 11, macro);
-        sampleNode(m_mid, xs, ys, zs, m_seed + 23, mid);
-        sampleNode(m_layer, xs, ys, zs, m_seed + 89, layer);
-        sampleNode(m_crack, xs, ys, zs, m_seed + 101, crack);
+        sampleNode(m_warpA, xs, ys, zs, m_seed + 59, warpA);
+        sampleNode(m_warpB, xs, ys, zs, m_seed + 60, warpB);
+
+        // Domain-warp the cell sample positions so stone outlines look hand-laid
+        // instead of gridded. The warp is a pure function of world position, so
+        // shared seam vertices warp identically and the band stays watertight.
+        std::vector<float> cellX(count);
+        std::vector<float> cellZ(count);
+        for (std::size_t i = 0; i < count; i++) {
+            cellX[i] = xs[i] + (toFactor(warpA[i]) - 0.5f) * 2.0f * kWarpAmount;
+            cellZ[i] = zs[i] + (toFactor(warpB[i]) - 0.5f) * 2.0f * kWarpAmount;
+        }
+
+        // Distance-to-edge metric and per-cell value share the same cell layout
+        // (identical scale/jitter/seed), so each stone gets one coherent height.
+        std::vector<float> crack;
+        std::vector<float> cellValue;
+        sampleNode(m_crack, cellX, ys, cellZ, m_seed + 101, crack);
+        sampleNode(m_cellValue, cellX, ys, cellZ, m_seed + 101, cellValue);
+
+        // Per-course banding: quantise world height into masonry rows and jitter
+        // each row by sampling a value field at the quantised step coordinate.
+        std::vector<float> zeros(count, 0.0f);
+        std::vector<float> layerZ(count);
+        for (std::size_t i = 0; i < count; i++) {
+            layerZ[i] = std::floor(ys[i] * kCoursesPerUnit) * kLayerStepCoeff;
+        }
+        std::vector<float> layer;
+        sampleNode(m_layer, zeros, zeros, layerZ, m_seed + 89, layer);
 
         const bool active = m_settings.rockEnabled && m_settings.rockAmplitude > 0.0f;
         const float amp = std::max(0.0f, m_settings.rockAmplitude);
-        for (std::size_t i = 0; i < samples.size(); i++) {
-            const float blocky = toFactor(macro[i]) * 0.5f + toFactor(mid[i]) * 0.3f + toFactor(layer[i]) * 0.2f;
-            const float relief = blocky * 2.0f - 1.0f;
-            const float distEdge = std::fabs(crack[i]);
-            const float crackMask = clamp01(1.0f - distEdge * kCrackEdgeScale);
-            const float groove = crackMask * crackMask;
-            const float field = std::clamp(relief - groove, -1.0f, 1.0f);
+        for (std::size_t i = 0; i < count; i++) {
+            // Each stone is a FLAT-topped block. Its top sits proud of the seam
+            // plane (kStoneBase); CellularValue gives one constant height per cell,
+            // so the interior of a stone stays flat instead of perlin-lumpy. A slow
+            // macro tilt (feature size >> stone) and a per-course bias only nudge the
+            // whole block up/down -- they do not ripple within it. This mirrors the
+            // Blender cyclopean mesh: discrete beveled blocks, not a noisy heightfield.
+            const float stoneTop =
+                kStoneBase +
+                (toFactor(cellValue[i]) - 0.5f) * kCellHeightCoeff +
+                (toFactor(macro[i]) - 0.5f) * kMacroCoeff +
+                (toFactor(layer[i]) - 0.5f) * kCourseCoeff;
+
+            // FastNoise Index0Sub1 is measured to peak (-crack ~1.0) ALONG the cell seams
+            // and fall to ~0.09 at the cell centres -- i.e. -crack is "seam proximity",
+            // bright thin lines exactly on the Voronoi edges. So the groove follows HIGH
+            // seam proximity: ramp from the flat stone face up into a fixed dark mortar
+            // floor across [kEdgeLo, kEdgeHi]. The fixed floor makes every seam a
+            // continuous recessed mortar line regardless of the two stones' heights --
+            // the crisp dark outline the Blender cyclopean mesh gets from its bevel + gaps.
+            const float seam = -crack[i];
+            const float t = clamp01((seam - kEdgeLo) / (kEdgeHi - kEdgeLo));
+            const float groove = t * t * (3.0f - 2.0f * t);
+            const float field = std::clamp(stoneTop + (kGrooveFloor - stoneTop) * groove, -1.0f, 1.0f);
+
             float offset = 0.0f;
             if (active) {
                 offset = field * amp * wallFade(samples[i].heightT, samples[i].fadeAtBottom) * samples[i].edgeWeight;
@@ -258,11 +309,33 @@ public:
     }
 
 private:
-    static constexpr float kMacroScale = 13.0f;
-    static constexpr float kMidScale = 3.4f;
-    static constexpr float kLayerScale = 1.4f;
-    static constexpr float kCellScale = 2.4f;
-    static constexpr float kCrackEdgeScale = 3.0f;
+    // Feature sizes are WORLD units (FastNoise SetScale == feature size; larger =
+    // bigger). Measured against the Blender cyclopean mesh: stones are ~0.5 units
+    // across, which yields a couple of chunky courses across a ~1-unit landscape
+    // wall (genuinely "cyclopean" -- big irregular blocks).
+    static constexpr float kCellScale = 0.5f;        // stone size (Voronoi cell ~0.5 units, matches Blender 0.56)
+    static constexpr float kWarpScale = 1.4f;        // domain-warp feature size for organic edges
+    static constexpr float kMacroScale = 4.0f;       // slow undulation over many stones (>> stone, stays flat per block)
+    static constexpr float kLayerNoiseScale = 0.9f;  // per-course value field
+
+    static constexpr float kWarpAmount = 0.18f;      // world-space crack waver (~third of a cell)
+    static constexpr float kCoursesPerUnit = 2.2f;   // masonry rows per world unit of height
+    static constexpr float kLayerStepCoeff = 0.6f;   // per-course step (Blender Math.005)
+
+    // Mortar geometry, calibrated against the raw -crack ("seam proximity") dump: ~1.0
+    // on the Voronoi edges, ~0.09 at cell centres. Below kEdgeLo is flat stone face;
+    // [kEdgeLo..kEdgeHi] bevels down into the dark mortar floor at the seam. Tuned so
+    // the line is thick enough to survive the landscape's per-quad averaging yet still
+    // reads as crisp masonry.
+    static constexpr float kEdgeLo = 0.66f;          // seam proximity where the bevel starts
+    static constexpr float kEdgeHi = 0.93f;          // seam proximity at the bottom of the groove
+    static constexpr float kGrooveFloor = -0.85f;    // dark recess the seam settles into
+
+    // Stones bulge proud of the plane, grooves recess below it.
+    static constexpr float kStoneBase = 0.5f;        // baseline lift so faces read as raised/bright
+    static constexpr float kCellHeightCoeff = 0.55f; // distinct per-stone height + colour spread
+    static constexpr float kMacroCoeff = 0.14f;      // gentle whole-wall tilt
+    static constexpr float kCourseCoeff = 0.16f;     // per-course up/down bias
 
     static float toFactor(float value) {
         return clamp01(value * 0.5f + 0.5f);
@@ -302,21 +375,39 @@ private:
         return cellular;
     }
 
+    // Same partition as makeCellularEdge (matching scale/jitter/distance/seed),
+    // so the returned per-cell white-noise value lines up with the groove field.
+    static FastNoise::SmartNode<> makeCellularValue(float cellScale) {
+        auto cellular = FastNoise::New<FastNoise::CellularValue>();
+        if (!cellular) {
+            return nullptr;
+        }
+        cellular->SetScale(cellScale);
+        cellular->SetDistanceFunction(FastNoise::DistanceFunction::Euclidean);
+        cellular->SetValueIndex(0);
+        cellular->SetGridJitter(1.0f);
+        return cellular;
+    }
+
     static ColorRgba stoneColor(float t) {
         t = clamp01(t);
         const auto mix = [&](int dark, int light) {
             return (std::uint8_t)std::clamp(
                 (int)std::lround((float)dark + ((float)light - (float)dark) * t), 0, 255);
         };
-        return {mix(58, 171), mix(56, 164), mix(52, 150), 255};
+        // Recessed groove (deep cool brown) -> raised sunlit stone (warm sandstone).
+        // Wide range so the masonry still reads after the preview's wall-colour mute.
+        return {mix(58, 224), mix(50, 202), mix(40, 166), 255};
     }
 
     MeshBuildSettings m_settings;
     int m_seed = 0;
     FastNoise::SmartNode<> m_macro;
-    FastNoise::SmartNode<> m_mid;
+    FastNoise::SmartNode<> m_warpA;
+    FastNoise::SmartNode<> m_warpB;
     FastNoise::SmartNode<> m_layer;
     FastNoise::SmartNode<> m_crack;
+    FastNoise::SmartNode<> m_cellValue;
 };
 
 } // namespace

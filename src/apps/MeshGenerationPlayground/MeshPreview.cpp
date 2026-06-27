@@ -559,7 +559,10 @@ ImU32 blendTowardColor(ImU32 color, ImU32 target, float amount) {
 }
 
 ImU32 previewWallColor(ImU32 color) {
-    return blendTowardColor(color, IM_COL32(118, 110, 96, 255), 0.68f);
+    // Soften toward a neutral rock tone for a unified look, but keep enough of the
+    // style's authored colour that masonry (cyclopean stone/groove contrast, per-
+    // stone tint) still reads. 0.68 washed wall detail out almost entirely.
+    return blendTowardColor(color, IM_COL32(118, 110, 96, 255), 0.45f);
 }
 
 glm::vec4 colorToVec4(ImU32 color) {
@@ -663,7 +666,9 @@ Vec3 previewNormalForQuad(const MeshQuad& quad, const ProductionPreviewSettings&
     if (debugMode == ProductionPreviewDebugMode::BlendedNormals) {
         return blendedWallNormal(quad);
     }
-    return wallLightingNormal(quad);
+    // Relief-aware wall lighting: blend toward the faceted displacement normal so
+    // masonry detail (cyclopean stones/grooves, block-cliff facets) catches light.
+    return detailAdjustedWallNormal(quad, 0.6f);
 }
 
 ImU32 productionLitColor(
