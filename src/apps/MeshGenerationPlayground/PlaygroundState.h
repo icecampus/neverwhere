@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CliffWallScenario.h"
 #include "LandscapeBowlScenario.h"
 #include "RectangleCliffScenario.h"
 #include "SingleQuadLabScenario.h"
@@ -29,6 +30,8 @@ extern MeshPreviewCamera g_meshCamera;
 extern LandscapeBowlSettings g_landscapeSettings;
 extern LandscapeBowlModel g_landscapeModel;
 extern MeshPreviewCamera g_landscapeCamera;
+// Production Preview wall style: 0 = Block Cliff (default), 1 = Cyclopean.
+extern int g_productionWallStyle;
 extern Vec3 g_productionLightDirection;
 extern ProductionPreviewSettings g_productionPreviewSettings;
 extern SingleQuadLabSettings g_singleQuadLabSettings;
@@ -37,5 +40,8 @@ extern QuadLabPreviewCamera g_singleQuadLabCamera;
 extern WallSeriesLabSettings g_wallSeriesLabSettings;
 extern WallSeriesLabModel g_wallSeriesLabModel;
 extern QuadLabPreviewCamera g_wallSeriesLabCamera;
+extern CliffWallSettings g_cliffWallSettings;
+extern CliffWallModel g_cliffWallModel;
+extern QuadLabPreviewCamera g_cliffWallCamera;
 
 } // namespace meshgen_playground

@@ -6,7 +6,9 @@ nw_add_lib_sources(
     SOURCES
         pch.h
         include/landscape_mesh/landscape_mesh.h
+        include/landscape_mesh/wall_style.h
         src/landscape_mesh.cpp
+        src/wall_style.cpp
     LIBS
         landscape_core
         FastNoise2::FastNoise

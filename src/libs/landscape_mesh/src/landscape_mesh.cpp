@@ -1,4 +1,5 @@
 #include "landscape_mesh/landscape_mesh.h"
+#include "landscape_mesh/wall_style.h"
 
 #include <FastNoise/FastNoise.h>
 
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 namespace landscape_mesh {
 namespace {
@@ -153,16 +155,6 @@ ColorRgba wallColor(BoundarySide side, float heightT, float noiseValue) {
     };
 }
 
-ColorRgba rockTopColor(float noiseValue) {
-    const int shade = (int)(noiseValue * 10.0f);
-    return {
-        (std::uint8_t)std::clamp(88 + shade, 58, 122),
-        (std::uint8_t)std::clamp(143 + shade, 104, 172),
-        (std::uint8_t)std::clamp(82 + shade, 52, 116),
-        255,
-    };
-}
-
 float deterministicRock(const MeshBuildSettings& settings, float x, float y, float z) {
     const float scaleValue = std::max(0.001f, settings.rockScale);
     const float seedOffset = (float)settings.rockSeed * 0.017f;
@@ -173,69 +165,6 @@ float deterministicRock(const MeshBuildSettings& settings, float x, float y, flo
     const float b = std::sin(sx * 43.11f - sy * 17.27f + sz * 29.41f) * 0.30f;
     const float c = std::sin(sx * 83.63f + sy * 13.37f - sz * 47.09f) * 0.15f;
     return std::clamp(a + b + c, -1.0f, 1.0f);
-}
-
-FastNoise::SmartNode<> makeRockNoiseNode(const MeshBuildSettings& settings) {
-    auto simplex = FastNoise::New<FastNoise::Simplex>();
-    if (!simplex) {
-        return nullptr;
-    }
-    simplex->SetScale(settings.rockScale);
-
-    auto fractal = FastNoise::New<FastNoise::FractalRidged>();
-    if (!fractal) {
-        return simplex;
-    }
-
-    fractal->SetSource(simplex);
-    fractal->SetOctaveCount(4);
-    fractal->SetLacunarity(2.15f);
-    fractal->SetGain(0.55f);
-    fractal->SetWeightedStrength(0.35f);
-    return fractal;
-}
-
-void sampleRockNoiseBatch(
-    const FastNoise::SmartNode<>& noise,
-    const MeshBuildSettings& settings,
-    const std::vector<Vec3>& points,
-    std::vector<float>& outNoise) {
-
-    outNoise.assign(points.size(), 0.0f);
-    if (points.empty()) {
-        return;
-    }
-
-    if (!noise) {
-        for (std::size_t i = 0; i < points.size(); i++) {
-            outNoise[i] = deterministicRock(settings, points[i].x, points[i].y, points[i].z);
-        }
-        return;
-    }
-
-    std::vector<float> xs(points.size());
-    std::vector<float> ys(points.size());
-    std::vector<float> zs(points.size());
-    for (std::size_t i = 0; i < points.size(); i++) {
-        xs[i] = points[i].x;
-        ys[i] = points[i].y;
-        zs[i] = points[i].z;
-    }
-
-    noise->GenPositionArray3D(
-        outNoise.data(),
-        (int)points.size(),
-        xs.data(),
-        ys.data(),
-        zs.data(),
-        0.0f,
-        0.0f,
-        0.0f,
-        settings.rockSeed);
-
-    for (float& value : outNoise) {
-        value = std::clamp(value, -1.0f, 1.0f);
-    }
 }
 
 float terraceValue(float value, int steps) {
@@ -280,18 +209,12 @@ Vec3 displaceWallPoint(
     };
 }
 
-Vec3 displaceTopPoint(
-    const MeshBuildSettings& settings,
-    const Vec3& point,
-    const Vec3& normal,
-    bool boundaryPoint,
-    float rawNoise) {
-
-    if (!boundaryPoint) {
-        return point;
-    }
-
-    return displaceWallPoint(settings, point, normal, 1.0f, rawNoise, false);
+// Apply a style offset along the (horizontal) normal, keeping Y fixed, with the
+// uniform anti-fold clamp. The clamp MUST be identical for every vertex of a
+// level so shared edges close exactly.
+Vec3 applyWallShade(const Vec3& base, const Vec3& normal, float offset, float maxOffset) {
+    const float o = std::clamp(offset, -maxOffset, maxOffset);
+    return {base.x + normal.x * o, base.y, base.z + normal.z * o};
 }
 
 bool tryBoundaryVertexNormal(const SolidMaskGrid& mask, const std::vector<BoundarySegment>& segments, const Int2& vertex, Vec3& outNormal) {
@@ -544,7 +467,7 @@ void addTopCell(
     const SolidMaskGrid& mask,
     const std::vector<BoundarySegment>& boundarySegments,
     const MeshBuildSettings& settings,
-    const FastNoise::SmartNode<>& rockNoise,
+    const IWallStyle& style,
     int cellX,
     int cellY,
     float height,
@@ -593,7 +516,28 @@ void addTopCell(
         }
     }
 
-    sampleRockNoiseBatch(rockNoise, settings, points, noise);
+    // The crest band is owned by the style: it shades the rim vertices (edgeWeight
+    // from the boundary flag) and colours the top panels. With heightT == 1 and no
+    // fadeAtBottom the seam envelope yields a flat lip, so the crest meets the
+    // pinned flat interior and the wall top without a gap.
+    std::vector<WallStyleSample> samples(points.size());
+    for (std::size_t i = 0; i < points.size(); i++) {
+        samples[i].worldPos = points[i];
+        samples[i].normal = normals[i];
+        samples[i].heightT = 1.0f;
+        samples[i].edgeWeight = boundaryFlags[i] != 0 ? 1.0f : 0.0f;
+        samples[i].fadeAtBottom = false;
+        samples[i].part = WallPart::Crest;
+    }
+    std::vector<WallShade> shades;
+    style.shade(samples, shades);
+
+    std::vector<Vec3> displaced(points.size());
+    for (std::size_t i = 0; i < points.size(); i++) {
+        displaced[i] = boundaryFlags[i] != 0
+            ? applyWallShade(points[i], normals[i], shades[i].offset, std::numeric_limits<float>::max())
+            : points[i];
+    }
 
     for (int y = 0; y < subdivisions; y++) {
         for (int x = 0; x < subdivisions; x++) {
@@ -603,12 +547,12 @@ void addTopCell(
             const std::size_t i11 = i01 + 1;
 
             MeshQuad top;
-            top.a = displaceTopPoint(settings, points[i00], normals[i00], boundaryFlags[i00] != 0, noise[i00]);
-            top.b = displaceTopPoint(settings, points[i10], normals[i10], boundaryFlags[i10] != 0, noise[i10]);
-            top.c = displaceTopPoint(settings, points[i11], normals[i11], boundaryFlags[i11] != 0, noise[i11]);
-            top.d = displaceTopPoint(settings, points[i01], normals[i01], boundaryFlags[i01] != 0, noise[i01]);
-            const float panelNoise = (noise[i00] + noise[i10] + noise[i11] + noise[i01]) * 0.25f;
-            top.color = rockTopColor(panelNoise);
+            top.a = displaced[i00];
+            top.b = displaced[i10];
+            top.c = displaced[i11];
+            top.d = displaced[i01];
+            const float panelField = (shades[i00].field + shades[i10].field + shades[i11].field + shades[i01].field) * 0.25f;
+            top.color = style.color(WallPart::Crest, BoundarySide::Top, 1.0f, panelField);
             top.cliffWall = false;
             assignTopQuadMetadata(top);
             addQuad(result, top);
@@ -1182,14 +1126,23 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
     result.stats.boundarySegmentCount += (int)boundary.boundarySegments.size();
     result.stats.beveledSegmentCount += (int)boundary.beveledSegments.size();
 
-    const FastNoise::SmartNode<> rockNoise = settings.rockEnabled ? makeRockNoiseNode(settings) : nullptr;
+    // One style instance per level band, shared by the crest and every wall segment
+    // so its noise nodes are built once and the whole transition reads coherently.
+    std::unique_ptr<IWallStyle> style = makeWallStyle(settings.wallStyle);
+    WallStyleContext styleContext;
+    styleContext.settings = settings;
+    styleContext.level = request.level;
+    styleContext.lowerLevel = request.level > 0 ? (std::uint8_t)(request.level - 1) : 0;
+    styleContext.maxLevel = request.maxLevel;
+    styleContext.seed = settings.rockSeed;
+    style->prepare(styleContext);
 
     for (int y = 0; y < request.mask.height; y++) {
         for (int x = 0; x < request.mask.width; x++) {
             if (!request.mask.hasTop(x, y)) {
                 continue;
             }
-            addTopCell(result, request.mask, boundary.boundarySegments, settings, rockNoise, x, y, request.topHeight, request.level, request.maxLevel);
+            addTopCell(result, request.mask, boundary.boundarySegments, settings, *style, x, y, request.topHeight, request.level, request.maxLevel);
         }
     }
 
@@ -1239,7 +1192,9 @@ CompositionResult composeSolidMaskMesh(const SolidMeshBuildRequest& request, con
             request.topHeight,
             request.fadeWallDisplacementAtBottom,
             wallMaxOffset,
-            settings);
+            settings,
+            nullptr,
+            style.get());
         for (const MeshQuad& wall : segmentQuads) {
             addQuad(result, wall);
         }
@@ -1258,7 +1213,8 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
     bool fadeWallDisplacementAtBottom,
     float wallMaxOffset,
     const MeshBuildSettings& inputSettings,
-    std::vector<MeshQuad>* outBaseQuads) {
+    std::vector<MeshQuad>* outBaseQuads,
+    const IWallStyle* style) {
 
     std::vector<MeshQuad> quads;
     MeshBuildSettings settings = inputSettings;
@@ -1267,6 +1223,19 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
     settings.rockScale = std::max(0.001f, settings.rockScale);
     settings.rockAmplitude = std::max(0.0f, settings.rockAmplitude);
     settings.terraceSteps = std::clamp(settings.terraceSteps, 0, 12);
+
+    // When called standalone (e.g. Wall Lab) build a style from the settings so the
+    // single path stays self-contained; composeSolidMaskMesh passes a prepared one.
+    std::unique_ptr<IWallStyle> localStyle;
+    const IWallStyle* useStyle = style;
+    if (useStyle == nullptr) {
+        localStyle = makeWallStyle(settings.wallStyle);
+        WallStyleContext ctx;
+        ctx.settings = settings;
+        ctx.seed = settings.rockSeed;
+        localStyle->prepare(ctx);
+        useStyle = localStyle.get();
+    }
 
     const Vec3 topA{segment.a.x, topHeight, segment.a.z};
     const Vec3 topB{segment.b.x, topHeight, segment.b.z};
@@ -1297,8 +1266,28 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
         }
     }
 
-    const FastNoise::SmartNode<> rockNoise = settings.rockEnabled ? makeRockNoiseNode(settings) : nullptr;
-    sampleRockNoiseBatch(rockNoise, settings, wallPoints, wallNoise);
+    // Shade every wall vertex through the style. Each vertex carries its heightT
+    // (1 at the top row, 0 at the base), so the style's seam envelope pins the top
+    // and bottom rows to 0 displacement and the panel stitches to crest and ground.
+    std::vector<WallStyleSample> samples(wallPoints.size());
+    for (int row = 0; row < vertexRows; row++) {
+        const float heightT = 1.0f - (float)row / (float)settings.wallVerticalSubdivisions;
+        for (int column = 0; column < vertexColumns; column++) {
+            const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
+            samples[index].worldPos = wallPoints[index];
+            samples[index].normal = wallNormals[index];
+            samples[index].heightT = heightT;
+            samples[index].edgeWeight = 1.0f;
+            samples[index].fadeAtBottom = fadeWallDisplacementAtBottom;
+            samples[index].part = WallPart::Face;
+        }
+    }
+    std::vector<WallShade> shades;
+    useStyle->shade(samples, shades);
+    wallNoise.resize(wallPoints.size());
+    for (std::size_t i = 0; i < shades.size(); i++) {
+        wallNoise[i] = shades[i].field;
+    }
 
     float resolvedWallMaxOffset = wallMaxOffset;
     if (resolvedWallMaxOffset <= 0.0f) {
@@ -1308,6 +1297,11 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
             ? segmentLength / (float)settings.wallHorizontalSubdivisions
             : vSpacing;
         resolvedWallMaxOffset = 0.7f * std::max(0.0001f, std::min(hSpacing, vSpacing));
+    }
+
+    std::vector<Vec3> displaced(wallPoints.size());
+    for (std::size_t i = 0; i < wallPoints.size(); i++) {
+        displaced[i] = applyWallShade(wallPoints[i], wallNormals[i], shades[i].offset, resolvedWallMaxOffset);
     }
 
     for (int sy = 0; sy < settings.wallVerticalSubdivisions; sy++) {
@@ -1328,7 +1322,7 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
                 segment.normal);
             const float panelNoise = (wallNoise[i00] + wallNoise[i10] + wallNoise[i11] + wallNoise[i01]) * 0.25f;
             const float panelHeightFraction = std::clamp((topT0 + topT1) * 0.5f, 0.0f, 1.0f);
-            const ColorRgba panelColor = wallColor(segment.side, (topT0 + topT1) * 0.5f, panelNoise);
+            const ColorRgba panelColor = useStyle->color(WallPart::Face, segment.side, (topT0 + topT1) * 0.5f, panelNoise);
 
             if (outBaseQuads != nullptr) {
                 MeshQuad base;
@@ -1346,10 +1340,10 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
             }
 
             MeshQuad wall;
-            wall.a = displaceWallPoint(settings, wallPoints[i00], wallNormals[i00], topT0, wallNoise[i00], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
-            wall.b = displaceWallPoint(settings, wallPoints[i10], wallNormals[i10], topT0, wallNoise[i10], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
-            wall.c = displaceWallPoint(settings, wallPoints[i11], wallNormals[i11], topT1, wallNoise[i11], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
-            wall.d = displaceWallPoint(settings, wallPoints[i01], wallNormals[i01], topT1, wallNoise[i01], fadeWallDisplacementAtBottom, resolvedWallMaxOffset);
+            wall.a = displaced[i00];
+            wall.b = displaced[i10];
+            wall.c = displaced[i11];
+            wall.d = displaced[i01];
             wall.normal = displacedFaceNormal(
                 wall.a, wall.b, wall.c, wall.d,
                 wallPoints[i00], wallPoints[i10], wallPoints[i11], wallPoints[i01],

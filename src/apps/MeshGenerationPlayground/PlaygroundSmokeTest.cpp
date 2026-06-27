@@ -1,5 +1,6 @@
 #include "PlaygroundSmokeTest.h"
 
+#include "CliffWallScenario.h"
 #include "MeshBridge.h"
 #include "MeshPreview.h"
 #include "PlaygroundState.h"
@@ -213,11 +214,49 @@ void scanWallGeometryIntegrity() {
         marker, g_landscapeModel.cliffWallQuadCount, spikes, b45, b90, b135, b170, degenerate, worstCx, worstCz, worstCount);
 }
 
+// Rebuild the production landscape with the Cyclopean wall style and confirm the
+// switched style keeps watertight seams and outward-facing wall normals, then
+// restore the default style. Must run before runTestScenario takes g_modelMutex,
+// since rebuildLandscapeBowlModel locks it internally.
+bool runCyclopeanWallStyleSmokeTest() {
+    const int previousStyle = g_productionWallStyle;
+
+    g_productionWallStyle = 1; // Cyclopean
+    rebuildLandscapeBowlModel();
+
+    int seamMismatch = 0;
+    int wallQuads = 0;
+    OutwardOrientationScan scan;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        seamMismatch = g_landscapeModel.seamMismatchCount;
+        wallQuads = g_landscapeModel.cliffWallQuadCount;
+        scan = scanModelOutwardOrientation(g_landscapeModel.meshQuads);
+    }
+
+    const bool ok = wallQuads > 0 && seamMismatch == 0 && scan.outwardFailCount == 0;
+
+    g_productionWallStyle = previousStyle;
+    rebuildLandscapeBowlModel();
+
+    spdlog::info(
+        "{} cyclopean wall style: wallQuads={}, seamMismatch={}, outwardFail/warn={}/{}, minWallDot={:.4f}",
+        ok ? "TEST PASS" : "TEST FAIL",
+        wallQuads,
+        seamMismatch,
+        scan.outwardFailCount,
+        scan.outwardWarnCount,
+        scan.minWallOutwardDot);
+    return ok;
+}
+
 } // namespace
 
 bool runTestScenario() {
     const bool singleQuadLabOk = runSingleQuadLabSmokeTest();
     const bool wallSeriesLabOk = runWallSeriesLabSmokeTest();
+    const bool cliffWallOk = runCliffWallSmokeTest();
+    const bool cyclopeanWallStyleOk = runCyclopeanWallStyleSmokeTest();
     const bool quadLabGpuOk = warmupQuadLabGpuPreview();
 
     std::lock_guard<std::mutex> lock(g_modelMutex);
@@ -265,7 +304,7 @@ bool runTestScenario() {
         g_landscapeModel.topQuadCount > 0 &&
         g_landscapeModel.cliffWallQuadCount > 0 &&
         g_landscapeModel.beveledSegmentCount > 0;
-    if (rectangleOk && landscapeOk && outwardOk && litNormalsOk && singleQuadLabOk && wallSeriesLabOk && quadLabGpuOk) {
+    if (rectangleOk && landscapeOk && outwardOk && litNormalsOk && singleQuadLabOk && wallSeriesLabOk && cliffWallOk && cyclopeanWallStyleOk && quadLabGpuOk) {
         if (outwardWarn) {
             spdlog::warn(
                 "TEST WARN MeshGenerationPlayground outward orientation: rectangle fail/warn/minDot={}/{}/{:.4f}, landscape fail/warn/minDot={}/{}/{:.4f}",
@@ -305,13 +344,15 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, singleQuadLabOk={}, wallSeriesLabOk={}, quadLabGpuOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, singleQuadLabOk={}, wallSeriesLabOk={}, cliffWallOk={}, cyclopeanWallStyleOk={}, quadLabGpuOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
         outwardOk,
         litNormalsOk,
         singleQuadLabOk,
         wallSeriesLabOk,
+        cliffWallOk,
+        cyclopeanWallStyleOk,
         quadLabGpuOk,
         g_rectModel.topQuadCount,
         g_rectModel.cliffWallQuadCount,

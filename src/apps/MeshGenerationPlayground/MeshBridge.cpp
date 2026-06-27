@@ -123,6 +123,9 @@ landscape_mesh::MeshBuildSettings makeSharedLandscapeMeshSettings(float levelHei
     meshSettings.wallHorizontalSubdivisions = qualitySettings.wallHorizontalSubdivisions;
     meshSettings.wallVerticalSubdivisions = qualitySettings.wallVerticalSubdivisions;
     meshSettings.terraceSteps = qualitySettings.terraceSteps;
+    meshSettings.wallStyle = g_productionWallStyle == 1
+        ? landscape_mesh::WallStyleId::Cyclopean
+        : landscape_mesh::WallStyleId::BlockCliff;
     return meshSettings;
 }
 

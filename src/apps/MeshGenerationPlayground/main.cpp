@@ -1,3 +1,4 @@
+#include "CliffWallScenario.h"
 #include "LandscapeBowlScenario.h"
 #include "MeshPreview.h"
 #include "PlaygroundLog.h"
@@ -132,6 +133,9 @@ void init() {
     spdlog::info("init: calling rebuildWallSeriesLabModel()");
     rebuildWallSeriesLabModel();
     resetWallSeriesLabCamera(g_wallSeriesLabCamera);
+    spdlog::info("init: calling rebuildCliffWallModel()");
+    rebuildCliffWallModel();
+    resetCliffWallCamera(g_cliffWallCamera);
     warmupProductionPreviewRenderer();
     runTestScenario();
     spdlog::info("init: complete");

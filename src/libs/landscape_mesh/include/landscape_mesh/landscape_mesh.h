@@ -10,6 +10,16 @@ namespace landscape_mesh {
 
 using BoundarySide = landscape_core::EdgeSide;
 
+// Selects which wall style skins the transition band (crest + face + foot).
+// Default keeps the original block-cliff look unchanged.
+enum class WallStyleId : std::uint8_t {
+    BlockCliff,
+    Cyclopean,
+};
+
+// Defined in wall_style.h; forward declared so MeshBuildSettings/declarations stay free of the cycle.
+class IWallStyle;
+
 enum class VertexKind : std::uint8_t {
     Empty,
     Edge,
@@ -97,6 +107,7 @@ struct MeshBuildSettings {
     int wallHorizontalSubdivisions = 5;
     int wallVerticalSubdivisions = 6;
     int terraceSteps = 4;
+    WallStyleId wallStyle = WallStyleId::BlockCliff;
 };
 
 struct CompositionStats {
@@ -197,7 +208,8 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
     bool fadeWallDisplacementAtBottom,
     float wallMaxOffset,
     const MeshBuildSettings& settings,
-    std::vector<MeshQuad>* outBaseQuads = nullptr);
+    std::vector<MeshQuad>* outBaseQuads = nullptr,
+    const IWallStyle* style = nullptr);
 // Lab helper: one rectangular cliff face built through buildWallQuadsFromBoundarySegment.
 std::vector<MeshQuad> buildDisplacedWallPanel(const WallPanelBuildRequest& request, const MeshBuildSettings& settings);
 // Flat undisplaced quads plus displaced cliff quads for the same wall panel grid.

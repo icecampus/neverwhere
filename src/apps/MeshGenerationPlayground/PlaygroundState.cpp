@@ -12,6 +12,7 @@ MeshPreviewCamera g_meshCamera;
 LandscapeBowlSettings g_landscapeSettings;
 LandscapeBowlModel g_landscapeModel;
 MeshPreviewCamera g_landscapeCamera;
+int g_productionWallStyle = 0;
 Vec3 g_productionLightDirection{-0.35f, 0.82f, -0.45f};
 ProductionPreviewSettings g_productionPreviewSettings;
 SingleQuadLabSettings g_singleQuadLabSettings;
@@ -20,5 +21,8 @@ QuadLabPreviewCamera g_singleQuadLabCamera;
 WallSeriesLabSettings g_wallSeriesLabSettings;
 WallSeriesLabModel g_wallSeriesLabModel;
 QuadLabPreviewCamera g_wallSeriesLabCamera;
+CliffWallSettings g_cliffWallSettings;
+CliffWallModel g_cliffWallModel;
+QuadLabPreviewCamera g_cliffWallCamera;
 
 } // namespace meshgen_playground

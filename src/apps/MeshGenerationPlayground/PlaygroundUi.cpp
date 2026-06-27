@@ -1,5 +1,6 @@
 ﻿#include "PlaygroundUi.h"
 
+#include "CliffWallScenario.h"
 #include "LandscapeBowlScenario.h"
 #include "MeshPreview.h"
 #include "PlaygroundLog.h"
@@ -273,6 +274,10 @@ void drawLandscapeScenarioControls(float panelWidth) {
         panel.checkbox("Show Top Faces", &g_landscapeSettings.showTopFaces);
         panel.checkbox("Show Cliff Walls", &g_landscapeSettings.showCliffWalls);
         panel.checkbox("Show Level Labels", &g_landscapeSettings.showHeightValues);
+        ImGui::Separator();
+        ImGui::Text("Wall Style");
+        const char* wallStyles[] = {"Block Cliff", "Cyclopean"};
+        changed |= panel.combo("Wall Style", &g_productionWallStyle, wallStyles, IM_ARRAYSIZE(wallStyles));
         ImGui::Separator();
         ImGui::Text("Rendering");
         panel.checkbox("Use GPU Renderer", &g_productionPreviewSettings.useGpuRenderer);
@@ -642,6 +647,83 @@ void drawWallLabTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
     drawMeshQuadsPreview(quads, g_wallSeriesLabCamera, previewOptions, {rightWidth, layoutSize.y});
 }
 
+void drawCliffWallControls(float panelWidth) {
+    PanelControls panel;
+    panel.begin(panelWidth);
+    drawFrameStats();
+    ImGui::Separator();
+
+    ImGui::Text("Cliff Wall (FastNoise2)");
+    ImGui::TextWrapped(
+        "FastNoise2 port of the Blender NW_CliffWall geometry-nodes prototype: a tall subdivided grid "
+        "displaced by stacked stone courses, fBm bulges, micro grain, Voronoi cracks and a jagged crown.");
+
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        ImGui::Text("Shape (maps 1:1 to the Blender modifier)");
+        changed |= panel.sliderFloat("Width", &g_cliffWallSettings.width, 4.0f, 48.0f);
+        changed |= panel.sliderFloat("Height", &g_cliffWallSettings.height, 4.0f, 48.0f);
+        changed |= panel.inputInt("Seed", &g_cliffWallSettings.seed);
+        changed |= panel.sliderFloat("Depth", &g_cliffWallSettings.depth, 0.0f, 8.0f);
+        changed |= panel.sliderInt("Layers", &g_cliffWallSettings.layers, 1, 80);
+        changed |= panel.sliderFloat("Top Jag", &g_cliffWallSettings.topJag, 0.0f, 8.0f);
+        changed |= panel.sliderFloat("Crack Depth", &g_cliffWallSettings.crackDepth, 0.0f, 3.0f);
+        changed |= panel.sliderFloat("Micro", &g_cliffWallSettings.micro, 0.0f, 1.0f);
+
+        ImGui::Separator();
+        ImGui::Text("Tessellation");
+        changed |= panel.sliderInt("Resolution X", &g_cliffWallSettings.resolutionX, 8, 320);
+        changed |= panel.sliderInt("Resolution Y", &g_cliffWallSettings.resolutionY, 8, 360);
+        panel.checkbox("Show Wireframe", &g_cliffWallSettings.showWireframe);
+
+        ImGui::Separator();
+        ImGui::Text("Preview Camera");
+        panel.sliderFloat("Camera Yaw", &g_cliffWallCamera.orbitYawDegrees, -180.0f, 180.0f);
+        panel.sliderFloat("Camera Pitch", &g_cliffWallCamera.orbitPitchDegrees, -89.0f, 89.0f);
+        if (ImGui::Button("Reset Camera")) {
+            resetCliffWallCamera(g_cliffWallCamera);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Verts/Quads: %d / %d", g_cliffWallModel.vertexCount, g_cliffWallModel.quadCount);
+        ImGui::Text("Relief depth: %.2f - %.2f", g_cliffWallModel.minDepth, g_cliffWallModel.maxDepth);
+    }
+    if (changed) {
+        rebuildCliffWallModel();
+    }
+}
+
+void drawCliffWallTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
+    const float gutter = 12.0f;
+    const float leftPanelWidth = std::min(420.0f, std::max(320.0f, layoutSize.x * 0.34f));
+    const float rightX = layoutOrigin.x + leftPanelWidth + gutter;
+    const float rightWidth = std::max(1.0f, layoutSize.x - leftPanelWidth - gutter);
+
+    drawScenarioPanelBackground(layoutOrigin, layoutSize, leftPanelWidth);
+    ImGui::SetCursorScreenPos({layoutOrigin.x + 12.0f, layoutOrigin.y + 12.0f});
+    ImGui::BeginGroup();
+    drawCliffWallControls(leftPanelWidth);
+    ImGui::EndGroup();
+
+    MeshQuadsPreviewOptions previewOptions;
+    std::vector<MeshQuad> quads;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        previewOptions.projectionCenterX = 0.0f;
+        previewOptions.projectionCenterY = 0.0f;
+        previewOptions.projectionCenterZ = 0.0f;
+        previewOptions.showWireframe = g_cliffWallSettings.showWireframe;
+        previewOptions.orbitResetYawDegrees = 180.0f;
+        previewOptions.orbitResetPitchDegrees = 6.0f;
+        previewOptions.previewTitle = "Cliff Wall: FastNoise2 GPU preview";
+        quads = g_cliffWallModel.quads;
+    }
+
+    ImGui::SetCursorScreenPos({rightX, layoutOrigin.y});
+    drawMeshQuadsPreview(quads, g_cliffWallCamera, previewOptions, {rightWidth, layoutSize.y});
+}
+
 void drawLandscapeScenarioTab(const ImVec2& layoutOrigin, const ImVec2& layoutSize) {
     static float viewportTopFraction = 0.2f;
 
@@ -754,6 +836,14 @@ void drawUi() {
             const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
             const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
             drawWallLabTab(layoutOrigin, layoutSize);
+            ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Cliff Wall")) {
+            const ImVec2 layoutOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 layoutSize = ImGui::GetContentRegionAvail();
+            drawCliffWallTab(layoutOrigin, layoutSize);
             ImGui::SetCursorScreenPos({layoutOrigin.x, layoutOrigin.y + layoutSize.y});
             ImGui::EndTabItem();
         }
