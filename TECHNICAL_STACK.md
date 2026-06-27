@@ -1,125 +1,170 @@
-# Технический Стек и Архитектурные Решения
+# Технический стек и архитектурные решения
 
-## 🏗 Архитектура Ядра (Core)
-Мы отказываемся от классического OOP (наследование) в пользу **ECS (Entity Component System)** для гибкости и производительности.
+> **Легенда статусов:**
+> - `[есть]` — реально используется в продакшн-коде;
+> - `[прототип]` — проверено в песочнице (`src/apps/*Playground`), в основной код не въехало;
+> - `[концепт]` — запланировано, в коде отсутствует.
+>
+> Статусы сверены с репозиторием на дату обновления документа.
 
-*   **Архитектурный паттерн:** ECS (Entity Component System).
-    *   *Зачем:* Позволяет собирать объекты (Entities) из кирпичиков (Components) без сложной иерархии наследования. Решает проблему "алмазного наследования" и упрощает игровую логику.
-    *   *Библиотека:* **EnTT** (стандарт де-факто в современном C++).
-    *   **Проверено прототипами:** `src/apps/EcsPlayground`, `src/apps/RttrPlayground`.
-    *   **Паттерн интеграции с Qt/QML: ECS Model Adapter (EnTT → QAbstractListModel):**
-        *   `entt::registry` хранит только данные (pure-data). UI не читает компоненты напрямую, а получает значения через Qt модель (адаптер).
-        *   Для стабильных индексов QML нужен кеш активных сущностей: `std::vector<entt::entity>` (индекс в модели → `entt::entity`).
-        *   Для корректной реактивности QML Qt модель должна корректно эмитить сигналы:
-            *   Добавление сущностей: `beginInsertRows()` / `endInsertRows()`.
-            *   Массовые изменения/очистка: `beginResetModel()` / `endResetModel()`.
-            *   Изменение данных: `dataChanged(first, last, {roles...})` (по возможности — только затронутые строки/роли).
-        *   Компоненты в UI лучше выдавать как роли (`roleNames()`), а не через ручные геттеры на каждый компонент.
-*   **Управление состоянием (Undo/Redo):**
-    *   *Подход:* Неизменяемые снэпшоты (Immutable Snapshots).
-    *   *Библиотека:* **immer** (Persistent Data Structures).
-    *   *Интеграция:* Состояние карты хранится в immer-структурах. ECS (EnTT) инициализируется/обновляется из этих данных при загрузке или смене кадра истории.
+## Базовый стек `[есть]`
 
-## 💾 Data Layer (No-Qt)
-**Требование:** слой игровых данных **не зависит от Qt** и одинаково используется в **EpicGameRuntime** и в **Epic Map Editor**.
+| Назначение | Технология | Где живёт |
+|---|---|---|
+| Язык | C++20 (MSVC; Clang для Emscripten) | — |
+| Сборка | CMake 3.20+, vcpkg (submodule), presets `vs2022`/`emscripten` | `CMakePresets.json`, `cmake/utils.cmake` |
+| Рендер | Sokol GFX (`sokol_gfx`), `sokol_app`/`sokol_time`/`sokol_glue` | `src/libs/graphics`, runtime + playgrounds |
+| GL-загрузчик | glad (Windows) | — |
+| Сериализация | nlohmann::json | `src/libs/game_data` |
+| Математика | glm | `src/libs/math` |
+| Шум | fastnoise2, libnoise | `src/libs/generators`, landscape |
+| Логирование | spdlog (non-emscripten) | — |
+| Прочее | magic_enum, Boost (uuid, lexical_cast, container_hash), stb | — |
+| UI редактора | Qt6 (qml, quick, widgets, quickcontrols2, shader tools, core5compat) | `src/apps/EpicMapEditor` |
+| UI рантайма | Dear ImGui (через `util/sokol_imgui.h`) | `src/apps/EpicGameRuntime` |
+| Тесты | gtest | `src/libs/tests` |
 
-**Что относится к игровым данным (JSON):**
-- chapters (главы), maps (карты)
-- balance tables (экономика/крафт/параметры предметов/дропа и т.п.)
-- ресурсы/пакеты ресурсов и их метаданные
+### CMake-макросы (настоящие)
+- `nw_add_qml_app(NAME ... LIBS ...)` — для QML-приложений: добавляет QML-модуль
+  (`qt6_add_qml_module`), общий include path на `src/libs`, подключает `pch.h`, на MSVC
+  делает post-build деплой через `windeployqt`.
+- `nw_add_lib_sources(...)` — для внутренних библиотек, далее линкуется в `LIBS` у приложений.
+- Оба определены в `cmake/utils.cmake`.
+- PCH: в каждой lib/app есть `pch.h`, подключается первым.
 
-**Правило границ:**
-- “чистые” структуры + загрузка/сохранение JSON → отдельный модуль/target (условное имя: `game_data`)
-- Qt/QML-специфика (enum-экспорт в QML, модели, QObject-обёртки) → **editor-слой** (`editor_qt_adapters` и модели редактора)
+### Слой данных (без Qt) `[есть]`
+- `src/libs/game_data` — чистые структуры + JSON load/save, не зависит от Qt.
+  Заголовки: `assets.h` (`AssetIndex`), `map.h` (`Map`, `Layer`, `GameObject`), `types.h`
+  (`LayerType`, `GameObjectType`).
+- `src/libs/game_runtime` — `Runtime`, `RuntimeConfig`, `GameSession`, `GameWorld`, `Fixture`.
+  Сейчас `GameWorld` хранит данные в `std::unordered_map` (персонажи/инвентари/квесты/время),
+  **не** на ECS.
 
-## 🎨 Рендеринг и Визуализация
+---
 
-### Гибридный подход
-Используем "слоеный пирог" для достижения максимальной производительности игрового мира и удобства инструментов редактора.
-1.  **Нижний слой (Game View):** Высокопроизводительный рендеринг игрового мира (тысячи спрайтов, свет, партиклы). Не использует QML Scene Graph напрямую.
-2.  **Верхний слой (Editor Overlay):** Qt/QML интерфейс поверх рендера. Используется для гизмо, маркеров выделения, сложных контролов редактирования. Координаты игрового мира проецируются (Project/Unproject) в экранные координаты для QML.
+## Проверено прототипами, в продакшн не въехало `[прототип]`
 
-### Графический бэкенд (Render Backend)
-Нам нужен кроссплатформенный API, который можно встроить в окно Qt для редактора и использовать отдельно для запуска игры (.exe).
-*Статус:* **Sokol выбран (02.02.2026) и проверен прототипом интеграции с QtQuick**.
+Эти решения отработаны в песочницах и описаны ниже как готовые рецепты, но в основной
+код (редактор/рантайм) ещё не перенесены. При переносе — сверять с актуальным кодом.
 
-**Sokol**
-    *   *Плюсы:* Экстремально легкий, header-only, отлично подходит для встраивания.
-    *   *Интеграция:* Используем `sokol_gfx` как общий API рендера (общий `graphics_core`), но shell/backend различается для редактора и runtime.
-    *   *Зависимости:* Требуется `glad` (или другой загрузчик GL) на Windows для инициализации OpenGL контекста, используемого Sokol.
-    *   **Проверено прототипом:** `src/apps/EcsPlayground` + общая библиотека `src/libs/graphics`.
-    *   **Правила интеграции Sokol с QtQuick (через `QQuickFramebufferObject`):**
-        *   **Рендер-пайплайн в QtQuick:** Sokol встраивается как “нижний слой” через `QQuickFramebufferObject` (рендер в FBO), а QML поверх рисует UI.
-        *   **Принудительный графический API:** для совместимости Sokol + QtQuick требуется OpenGL: `QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL)`.
-        *   **Инициализация строго при активном контексте:** `sg_setup()`/`Graphics::init()` вызываются только тогда, когда GL контекст уже активен (в Qt это render-thread). Практика: lazy-init внутри `QQuickFramebufferObject::Renderer::render()`.
-        *   **GL state “грязный”:** перед рисованием сбрасываем кеш состояний Sokol: `sg_reset_state_cache()` (Qt меняет GL-state между кадрами).
-        *   **Рендер в FBO:** текстуру `QOpenGLFramebufferObject` нужно обернуть в `sg_image` с корректными параметрами (важно указать `gl_texture_target = GL_TEXTURE_2D`), затем создать `sg_view` для color attachment и передать его в `sg_pass.attachments`.
-        *   **Depth/stencil:** если depth не оборачиваем в pass, в pipeline нужно отключить ожидание depth: `pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE`.
-        *   **Коммит кадра:** `sg_commit()` обязателен **ровно один раз на кадр** на верхнем уровне рендера (в прототипе — после `sg_end_pass()` в рендерере view). Не стоит прятать `sg_commit()` внутри общих функций `end_frame()`, если часть рендеринга идёт в offscreen pass.
-        *   **Shutdown:** не вызывать `sg_shutdown()` в деструкторах view/renderer (возможны несколько вьюх). Делать shutdown на `QGuiApplication::aboutToQuit`, и только если Sokol реально инициализирован.
-        *   **Сброс GL-состояния для Qt:** после Sokol-рендера вернуть критичные состояния (unbind program/buffers, отключить depth/cull), чтобы не ломать последующий рендер Qt.
+### ECS (EnTT)
+- **В коде:** только `src/apps/EcsPlayground` и `RttrPlayground`.
+- В рантайме `GameWorld` использует plain `std::unordered_map`; `entt::registry` в
+  `game_world.h` закомментирован. То есть ECS — пока прототип, не архитектура ядра.
 
-### Render Layer (shared core, different shells)
-**Цель:** один рендер мира, но разные “shell/backend”:
-- **Epic Map Editor (Qt)**: shell на QtQuick/FBO + QML overlay
-- **EpicGameRuntime (Standalone)**: shell без Qt (сейчас `sokol_app`) + runtime UI на ImGui
+### Рефлексия (RTTR)
+- **В коде:** только `RttrPlayground` (`Components.h` с `RTTR_ENABLE()`, регистрация в
+  `Components.cpp`). Авто-инспектор/авто-сериализация в редакторе на RTTR не сделаны.
 
-Практически это удобно оформлять как:
-- `graphics_core` (общие пайплайны/ресурсы/рендер-проходы; без Qt)
-- `graphics_shell_qtquick` (интеграция в Qt и управление FBO/pass)
-- `graphics_shell_sokolapp` (window+loop+swapchain в runtime)
+### ECS ↔ QAbstractListModel (адаптер)
+- **В коде:** `src/apps/EcsPlayground/EcsModel.*`. В редакторе не используется
+  (там живут отдельные модели вроде `core/models/chapters_model`).
 
-## 💾 Данные и Сериализация
-*   **Формат хранения:** **JSON**.
-    *   *Библиотека:* `nlohmann::json` (уже используется) или переход на `simdjson`/`yyjson` при проблемах с производительностью.
-    *   *Причина:* Читаемость, удобство слияния (Git merge), простота отладки.
-*   **Рефлексия (Reflection):**
-    *   *Библиотека:* **RTTR** (Run Time Type Reflection).
-    *   *Зачем:* Автоматическая генерация UI свойств в редакторе и автоматическая сериализация компонентов в JSON без написания ручного кода `to_json`/`from_json` для каждого поля.
-    *   *Паттерн реализации:*
-        *   **Components**: Определять как простые структуры с макросом `RTTR_ENABLE()` внутри.
-        *   **Registration**: Регистрировать компоненты в отдельном `.cpp` файле используя `RTTR_REGISTRATION`.
-        *   **Introspection**: Использовать `rttr::type::get<Component>()` для динамической итерации по свойствам.
-        *   **QML Integration**: Передавать данные инспектора в QML как `QVariantList` (список карт свойств) и использовать `Q_INVOKABLE` сеттеры для модификации данных через рефлексию.
-    *   **Проверено прототипом:** `src/apps/RttrPlayground`.
-    *   **Практика: RTTR Inspector для QML (данные + редактирование):**
-        *   **Формат данных для QML:** собрать `QVariantList`, где каждый элемент — `QVariantMap` компонента:
-            `{"name": <ComponentName>, "properties": [ {"name","typeName","value"}, ... ] }`.
-        *   **Сборка инспектора:** итерация по известному набору компонент-типов, для каждого присутствующего компонента:
-            `rttr::type::get<ComponentType>().get_properties()` + `prop.get_value(rttr::instance(comp))`.
-        *   **Редактирование:** `setProperty(row, compName, propName, QVariant)`:
-            найти `rttr::type` по имени компонента → `get_property(propName)` → конвертировать `QVariant` в `rttr::variant` по `prop.get_type()` → `prop.set_value(...)`.
-            После успешной записи обязательно эмитить `dataChanged()` для затронутых ролей (например, имя/позиция).
-        *   **Ограничения (TODO в будущем):** унифицировать конверсию типов (bool/enum/пользовательские типы), добавить валидацию/нормализацию значений и сообщения об ошибках в UI.
+### Sokol ↔ QtQuick
+- **В коде (прототип):** `src/apps/EcsPlayground/GameView.*` — через
+  `QQuickFramebufferObject::Renderer`.
+- **В коде (продакшн-редактор):** `src/apps/EpicMapEditor/src/runtime_map_view.*` —
+  `RuntimeMapView` наследует `QQuickItem` + `QOpenGLFunctions`, рендер заведён через
+  сигналы `QQuickWindow::beforeRendering`/`afterRendering` и слоты `sync()`/`render()`
+  (`Qt::DirectConnection`). **Внимание:** это другой путь, чем в прототипе, и рендер там
+  пока подключён не до конца (`LandscapeRenderer::init()` временно закомментирован).
 
-## 🎮 Игровая Логика и Скриптинг
-*   **Язык логики (Engine):** **C++20** (через ECS Системы).
-    *   Решает проблему "мультиметодов" через итерацию по кортежам компонентов в Системах (`view<Fire, Ice>`).
-*   **Игровой UI (Runtime):** **Dear ImGui**.
-    *   Быстрое создание интерфейсов (инвентарь, диалоги) внутри самой игры.
-*   **Скриптинг (Optional):** **Lua** (через Sol2).
-    *   Для написания квестов и диалогов без перекомпиляции C++.
+---
 
-## 🛠 Инструментарий (Roadmap Tech)
-*   **Timeline Editor:** Свой виджет на QML + C++ бекенд.
-*   **Node Graph (Quests):** Интеграция готового решения для узлов (например, NodeEditor для ImGui или QML-аналог) или написание своего легковесного графа.
+## Запланировано / целевые имена `[концепт]`
 
-## 🧱 Сборка и совместное использование библиотек (CMake)
-*   **QML приложения:** создавать через `nw_add_qml_app(...)` в `CMakeLists.txt` приложения.
-    *   Зависимости передавать через `LIBS` (пример: EnTT/RTTR/spdlog/Qt и внутренние libs вроде `graphics`).
-    *   Макрос автоматически добавляет QML-модуль (`qt6_add_qml_module(...)`), включает общий include path на `src/libs`, подключает `pch.h` и (на MSVC) делает post-build деплой через `windeployqt`.
-*   **Внутренние библиотеки:** оформлять как отдельные targets через `nw_add_lib_sources(...)` и затем линковать их в `LIBS` у приложений (пример: `src/libs/graphics` как общий рендер-модуль).
+Эти имена встречаются в документах/обсуждениях как целевая архитектура. В коде их нет,
+функциональность (если есть) разложена иначе:
 
-## 🪵 Логирование и диагностика
-*   **spdlog:** используем как стандартный логгер для приложений/библиотек (в прототипах логирует запуск, инспекцию, ошибки и состояние графической инициализации).
+- **`graphics_core` / `graphics_shell_qtquick` / `graphics_shell_sokolapp`** — целевые либы
+  с общим рендер-ядром и двумя шеллами. Сейчас: общий код в `src/libs/graphics` +
+  `src/libs/render_core`, шеллы — inline в приложениях.
+- **`editor_qt_adapters`** — целевой target для Qt-экспорта enum'ов и view-models. Сейчас
+  Qt-модели живут прямо в `src/libs/core`.
+- **`IProfileStore` / `IInventoryStore` / `ISaveGameStore`** — целевые интерфейсы «хранилищ»
+  для плейтеста. Сейчас подход другой — через `game_runtime::Fixture`.
+- **immer** — undo/redo на immutable snapshots. В `src/` нет ни одного включения.
+- **Lua/Sol2** — скриптинг квестов/диалогов. В `src/` нет.
+- **simdjson/yyjson** — резервная замена nlohmann при проблемах с перфом.
+- **Timeline Editor**, **Node Graph (quests/dialogs)** — инструментов в репозитории нет.
 
-## ▶ Play-Test Host + Fixtures (Editor → Runtime)
-**Требование:** редактор запускает runtime на текущей карте/главе без “полной игры”, но при этом runtime должен получать всё, что ему нужно для логики.
+---
 
-**Подход (high-level):**
-- runtime опирается на абстракции/интерфейсы “хранилищ” данных сессии игрока, например:
-  - `IProfileStore` (профиль/настройки)
-  - `IInventoryStore` (инвентарь)
-  - `ISaveGameStore` (прогресс/сейвы)
-- в обычной игре реализации читают/пишут реальные сохранения
-- в режиме плейтеста **Epic Map Editor** подставляет fixture-реализации (in-memory или JSON-шаблоны), чтобы быстро воспроизводить сценарии и тестировать контент
+## Боевая кухня: интеграция Sokol с QtQuick (из прототипа)
+
+Ниже — правила, выработанные в `src/apps/EcsPlayground/GameView.cpp`. Относится к пути через
+`QQuickFramebufferObject`. Если продакшн-редактор окончательно переходит на
+`QQuickItem` + `QOpenGLFunctions` (`RuntimeMapView`), часть пунктов про FBO теряет смысл —
+но общие принципы работы Sokol внутри Qt остаются актуальными.
+
+- **Принудительный графический API:** для совместимости Sokol + QtQuick требуется OpenGL:
+  `QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL)`.
+- **Инициализация строго при активном контексте:** `sg_setup()` вызывать только когда
+  GL-контекст активен (lazy-init в render-thread).
+- **GL state «грязный»:** перед рисованием сбрасывать кеш состояний Sokol —
+  `sg_reset_state_cache()` (Qt меняет GL-state между кадрами).
+- **Рендер в FBO (для пути QQuickFramebufferObject):** текстуру
+  `QOpenGLFramebufferObject` оборачивать в `sg_image` (`gl_texture_target = GL_TEXTURE_2D`),
+  создавать `sg_view` для color attachment и передавать в `sg_pass.attachments`.
+- **Depth/stencil:** если depth не оборачиваем в pass, в pipeline отключать ожидание depth:
+  `pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE`.
+- **Коммит кадра:** `sg_commit()` ровно один раз на кадр на верхнем уровне рендера
+  (после `sg_end_pass()`). Не прятать `sg_commit()` внутри общих `end_frame()`, если есть
+  offscreen pass.
+- **Shutdown:** не вызывать `sg_shutdown()` в деструкторах view/renderer (возможны несколько
+  вьюх). Делать shutdown на `QGuiApplication::aboutToQuit` и только если Sokol реально
+  инициализирован.
+- **Сброс GL-состояния для Qt:** после Sokol-рендера возвращать критичные состояния
+  (unbind program/buffers, отключить depth/cull), чтобы не ломать последующий рендер Qt.
+
+## Боевая кухня: ECS ↔ QAbstractListModel (из прототипа)
+
+Из `src/apps/EcsPlayground`. Применимо, когда редактор переедет на EnTT.
+
+- `entt::registry` хранит только данные; UI читает их через Qt-модель (адаптер), не напрямую.
+- Для стабильных индексов QML — кеш активных сущностей `std::vector<entt::entity>`
+  (индекс в модели → `entt::entity`).
+- Корректная реактивность QML через сигналы:
+  - добавление: `beginInsertRows()` / `endInsertRows()`;
+  - массовые изменения/очистка: `beginResetModel()` / `endResetModel()`;
+  - точечные изменения: `dataChanged(first, last, {roles...})` — только затронутые строки/роли.
+- Компоненты в UI выдавать как роли (`roleNames()`), а не через ручные геттеры на каждый
+  компонент.
+
+## Боевая кухня: RTTR Inspector для QML (из прототипа)
+
+Из `src/apps/RttrPlayground`. Применимо при появлении авто-инспектора в редакторе.
+
+- **Формат данных для QML:** собирать `QVariantList`, где каждый элемент — `QVariantMap`
+  компонента: `{"name": <ComponentName>, "properties": [ {"name","typeName","value"}, ... ]}`.
+- **Сборка инспектора:** итерация по известному набору компонент-типов, для каждого:
+  `rttr::type::get<ComponentType>().get_properties()` + `prop.get_value(rttr::instance(comp))`.
+- **Редактирование** `setProperty(row, compName, propName, QVariant)`:
+  найти `rttr::type` по имени компонента → `get_property(propName)` → конвертировать
+  `QVariant` в `rttr::variant` по `prop.get_type()` → `prop.set_value(...)`.
+  После успешной записи обязательно эмитить `dataChanged()` для затронутых ролей.
+- **Компоненты:** простые структуры с `RTTR_ENABLE()`; регистрация в отдельном `.cpp`
+  через `RTTR_REGISTRATION`; инспекция через `rttr::type::get<Component>()`.
+- **TODO:** унифицировать конверсию типов (bool/enum/пользовательские), добавить
+  валидацию/нормализацию значений и сообщения об ошибках в UI.
+
+---
+
+## Логирование и диагностика `[есть]`
+spdlog — стандартный логгер для приложений/библиотек (запуск, инспекция, ошибки,
+состояние графической инициализации).
+
+## Рендер-слой (цель) `[концепт]`
+Цель: один рендер мира, но разные shell/backend:
+- **EpicMapEditor (Qt):** shell на QtQuick + QML overlay;
+- **EpicGameRuntime (Standalone):** shell без Qt (`sokol_app`) + runtime UI на ImGui.
+
+Оформление в виде отдельных либ `graphics_core` / `graphics_shell_qtquick` /
+`graphics_shell_sokolapp` — пока не сделано (см. выше).
+
+## Play-Test Host + Fixtures (Editor → Runtime) `[заготовка]`
+- Редактор запускает рантайм на текущей карте/главе без «полной игры», но рантайм должен
+  получать всё, что нужно для логики.
+- Текущий подход — `game_runtime::Fixture` (декларативное описание начального состояния
+  мира: карта, персонажи, инвентари, квесты, время). Билдер и (де)сериализация реализованы.
+- Целевые интерфейсы `IProfileStore` / `IInventoryStore` / `ISaveGameStore` — пока концепт.
