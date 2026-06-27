@@ -1,0 +1,1 @@
+сделано по референсу Rock_Gen_2.0.blend (../../reference/Rock_Gen_2.0.blend)

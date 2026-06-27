@@ -126,6 +126,7 @@ python utils/asset_generator/technical/generate_atlas_ridge.py --no-publish    #
 ### Blender-прототипы — `utils/blender/`
 Python-порты C++-логики ландшафта (`landscape_core::generateLandscapeBowl`) для визуальной проверки в Blender. Запуск из Scripting-воркспейса, идемпотентны:
 - `nw_bowl_rebuild.py`, `nw_bowl_rock_rebuild.py` — реконструкция block-cliff bowl-прототипа.
+- `prototypes/` — исходные `.blend`-сцены прототипов (`clifs/`, `landscape/hex/`, `reference/`).
 
 ### Визуальные smoke-тесты — `utils/visual_tests/`
 Запускает `MeshGenerationPlayground` со снятием скриншотов и гоняет OpenCV-эвристики по ним. Зависимости: см. `requirements.txt`.

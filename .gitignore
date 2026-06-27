@@ -9,3 +9,6 @@ _int_mac
 Testing/Temporary/
 __pycache__
 logs/
+
+# Blender autosave backups (covered by LFS too, but shouldn't be committed)
+*.blend1
