@@ -5,13 +5,4 @@ alwaysApply: true
 
 # Build And Dependencies
 
-- The main Windows workflow is Visual Studio 2022 plus CMake Presets.
-- Generate the Visual Studio solution with `generate_vs.bat`.
-- The generated solution is `_intermediate_64\Neverwhere.sln`.
-- Do not use `build.sh` for the Windows workflow.
-- To configure without the wrapper, use `cmake --preset vs2022`.
-- To build from the command line, use build presets, for example `cmake --build --preset debug --target EpicMapEditor`.
-- Use `_intermediate_64` as the Windows binary directory and `_b-em` for Emscripten.
-- Manage dependencies through `vcpkg.json`; do not patch `toolchain/vcpkg` directly.
-- For vcpkg overlay fixes, use `vcpkg_overlays/ports`; this path is already wired in `CMakePresets.json`.
-- When adding a dependency, update `vcpkg.json`, add the required `find_package(...)`, then link the imported target in the relevant `nw_add_...` `LIBS` section.
+Canonical guidance lives in `AGENTS.md` → «Сборка (Windows, CMake + vcpkg)».

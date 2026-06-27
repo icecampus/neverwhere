@@ -5,10 +5,4 @@ alwaysApply: true
 
 # Testing And Prototyping
 
-- Create new test applications and prototypes under `src/apps/<PrototypeName>`.
-- Prototype and test application targets must use the `Playground` suffix, for example `RttrPlayground` or `EcsPlayground`.
-- Use `nw_add_qml_app` for GUI prototypes and `nw_add_console_app` for CLI prototypes.
-- For smoke-test style agent verification, add a `runTestScenario()` method to the main model or logic class.
-- Smoke scenarios should exercise key operations programmatically without UI interaction.
-- Log smoke-test results through `spdlog::info` or `spdlog::error` with clear `TEST PASS` / `TEST FAIL` markers.
-- If a smoke scenario must run from an app, trigger it with `QTimer::singleShot(1000, ...)` in `main.cpp`.
+Canonical guidance lives in `AGENTS.md` → «Тестирование и прототипы».

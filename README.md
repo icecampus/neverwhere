@@ -106,43 +106,12 @@ flowchart TB
 ## Play-Test в редакторе (концепт)
 Редактор должен уметь **запускать EpicGameRuntime на текущей редактируемой карте**.
 
-Если runtime-логике нужны данные, которых нет в карте (профиль игрока, прогресс, инвентарь, сейвы), редактор предоставляет их через **fixture-подобные провайдеры** (по аналогии с unit tests):\n- фиксированный “профиль по умолчанию”\n- тестовый инвентарь/прогресс\n- временное хранилище (in-memory) на время сессии плейтеста
 Если runtime-логике нужны данные, которых нет в карте (профиль игрока, прогресс, инвентарь, сейвы), редактор предоставляет их через **fixture-подобные провайдеры** (по аналогии с unit tests):
 - фиксированный “профиль по умолчанию”
 - тестовый инвентарь/прогресс
 - временное хранилище (in-memory) на время сессии плейтеста
 
-## Build (Windows, CMake + vcpkg)
-Сборка использует vcpkg (подключён как submodule). Мы **не патчим** `toolchain/vcpkg` напрямую.
-
-Основной Windows-flow строится вокруг CMake Presets и Visual Studio 2022:
-
-```bat
-generate_vs.bat
-```
-
-По умолчанию скрипт bootstrap'ит vcpkg при необходимости и генерирует solution через preset `vs2022`. После этого можно открыть:
-
-```text
-_intermediate_64\Neverwhere.sln
-```
-
-Можно явно выбрать CMake configure preset:
-
-```bat
-generate_vs.bat vs2022
-```
-
-Сборка после генерации выполняется из Visual Studio или явно через CMake/MSBuild:
-
-```bat
-cmake --build --preset debug --target EpicMapEditor
-```
-
-Sokol подключён через **overlay port**, чтобы держать `util/sokol_imgui.h` совместимым с актуальным Dear ImGui из vcpkg:
-- `vcpkg_overlays/ports`
-- путь уже подключён в `CMakePresets.json` через `VCPKG_OVERLAY_PORTS`
-
-## Roadmap (кратко)
-- **Undo/Redo**: перейти на неизменяемые снэпшоты через `immer` (см. `docs/TECHNICAL_STACK.md`)
-- **Data/View separation**: отделить данные от QObject/QML представлений
+## Разработка
+- **Как работать с репозиторием** (сборка, конвенции, макросы, прототипы) — см. [`AGENTS.md`](./AGENTS.md).
+- **Видение и статусы фич** — [`docs/ROADMAP_VISION.md`](./docs/ROADMAP_VISION.md).
+- **Стек и архитектурные решения** — [`docs/TECHNICAL_STACK.md`](./docs/TECHNICAL_STACK.md).
