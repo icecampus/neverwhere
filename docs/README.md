@@ -4,6 +4,8 @@
 
 | Document | Topic |
 |----------|-------|
+| [ROADMAP_VISION.md](./ROADMAP_VISION.md) | Product vision, positioning, feature pillars (with status tags) |
+| [TECHNICAL_STACK.md](./TECHNICAL_STACK.md) | Tech stack and architectural decisions (real / prototype / concept) |
 | [TILE_RESOLUTION_ANALYSIS.md](./TILE_RESOLUTION_ANALYSIS.md) | Tile resolution analysis |
 
 ## Reference library

@@ -144,5 +144,5 @@ Sokol подключён через **overlay port**, чтобы держать 
 - путь уже подключён в `CMakePresets.json` через `VCPKG_OVERLAY_PORTS`
 
 ## Roadmap (кратко)
-- **Undo/Redo**: перейти на неизменяемые снэпшоты через `immer` (см. `TECHNICAL_STACK.md`)
+- **Undo/Redo**: перейти на неизменяемые снэпшоты через `immer` (см. `docs/TECHNICAL_STACK.md`)
 - **Data/View separation**: отделить данные от QObject/QML представлений
