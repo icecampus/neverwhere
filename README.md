@@ -123,7 +123,7 @@ python utils/asset_generator/technical/generate_atlas_ridge.py --no-publish    #
 ```
 См. `utils/asset_generator/README.md` и `utils/asset_generator/technical/TILE_MASKS.md`.
 
-### Blender-прототипы — `utils/blender/prototypes/`
+### Blender-прототипы — `prototypes/blender/`
 Исходные `.blend`-сцены ранних ручных прототипов геометрии (обрывы, hex-ландшафт) и референсы (`clifs/`, `landscape/hex/`, `reference/`). Используются вручную в Blender для визуальной проверки; в сборку и рантайм не входят. Каноничная логика ландшафта живёт в C++ (`src/libs/landscape_core`).
 
 ### Визуальные smoke-тесты — `utils/visual_tests/`
