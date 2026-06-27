@@ -11,45 +11,83 @@ Neverwhere — это **узкоспециализированный 2D engine/s
 
 ## High-level architecture
 
+Проект разбит на **слои**. Нижние слои не зависят от верхних; оба приложения
+(редактор и рантайм) работают с **одной и той же моделью данных** и **одним
+рендер-ядром**, отличаются только UI-шеллом.
+
+### Слои
+
+- **Слой данных (без Qt).** Чистые структуры + JSON load/save. Должен быть
+  читаем без Qt, чтобы рантайм не тянул Qt-зависимости.
+- **Рендер-ядро (общее).** Sokol GFX + утилиты рендера. Одно на оба приложения.
+- **Runtime-логика (общая).** Игровой мир, сессия, цикл обновления, fixtures.
+  Используется и в рантайме, и при плейтесте из редактора.
+- **Приложения (шеллы).** Два разных «кожуха» поверх общих слоёв:
+  - **EpicMapEditor** — Qt/QML. Рендер встроен в QtQuick через
+    `QQuickFramebufferObject`/`QQuickItem` + OpenGL.
+  - **EpicGameRuntime** — standalone на `sokol_app`, UI на Dear ImGui.
+
+### Что уже есть в коде, а что пока концепт
+
+Пометки ниже относятся к именам на диаграмме:
+
+| Блок на диаграмме | Статус | Где реально живёт |
+|---|---|---|
+| `game_data` | есть | `src/libs/game_data` (`assets.h`, `map.h`, `types.h`) |
+| `resources_manifest` | частично | есть `AssetIndex` (загрузка индекса ассетов), но как отдельный «манифест» не выделен |
+| `balance_tables` | концепт | в коде пока нет |
+| `render core` (Sokol) | есть | `src/libs/graphics` + утилиты в `src/libs/render_core` (напр. `LandscapeRenderer`) |
+| `editor_qt_adapters` | частично | Qt-модели-адаптеры (`QAbstractListModel` поверх EnTT) реально есть в `src/libs/core/models/`, но модуля с таким именем нет |
+| `graphics_shell_qtquick` | есть (по сути) | `RuntimeMapView` (`src/apps/EpicMapEditor/src/runtime_map_view.*`) — встраивает рендер в QML |
+| `graphics_shell_sokolapp` | есть (по сути) | весь `src/apps/EpicGameRuntime/main.cpp` — это шелл на `sokol_app` |
+| `QML_UI` | есть | `src/apps/EpicMapEditor/qml/`, `resources.qrc` |
+| `ImGui_UI` | есть | `simgui` в `EpicGameRuntime/main.cpp` |
+| `game_loop` / `Runtime` | есть | `src/libs/game_runtime` (`Runtime`, `GameSession`, `GameWorld`) |
+| `fixtures` | есть | `game_runtime::Fixture` (`include/game_runtime/fixture.h`) |
+| `playtest_host` | частично | `RuntimeMapView` уже создаёт `Runtime` + сессию внутри редактора, но отдельного модуля «playtest host» нет |
+
+### Схема
+
 ```mermaid
 flowchart TB
-  subgraph DataLayer[DataLayer_NoQt]
-    gameData[game_data(JSON_Schema+LoadSave)]
-    balanceData[balance_tables(JSON)]
-    resourcesData[resources_manifest]
+  subgraph Data["Слой данных (без Qt)"]
+    direction LR
+    gameData["game_data<br/>карты, ассеты, типы"]
+    balanceData["balance_tables<br/>(концепт)"]
+    resourcesData["resources_manifest<br/>(частично: AssetIndex)"]
   end
 
-  subgraph RenderLayer[RenderLayer_Shared]
-    renderCore[graphics_core(Sokol_GFX_API)]
+  subgraph Shared["Общие ядра"]
+    direction LR
+    renderCore["Рендер-ядро<br/>Sokol GFX + render_core"]
+    runtime["Runtime-логика<br/>Runtime / Session / World / Fixture"]
   end
 
-  subgraph EditorApp[EpicMapEditor(Qt)]
-    qmlUi[QML_UI]
-    qtAdapters[editor_qt_adapters]
-    qtShell[graphics_shell_qtquick]
-    playtestHost[playtest_host]
+  subgraph Editor["EpicMapEditor (Qt)"]
+    direction TB
+    qmlUi["QML UI"]
+    qtShell["QtQuick shell<br/>(RuntimeMapView)"]
   end
 
-  subgraph RuntimeApp[EpicGameRuntime(Standalone)]
-    imguiUi[ImGui_UI]
-    runtimeShell[graphics_shell_sokolapp]
-    gameLoop[game_loop]
+  subgraph RuntimeApp["EpicGameRuntime (standalone)"]
+    direction TB
+    imguiUi["ImGui UI"]
+    sokolShell["sokol_app shell"]
   end
 
-  gameData --> qtAdapters
-  gameData --> gameLoop
-  balanceData --> qtAdapters
-  balanceData --> gameLoop
-  resourcesData --> qtAdapters
-  resourcesData --> gameLoop
+  gameData --> Shared
+  balanceData --> Shared
+  resourcesData --> Shared
 
   renderCore --> qtShell
-  renderCore --> runtimeShell
+  renderCore --> sokolShell
+  runtime --> qtShell
+  runtime --> sokolShell
 
   qtShell --> qmlUi
-  runtimeShell --> imguiUi
+  sokolShell --> imguiUi
 
-  playtestHost -->|"launch_with_map+fixtures"| gameLoop
+  qtShell -. "запуск плейтеста:<br/>карта + fixture" .-> runtime
 ```
 
 ## Data layer (без Qt)
