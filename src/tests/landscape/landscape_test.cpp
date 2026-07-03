@@ -85,7 +85,7 @@ TEST_F(LandscapeTest, NodeDrawingLogic) {
     StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
     for (const math::ivec2& curCellPosition : neighbours)
     {
-        TileSet::TileType tileType = landNodes.getTileType(curCellPosition);
+        TileSet::TileType tileType = StaggeredTiledLandscape::tileTypeAt(landNodes, curCellPosition);
         updateLandscapeCell(layerModel, mockAsset, curCellPosition, tileType);
     }
 
@@ -95,7 +95,7 @@ TEST_F(LandscapeTest, NodeDrawingLogic) {
         EXPECT_FALSE(objects.empty());
         Landscape* landObject = dynamic_cast<Landscape*>(objects.back());
         ASSERT_NE(landObject, nullptr);
-        TileSet::TileType expectedType = landNodes.getTileType(curCellPosition);
+        TileSet::TileType expectedType = StaggeredTiledLandscape::tileTypeAt(landNodes, curCellPosition);
         EXPECT_EQ(landObject->getTileIndex(), mockAsset->subTileIndexByType(expectedType));
     }
 }
@@ -110,20 +110,20 @@ TEST_F(LandscapeTest, PencilConnectivityTest) {
     // Обновляем клетки вокруг node1
     auto cells1 = StaggeredIsometry::nodeNeighboursCell(node1);
     for (const auto& cellPos : cells1) {
-        updateLandscapeCell(layerModel, mockAsset, cellPos, nodes1.getTileType(cellPos));
+        updateLandscapeCell(layerModel, mockAsset, cellPos, StaggeredTiledLandscape::tileTypeAt(nodes1, cellPos));
     }
 
     // 2. Рисуем ВТОРУЮ точку рядом (которая делит клетки с node1)
-    math::ivec2 node2 = node1 + math::ivec2(0, 2); 
-    
+    math::ivec2 node2 = node1 + math::ivec2(0, 2);
+
     // СИМУЛИРУЕМ РАБОТУ КИСТИ (которая должна обновить клетки вокруг НОВОГО узла)
-    LandNodes nodes2 = LandNodes::createByMap(*layerModel);
+    LandNodes nodes2 = StaggeredTiledLandscape::buildLandNodes(*layerModel);
     nodes2[node2] = 1;
-    
+
     // Обновляем клетки вокруг НОВОГО узла
     auto cells2 = StaggeredIsometry::nodeNeighboursCell(node2);
     for (const auto& cellPos : cells2) {
-        updateLandscapeCell(layerModel, mockAsset, cellPos, nodes2.getTileType(cellPos));
+        updateLandscapeCell(layerModel, mockAsset, cellPos, StaggeredTiledLandscape::tileTypeAt(nodes2, cellPos));
     }
 
     // 3. ПРОВЕРКА:
@@ -131,10 +131,10 @@ TEST_F(LandscapeTest, PencilConnectivityTest) {
     // в LayerModel, так как Pencil обновил их при обработке node2.
     for (const auto& cellPos : cells1) {
         auto objects = layerModel->getObjectsAt(cellPos);
-        if (objects.empty()) continue; 
-        
+        if (objects.empty()) continue;
+
         Landscape* land = dynamic_cast<Landscape*>(objects.back());
-        TileSet::TileType currentTypeInMap = nodes2.getTileType(cellPos);
+        TileSet::TileType currentTypeInMap = StaggeredTiledLandscape::tileTypeAt(nodes2, cellPos);
         
         EXPECT_EQ(land->getTileIndex(), mockAsset->subTileIndexByType(currentTypeInMap))
             << "Cell at " << cellPos.x << "," << cellPos.y << " should be updated by Pencil connectivity logic!";

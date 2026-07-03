@@ -5,8 +5,10 @@
 class SliceAsset;
 class LayerModel;
 
-//StaggeredTiledLandscape
-struct StaggeredTiledLandscape
+//DiamondTiledLandscape
+// Pure cartesian grid topology. Unlike StaggeredTiledLandscape, neighbour
+// offsets do NOT depend on row parity: there is a single table for every cell.
+struct DiamondTiledLandscape
 {
     using NeighboursWithDiagonal = std::array<math::ivec2, 8>;
     using ModeNeighbours = std::array<math::ivec2, 4>;

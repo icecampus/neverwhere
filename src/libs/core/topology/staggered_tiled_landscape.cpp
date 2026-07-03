@@ -79,129 +79,8 @@ std::optional<size_t> StaggeredTiledLandscape::neighboursIndex(const math::ivec2
     return std::nullopt;
 }
 
-//TileSet
-TileSet::TileSet()
-{
-    //corners
-    {
-        TileType tilename = RightCorner; //"testset_1";
-        NeighboursNodeMask mask = { 0, 0, 1, 0 };
-
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = LeftCorner; //"testset_2";
-        NeighboursNodeMask mask = { 1, 0, 0, 0 };
-
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = UpCorner; //"testset_3";
-        NeighboursNodeMask mask = { 0, 1, 0, 0 };
-
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = DownCorner; //"testset_4";
-        NeighboursNodeMask mask = { 0, 0, 0, 1 };
-
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    //double corners
-    {
-        TileType tilename = LeftRightCorners; //"testset_1_2";
-        NeighboursNodeMask mask = { 1, 0, 1, 0 };
-
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = UpAndDownCorners; //"testset_3_4";
-        NeighboursNodeMask mask = { 0, 1, 0, 1 };
-        
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-
-    //
-    {
-        TileType tilename = DownLack; //"testset_5";
-        NeighboursNodeMask mask = { 1, 1, 1, 0 };
-
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = UpLack; //"testset_6";
-        NeighboursNodeMask mask = { 1, 0, 1, 1 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = RightLack; //"testset_7";
-        NeighboursNodeMask mask = { 1, 1, 0, 1 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = LeftLack; //"testset_8";
-        NeighboursNodeMask mask = { 0, 1, 1, 1 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    //line
-    {
-        TileType tilename = RightDownLine; //"testset_9";
-        NeighboursNodeMask mask = { 0, 0, 1, 1 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = LeftDownLine; //"testset_10";
-        NeighboursNodeMask mask = { 1, 0, 0, 1 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = RightUpLine; //"testset_11";
-        NeighboursNodeMask mask = { 0, 1, 1, 0 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    {
-        TileType tilename = LeftUpLine; //"testset_12";
-        NeighboursNodeMask mask = { 1, 1, 0, 0 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-
-    //full
-    {
-        TileType tilename = Full; //"testset_1_land";
-        NeighboursNodeMask mask = { 1, 1, 1, 1 };
-        tileset[mask] = tilename;
-        tilename2mask[tilename] = mask;
-    }
-}
-
-LandNodes LandNodes::createByMap(LayerModel& map)
+//LandNodes helpers (staggered topology)
+LandNodes StaggeredTiledLandscape::buildLandNodes(LayerModel& map)
 {
     LandNodes landMask;
     landMask.init(200, 200);
@@ -221,7 +100,7 @@ LandNodes LandNodes::createByMap(LayerModel& map)
             for (size_t i = 0; i < mask.size(); ++i)
             {
                 math::ivec2 nodePos = neighbours[i];
-                if (mask[i]) 
+                if (mask[i])
                 {
                     landMask[nodePos] = 1;
                 }
@@ -232,50 +111,19 @@ LandNodes LandNodes::createByMap(LayerModel& map)
     return landMask;
 }
 
-//LandNodes
-void LandNodes::init(size_t width_, size_t height_)
+TileSet::TileType StaggeredTiledLandscape::tileTypeAt(const LandNodes& nodes, const math::ivec2& cellPosition)
 {
-    _width = width_;
-    _height = height_;
-
-    clear();
-    resize(_width * _height);
-}
-
-uint8_t& LandNodes::operator[](const math::ivec2& position)
-{
-    size_t index = static_cast<size_t>(position.y) * _width + position.x;
-    return std::vector<uint8_t>::operator[](index);
-}
-
-uint8_t LandNodes::operator[](const math::ivec2& position) const
-{
-    return at(position);
-}
-
-uint8_t LandNodes::at(const math::ivec2& position) const
-{
-    size_t index = static_cast<size_t>(position.y) * _width + position.x;
-    return std::vector<uint8_t>::operator[](index);
-}
-
-TileSet::TileType LandNodes::getTileType(const math::ivec2& cellPosition)
-{
-    TileSet::TileType result;
-
     TileSet::NeighboursNodeMask nodesMaskForCell;
     StaggeredTiledLandscape::ModeNeighbours cellNeighboursNodes = StaggeredTiledLandscape::getNeighboursNodeForCell(cellPosition);
 
     for (size_t i = 0; i < nodesMaskForCell.size(); ++i)
     {
-        math::ivec2 neighbourNodePos = cellNeighboursNodes[i];
-        bool nodeState = at(cellNeighboursNodes[i]);
-
+        bool nodeState = nodes.at(cellNeighboursNodes[i]);
         nodesMaskForCell[i] = nodeState;
     }
 
     static TileSet tileSet;
-    result = tileSet.tileset[nodesMaskForCell];
-
-    return result;
+    return tileSet.tileset[nodesMaskForCell];
 }
+
+

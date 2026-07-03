@@ -1,0 +1,38 @@
+find_package(GTest REQUIRED)
+
+# Collect every *_test.cpp under src/tests/<domain>/ recursively. New test
+# suites land here as src/tests/<domain>/<name>_test.cpp and are picked up
+# automatically — no manual source listing needed.
+file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp"
+)
+
+add_executable(neverwhere_tests ${TEST_SOURCES})
+
+target_include_directories(neverwhere_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/libs
+)
+
+target_link_libraries(neverwhere_tests PRIVATE
+    GTest::gtest_main
+    core
+    math
+    base_data
+    generators
+    landscape_core
+    landscape_mesh
+    utils
+    Qt6::Core
+    Qt6::Quick
+)
+
+if(MSVC)
+    target_compile_options(neverwhere_tests PRIVATE "/MP")
+endif()
+
+# Group in IDE solution tree (Visual Studio "tests" folder, next to libs/_apps).
+set_property(TARGET neverwhere_tests PROPERTY FOLDER tests)
+
+# Enable testing
+enable_testing()
+add_test(NAME neverwhere_tests COMMAND neverwhere_tests)

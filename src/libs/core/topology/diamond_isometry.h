@@ -6,40 +6,48 @@
 #include "topology_common.h"
 
 
-//staggered_dimensions
-struct staggered_dimensions
+//diamond_dimensions
+struct diamond_dimensions
 {
     Q_GADGET;
-    QML_NAMED_ELEMENT(staggered_dimensions)
+    QML_NAMED_ELEMENT(diamond_dimensions)
     Q_PROPERTY(float cellWidth READ getCellWidth CONSTANT);
     Q_PROPERTY(float aspectRatio READ getAspectRatio CONSTANT);
     Q_PROPERTY(math::vec2 cellSize READ cellSize CONSTANT);
 
 public:
-    staggered_dimensions(const float& cellWidth, float aspectRatio);
+    diamond_dimensions(const float& cellWidth, float aspectRatio);
 
     math::vec2 cellSize() const;
     float getCellWidth() const { return cellWidth; }
     float getAspectRatio() const { return aspectRatio; }
 
-    bool operator==(const staggered_dimensions&) const = default;
+    bool operator==(const diamond_dimensions&) const = default;
 
     float cellWidth;
-    float aspectRatio{ 2.0 }; 
+    float aspectRatio{ 2.0 };
 };
 
-//StaggeredIsometry
-class StaggeredIsometry: public QObject
+
+//DiamondIsometry
+// Pure isometric projection: a cartesian (cx, cy) grid rendered as diamonds.
+// No even/odd row stagger — every row shares the same X mapping, so any
+// affine op (pan, rotate field 90°, ...) is trivial.
+//
+//   cellCenter(cx, cy) world = ((cx - cy) * halfW + halfW,
+//                               (cx + cy) * halfH + halfH)
+//   where halfW = cellWidth/2, halfH = cellHeight/2.
+class DiamondIsometry: public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(staggered_dimensions dimensions READ getDimensions CONSTANT)
+    Q_PROPERTY(diamond_dimensions dimensions READ getDimensions CONSTANT)
 public:
     using Neighbours = std::array<math::ivec2, 4>;
 
 
-    StaggeredIsometry(QObject* parent = nullptr);
+    DiamondIsometry(QObject* parent = nullptr);
 
-    staggered_dimensions getDimensions() const { return dimensions; }
+    diamond_dimensions getDimensions() const { return dimensions; }
 
     Q_INVOKABLE math::ivec2 fieldToMap(const math::vec2& fieldPosition) const;
     Q_INVOKABLE math::vec2  mapToField(const math::ivec2& cellPosition) const;
@@ -51,11 +59,11 @@ public:
     static Neighbours nodeNeighboursCell(const math::ivec2& nodePosition);
 
 
-    staggered_dimensions dimensions;
+    diamond_dimensions dimensions;
 };
 
-//StaggeredIsometryView
-class StaggeredIsometryView:  public StaggeredIsometry
+//DiamondIsometryView
+class DiamondIsometryView:  public DiamondIsometry
 {
     Q_OBJECT
 
@@ -64,7 +72,7 @@ class StaggeredIsometryView:  public StaggeredIsometry
     Q_PROPERTY(float cameraZoom READ getCameraZoom WRITE setCameraZoom NOTIFY cameraZoomChanged)
 
 public:
-    StaggeredIsometryView(QObject* parent = nullptr);
+    DiamondIsometryView(QObject* parent = nullptr);
 
     float getCameraX() const;
     void setCameraX(float x);
@@ -74,7 +82,7 @@ public:
 
     float getCameraZoom() const;
     void setCameraZoom(float zoom);
-    
+
     Q_INVOKABLE math::ivec2 screenToMap(const math::vec2& screenPosition) const;
     Q_INVOKABLE math::vec2 mapToScreen(const math::ivec2& cellPosition) const;
     Q_INVOKABLE VisibleRegion getVisibleCellBounds(const math::vec2& viewSize, const math::vec2& cameraOffset) const override;
