@@ -29,9 +29,9 @@ QString ImageAsset::getImageFilename() const
     return data.imageData->imageFilename.c_str(); 
 }
 
-QSize ImageAsset::getScreenSize(StaggeredIsometry* iso)
+QSize ImageAsset::getScreenSize(DiamondIsometry* iso)
 {
-    staggered_dimensions dimensions = iso->getDimensions();
+    diamond_dimensions dimensions = iso->getDimensions();
     float mapSize = dimensions.getCellWidth() * data.imageData->width;
 
     QSize imageRealSize = thumbnail().size();
@@ -40,7 +40,7 @@ QSize ImageAsset::getScreenSize(StaggeredIsometry* iso)
     return imageRealSize / k;
 }
 
-void ImageAsset::setScreenWidth(const float screenWidth, StaggeredIsometry* iso)
+void ImageAsset::setScreenWidth(const float screenWidth, DiamondIsometry* iso)
 {
    //spdlog::info("screenWidth: {}",  screenWidth);
    data.imageData->width = screenWidth /  iso->dimensions.getCellWidth();

@@ -3,7 +3,7 @@
 #include "simple_model.h"
 #include "assets_library/asset.h"
 #include "map/map_model.h"
-#include "topology/staggered_isometry.h"
+#include "topology/diamond_isometry.h"
 
 //Tool
 class Tool : public QObject
@@ -18,7 +18,7 @@ public:
     QString icon() const;
 
 
-    virtual void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso, 
+    virtual void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, DiamondIsometryView* iso,
         bool ctrlModifier, bool shiftModifier, bool altModifier)=0;
 private:
     QString _name;

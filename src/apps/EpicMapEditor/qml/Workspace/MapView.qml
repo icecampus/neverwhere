@@ -59,7 +59,7 @@ Rectangle
     }
 
 
-    StaggeredIsometryView
+    DiamondIsometryView
     {
         id: isoView
     }
@@ -114,7 +114,7 @@ Rectangle
         }
     }
     
-    StaggeredGrid 
+    DiamondGrid
     {
         id: customItem
         topology: isoView
@@ -136,7 +136,7 @@ Rectangle
         ]
     }
     
-    StaggeredCursor
+    DiamondCursor
     {
         topology: isoView
         color: "red"

@@ -1,32 +1,32 @@
-#include "staggered_cursor.h"
+#include "diamond_cursor.h"
 
-StaggeredCursor::StaggeredCursor(QQuickItem* parent)
+DiamondCursor::DiamondCursor(QQuickItem* parent)
     : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
 }
 
-math::ivec2 StaggeredCursor::mapPosition() const
+math::ivec2 DiamondCursor::mapPosition() const
 {
     return _pos;
 }
 
-void StaggeredCursor::setMapPosition(const math::ivec2& newPosition)
+void DiamondCursor::setMapPosition(const math::ivec2& newPosition)
 {
-    if (_pos != newPosition) 
+    if (_pos != newPosition)
     {
         _pos = newPosition;
         emit mapPositionChanged();
-        update(); 
+        update();
     }
 }
 
-StaggeredIsometryView* StaggeredCursor::getTopology() const
+DiamondIsometryView* DiamondCursor::getTopology() const
 {
     return _topology;
 }
 
-void StaggeredCursor::setTopology(StaggeredIsometryView* topology_)
+void DiamondCursor::setTopology(DiamondIsometryView* topology_)
 {
     if (topology_ != _topology)
     {
@@ -36,12 +36,12 @@ void StaggeredCursor::setTopology(StaggeredIsometryView* topology_)
     }
 }
 
-QColor StaggeredCursor::color() const
+QColor DiamondCursor::color() const
 {
     return _color;
 }
 
-void StaggeredCursor::setColor(const QColor& newColor)
+void DiamondCursor::setColor(const QColor& newColor)
 {
     if (_color == newColor)
         return;
@@ -50,7 +50,7 @@ void StaggeredCursor::setColor(const QColor& newColor)
     update();
 }
 
-QSGNode* StaggeredCursor::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
+QSGNode* DiamondCursor::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
     QSGGeometryNode* node = nullptr;
     QSGGeometry* geometry = nullptr;

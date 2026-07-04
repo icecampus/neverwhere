@@ -4,7 +4,7 @@
 #include "tool.h"
 #include "assets_library/asset.h"
 #include "map/map_model.h"
-#include "topology/staggered_isometry.h"
+#include "topology/diamond_isometry.h"
 
 //AssetToolsModel
 class AssetToolsModel : public SimpleModel<Tool>
@@ -13,11 +13,11 @@ class AssetToolsModel : public SimpleModel<Tool>
     Q_PROPERTY(int currentTool READ getCurrentTool WRITE setCurrentTool NOTIFY currentToolChanged)
 public:
     explicit AssetToolsModel(QObject* parent);
-    
+
     int getCurrentTool() const;
     void setCurrentTool(int currentIndex);
 
-    void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso,
+    void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, DiamondIsometryView* iso,
         bool ctrlModifier, bool shiftModifier, bool altModifier);
 
 signals:
@@ -42,7 +42,7 @@ public:
 
     AssetToolsModel* getToolsModel();
 
-    Q_INVOKABLE void click(QPoint screenPos, MapModel* mapModel, StaggeredIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier);
+    Q_INVOKABLE void click(QPoint screenPos, MapModel* mapModel, DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier);
 signals:
     void currentAssetChanged();
     void toolsModelChanged();

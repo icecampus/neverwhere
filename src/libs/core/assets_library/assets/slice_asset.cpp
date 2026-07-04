@@ -53,9 +53,9 @@ QImage SliceAsset::thumbnail()
     return QImage();
 }
 
-QSize SliceAsset::getSize(StaggeredIsometry* iso)
+QSize SliceAsset::getSize(DiamondIsometry* iso)
 {
-    staggered_dimensions dimensions = iso->getDimensions();
+    diamond_dimensions dimensions = iso->getDimensions();
     float mapSize = dimensions.getCellWidth();
 
     QSize imageRealSize = thumbnail().size();

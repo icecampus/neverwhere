@@ -3,11 +3,11 @@
 #include <cmath>
 #include <map>
 #include <QUuid>
-#include "topology/staggered_tiled_landscape.h"
+#include "topology/diamond_tiled_landscape.h"
 #include "game_objects/landscape.h"
 #include "map/map_model.h"
 #include "assets_library/assets/slice_asset.h"
-#include "topology/staggered_isometry.h"
+#include "topology/diamond_isometry.h"
 #include <landscape_core/landscape_logic.h>
 #include <landscape_core/sun_shadow.h>
 #include <landscape_mesh/landscape_mesh.h>
@@ -22,7 +22,7 @@ class LandscapeTest : public ::testing::Test {
 protected:
     void SetUp() override {
         layerModel = new LayerModel(nullptr);
-        isoView = new StaggeredIsometryView(nullptr);
+        isoView = new DiamondIsometryView(nullptr);
         mockAsset = new MockSliceAsset(nullptr);
     }
 
@@ -47,7 +47,7 @@ protected:
     }
 
     LayerModel* layerModel;
-    StaggeredIsometryView* isoView;
+    DiamondIsometryView* isoView;
     MockSliceAsset* mockAsset;
 };
 
@@ -82,10 +82,10 @@ TEST_F(LandscapeTest, NodeDrawingLogic) {
     landNodes.init(100, 100);
     landNodes[nodePos] = 1;
 
-    StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
+    DiamondIsometry::Neighbours neighbours = DiamondIsometry::nodeNeighboursCell(nodePos);
     for (const math::ivec2& curCellPosition : neighbours)
     {
-        TileSet::TileType tileType = StaggeredTiledLandscape::tileTypeAt(landNodes, curCellPosition);
+        TileSet::TileType tileType = DiamondTiledLandscape::tileTypeAt(landNodes, curCellPosition);
         updateLandscapeCell(layerModel, mockAsset, curCellPosition, tileType);
     }
 
@@ -95,7 +95,7 @@ TEST_F(LandscapeTest, NodeDrawingLogic) {
         EXPECT_FALSE(objects.empty());
         Landscape* landObject = dynamic_cast<Landscape*>(objects.back());
         ASSERT_NE(landObject, nullptr);
-        TileSet::TileType expectedType = StaggeredTiledLandscape::tileTypeAt(landNodes, curCellPosition);
+        TileSet::TileType expectedType = DiamondTiledLandscape::tileTypeAt(landNodes, curCellPosition);
         EXPECT_EQ(landObject->getTileIndex(), mockAsset->subTileIndexByType(expectedType));
     }
 }
@@ -108,22 +108,22 @@ TEST_F(LandscapeTest, PencilConnectivityTest) {
     nodes1[node1] = 1;
 
     // Обновляем клетки вокруг node1
-    auto cells1 = StaggeredIsometry::nodeNeighboursCell(node1);
+    auto cells1 = DiamondIsometry::nodeNeighboursCell(node1);
     for (const auto& cellPos : cells1) {
-        updateLandscapeCell(layerModel, mockAsset, cellPos, StaggeredTiledLandscape::tileTypeAt(nodes1, cellPos));
+        updateLandscapeCell(layerModel, mockAsset, cellPos, DiamondTiledLandscape::tileTypeAt(nodes1, cellPos));
     }
 
     // 2. Рисуем ВТОРУЮ точку рядом (которая делит клетки с node1)
     math::ivec2 node2 = node1 + math::ivec2(0, 2);
 
     // СИМУЛИРУЕМ РАБОТУ КИСТИ (которая должна обновить клетки вокруг НОВОГО узла)
-    LandNodes nodes2 = StaggeredTiledLandscape::buildLandNodes(*layerModel);
+    LandNodes nodes2 = DiamondTiledLandscape::buildLandNodes(*layerModel);
     nodes2[node2] = 1;
 
     // Обновляем клетки вокруг НОВОГО узла
-    auto cells2 = StaggeredIsometry::nodeNeighboursCell(node2);
+    auto cells2 = DiamondIsometry::nodeNeighboursCell(node2);
     for (const auto& cellPos : cells2) {
-        updateLandscapeCell(layerModel, mockAsset, cellPos, StaggeredTiledLandscape::tileTypeAt(nodes2, cellPos));
+        updateLandscapeCell(layerModel, mockAsset, cellPos, DiamondTiledLandscape::tileTypeAt(nodes2, cellPos));
     }
 
     // 3. ПРОВЕРКА:
@@ -134,7 +134,7 @@ TEST_F(LandscapeTest, PencilConnectivityTest) {
         if (objects.empty()) continue;
 
         Landscape* land = dynamic_cast<Landscape*>(objects.back());
-        TileSet::TileType currentTypeInMap = StaggeredTiledLandscape::tileTypeAt(nodes2, cellPos);
+        TileSet::TileType currentTypeInMap = DiamondTiledLandscape::tileTypeAt(nodes2, cellPos);
         
         EXPECT_EQ(land->getTileIndex(), mockAsset->subTileIndexByType(currentTypeInMap))
             << "Cell at " << cellPos.x << "," << cellPos.y << " should be updated by Pencil connectivity logic!";

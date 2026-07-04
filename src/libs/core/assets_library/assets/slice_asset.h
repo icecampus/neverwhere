@@ -1,14 +1,14 @@
 #pragma once
 #include "assets_library/asset.h"
 #include <array>
-#include "topology/staggered_isometry.h"
-#include "topology/staggered_tiled_landscape.h"
+#include "topology/diamond_isometry.h"
+#include "topology/diamond_tiled_landscape.h"
 
 class SliceAsset: public Asset
 {
     Q_OBJECT
 
-    
+
 public:
     explicit SliceAsset(QObject* parent);
 
@@ -16,8 +16,8 @@ public:
     void load(const BaseData::AssetData& data) override;
     QImage thumbnail() override;
 
-    //INVOKABLE 
-    Q_INVOKABLE QSize getSize(StaggeredIsometry* iso);
+    //INVOKABLE
+    Q_INVOKABLE QSize getSize(DiamondIsometry* iso);
 
     //
     void registerImages(RegistationHandle handle) override;

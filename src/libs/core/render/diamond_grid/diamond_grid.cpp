@@ -1,24 +1,24 @@
-#include "staggered_grid.h"
+#include "diamond_grid.h"
 
 
-StaggeredGrid::StaggeredGrid(QQuickItem* parent)
+DiamondGrid::DiamondGrid(QQuickItem* parent)
     : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
 }
 
-QSize StaggeredGrid::size() const 
-{ 
-    return _size; 
+QSize DiamondGrid::size() const
+{
+    return _size;
 }
 
-void StaggeredGrid::setSize(const QSize& newSize)
+void DiamondGrid::setSize(const QSize& newSize)
 {
     QSize corrected = newSize;
     corrected.setWidth(std::max(1, newSize.width()));
     corrected.setHeight(std::max(1, newSize.height()));
 
-    if (_size != corrected) 
+    if (_size != corrected)
     {
         _size = corrected;
         emit sizeChanged();
@@ -26,12 +26,12 @@ void StaggeredGrid::setSize(const QSize& newSize)
     }
 }
 
-StaggeredIsometryView* StaggeredGrid::getTopology() const
+DiamondIsometryView* DiamondGrid::getTopology() const
 {
     return _topology;
 }
 
-void StaggeredGrid::setTopology(StaggeredIsometryView* topology_)
+void DiamondGrid::setTopology(DiamondIsometryView* topology_)
 {
     if (topology_ != _topology)
     {
@@ -41,12 +41,12 @@ void StaggeredGrid::setTopology(StaggeredIsometryView* topology_)
     }
 }
 
-QColor StaggeredGrid::color() const
+QColor DiamondGrid::color() const
 {
     return _color;
 }
 
-void StaggeredGrid::setColor(const QColor& newColor)
+void DiamondGrid::setColor(const QColor& newColor)
 {
     if (_color == newColor)
         return;
@@ -55,16 +55,16 @@ void StaggeredGrid::setColor(const QColor& newColor)
     update();
 }
 
-QSGNode* StaggeredGrid::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
+QSGNode* DiamondGrid::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
     QSGGeometryNode* node = nullptr;
     QSGGeometry* geometry = nullptr;
 
-    if (!oldNode) 
+    if (!oldNode)
     {
         node = new QSGGeometryNode;
         geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 0, 0, QSGGeometry::UnsignedIntType);
-        
+
         geometry->setDrawingMode(QSGGeometry::DrawLines);
         geometry->setLineWidth(1);
 
@@ -75,7 +75,7 @@ QSGNode* StaggeredGrid::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
         node->setMaterial(material);
         node->setFlag(QSGNode::OwnsMaterial);
     }
-    else 
+    else
     {
         node = static_cast<QSGGeometryNode*>(oldNode);
         geometry = node->geometry();

@@ -6,7 +6,7 @@ Cursor::Cursor(QObject* parent):
 
 }
 
-void Cursor::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier)
+void Cursor::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
 
 }

@@ -88,11 +88,11 @@ void registreTypes()
     qmlRegisterType<SliceAsset>("Game", 1, 0, "SliceAsset");
 
 
-    qmlRegisterType<StaggeredIsometryView>("Game", 1, 0, "StaggeredIsometryView");
-    qmlRegisterType<staggered_dimensions>("Game", 1, 0, "staggered_dimensions");
+    qmlRegisterType<DiamondIsometryView>("Game", 1, 0, "DiamondIsometryView");
+    qmlRegisterType<diamond_dimensions>("Game", 1, 0, "diamond_dimensions");
 
-    qmlRegisterType<StaggeredGrid>("Game", 1, 0, "StaggeredGrid");
-    qmlRegisterType<StaggeredCursor>("Game", 1, 0, "StaggeredCursor");
+    qmlRegisterType<DiamondGrid>("Game", 1, 0, "DiamondGrid");
+    qmlRegisterType<DiamondCursor>("Game", 1, 0, "DiamondCursor");
     
     // RuntimeMapView - OpenGL rendering through Runtime
     qmlRegisterType<RuntimeMapView>("Game", 1, 0, "RuntimeMapView");

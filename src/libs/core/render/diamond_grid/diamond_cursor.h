@@ -2,24 +2,24 @@
 #include <QQuickItem>
 #include <QSGGeometryNode>
 #include <QSGFlatColorMaterial>
-#include "topology/staggered_isometry.h"
+#include "topology/diamond_isometry.h"
 
-class StaggeredCursor : public QQuickItem
+class DiamondCursor : public QQuickItem
 {
     Q_OBJECT
 
     Q_PROPERTY(math::ivec2 mapPosition READ mapPosition WRITE setMapPosition NOTIFY mapPositionChanged);
-    Q_PROPERTY(StaggeredIsometryView* topology READ getTopology WRITE setTopology NOTIFY topologyChanged)
+    Q_PROPERTY(DiamondIsometryView* topology READ getTopology WRITE setTopology NOTIFY topologyChanged)
     Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY colorChanged)
 
 public:
-    StaggeredCursor(QQuickItem* parent = nullptr);
+    DiamondCursor(QQuickItem* parent = nullptr);
 
     math::ivec2 mapPosition() const;
     void setMapPosition(const math::ivec2& newPosition);
 
-    StaggeredIsometryView* getTopology() const;
-    void setTopology(StaggeredIsometryView* topology);
+    DiamondIsometryView* getTopology() const;
+    void setTopology(DiamondIsometryView* topology);
 
     QColor color() const;
     void setColor(const QColor& newColor);
@@ -34,7 +34,7 @@ protected:
 
 private:
 
-    StaggeredIsometryView* _topology = nullptr;
+    DiamondIsometryView* _topology = nullptr;
     QColor _color = Qt::blue;
 
     math::ivec2 _pos{ 0,0 };

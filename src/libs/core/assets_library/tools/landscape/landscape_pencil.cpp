@@ -1,7 +1,7 @@
 #include "landscape_pencil.h"
 #include "game_objects/landscape.h"
 #include "math/lib.h"
-#include "topology/staggered_tiled_landscape.h"
+#include "topology/diamond_tiled_landscape.h"
 #include "assets_library/assets/slice_asset.h"
 
 
@@ -11,7 +11,7 @@ LandscapePencil::LandscapePencil(QObject* parent):
 
 }
 
-void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, StaggeredIsometryView* iso,
+void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* layerModel, DiamondIsometryView* iso,
     bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
     spdlog::info("Screen pos {}", screenPos);
@@ -19,7 +19,7 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
     SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(currentAsset);
     if (sliceAsset && layerModel)
     {
-        LandNodes landNodes = StaggeredTiledLandscape::buildLandNodes(*layerModel);
+        LandNodes landNodes = DiamondTiledLandscape::buildLandNodes(*layerModel);
 
         //set node UP upder cursor
         const math::ivec2 nodePos = iso->screendToNode(math::vec2(screenPos.x(), screenPos.y()));
@@ -33,10 +33,10 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
         }
 
         //update cells around node
-        StaggeredIsometry::Neighbours neighbours = StaggeredIsometry::nodeNeighboursCell(nodePos);
+        DiamondIsometry::Neighbours neighbours = DiamondIsometry::nodeNeighboursCell(nodePos);
         for (const math::ivec2& curCellPosition : neighbours)
         {
-            TileSet::TileType tileType = StaggeredTiledLandscape::tileTypeAt(landNodes, curCellPosition);
+            TileSet::TileType tileType = DiamondTiledLandscape::tileTypeAt(landNodes, curCellPosition);
             updateLandscapeCell(layerModel, sliceAsset, curCellPosition, tileType);
         }
     }

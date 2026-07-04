@@ -6,7 +6,7 @@ Eraser::Eraser(QObject* parent) :
 
 }
 
-void Eraser::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, StaggeredIsometryView* iso, 
+void Eraser::click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, DiamondIsometryView* iso,
     bool ctrlModifier, bool shiftModifier, bool altModifier)
 {
 

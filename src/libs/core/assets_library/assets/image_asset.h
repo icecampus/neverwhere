@@ -1,7 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include "assets_library/asset.h"
-#include "topology/staggered_isometry.h"
+#include "topology/diamond_isometry.h"
 
 class ImageAsset: public Asset
 {
@@ -18,8 +18,8 @@ public:
 
     QString getImageFilename() const;
 
-    Q_INVOKABLE QSize getScreenSize(StaggeredIsometry* iso);
-    Q_INVOKABLE void setScreenWidth(const float screenWidth, StaggeredIsometry* iso);
+    Q_INVOKABLE QSize getScreenSize(DiamondIsometry* iso);
+    Q_INVOKABLE void setScreenWidth(const float screenWidth, DiamondIsometry* iso);
 
     //
     void load(const BaseData::AssetData& data) override;
