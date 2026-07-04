@@ -65,6 +65,27 @@
 
 - Для документации по библиотекам/API, codegen, setup — использовать Context7 MCP, не дожидаясь явного напоминания.
 
+### Отладка падений через cdb-MCP (`neverwhere-debug`)
+
+MCP-сервер `neverwhere-debug` (`tools/debug_mcp/`, запуск через `tools/run_mcp_server.ps1`) — обёртка над **cdb** (Windows native C++ debugger). Подключён в `.mcp.json`, запускается автоматически вместе с IDE. Зависимости: `mcp>=1.0` (см. `tools/debug_mcp/requirements.txt`), cdb из Windows SDK.
+
+**Принцип cdb-first:** при падении/ассерте/неверном рантайм-значении — сначала **доказательство через MCP** (`debug_*`), не фикс по стектрейсу из лога.
+
+**Базовый flow для краша EpicMapEditor:**
+1. `debug_self_check` — проверить, что cdb найден, EpicMapEditor.exe и .pdb на месте.
+2. `debug_session_start(exe_target="EpicMapEditor")` — запустить inferior под cdb (или `debug_process_find(name_query="EpicMapEditor")` → `debug_session_start(process_id=<pid>)` для attach к уже бегущему).
+3. `debug_run_until_stop` — гонять до падения/брейкпоинта.
+4. `debug_stack_get` / `debug_scopes_get` / `debug_expression_eval` — стек, локали, выражения в точке сбоя. Реальная точка — **первый проектный фрейм** (под `repo_root()`), не верхний CRT/SEH-трамплин.
+5. `debug_session_stop` — закрыть сессию.
+
+**Разрешение exe-таргета:** `_intermediate_64/<config>/<target>.exe` (по умолчанию `EpicMapEditor`, конфиг `Debug`). Override: env `NEVERWHERE_DEBUG_EXE` / `NEVERWHERE_DEBUG_EXE_TARGET` / `NEVERWHERE_DEBUG_EXE_CONFIG`, или пин через `debug_set_active(cmake_target="...")` → `.zcode/debug_active.json`.
+
+**cdb search order:** env `CRASH_ANALYSIS_DEBUGGER_PATH` → Windows Kits (`C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe`). В `.mcp.json` путь уже прописан.
+
+**Post-mortem (.dmp):** `debug_crash_dump_analyze(dump_path)` — анализ готового дампа. Сейчас в neverwhere нет C++ хука для записи минидампов при SEH (это отдельный следующий шаг: `MiniDumpWriteDump` в `main.cpp` + `CRASH_DUMP_DIR`).
+
+Полный список инструментов и контракт — `debug_contract_get`. Код бэкенда — `tools/debug_mcp/debugger_mcp.py`.
+
 ## Где что искать
 
 - `README.md` — что это за проект, высокоуровневая архитектура.

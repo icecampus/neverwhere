@@ -10,5 +10,8 @@ Testing/Temporary/
 __pycache__
 logs/
 
+# zcode / debug MCP scratch state (debug sessions, active target, workdirs)
+.zcode/
+
 # Blender autosave backups (covered by LFS too, but shouldn't be committed)
 *.blend1
