@@ -30,11 +30,16 @@ namespace BaseData
         };
 
         Data data;
-        
+
         std::filesystem::path indexPath;
         std::vector<MapDescription> maps;
 
         std::filesystem::path thumbnail() const;
+
+        // Write Chapter::Data to a `index.json` file at chapterDataPath.
+        // Public so editors can create a new chapter on disk without going
+        // through the (currently empty) Chaptets::save.
+        static void saveChapterData(const std::filesystem::path& chapterDataPath, const Data& data);
     };
 
     //Chaptets

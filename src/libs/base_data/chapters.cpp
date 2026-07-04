@@ -9,52 +9,32 @@ const std::string INDEX_FILENAME = "index.json";
 
 namespace
 {
-    BaseData::Chapter::Data loadChapterData(const std::filesystem::path& chapterDataPath) 
+    BaseData::Chapter::Data loadChapterData(const std::filesystem::path& chapterDataPath)
     {
-        if (!std::filesystem::exists(chapterDataPath)) 
+        if (!std::filesystem::exists(chapterDataPath))
         {
             //spdlog::error("File not found: " + chapterDataPath.string());
         }
 
         std::ifstream file(chapterDataPath);
-        if (!file.is_open()) 
+        if (!file.is_open())
         {
             //spdlog::error("Failed to open file: " + chapterDataPath.string());
         }
 
-        try 
+        try
         {
             nlohmann::json j;
             file >> j;
 
             return j.get<BaseData::Chapter::Data>();
         }
-        catch (const nlohmann::json::exception& e) 
+        catch (const nlohmann::json::exception& e)
         {
             //spdlog::error("JSON parsing error: " + std::string(e.what()));
         }
 
         return {};
-    }
-
-    
-    void saveChapterData(const std::filesystem::path& chapterDataPath, const BaseData::Chapter::Data& data) 
-    {
-        std::ofstream file(chapterDataPath);
-        if (!file.is_open()) 
-        {
-            //spdlog::error("Failed to create file: " + chapterDataPath.string());
-        }
-
-        try 
-        {
-            nlohmann::json j = data;
-            file << std::setw(4) << j; 
-        }
-        catch (const nlohmann::json::exception& e) 
-        {
-            //spdlog::error("JSON serialization error: " + std::string(e.what()));
-        }
     }
 }
 
@@ -84,6 +64,26 @@ std::vector<MapDescription> loadMapsDescriptions(const std::filesystem::path& ma
 std::filesystem::path Chapter::thumbnail() const
 {
     return indexPath.parent_path() / data.thumbnail;
+}
+
+void Chapter::saveChapterData(const std::filesystem::path& chapterDataPath, const Data& data)
+{
+    std::ofstream file(chapterDataPath);
+    if (!file.is_open())
+    {
+        //spdlog::error("Failed to create file: " + chapterDataPath.string());
+        return;
+    }
+
+    try
+    {
+        nlohmann::json j = data;
+        file << std::setw(4) << j;
+    }
+    catch (const nlohmann::json::exception& e)
+    {
+        //spdlog::error("JSON serialization error: " + std::string(e.what()));
+    }
 }
 
 //Chaptets
