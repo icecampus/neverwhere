@@ -18,6 +18,7 @@ nw_add_qml_app(
         Qt6::Gui
         Qt6::Core5Compat
         Qt6::QuickControls2
+        Qt6::Network
     )
 
 # Sokol is header-only
@@ -26,6 +27,14 @@ if(NOT SOKOL_INCLUDE_DIRS)
     message(FATAL_ERROR "Sokol headers not found")
 endif()
 target_include_directories(${AppName} PRIVATE ${SOKOL_INCLUDE_DIRS})
+
+# Editor automation sources (RPC server + scene registry) — listed
+# explicitly because the project's collect_sources() GLOB sometimes fails
+# to wire new files into the link step on the first configure.
+# editor_scene_registry is header-only (inline) to sidestep the same issue.
+target_sources(${AppName} PRIVATE
+    src/editor_rpc_server.cpp
+)
 
 # OpenGL/Renderer libraries
 if(MSVC)

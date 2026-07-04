@@ -7,10 +7,12 @@ import "Workspace"
 {
     property var chapter: null
 
-    function load(data) 
+    function load(data)
     {
         chapter = core.chapters.getByUuid(data.chapterUuid)
         mapView.load(chapter.mapPath)
+        // Register the active scene so the RPC server can reach it.
+        sceneRegistry.setActiveScene(mapView.model, mapView.isoView, mapView.toolsSelector, chapter)
     }
 
     orientation: Qt.Horizontal

@@ -6,6 +6,8 @@
 #include "core/lib.h"
 #include "ui/lib.h"
 #include "src/runtime_map_view.h"
+#include "src/editor_scene_registry.h"
+#include "src/editor_rpc_server.h"
 #include <QQuickStyle>
 #include <QDateTime>
 #include <QFile>
@@ -148,6 +150,18 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
 
     CoreContext* coreContext = new CoreContext(engine);
     engine.rootContext()->setContextProperty("core", coreContext);
+
+    // Editor automation: registry bridges QML scene objects to C++,
+    // RPC server exposes them over TCP on 127.0.0.1:9876.
+    auto sceneRegistry = new EditorSceneRegistry(&engine);
+    engine.rootContext()->setContextProperty("sceneRegistry", sceneRegistry);
+
+    auto rpcServer = new EditorRpcServer(coreContext, sceneRegistry, &engine);
+    engine.rootContext()->setContextProperty("rpcServer", rpcServer);
+    if (!rpcServer->start())
+    {
+        qWarning() << "Editor RPC server failed to start on 127.0.0.1:9876";
+    }
 }
 
 

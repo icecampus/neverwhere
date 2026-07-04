@@ -13,5 +13,8 @@ logs/
 # zcode / debug MCP scratch state (debug sessions, active target, workdirs)
 .zcode/
 
+# Editor runtime logs (Qt message handler writes EpicMapEditor.log next to exe)
+*.log
+
 # Blender autosave backups (covered by LFS too, but shouldn't be committed)
 *.blend1

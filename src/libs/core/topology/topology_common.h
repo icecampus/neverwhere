@@ -78,6 +78,10 @@ struct LandNodes : public std::vector<uint8_t>
 {
     void init(size_t width_, size_t height_);
 
+    // True when (x, y) is inside the [_width, _height) rectangle. Negative
+    // coordinates are out of bounds — diamond fieldToMap can return them.
+    bool inBounds(const math::ivec2& position) const;
+
     uint8_t& operator[](const math::ivec2& position);
     uint8_t operator[](const math::ivec2& position) const;
     uint8_t at(const math::ivec2& position) const;

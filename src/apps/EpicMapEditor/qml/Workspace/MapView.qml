@@ -5,12 +5,14 @@ import Game 1.0
 import "GameObjects"
 import "MapView"
 
-Rectangle 
+Rectangle
 {
     property var assetsContext: null
     property var hoveredCell: math.ivec2(1, 1)
     property bool showCoordinates: true
     property alias model: mapModel
+    property alias isoView: isoView
+    property alias toolsSelector: toolsSelector
 
     function load(path)
     {

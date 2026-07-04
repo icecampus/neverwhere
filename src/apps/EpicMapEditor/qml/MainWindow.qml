@@ -27,10 +27,20 @@ Item
 		}
 	}
 
-    Component.onCompleted: 
+    Component.onCompleted:
     {
         core.load();
-        tabsContentCreator.createOrActivateTab("Home", TabType.Home, {}, {} ) 
+        tabsContentCreator.createOrActivateTab("Home", TabType.Home, {}, {} )
+    }
+
+    // RPC-driven chapter loading (from editor_rpc_server).
+    Connections
+    {
+        target: rpcServer
+        function onLoadChapterRequested(name, uuid)
+        {
+            tabsContentCreator.openChapterByUuid(name, uuid)
+        }
     }
 
     TabContentCreator
