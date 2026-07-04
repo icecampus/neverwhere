@@ -1,11 +1,11 @@
 ﻿import QtQuick
 import Game 1.0
 
-Item 
+Item
 {
     property Tile2D gameObject: null
-    
-    property var cellCenter: isoView.mapToField(gameObject.position)
+
+    property var cellCenter: isoView ? isoView.mapToField(gameObject.position) : Qt.point(0, 0)
 
     property ImageAsset imageAsset: core.assetsLibrary.getAsset(gameObject.assetUuid)
     //property size assetSize
@@ -15,8 +15,8 @@ Item
     {
         //console.log("screenDelta.x: " + screenDelta.x + ", screenDelta.y: " + screenDelta.y)
 
-        imageAsset.pivot.x -= (screenDelta.x.toFixed()/isoView.dimensions.cellSize.x)
-        imageAsset.pivot.y -= (screenDelta.y.toFixed()/isoView.dimensions.cellSize.y)
+        imageAsset.pivot.x -= (screenDelta.x.toFixed()/isoView.cellSizeX)
+        imageAsset.pivot.y -= (screenDelta.y.toFixed()/isoView.cellSizeY)
     }
 
     function updateAssetWidth(screenWidthDelta)
@@ -31,11 +31,11 @@ Item
     {
         var assetSize = imageAsset.getScreenSize(isoView)
 
-        //console.log("isoView.dimensions.cellSize.x: " + isoView.dimensions.cellSize.x)
+        //console.log("isoView.cellSizeX: " + isoView.cellSizeX)
         //console.log("imageAsset.pivot.x: " + imageAsset.pivot.x)
 
-        frame.x = (isoView.dimensions.cellSize.x * imageAsset.pivot.x) - assetSize.width/2
-        frame.y = (isoView.dimensions.cellSize.y * imageAsset.pivot.y) - assetSize.height/2
+        frame.x = (isoView.cellSizeX * imageAsset.pivot.x) - assetSize.width/2
+        frame.y = (isoView.cellSizeY * imageAsset.pivot.y) - assetSize.height/2
         frame.width =  assetSize.width
         frame.height = assetSize.height
 
@@ -58,11 +58,11 @@ Item
 
     Pivot
     {
-        x: -isoView.dimensions.cellSize.x/2
-        y: -isoView.dimensions.cellSize.y/2
-        
-        width: isoView.dimensions.cellSize.x
-        height: isoView.dimensions.cellSize.y
+        x: -isoView.cellSizeX/2
+        y: -isoView.cellSizeY/2
+
+        width: isoView.cellSizeX
+        height: isoView.cellSizeY
     }
 
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

@@ -40,7 +40,20 @@ public:
 class DiamondIsometry: public QObject
 {
     Q_OBJECT
+    // NOTE: the gadget `dimensions` is exposed as a Q_PROPERTY for parity with
+    // the C++ side, but QML must NOT read it through `isoView.dimensions.X`
+    // chains. Reading a gadget-property in QML goes through
+    // QQmlValueTypeWrapper::readReference, which under Qt 6.11 invokes
+    // qt_static_metacall with argv[0]==nullptr (Qt regression; also tracked
+    // in MuseScale #33015). Use the scalar mirror properties below
+    // (cellWidth / cellHeight / cellSizeX / cellSizeY) from QML instead —
+    // scalar reads do not involve value-type wrapping and are crash-free.
     Q_PROPERTY(diamond_dimensions dimensions READ getDimensions CONSTANT)
+    Q_PROPERTY(float cellWidth READ getCellWidth CONSTANT)
+    Q_PROPERTY(float cellHeight READ getCellHeight CONSTANT)
+    Q_PROPERTY(float cellSizeX READ getCellSizeX CONSTANT)
+    Q_PROPERTY(float cellSizeY READ getCellSizeY CONSTANT)
+    Q_PROPERTY(float aspectRatio READ getAspectRatio CONSTANT)
 public:
     using Neighbours = std::array<math::ivec2, 4>;
 
@@ -48,6 +61,12 @@ public:
     DiamondIsometry(QObject* parent = nullptr);
 
     diamond_dimensions getDimensions() const { return dimensions; }
+    // Scalar mirrors for safe QML access (see Q_PROPERTY note above).
+    float getCellWidth() const { return dimensions.cellWidth; }
+    float getCellHeight() const { return dimensions.cellWidth / dimensions.aspectRatio; }
+    float getCellSizeX() const { return dimensions.cellSize().x; }
+    float getCellSizeY() const { return dimensions.cellSize().y; }
+    float getAspectRatio() const { return dimensions.aspectRatio; }
 
     Q_INVOKABLE math::ivec2 fieldToMap(const math::vec2& fieldPosition) const;
     Q_INVOKABLE math::vec2  mapToField(const math::ivec2& cellPosition) const;
