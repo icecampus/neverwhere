@@ -84,7 +84,7 @@ MCP-сервер `neverwhere-debug` (`tools/debug_mcp/`, запуск через
 
 **Post-mortem (.dmp):** `debug_crash_dump_analyze(dump_path)` — анализ готового дампа. Сейчас в neverwhere нет C++ хука для записи минидампов при SEH (это отдельный следующий шаг: `MiniDumpWriteDump` в `main.cpp` + `CRASH_DUMP_DIR`).
 
-Полный список инструментов и контракт — `debug_contract_get`. Код бэкенда — `tools/debug_mcp/debugger_mcp.py`.
+Полный список инструментов и контракт — `debug_contract_get`. Детальная методичка (flow, gotchas, first-chance exceptions, moc-кэш, чек-лист) — `docs/debugging.md`. Код бэкенда — `tools/debug_mcp/debugger_mcp.py`.
 
 ## Где что искать
 
@@ -92,3 +92,4 @@ MCP-сервер `neverwhere-debug` (`tools/debug_mcp/`, запуск через
 - `docs/ROADMAP_VISION.md` — продуктовое видение и статусы фич.
 - `docs/TECHNICAL_STACK.md` — стек и решения (что есть / прототип / концепт).
 - `docs/reference/` — бумаги и порты по процедурному рельефу.
+- `docs/debugging.md` — отладка через cdb-MCP: flow, gotchas, first-chance exceptions, чек-лист.
