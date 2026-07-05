@@ -30,6 +30,20 @@
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchain/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
         "VCPKG_TARGET_TRIPLET": "wasm32-emscripten"
       }
+    },
+    {
+      "name": "ide-index",
+      "displayName": "Ninja (IDE indexing only, emits compile_commands.json)",
+      "binaryDir": "${sourceDir}/_intermediate_ide",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg_overlays/ports",
+        "VCPKG_INSTALL_OPTIONS": "--x-buildtrees-root=d:/_build",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     }
   ],
   "buildPresets": [

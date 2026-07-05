@@ -4,11 +4,17 @@ cmake-build-debug
 .idea
 CMakeLists.txt.user
 _intermediate_64
+_intermediate_ide
 _b-em
 _int_mac
 Testing/Temporary/
 __pycache__
 logs/
+
+# Generated for clangd/Serena indexing only (see generate_compile_commands.bat).
+# Symlink or copy of _intermediate_ide/compile_commands.json, rebuilt on demand.
+compile_commands.json
+.cache/
 
 # zcode / debug MCP scratch state (debug sessions, active target, workdirs)
 .zcode/

@@ -48,6 +48,18 @@
   - Например, Sokol подключён через overlay, чтобы держать `util/sokol_imgui.h` совместимым с актуальным Dear ImGui из vcpkg.
 - При добавлении зависимости: обновить `vcpkg.json` → `find_package(...)` → прилинковать импортированный target в `LIBS` у соответствующего `nw_add_...`.
 
+### Индексация для IDE/clangd (Serena MCP, clangd LSP)
+
+Основной флоу — Visual Studio generator, который **не** умеет эмиттить `compile_commands.json` (это ограничение CMake, не баг). Для Serena/clangd есть отдельный Ninja-preset, который только конфигурирует (не собирает).
+
+- **Preset:** `ide-index` в `CMakePresets.json` — Ninja generator, `CMAKE_EXPORT_COMPILE_COMMANDS=ON`, отдельный `binaryDir = _intermediate_ide`.
+- **Обёртка:** `generate_compile_commands.bat` — вызывает `vcvars64.bat` (Ninja не находит MSVC сам), конфигурит, копирует/симлинкает `compile_commands.json` в корень репо.
+- **Запуск:** `generate_compile_commands.bat` (или `--clean` для полного ребилда кэша).
+- **Когда перегенерировать:** после добавления/удаления исходников, изменения compile-флагов или `vcpkg.json`. После правок в существующих файлах — **не нужно** (clangd читает флаги из `compile_commands.json`, а не из самих исходников).
+- `_intermediate_ide/` и `compile_commands.json` в `.gitignore` — это локальные artefacts.
+
+Без `compile_commands.json` Serena работает на структурном parse (видит имена, но не типы), и `get_diagnostics_for_file` выдаёт ложный шум (`'QObject' file not found`, `Unknown type name 'Q_OBJECT'`). С ним — полноценная индексация: чистая диагностика, полные references, type-aware навигация.
+
 ## Undo/Redo
 
 - Предпочитать immutable-снэпшоты через `immer`; избегать Command Pattern, если явно не просят. (Сейчас immer — `[концепт]`, см. `docs/TECHNICAL_STACK.md`.)
