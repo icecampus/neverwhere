@@ -27,9 +27,11 @@ math::ivec2 DiamondIsometry::fieldToMap(const math::vec2& fieldPosition) const
     //   halfW = cellWidth/2, halfH = cellHeight/2
     //   world.x = (cx - cy) * halfW + halfW
     //   world.y = (cx + cy) * halfH + halfH
-    // Inverting for (cx, cy):
-    //   cx = (world.x / halfW + world.y / halfH) / 2 - 0.5
-    //   cy = (world.y / halfH - world.x / halfW) / 2 - 0.5
+    // Solving for (cx, cy) by adding/subtracting the two equations:
+    //   world.x/halfW = (cx - cy) + 1     ... (sx)
+    //   world.y/halfH = (cx + cy) + 1     ... (sy)
+    //   (sx + sy) = 2*cx + 2   →  cx = (sx + sy)/2 - 1
+    //   (sy - sx) = 2*cy      →  cy = (sy - sx)/2
     //
     // Rounding each coordinate independently to the nearest integer cell is
     // equivalent to snapping to the nearest diamond center (L1 Voronoi cell),
@@ -41,8 +43,8 @@ math::ivec2 DiamondIsometry::fieldToMap(const math::vec2& fieldPosition) const
     const float sx = fieldPosition.x / halfW;
     const float sy = fieldPosition.y / halfH;
 
-    const float cx = (sx + sy) * 0.5f - 0.5f;
-    const float cy = (sy - sx) * 0.5f - 0.5f;
+    const float cx = (sx + sy) * 0.5f - 1.0f;
+    const float cy = (sy - sx) * 0.5f;
 
     return math::ivec2(static_cast<int>(std::round(cx)), static_cast<int>(std::round(cy)));
 }
@@ -110,11 +112,36 @@ VisibleRegion DiamondIsometry::getVisibleCellBounds(const math::vec2& viewSize, 
 
 math::ivec2 DiamondIsometry::fieldToNode(const math::vec2& fieldPosition) const
 {
-    // A node is the vertex shared by 4 cells, offset by half a cell along the
-    // world Y axis from the cell center (same geometric meaning as in the
-    // staggered version: nodes sit at diamond corners).
-    math::vec2 delta(0, dimensions.cellSize().y / 2);
-    return fieldToMap(fieldPosition + delta);
+    // A node (nx, ny) is the shared vertex of 4 cells: (nx,ny), (nx-1,ny),
+    // (nx,ny-1), (nx-1,ny-1). Geometrically it sits at the Up-corner of cell
+    // (nx, ny) — i.e. where those 4 cells meet. That point is exactly
+    //   ((nx-ny)*halfW + halfW, (nx+ny)*halfH)
+    // — the same as mapToField(nx, ny) but WITHOUT the +halfH offset in Y
+    // (because mapToField places cell CENTERS, and the Up-corner is one halfH
+    // above the center).
+    //
+    // Solving for (nx, ny):
+    //   sx = world.x/halfW = (nx-ny) + 1
+    //   sy = world.y/halfH = (nx+ny)
+    //   (sx + sy) = 2*nx + 1   →  nx = (sx + sy)/2 - 0.5
+    //   (sy - sx) = 2*ny - 1   →  ny = (sy - sx)/2 + 0.5
+    //
+    // Note: these are NOT the same as the cell formulas (cx/ny differ by 0.5
+    // in both axes). The previous diamond port tried to emulate this by adding
+    // (0, +halfCellHeight) to the field point and calling fieldToMap, which
+    // only worked by accident on staggered's doubled-Y grid and produced
+    // unpredictable rounding on the cartesian grid.
+    const math::vec2 cellSz = dimensions.cellSize();
+    const float halfW = cellSz.x * 0.5f;
+    const float halfH = cellSz.y * 0.5f;
+
+    const float sx = fieldPosition.x / halfW;
+    const float sy = fieldPosition.y / halfH;
+
+    const float nx = (sx + sy) * 0.5f - 0.5f;
+    const float ny = (sy - sx) * 0.5f + 0.5f;
+
+    return math::ivec2(static_cast<int>(std::round(nx)), static_cast<int>(std::round(ny)));
 }
 
 DiamondIsometry::Neighbours DiamondIsometry::nodeNeighboursCell(const math::ivec2& nodePosition)
