@@ -120,17 +120,22 @@ Rectangle
     {
         id: customItem
         topology: isoView
-        size: Qt.size(200, 200)
-        
+        viewSize: Qt.size(centerPanel.width, centerPanel.height)
+
+        // QQuickItem must cover the whole viewport, otherwise the scene graph
+        // clips the geometry to the item's (default 0x0) bounding rect and
+        // nothing is visible — even with ItemHasContents set.
+        anchors.fill: centerPanel
+
         color: "grey"
 
         transform: [
-            Scale 
+            Scale
             {
                 xScale: isoView.cameraZoom
                 yScale: isoView.cameraZoom
             },
-            Translate 
+            Translate
             {
                 x: isoView.cameraX
                 y: isoView.cameraY
