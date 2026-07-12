@@ -26,16 +26,29 @@ DiamondTiledLandscape::NeighboursWithDiagonal DiamondTiledLandscape::cellNeighbo
     return result;
 }
 
-// Returns the 4 corner-nodes of the cell at `cellPosition`. On a cartesian
-// grid a cell (cx, cy) is bounded by nodes at (cx, cy), (cx+1, cy),
-// (cx, cy+1), (cx+1, cy+1). The order [Left, Up, Right, Down] matches the
-// mask-bit order consumed by TileSet, so existing tile art stays valid.
+// Returns the 4 corner-nodes of the cell at `cellPosition`, in SLOT order.
+// Node coordinates share the cartesian grid with cells; a node (nx, ny) is
+// geometrically located at the Up-corner of cell (nx, ny) — i.e. at world
+// point ((nx-ny)*halfW + halfW, (nx+ny)*halfH) (see fieldToNode).
+//
+// For cell (cx, cy) with centre ((cx-cy)*halfW + halfW, (cx+cy)*halfH + halfH)
+// the 4 diamond corners and their corresponding nodes are:
+//   Left  corner = (centre.x - halfW,   centre.y        ) → node (cx,     cy + 1)
+//   Up    corner = (centre.x,           centre.y - halfH) → node (cx,     cy    )
+//   Right corner = (centre.x + halfW,   centre.y        ) → node (cx + 1, cy    )
+//   Down  corner = (centre.x,           centre.y + halfH) → node (cx + 1, cy + 1)
+//
+// Slot order is [Left, Up, Right, Down] (counter-clockwise from the left
+// vertex). This is the order TileSet mask bits are written in (see the
+// contract in topology_common.h) and matches landscape_core::nodeMaskToTileType,
+// so the editor and the runtime/3D pipeline stay in sync. Do NOT reorder
+// these slots without rewriting TileSet::TileSet() to match.
 DiamondTiledLandscape::ModeNeighbours DiamondTiledLandscape::getNeighboursNodeForCell(const math::ivec2& cellPosition)
 {
-    static const ModeNeighbours nodes = { { math::ivec2(0, 0),  // Left
-                                            math::ivec2(0, 1),  // Up
-                                            math::ivec2(1, 1),  // Right
-                                            math::ivec2(1, 0)   // Down
+    static const ModeNeighbours nodes = { { math::ivec2(0, 1),  // slot 0: Left
+                                            math::ivec2(0, 0),  // slot 1: Up
+                                            math::ivec2(1, 0),  // slot 2: Right
+                                            math::ivec2(1, 1)   // slot 3: Down
                                           } };
 
     ModeNeighbours result;

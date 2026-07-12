@@ -1,19 +1,33 @@
 #include "topology_common.h"
 
 //TileSet
+// A 4-bit corner mask describes which of a diamond's 4 corners are "land".
+// The table maps each of the 16 masks to a TileType. This is purely a data
+// description — it does not know how the 4 corners are sampled, that is the
+// topology's job (see getNeighboursNodeForCell).
+//
+// Mask bit order is the SLOT order produced by getNeighboursNodeForCell.
+// For the diamond topology that order is [Left, Up, Right, Down]
+// (counter-clockwise starting from the left vertex of the diamond). Tile
+// names like "UpCorner" describe which geometric corner is the land bit,
+// so the UpCorner mask sets slot[1] (the Up slot) to 1.
+//
+// This mirrors landscape_core::nodeMaskToTileType so the editor and the
+// runtime/3D pipeline agree on tile semantics — see
+// SharedTileResolverMatchesTileSetMasks in src/tests/landscape.
 TileSet::TileSet()
 {
     //corners
     {
-        TileType tilename = RightCorner; //"testset_1";
-        NeighboursNodeMask mask = { 0, 0, 1, 0 };
+        TileType tilename = RightCorner;
+        NeighboursNodeMask mask = { 0, 0, 1, 0 };    // [Left, Up, Right, Down]
 
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 
     {
-        TileType tilename = LeftCorner; //"testset_2";
+        TileType tilename = LeftCorner;
         NeighboursNodeMask mask = { 1, 0, 0, 0 };
 
         tileset[mask] = tilename;
@@ -21,7 +35,7 @@ TileSet::TileSet()
     }
 
     {
-        TileType tilename = UpCorner; //"testset_3";
+        TileType tilename = UpCorner;
         NeighboursNodeMask mask = { 0, 1, 0, 0 };
 
         tileset[mask] = tilename;
@@ -29,7 +43,7 @@ TileSet::TileSet()
     }
 
     {
-        TileType tilename = DownCorner; //"testset_4";
+        TileType tilename = DownCorner;
         NeighboursNodeMask mask = { 0, 0, 0, 1 };
 
         tileset[mask] = tilename;
@@ -38,7 +52,7 @@ TileSet::TileSet()
 
     //double corners
     {
-        TileType tilename = LeftRightCorners; //"testset_1_2";
+        TileType tilename = LeftRightCorners;
         NeighboursNodeMask mask = { 1, 0, 1, 0 };
 
         tileset[mask] = tilename;
@@ -46,7 +60,7 @@ TileSet::TileSet()
     }
 
     {
-        TileType tilename = UpAndDownCorners; //"testset_3_4";
+        TileType tilename = UpAndDownCorners;
         NeighboursNodeMask mask = { 0, 1, 0, 1 };
 
         tileset[mask] = tilename;
@@ -56,7 +70,7 @@ TileSet::TileSet()
 
     //
     {
-        TileType tilename = DownLack; //"testset_5";
+        TileType tilename = DownLack;
         NeighboursNodeMask mask = { 1, 1, 1, 0 };
 
         tileset[mask] = tilename;
@@ -64,21 +78,21 @@ TileSet::TileSet()
     }
 
     {
-        TileType tilename = UpLack; //"testset_6";
+        TileType tilename = UpLack;
         NeighboursNodeMask mask = { 1, 0, 1, 1 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 
     {
-        TileType tilename = RightLack; //"testset_7";
+        TileType tilename = RightLack;
         NeighboursNodeMask mask = { 1, 1, 0, 1 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 
     {
-        TileType tilename = LeftLack; //"testset_8";
+        TileType tilename = LeftLack;
         NeighboursNodeMask mask = { 0, 1, 1, 1 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
@@ -86,28 +100,28 @@ TileSet::TileSet()
 
     //line
     {
-        TileType tilename = RightDownLine; //"testset_9";
+        TileType tilename = RightDownLine;
         NeighboursNodeMask mask = { 0, 0, 1, 1 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 
     {
-        TileType tilename = LeftDownLine; //"testset_10";
+        TileType tilename = LeftDownLine;
         NeighboursNodeMask mask = { 1, 0, 0, 1 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 
     {
-        TileType tilename = RightUpLine; //"testset_11";
+        TileType tilename = RightUpLine;
         NeighboursNodeMask mask = { 0, 1, 1, 0 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
     }
 
     {
-        TileType tilename = LeftUpLine; //"testset_12";
+        TileType tilename = LeftUpLine;
         NeighboursNodeMask mask = { 1, 1, 0, 0 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;
@@ -115,7 +129,7 @@ TileSet::TileSet()
 
     //full
     {
-        TileType tilename = Full; //"testset_1_land";
+        TileType tilename = Full;
         NeighboursNodeMask mask = { 1, 1, 1, 1 };
         tileset[mask] = tilename;
         tilename2mask[tilename] = mask;

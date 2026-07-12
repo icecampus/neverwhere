@@ -195,3 +195,62 @@ TEST(DiamondProjectionTest, NodeNeighboursCellIsDualOfGetNeighboursNodeForCell)
         }
     }
 }
+
+TEST(DiamondProjectionTest, GetNeighboursNodeForCellSlotsMatchGeometricCorners)
+{
+    // The contract: getNeighboursNodeForCell returns corner nodes in
+    // [Left, Up, Right, Down] slot order, where the slot index matches the
+    // mask bit consumed by TileSet (see topology_common.h) and by
+    // landscape_core::nodeMaskToTileType.
+    //
+    // Geometrically a node (nx, ny) sits at the Up-corner of cell (nx, ny),
+    // so for cell (cx, cy) the four diamond corners resolve to:
+    //   slot 0 Left  -> node (cx,     cy + 1)
+    //   slot 1 Up    -> node (cx,     cy    )
+    //   slot 2 Right -> node (cx + 1, cy    )
+    //   slot 3 Down  -> node (cx + 1, cy + 1)
+    //
+    // Verify by sampling each slot's node with fieldToNode at the matching
+    // geometric corner of the cell's diamond.
+    DiamondIsometry iso;
+    const math::vec2 cellSz = iso.dimensions.cellSize();
+    const float halfW = cellSz.x * 0.5f;
+    const float halfH = cellSz.y * 0.5f;
+
+    const math::ivec2 cells[] = {
+        {0, 0}, {3, -2}, {-4, 5}, {7, 7},
+    };
+
+    struct SlotCorner
+    {
+        const char* name;
+        math::vec2 worldOffset; // relative to the cell's centre
+    };
+    const SlotCorner slotCorners[4] = {
+        {"Left",  {-halfW,  0.0f}},  // slot 0
+        {"Up",    { 0.0f,  -halfH}}, // slot 1
+        {"Right", { halfW,  0.0f}},  // slot 2
+        {"Down",  { 0.0f,   halfH}}, // slot 3
+    };
+
+    for (const math::ivec2& cell : cells)
+    {
+        const DiamondTiledLandscape::ModeNeighbours nodes =
+            DiamondTiledLandscape::getNeighboursNodeForCell(cell);
+        const math::vec2 center = iso.mapToField(cell);
+
+        for (size_t slot = 0; slot < 4; ++slot)
+        {
+            const math::vec2 sample{
+                center.x + slotCorners[slot].worldOffset.x,
+                center.y + slotCorners[slot].worldOffset.y};
+            const math::ivec2 resolved = iso.fieldToNode(sample);
+            EXPECT_TRUE(ivecEq(resolved, nodes[slot]))
+                << "cell (" << cell.x << "," << cell.y << ") slot " << slot
+                << " (" << slotCorners[slot].name
+                << "): geometric corner resolves to node ("
+                << resolved.x << "," << resolved.y << ") but getNeighboursNodeForCell["
+                << slot << "] returned node (" << nodes[slot].x << "," << nodes[slot].y << ")";
+        }
+    }
+}

@@ -31,9 +31,17 @@ public:
 // A 4-bit corner mask describes which of a diamond's 4 corners are "land".
 // The table maps each of the 16 masks to a TileType. This is purely a data
 // description — it does not know how the 4 corners are sampled, that is the
-// topology's job (see getNeighboursNodeForCell). Mask bit order is fixed by
-// convention as [Left, Up, Right, Down] and must be respected by every
-// topology that feeds this table.
+// topology's job (see getNeighboursNodeForCell).
+//
+// Mask bit order is the SLOT order produced by getNeighboursNodeForCell.
+// For the diamond topology that order is [Left, Up, Right, Down]
+// (counter-clockwise starting from the left vertex of the diamond). Tile
+// names like "UpCorner" describe which geometric corner is the land bit,
+// so the UpCorner mask sets slot[1] (the Up slot) to 1.
+//
+// This mirrors landscape_core::nodeMaskToTileType so the editor and the
+// runtime/3D pipeline agree on tile semantics — see
+// SharedTileResolverMatchesTileSetMasks in src/tests/landscape.
 struct TileSet
 {
     enum TileType
