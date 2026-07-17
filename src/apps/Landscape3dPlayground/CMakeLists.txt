@@ -1,5 +1,6 @@
 find_package(glm CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(FastNoise2 CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
@@ -8,8 +9,9 @@ nw_add_console_app(
         spdlog::spdlog_header_only
         imgui::imgui
         glm::glm-header-only
-        topology_core
         landscape_core
+        landscape_mesh
+        render_core
 )
 
 # Sokol is header-only in this project (via vcpkg overlay).
@@ -19,15 +21,14 @@ if(NOT SOKOL_INCLUDE_DIRS)
 endif()
 target_include_directories(${AppName} PRIVATE ${SOKOL_INCLUDE_DIRS})
 
-# stb headers (image loading for grass top texture).
-find_path(STB_INCLUDE_DIRS "stb_image.h")
-if(NOT STB_INCLUDE_DIRS)
-    message(FATAL_ERROR "stb headers not found (stb_image.h). Make sure vcpkg dependency 'stb' is installed.")
-endif()
-target_include_directories(${AppName} PRIVATE ${STB_INCLUDE_DIRS})
-
 # Sokol backend link requirements (standalone app uses sokol_app + D3D11 on Windows).
 if(MSVC)
     target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
+    add_custom_command(TARGET ${AppName} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:FastNoise2::FastNoise>
+            $<TARGET_FILE_DIR:${AppName}>/$<TARGET_FILE_NAME:FastNoise2::FastNoise>
+        VERBATIM
+    )
 endif()
 

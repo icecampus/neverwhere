@@ -1,16 +1,9 @@
-#include <algorithm>
-#include <cstdint>
-#include <cmath>
-#include <filesystem>
-#include <vector>
+#include "pch.h"
 
-#include <imgui.h>
-#include <glm/gtc/matrix_inverse.hpp>
-#include <spdlog/spdlog.h>
-#include <topology_core/staggered_isometry.h>
-
-#include "Landscape3dRenderer.h"
-#include "TerrainScene.h"
+#include "LandscapeCellCatalog.h"
+#include "LandscapeModel.h"
+#include "LandscapePreview.h"
+#include "PlaygroundSmokeTest.h"
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -27,6 +20,9 @@
     #endif
 #endif
 
+#include <imgui.h>
+#include <spdlog/spdlog.h>
+
 #include <sokol_app.h>
 #include <sokol_gfx.h>
 #include <sokol_glue.h>
@@ -36,593 +32,403 @@
 
 namespace {
 
-struct AppState {
-    uint64_t lastTime = 0;
-    float dt = 1.0f / 60.0f;
-    int frameIndex = 0;
-    bool gfxOk = false;
-    bool imguiOk = false;
+using landscape3d::GridPoint;
+using landscape3d::LandscapeCellCatalog;
+using landscape3d::LandscapeCellCatalogSettings;
+using landscape3d::LandscapeModel;
+using landscape3d::LandscapePreview;
+using landscape3d::LandscapePreviewSettings;
 
-    bool panning = false;
-    bool brushEnabled = true;
-    bool brushPainting = false;
-    bool brushErasing = false;
-    bool brushHoverValid = false;
-    float dragStartX = 0.0f;
-    float dragStartY = 0.0f;
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    glm::vec3 startTarget{0.0f};
-    glm::vec3 panAnchorWorld{0.0f};
-    bool panHasAnchor = false;
-    glm::vec3 brushWorld{0.0f};
-    glm::vec2 brushField{0.0f};
-    glm::ivec2 hoveredCell{-1, -1};
-    glm::ivec2 hoveredNode{-1, -1};
-    std::vector<glm::ivec2> brushTouchedNodes;
+struct AppState {
+    std::uint64_t lastTime = 0;
+    float frameSeconds = 1.0f / 60.0f;
+    int frameIndex = 0;
+    bool graphicsReady = false;
+    bool imguiReady = false;
+    std::optional<GridPoint> hoveredNode;
+    bool lastPreviewRendered = false;
 };
 
 AppState g_state;
-TerrainSceneSettings g_sceneSettings;
-TerrainScene g_scene;
-Landscape3dRenderParams g_renderParams;
-Landscape3dCamera g_camera;
-Landscape3dRenderer g_renderer;
-bool g_needsMeshRebuild = true;
-bool g_grassTextureLoaded = false;
-bool g_rockTextureLoaded = false;
+LandscapeModel g_model;
+LandscapeCellCatalog g_catalog;
+LandscapeCellCatalogSettings g_catalogSettings;
+LandscapePreview g_preview;
+LandscapePreviewSettings g_previewSettings;
 
-constexpr float kFixedIsoYawDeg = Landscape3dCamera::fixedYawDeg;
-constexpr float kFixedIsoPitchDeg = Landscape3dCamera::fixedPitchDeg;
-constexpr float kFixedIsoDistance = Landscape3dCamera::fixedDistance;
-constexpr float kDefaultOrthoScale = Landscape3dCamera::defaultOrthoScale;
-constexpr float kMinOrthoScale = 0.5f;
-constexpr float kMaxOrthoScale = 120.0f;
+constexpr ImU32 kNodeLowColor = IM_COL32(196, 214, 226, 170);
+constexpr ImU32 kNodeHighColor = IM_COL32(255, 220, 102, 245);
+constexpr ImU32 kNodeLockedColor = IM_COL32(103, 114, 130, 120);
+constexpr ImU32 kNodeHoverColor = IM_COL32(255, 132, 82, 255);
 
-bool looksLikeDataRoot(const std::filesystem::path& dir) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    return fs::exists(dir / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png", ec);
-}
-
-std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    startDir = fs::weakly_canonical(startDir, ec);
-    if (startDir.empty()) startDir = fs::current_path(ec);
-    if (startDir.empty()) return {};
-
-    fs::path dir = startDir;
-    for (int i = 0; i < 16; i++) {
-        if (looksLikeDataRoot(dir)) return dir;
-        if (!dir.has_parent_path()) break;
-        const fs::path parent = dir.parent_path();
-        if (parent == dir) break;
-        dir = parent;
-    }
-    return {};
-}
-
-void applyFixedIsoCameraAngles() {
-    g_camera.yawDeg = kFixedIsoYawDeg;
-    g_camera.pitchDeg = kFixedIsoPitchDeg;
-    g_camera.distance = kFixedIsoDistance;
-    g_camera.perspective = false;
-}
-
-void resetIsoCameraView() {
-    applyFixedIsoCameraAngles();
-    g_camera.target = {0.0f, 0.0f, 0.0f};
-    g_camera.orthoScale = kDefaultOrthoScale;
-}
-
-topology_core::StaggeredIsometry makeBrushIsometry() {
-    topology_core::StaggeredIsometry iso;
-    iso.dims.cellWidth = std::max(0.1f, g_renderParams.cubeSize);
-    iso.dims.aspectRatio = Landscape3dCamera::editorGroundAspectRatio;
-    return iso;
-}
-
-bool pickGroundPlaneAt(float screenX, float screenY, glm::vec3& world) {
-    const int width = sapp_width();
-    const int height = sapp_height();
-    if (width <= 0 || height <= 0) return false;
-
-    const float aspect = (float)width / (float)height;
-    const glm::mat4 invMvp = glm::inverse(g_camera.projectionMatrix(aspect) * g_camera.viewMatrix());
-    const float ndcX = (screenX / (float)width) * 2.0f - 1.0f;
-    const float ndcY = 1.0f - (screenY / (float)height) * 2.0f;
-
-    glm::vec4 nearPoint = invMvp * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
-    glm::vec4 farPoint = invMvp * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
-    if (nearPoint.w == 0.0f || farPoint.w == 0.0f) return false;
-
-    nearPoint /= nearPoint.w;
-    farPoint /= farPoint.w;
-
-    const glm::vec3 rayStart = glm::vec3(nearPoint);
-    const glm::vec3 rayEnd = glm::vec3(farPoint);
-    const glm::vec3 ray = rayEnd - rayStart;
-    if (std::abs(ray.y) < 0.0001f) return false;
-
-    const float t = -rayStart.y / ray.y;
-    if (t < 0.0f) return false;
-
-    world = rayStart + ray * t;
-    return true;
-}
-
-bool pickGroundAt(float screenX, float screenY, glm::vec3& world, glm::vec2& field, glm::ivec2& cell, glm::ivec2& node) {
-    if (g_scene.gridSize() <= 0 || !pickGroundPlaneAt(screenX, screenY, world)) return false;
-
-    topology_core::StaggeredIsometry iso = makeBrushIsometry();
-    const glm::vec2 origin = iso.mapToField({g_scene.gridSize() / 2, g_scene.gridSize() / 2});
-    field = glm::vec2(world.x, world.z) + origin;
-    cell = iso.fieldToMap(field);
-    node = iso.fieldToMap(field + glm::vec2(0.0f, iso.dims.cellSize().y * 0.5f));
-
-    return node.x >= -1 && node.y >= 0 && node.x <= g_scene.gridSize() && node.y <= g_scene.gridSize() + 1;
-}
-
-void updateBrushHover(float screenX, float screenY) {
-    g_state.mouseX = screenX;
-    g_state.mouseY = screenY;
-    g_state.brushHoverValid = pickGroundAt(
-        screenX,
-        screenY,
-        g_state.brushWorld,
-        g_state.brushField,
-        g_state.hoveredCell,
-        g_state.hoveredNode);
-}
-
-bool brushTouchedNode(const glm::ivec2& node) {
-    return std::find(g_state.brushTouchedNodes.begin(), g_state.brushTouchedNodes.end(), node) !=
-        g_state.brushTouchedNodes.end();
-}
-
-void markBrushTouchedNode(const glm::ivec2& node) {
-    if (!brushTouchedNode(node)) {
-        g_state.brushTouchedNodes.push_back(node);
+void resetLandscape(int width, int height, bool sample) {
+    g_model.reset(width, height);
+    if (sample) {
+        g_model.loadSample();
     }
 }
 
-void applyBrushToHoveredNode(bool enabled) {
-    if (!g_state.brushEnabled || !g_state.brushHoverValid) return;
+void rebuildCatalog() {
+    g_catalog.rebuild(g_catalogSettings);
+    spdlog::info(
+        "Landscape3dPlayground: rebuilt 16 templates, highgroundHeight={}, wallSubdivisions={}x{}",
+        g_catalogSettings.highgroundHeight,
+        g_catalogSettings.wallHorizontalSubdivisions,
+        g_catalogSettings.wallVerticalSubdivisions);
+}
 
-    const glm::ivec2 node = g_state.hoveredNode;
-    if (!enabled) {
-        if (g_scene.setLandNodeLevel(node.x, node.y, 0)) {
-            g_needsMeshRebuild = true;
+void drawNodeOverlay(
+    ImDrawList* drawList,
+    const ImVec2& origin,
+    const ImVec2& viewportSize,
+    const std::optional<GridPoint>& hovered) {
+
+    const glm::vec2 size{viewportSize.x, viewportSize.y};
+    for (int y = 0; y <= g_model.height(); ++y) {
+        for (int x = 0; x <= g_model.width(); ++x) {
+            const GridPoint node{x, y};
+            const glm::vec2 local = g_preview.projectNode(g_model, g_previewSettings, size, node);
+            if (local.x < -12.0f || local.y < -12.0f || local.x > viewportSize.x + 12.0f ||
+                local.y > viewportSize.y + 12.0f) {
+                continue;
+            }
+
+            const bool editable = g_model.isNodeEditable(node);
+            const bool high = g_model.nodeIsHigh(node);
+            const bool isHovered = hovered.has_value() && *hovered == node;
+            const ImU32 color = isHovered ? kNodeHoverColor :
+                !editable ? kNodeLockedColor :
+                high ? kNodeHighColor : kNodeLowColor;
+            const float radius = isHovered ? 5.5f : high ? 4.0f : 2.6f;
+            const ImVec2 point{origin.x + local.x, origin.y + local.y};
+            drawList->AddCircleFilled(point, radius, color);
+            if (isHovered) {
+                drawList->AddCircle(point, radius + 2.0f, IM_COL32(255, 255, 255, 235), 0, 1.2f);
+            }
         }
-        return;
-    }
-
-    if (brushTouchedNode(node)) {
-        return;
-    }
-
-    const std::uint8_t currentLevel = g_scene.landNodeLevelAt(node.x, node.y);
-    const std::uint8_t nextLevel = std::min<std::uint8_t>((std::uint8_t)(currentLevel + 1), 2);
-    markBrushTouchedNode(node);
-    if (g_scene.setLandNodeLevel(node.x, node.y, nextLevel)) {
-        g_needsMeshRebuild = true;
     }
 }
 
-void regenerateScene() {
-    g_scene.generate(g_sceneSettings);
-    g_needsMeshRebuild = true;
+void drawPreviewCanvas(const ImVec2& origin, const ImVec2& viewportSize) {
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::InvisibleButton("##VertexLandscapePreview", viewportSize);
+    const bool hovered = ImGui::IsItemHovered();
+    const ImGuiIO& io = ImGui::GetIO();
+    const glm::vec2 localMouse{io.MousePos.x - origin.x, io.MousePos.y - origin.y};
+    const glm::vec2 size{viewportSize.x, viewportSize.y};
+
+    g_state.hoveredNode = hovered
+        ? g_preview.pickNode(g_model, g_previewSettings, size, localMouse)
+        : std::nullopt;
+
+    if (hovered && io.MouseWheel != 0.0f) {
+        const float previousZoom = g_previewSettings.zoom;
+        const float nextZoom = std::clamp(previousZoom * (1.0f + io.MouseWheel * 0.12f), 0.28f, 7.0f);
+        const float ratio = nextZoom / previousZoom;
+        const glm::vec2 anchor{viewportSize.x * 0.5f, std::min(170.0f, std::max(96.0f, viewportSize.y * 0.34f))};
+        g_previewSettings.pan += (localMouse - anchor - g_previewSettings.pan) * (1.0f - ratio);
+        g_previewSettings.zoom = nextZoom;
+    }
+
+    if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Right)) {
+        g_previewSettings.pan += glm::vec2{io.MouseDelta.x, io.MouseDelta.y};
+    }
+
+    if (hovered && ImGui::IsMouseDown(ImGuiMouseButton_Left) && g_state.hoveredNode.has_value()) {
+        const bool erase = io.KeyCtrl;
+        if (g_model.setNodeHigh(*g_state.hoveredNode, !erase)) {
+            spdlog::debug(
+                "Landscape3dPlayground: {} node ({}, {})",
+                erase ? "erased" : "painted",
+                g_state.hoveredNode->x,
+                g_state.hoveredNode->y);
+        }
+    }
+
+    g_state.lastPreviewRendered = g_preview.render(
+        g_model,
+        g_catalog,
+        g_previewSettings,
+        (int)std::max(1.0f, viewportSize.x),
+        (int)std::max(1.0f, viewportSize.y));
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(18, 21, 27, 255));
+    drawList->PushClipRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, true);
+    if (g_state.lastPreviewRendered && g_preview.validOutput()) {
+        const ImTextureID texture = (ImTextureID)simgui_imtextureid_with_sampler(
+            g_preview.outputView(),
+            g_preview.outputSampler());
+        drawList->AddImage(texture, origin, {origin.x + viewportSize.x, origin.y + viewportSize.y});
+    } else {
+        drawList->AddText(
+            {origin.x + 16.0f, origin.y + 16.0f},
+            IM_COL32(255, 138, 110, 255),
+            "Sokol preview renderer is unavailable");
+    }
+
+    drawNodeOverlay(drawList, origin, viewportSize, g_state.hoveredNode);
+    drawList->AddText(
+        {origin.x + 12.0f, origin.y + 12.0f},
+        IM_COL32(226, 232, 241, 255),
+        "Vertex-centric 3D highground — 16 logical cell templates");
+    drawList->AddText(
+        {origin.x + 12.0f, origin.y + 32.0f},
+        IM_COL32(164, 179, 196, 255),
+        "LMB drag: paint highground   Ctrl+LMB: erase   RMB drag: pan   Wheel: zoom");
+    drawList->AddText(
+        {origin.x + 12.0f, origin.y + 52.0f},
+        g_state.lastPreviewRendered ? IM_COL32(126, 220, 150, 255) : IM_COL32(235, 186, 90, 255),
+        g_state.lastPreviewRendered ? "Renderer: Sokol offscreen" : "Renderer: unavailable");
+    drawList->PopClipRect();
+    drawList->AddRect(origin, {origin.x + viewportSize.x, origin.y + viewportSize.y}, IM_COL32(76, 87, 104, 255));
 }
 
-void drawUi() {
-    ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(430.0f, 620.0f), ImGuiCond_Once);
-
-    ImGui::Begin("Landscape3dPlayground");
-    ImGui::Text("Frame: %d", g_state.frameIndex);
-    ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
+void drawControls(float width) {
+    ImGui::Text("Binary Vertex Landscape");
+    ImGui::TextWrapped(
+        "Nodes are the only authored data. Each cell resolves one of the shared 16 "
+        "Marching Squares types and instantiates a matching 3D cliff template.");
     ImGui::Separator();
 
-    int gridSize = g_sceneSettings.gridSize;
-    if (ImGui::SliderInt("Grid Size", &gridSize, 8, 96)) {
-        g_sceneSettings.gridSize = gridSize;
-        regenerateScene();
+    int gridWidth = g_model.width();
+    int gridHeight = g_model.height();
+    bool resetRequested = false;
+    resetRequested |= ImGui::SliderInt("Grid Width", &gridWidth, 8, 64);
+    resetRequested |= ImGui::SliderInt("Grid Height", &gridHeight, 8, 56);
+    if (resetRequested) {
+        resetLandscape(gridWidth, gridHeight, false);
     }
-
-    int minHeight = g_sceneSettings.minHeight;
-    if (ImGui::SliderInt("Min Cubes", &minHeight, 0, 12)) {
-        g_sceneSettings.minHeight = std::min(minHeight, g_sceneSettings.maxHeight - 1);
-        regenerateScene();
-    }
-
-    int maxHeight = g_sceneSettings.maxHeight;
-    if (ImGui::SliderInt("Max Cubes", &maxHeight, 2, 32)) {
-        g_sceneSettings.maxHeight = std::max(maxHeight, g_sceneSettings.minHeight + 1);
-        regenerateScene();
-    }
-
-    if (ImGui::InputInt("Seed", &g_sceneSettings.seed)) {
-        regenerateScene();
+    if (ImGui::Button("Load sample highground", {width * 0.48f, 0.0f})) {
+        g_model.loadSample();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Regenerate")) {
-        g_sceneSettings.seed += 1;
-        regenerateScene();
-    }
-
-    float nodeThreshold = g_sceneSettings.nodeThreshold;
-    if (ImGui::SliderFloat("Node Threshold", &nodeThreshold, 0.15f, 0.85f)) {
-        g_sceneSettings.nodeThreshold = nodeThreshold;
-        regenerateScene();
+    if (ImGui::Button("Clear", {width * 0.44f, 0.0f})) {
+        g_model.clear();
     }
 
     ImGui::Separator();
-    ImGui::Text("Terrain Geometry");
-    const char* terrainModes[] = {"Cubes Debug", "Valley Geometry", "Contour Geometry"};
-    int terrainMode = (int)g_renderParams.terrainMode;
-    if (ImGui::Combo("Terrain Mode", &terrainMode, terrainModes, 3)) {
-        g_renderParams.terrainMode = (Landscape3dTerrainMode)terrainMode;
-        g_needsMeshRebuild = true;
+    ImGui::Text("Cell template geometry");
+    bool catalogDirty = false;
+    catalogDirty |= ImGui::SliderFloat("Highground Height", &g_catalogSettings.highgroundHeight, 0.4f, 4.0f);
+    catalogDirty |= ImGui::SliderInt(
+        "Wall Horizontal Subdivisions",
+        &g_catalogSettings.wallHorizontalSubdivisions,
+        1,
+        12);
+    catalogDirty |= ImGui::SliderInt(
+        "Wall Vertical Subdivisions",
+        &g_catalogSettings.wallVerticalSubdivisions,
+        1,
+        12);
+    if (catalogDirty) {
+        rebuildCatalog();
     }
 
-    if (ImGui::SliderFloat("Cube Size", &g_renderParams.cubeSize, 0.35f, 2.5f)) {
-        g_needsMeshRebuild = true;
-    }
-
-    if (ImGui::SliderFloat("Height Step (cubes)", &g_renderParams.heightStepInCubes, 0.10f, 1.0f)) {
-        g_needsMeshRebuild = true;
-    }
-    ImGui::Text("Level 2 max = %.2f cube height", g_renderParams.heightStepInCubes * 2.0f);
-
-    int previewTileIndex = g_renderParams.previewTileIndex;
-    if (ImGui::SliderInt("Preview Tile Index", &previewTileIndex, -1, 23)) {
-        g_renderParams.previewTileIndex = previewTileIndex;
-        g_needsMeshRebuild = true;
-    }
-    if (g_renderParams.previewTileIndex >= 0) {
-        ImGui::Text("Preview Type: %s", tileTypeName(tileTypeFromAtlasIndex(g_renderParams.previewTileIndex)).data());
-    } else {
-        ImGui::Text("Preview Type: Generated nodes");
+    ImGui::Separator();
+    ImGui::Text("Production Preview lighting");
+    ImGui::SliderFloat("Ambient", &g_previewSettings.ambient, 0.35f, 1.35f);
+    ImGui::SliderFloat("Diffuse", &g_previewSettings.diffuseStrength, 0.0f, 0.85f);
+    ImGui::SliderFloat("Wall Brightness", &g_previewSettings.wallBrightness, 0.45f, 1.65f);
+    ImGui::SliderFloat("Texture Scale", &g_previewSettings.textureScale, 0.25f, 4.0f);
+    ImGui::SliderFloat("Wall AO", &g_previewSettings.wallAoStrength, 0.0f, 0.85f);
+    ImGui::SliderFloat("Wall Grain", &g_previewSettings.wallGrainStrength, 0.0f, 0.6f);
+    if (ImGui::Button("Reset View")) {
+        g_previewSettings.zoom = 1.0f;
+        g_previewSettings.pan = {0.0f, 0.0f};
     }
 
     ImGui::Separator();
     ImGui::Text("Brush");
-    ImGui::Checkbox("Brush Enabled", &g_state.brushEnabled);
-    if (ImGui::Button("Clear Nodes")) {
-        g_scene.clearLandNodes();
-        g_needsMeshRebuild = true;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Regenerate Nodes")) {
-        regenerateScene();
-    }
-    if (g_state.brushHoverValid) {
-        ImGui::Text("Hovered Cell: %d, %d", g_state.hoveredCell.x, g_state.hoveredCell.y);
-        ImGui::Text("Hovered Node: %d, %d [level %u]",
-            g_state.hoveredNode.x,
-            g_state.hoveredNode.y,
-            (unsigned)g_scene.landNodeLevelAt(g_state.hoveredNode.x, g_state.hoveredNode.y));
-        const auto affectedCells = TerrainScene::nodeNeighboursCells(g_state.hoveredNode);
-        ImGui::Text("Affects: (%d,%d) (%d,%d) (%d,%d) (%d,%d)",
-            affectedCells[0].x, affectedCells[0].y,
-            affectedCells[1].x, affectedCells[1].y,
-            affectedCells[2].x, affectedCells[2].y,
-            affectedCells[3].x, affectedCells[3].y);
+    if (g_state.hoveredNode.has_value()) {
+        const GridPoint node = *g_state.hoveredNode;
+        ImGui::Text(
+            "Node: %d, %d  [%s]%s",
+            node.x,
+            node.y,
+            g_model.nodeIsHigh(node) ? "high" : "low",
+            g_model.isNodeEditable(node) ? "" : " (locked border)");
+        const auto cells = g_model.affectedCells(node);
+        ImGui::Text(
+            "Affects: (%d,%d) (%d,%d) (%d,%d) (%d,%d)",
+            cells[0].x,
+            cells[0].y,
+            cells[1].x,
+            cells[1].y,
+            cells[2].x,
+            cells[2].y,
+            cells[3].x,
+            cells[3].y);
     } else {
-        ImGui::Text("Hovered Node: none");
-    }
-    ImGui::Text("Controls: RMB drag pan, wheel zoom, LMB paint/raise");
-    ImGui::Text("Erase: Ctrl+LMB or Ctrl+RMB");
-    if (g_renderParams.previewTileIndex >= 0) {
-        ImGui::Text("Preview mode ignores painted nodes");
+        ImGui::TextDisabled("Hover a visible node to paint it.");
     }
 
     ImGui::Separator();
-    ImGui::Text("Lighting");
-    ImGui::SliderFloat("Light Yaw", &g_renderParams.lightYawDeg, -180.0f, 180.0f);
-    ImGui::SliderFloat("Light Pitch", &g_renderParams.lightPitchDeg, 5.0f, 85.0f);
+    ImGui::Text("Diagnostics");
+    ImGui::Text("High nodes: %d", g_model.highNodeCount());
+    ImGui::Text("Render quads: %d", g_preview.renderedQuadCount());
+    ImGui::Text(
+        "Unknown / Full / Corner / Lack / Line / Opposite: %d / %d / %d / %d / %d / %d",
+        g_model.cellTypeCount(landscape_core::LandscapeTileType::Unknown),
+        g_model.cellTypeCount(landscape_core::LandscapeTileType::Full),
+        g_model.cellTypeCount(landscape_core::LandscapeTileType::RightCorner) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::LeftCorner) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::UpCorner) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::DownCorner),
+        g_model.cellTypeCount(landscape_core::LandscapeTileType::DownLack) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::UpLack) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::RightLack) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::LeftLack),
+        g_model.cellTypeCount(landscape_core::LandscapeTileType::RightDownLine) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::LeftDownLine) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::RightUpLine) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::LeftUpLine),
+        g_model.cellTypeCount(landscape_core::LandscapeTileType::UpAndDownCorners) +
+            g_model.cellTypeCount(landscape_core::LandscapeTileType::LeftRightCorners));
+    ImGui::Text("Grass texture: %s", g_preview.grassTextureLoaded() ? "loaded" : "fallback");
+    ImGui::Text("Rock texture: %s", g_preview.rockTextureLoaded() ? "loaded" : "fallback");
+    ImGui::Text("Frame: %d (%.2f ms)", g_state.frameIndex, g_state.frameSeconds * 1000.0f);
+}
 
-    ImGui::Separator();
-    ImGui::Text("Debug");
-    const char* debugModes[] = {"Lit", "Top Texture", "Earth Sides", "Height", "Normals"};
-    ImGui::Combo("Debug Mode", &g_renderParams.debugMode, debugModes, 5);
-    ImGui::Checkbox("Use Terrain Textures", &g_renderParams.useGrassTexture);
+void drawUi() {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    constexpr ImGuiWindowFlags windowFlags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    ImGui::Begin("Landscape3dPlayground", nullptr, windowFlags);
 
-    ImGui::Separator();
-    ImGui::Text("Visual Polish");
-    if (ImGui::Checkbox("Soft Edge Accents", &g_renderParams.showEdgeAccents)) {
-        g_needsMeshRebuild = true;
-    }
-    if (ImGui::Checkbox("Debug Wireframe", &g_renderParams.showWireframe)) {
-        g_needsMeshRebuild = true;
-    }
-    if (ImGui::Checkbox("Grass Variation", &g_renderParams.grassVariation)) {
-        g_needsMeshRebuild = true;
-    }
-    if (ImGui::Checkbox("Side Gradient", &g_renderParams.sideGradient)) {
-        g_needsMeshRebuild = true;
-    }
-    ImGui::SliderFloat("AO Strength", &g_renderParams.ambientOcclusionStrength, 0.0f, 1.0f);
-    if (ImGui::Button("Reset Visual Defaults")) {
-        g_renderParams.showEdgeAccents = true;
-        g_renderParams.showWireframe = false;
-        g_renderParams.grassVariation = true;
-        g_renderParams.sideGradient = true;
-        g_renderParams.ambientOcclusionStrength = 0.85f;
-        g_renderParams.lightYawDeg = -35.0f;
-        g_renderParams.lightPitchDeg = 48.0f;
-        g_needsMeshRebuild = true;
-    }
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const float panelWidth = std::clamp(available.x * 0.31f, 330.0f, 420.0f);
+    constexpr float gutter = 12.0f;
+    const ImVec2 previewOrigin{origin.x + panelWidth + gutter, origin.y};
+    const ImVec2 previewSize{
+        std::max(1.0f, available.x - panelWidth - gutter),
+        std::max(1.0f, available.y),
+    };
 
-    ImGui::Separator();
-    applyFixedIsoCameraAngles();
-    ImGui::Text("Iso Camera");
-    ImGui::Text("Yaw/Pitch: %.1f / %.1f fixed", g_camera.yawDeg, g_camera.pitchDeg);
-    bool targetChanged = false;
-    targetChanged |= ImGui::DragFloat("Target X", &g_camera.target.x, 0.1f);
-    targetChanged |= ImGui::DragFloat("Target Z", &g_camera.target.z, 0.1f);
-    if (targetChanged) {
-        g_camera.target.y = 0.0f;
-    }
-    ImGui::SliderFloat("Ortho Scale", &g_camera.orthoScale, kMinOrthoScale, kMaxOrthoScale);
-    if (ImGui::Button("Reset View")) {
-        resetIsoCameraView();
-    }
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::BeginChild("LandscapeControls", {panelWidth, available.y}, true);
+    drawControls(panelWidth - 18.0f);
+    ImGui::EndChild();
 
-    ImGui::Separator();
-    ImGui::Text("Triangles: %d", g_renderer.triangleCount());
-    ImGui::Text("Lines: %d", g_renderer.lineCount());
-    const Landscape3dTileStats& stats = g_renderer.tileStats();
-    ImGui::Text("Tiles U/F/C/Lk/Ln/O: %d / %d / %d / %d / %d / %d",
-        stats.unknown,
-        stats.full,
-        stats.corners,
-        stats.lacks,
-        stats.lines,
-        stats.opposites);
-    ImGui::Text("Contour High/Smooth/Cliff/Chains: %d / %d / %d / %d",
-        stats.contourHighCells,
-        stats.contourSmoothEdges,
-        stats.contourCliffEdges,
-        stats.contourCliffChains);
-    ImGui::Text("Grass texture: %s", g_grassTextureLoaded ? "loaded" : "fallback");
-    ImGui::Text("Rock texture: %s", g_rockTextureLoaded ? "loaded" : "fallback");
-    ImGui::Text("Controls: RMB drag pan, MMB pan, wheel zoom");
+    drawPreviewCanvas(previewOrigin, previewSize);
+    ImGui::SetCursorScreenPos({origin.x, origin.y + available.y});
     ImGui::End();
 }
 
 void init() {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("Landscape3dPlayground: init()");
-
+    spdlog::info("Landscape3dPlayground: init");
     stm_setup();
     g_state.lastTime = stm_now();
 
-    sg_desc desc = {};
-    desc.environment = sglue_environment();
-    desc.logger.func = slog_func;
-    sg_setup(&desc);
-    g_state.gfxOk = sg_isvalid();
-    spdlog::info("Landscape3dPlayground: sg_setup() {}", g_state.gfxOk ? "OK" : "FAILED");
+    sg_desc graphicsDescription{};
+    graphicsDescription.environment = sglue_environment();
+    graphicsDescription.logger.func = slog_func;
+    sg_setup(&graphicsDescription);
+    g_state.graphicsReady = sg_isvalid();
+    if (!g_state.graphicsReady) {
+        spdlog::error("Landscape3dPlayground: sg_setup failed");
+        return;
+    }
 
-    if (!g_state.gfxOk) return;
+    simgui_desc_t imguiDescription{};
+    imguiDescription.max_vertices = 2u * 1024u * 1024u;
+    imguiDescription.logger.func = slog_func;
+    simgui_setup(&imguiDescription);
+    g_state.imguiReady = true;
 
-    simgui_desc_t imguiDesc = {};
-    simgui_setup(&imguiDesc);
-    g_state.imguiOk = true;
-
-    g_renderer.init();
-    resetIsoCameraView();
-    const std::filesystem::path dataRoot = findDataRootUpwards(std::filesystem::current_path());
-    const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
-    const std::filesystem::path rockPath = dataRoot / "resources" / "textures" / "rock.jpg";
-    g_grassTextureLoaded = g_renderer.loadGrassTexture(grassPath);
-    g_rockTextureLoaded = g_renderer.loadRockTexture(rockPath);
-    regenerateScene();
+    resetLandscape(32, 24, true);
+    rebuildCatalog();
+    g_preview.init();
+    runTestScenario(g_catalog);
 }
 
 void frame() {
-    const uint64_t now = stm_now();
-    g_state.dt = (float)stm_sec(stm_diff(now, g_state.lastTime));
+    const std::uint64_t now = stm_now();
+    g_state.frameSeconds = (float)stm_sec(stm_diff(now, g_state.lastTime));
     g_state.lastTime = now;
     g_state.frameIndex++;
-
-    if (!g_state.gfxOk) return;
-
-    const int w = sapp_width();
-    const int h = sapp_height();
-
-    if (g_needsMeshRebuild) {
-        g_renderer.rebuildMesh(g_scene, g_renderParams);
-        g_needsMeshRebuild = false;
+    if (!g_state.graphicsReady) {
+        return;
     }
 
-    if (g_state.imguiOk) {
-        simgui_frame_desc_t fd = {};
-        fd.width = w;
-        fd.height = h;
-        fd.delta_time = g_state.dt;
-        fd.dpi_scale = sapp_dpi_scale();
-        simgui_new_frame(&fd);
+    const int width = sapp_width();
+    const int height = sapp_height();
+    if (g_state.imguiReady) {
+        simgui_frame_desc_t frameDescription{};
+        frameDescription.width = width;
+        frameDescription.height = height;
+        frameDescription.delta_time = g_state.frameSeconds;
+        frameDescription.dpi_scale = sapp_dpi_scale();
+        simgui_new_frame(&frameDescription);
         drawUi();
     }
 
-    sg_pass_action action = {};
+    sg_pass_action action{};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
     action.colors[0].clear_value = {0.07f, 0.08f, 0.10f, 1.0f};
-    action.depth.load_action = SG_LOADACTION_CLEAR;
-    action.depth.clear_value = 1.0f;
-    action.stencil.load_action = SG_LOADACTION_CLEAR;
-
-    sg_pass pass = {};
+    sg_pass pass{};
     pass.action = action;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
-
-    g_renderer.render(g_camera, g_renderParams, w, h);
-
-    if (g_state.imguiOk) {
+    if (g_state.imguiReady) {
         simgui_render();
     }
-
     sg_end_pass();
     sg_commit();
 }
 
 void cleanup() {
-    spdlog::info("Landscape3dPlayground: cleanup()");
-    g_renderer.shutdown();
-    if (g_state.imguiOk) {
+    spdlog::info("Landscape3dPlayground: cleanup");
+    g_preview.shutdown();
+    if (g_state.imguiReady) {
         simgui_shutdown();
-        g_state.imguiOk = false;
+        g_state.imguiReady = false;
     }
     if (sg_isvalid()) {
         sg_shutdown();
     }
 }
 
-void event(const sapp_event* ev) {
-    if (g_state.imguiOk) {
-        simgui_handle_event(ev);
-    }
-
-    if (g_state.imguiOk) {
-        const ImGuiIO& io = ImGui::GetIO();
-        if (io.WantCaptureMouse) {
-            if (ev->type == SAPP_EVENTTYPE_MOUSE_UP) {
-                g_state.brushPainting = false;
-                g_state.brushErasing = false;
-                g_state.panning = false;
-                g_state.panHasAnchor = false;
-                g_state.brushTouchedNodes.clear();
-            }
-            return;
-        }
-    }
-
-    switch (ev->type) {
-    case SAPP_EVENTTYPE_MOUSE_DOWN: {
-        updateBrushHover(ev->mouse_x, ev->mouse_y);
-        const bool ctrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
-        const bool editableTerrain =
-            g_renderParams.terrainMode == Landscape3dTerrainMode::ValleyGeometry ||
-            g_renderParams.terrainMode == Landscape3dTerrainMode::ContourGeometry;
-        const bool wantsBrush = g_state.brushEnabled &&
-            editableTerrain &&
-            (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT ||
-             (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT && ctrl));
-
-        if (wantsBrush) {
-            g_state.brushPainting = true;
-            g_state.brushErasing = ctrl || ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT;
-            g_state.brushTouchedNodes.clear();
-            applyBrushToHoveredNode(!g_state.brushErasing);
-            break;
-        }
-
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT || ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
-            g_state.panning = true;
-            g_state.dragStartX = ev->mouse_x;
-            g_state.dragStartY = ev->mouse_y;
-            g_state.startTarget = g_camera.target;
-            g_state.panHasAnchor = pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, g_state.panAnchorWorld);
-        }
-        break;
-    }
-    case SAPP_EVENTTYPE_MOUSE_UP:
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT || ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
-            g_state.brushPainting = false;
-            g_state.brushErasing = false;
-            g_state.brushTouchedNodes.clear();
-        }
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
-            g_state.panning = false;
-            g_state.panHasAnchor = false;
-        }
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
-            g_state.panning = false;
-            g_state.panHasAnchor = false;
-        }
-        break;
-    case SAPP_EVENTTYPE_MOUSE_MOVE: {
-        updateBrushHover(ev->mouse_x, ev->mouse_y);
-        if (g_state.brushPainting) {
-            applyBrushToHoveredNode(!g_state.brushErasing);
-            break;
-        }
-
-        const float dx = ev->mouse_x - g_state.dragStartX;
-        const float dy = ev->mouse_y - g_state.dragStartY;
-        if (g_state.panning) {
-            glm::vec3 currentWorld{0.0f};
-            g_camera.target = g_state.startTarget;
-            if (g_state.panHasAnchor && pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, currentWorld)) {
-                g_camera.target = g_state.startTarget + (g_state.panAnchorWorld - currentWorld);
-                g_camera.target.y = 0.0f;
-            } else {
-                const float scale = g_camera.orthoScale / std::max(1.0f, (float)sapp_height());
-                glm::vec3 groundRight = g_camera.right();
-                glm::vec3 groundUp = g_camera.up();
-                groundRight.y = 0.0f;
-                groundUp.y = 0.0f;
-                if (glm::length(groundRight) > 0.0001f) {
-                    groundRight = glm::normalize(groundRight);
-                }
-                if (glm::length(groundUp) > 0.0001f) {
-                    groundUp = glm::normalize(groundUp);
-                }
-                g_camera.target = g_state.startTarget + (-groundRight * dx + groundUp * dy) * scale * 2.0f;
-            }
-            updateBrushHover(ev->mouse_x, ev->mouse_y);
-        }
-        break;
-    }
-    case SAPP_EVENTTYPE_MOUSE_SCROLL: {
-        if (ev->scroll_y == 0.0f) break;
-        glm::vec3 beforeWorld{0.0f};
-        const bool hasBefore = pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, beforeWorld);
-
-        const float zoom = (ev->scroll_y > 0.0f) ? 0.90f : 1.10f;
-        g_camera.orthoScale = std::clamp(g_camera.orthoScale * zoom, kMinOrthoScale, kMaxOrthoScale);
-        applyFixedIsoCameraAngles();
-
-        glm::vec3 afterWorld{0.0f};
-        if (hasBefore && pickGroundPlaneAt(ev->mouse_x, ev->mouse_y, afterWorld)) {
-            g_camera.target += beforeWorld - afterWorld;
-            g_camera.target.y = 0.0f;
-        }
-        updateBrushHover(ev->mouse_x, ev->mouse_y);
-        break;
-    }
-    default:
-        break;
+void event(const sapp_event* event) {
+    if (g_state.imguiReady) {
+        simgui_handle_event(event);
     }
 }
 
 } // namespace
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    for (int index = 1; index < argc; ++index) {
+        if (std::string_view(argv[index]) == "--smoke") {
+            spdlog::set_level(spdlog::level::info);
+            rebuildCatalog();
+            return runTestScenario(g_catalog) ? 0 : 1;
+        }
+    }
 
-    sapp_desc desc = {};
-    desc.init_cb = init;
-    desc.frame_cb = frame;
-    desc.cleanup_cb = cleanup;
-    desc.event_cb = event;
-    desc.width = 1280;
-    desc.height = 720;
-    desc.sample_count = 1;
-    desc.window_title = "Landscape3dPlayground";
-    desc.high_dpi = true;
+    sapp_desc description{};
+    description.init_cb = init;
+    description.frame_cb = frame;
+    description.cleanup_cb = cleanup;
+    description.event_cb = event;
+    description.width = 1280;
+    description.height = 720;
+    description.sample_count = 1;
+    description.high_dpi = true;
+    description.window_title = "Landscape3dPlayground — Vertex 3D Painter";
 #if defined(_WIN32)
-    desc.win32.console_utf8 = true;
-    desc.win32.console_attach = true;
+    description.win32.console_utf8 = true;
+    description.win32.console_attach = true;
 #endif
-    desc.logger.func = slog_func;
-
-    sapp_run(&desc);
+    description.logger.func = slog_func;
+    sapp_run(&description);
     return 0;
 }
-
