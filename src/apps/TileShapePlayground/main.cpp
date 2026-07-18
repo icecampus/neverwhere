@@ -133,6 +133,7 @@ void applyBrushAtMouse() {
 }
 
 bool g_demoPattern = false;
+bool g_demoNode = false;
 
 // Painted programmatically in --demo mode: one raised blob, one lone raised
 // node, plus grass/yellow flat strokes — used for visual verification.
@@ -143,8 +144,10 @@ void paintDemoPattern() {
         }
     }
     g_layers[2].brush.setNode({16, 10}, true);
-    for (int x = 7; x <= 10; ++x) {
-        g_layers[0].brush.setNode({x, 16}, true);
+    for (int y = 15; y <= 18; ++y) {
+        for (int x = 6; x <= 9; ++x) {
+            g_layers[0].brush.setNode({x, y}, true);
+        }
     }
     for (int x = 13; x <= 16; ++x) {
         g_layers[1].brush.setNode({x, 16}, true);
@@ -189,6 +192,9 @@ void init() {
     if (g_demoPattern) {
         paintDemoPattern();
     }
+    if (g_demoNode) {
+        g_layers[0].brush.setNode({10, 10}, true);
+    }
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
     if (g_dataRoot.empty()) {
@@ -214,6 +220,12 @@ void init() {
     }
 
     centerCamera(sapp_width(), sapp_height());
+    if (g_demoNode) {
+        const glm::vec2 nodePos = g_iso.nodeToField({10, 10});
+        g_camera.zoom = 2.0f;
+        g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - nodePos.x * g_camera.zoom;
+        g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - nodePos.y * g_camera.zoom;
+    }
 }
 
 void drawImGui(int w, int h) {
@@ -426,6 +438,9 @@ int main(int argc, char* argv[]) {
         }
         if (std::string(argv[i]) == "--demo") {
             g_demoPattern = true;
+        }
+        if (std::string(argv[i]) == "--demo-node") {
+            g_demoNode = true;
         }
     }
 
