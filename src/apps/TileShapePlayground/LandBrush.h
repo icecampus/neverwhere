@@ -1,0 +1,46 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+#include <glm/glm.hpp>
+#include <landscape_core/landscape_logic.h>
+
+// Vertex-centric binary land brush — same contract as LandscapePencil / LandscapeModel.
+class LandBrush {
+public:
+    void reset(int width, int height);
+    void clear();
+
+    int width() const { return m_width; }
+    int height() const { return m_height; }
+
+    bool isNodeEditable(glm::ivec2 node) const;
+    bool nodeIsOn(glm::ivec2 node) const;
+    bool setNode(glm::ivec2 node, bool on);
+
+    landscape_core::LandscapeTileType cellTypeAt(glm::ivec2 cell) const;
+    std::array<bool, 4> nodeMaskAt(glm::ivec2 cell) const;
+    std::array<glm::ivec2, 4> affectedCells(glm::ivec2 node) const;
+
+    // Atlas tile index matching SliceAsset::subTileIndexByType (Grass 4x6 atlas).
+    static int atlasIndexByType(landscape_core::LandscapeTileType type);
+
+    int onNodeCount() const;
+    int cellTypeCount(landscape_core::LandscapeTileType type) const;
+
+private:
+    bool nodeInBounds(glm::ivec2 node) const;
+    bool cellInBounds(glm::ivec2 cell) const;
+    int nodeIndex(glm::ivec2 node) const;
+    int cellIndex(glm::ivec2 cell) const;
+    void refreshCell(glm::ivec2 cell);
+    void refreshAllCells();
+
+    int m_width = 0;
+    int m_height = 0;
+    std::vector<std::uint8_t> m_nodes;
+    std::vector<landscape_core::LandscapeTileType> m_cellTypes;
+};
