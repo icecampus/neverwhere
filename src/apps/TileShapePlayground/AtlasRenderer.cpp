@@ -301,10 +301,6 @@ bool AtlasRenderer::loadAtlasFromRgba(
     return ok;
 }
 
-void AtlasRenderer::setLayerAtlas(int layer, AtlasKind kind) {
-    m_layerAtlas[layer == 1 ? 1 : 0] = kind;
-}
-
 glm::vec4 AtlasRenderer::atlasUvRect(int tileIndex) const {
     if (tileIndex < 0) {
         return {};
@@ -421,8 +417,8 @@ void AtlasRenderer::appendWallTriangles(
 }
 
 void AtlasRenderer::render(
-    const LandBrush& brush,
-    const LandBrush& raisedBrush,
+    const PaintLayerView* layers,
+    int layerCount,
     const DiamondIso& iso,
     const topology_core::Camera2D& camera,
     int viewW,
@@ -432,14 +428,17 @@ void AtlasRenderer::render(
     float raisedHeight,
     bool hoverRaised) {
 
-    if (!m_ready || m_texPip.id == SG_INVALID_ID) {
+    if (!m_ready || m_texPip.id == SG_INVALID_ID || !layers || layerCount <= 0 || !layers[0].brush) {
         return;
     }
 
+    const int mapW = layers[0].brush->width();
+    const int mapH = layers[0].brush->height();
+
     std::vector<std::pair<std::uint64_t, glm::ivec2>> drawOrder;
-    drawOrder.reserve(static_cast<std::size_t>(brush.width() * brush.height()));
-    for (int y = 0; y < brush.height(); ++y) {
-        for (int x = 0; x < brush.width(); ++x) {
+    drawOrder.reserve(static_cast<std::size_t>(mapW * mapH));
+    for (int y = 0; y < mapH; ++y) {
+        for (int x = 0; x < mapW; ++x) {
             drawOrder.emplace_back(iso.zOffset({x, y}), glm::ivec2{x, y});
         }
     }
@@ -447,46 +446,87 @@ void AtlasRenderer::render(
         return a.first < b.first;
     });
 
-    // Flat ground tiles (z = 0) and raised top faces (z = raisedHeight).
-    // Raised tops reuse the same atlas quads with a -height offset, so the
-    // surface contour is pixel-identical to the flat tiles.
-    std::vector<TexVertex> flatVerts;
-    flatVerts.reserve(static_cast<std::size_t>(brush.width() * brush.height() * 6));
-    std::vector<TexVertex> topVerts;
-    topVerts.reserve(flatVerts.capacity());
+    // Every palette layer paints into the shared buffers; textured ranges are
+    // drawn with the layer's own atlas. Raised tops reuse the same atlas quads
+    // with a -height offset, so their contour matches the flat tiles exactly.
+    struct TexRange {
+        int base = 0;
+        int count = 0;
+        AtlasKind atlas = AtlasKind::Grass;
+    };
+    std::vector<TexRange> flatRanges;
+    std::vector<TexRange> topRanges;
+    std::vector<TexVertex> texVerts;
+    texVerts.reserve(static_cast<std::size_t>(mapW * mapH * 6 * layerCount));
 
-    for (const auto& [z, cell] : drawOrder) {
-        (void)z;
-        const int flatIdx = LandBrush::atlasIndexByType(brush.cellTypeAt(cell));
-        if (flatIdx >= 0 && landscape_core::tileTypeHasSurface(brush.cellTypeAt(cell))) {
-            appendTileQuad(flatVerts, iso, cell, flatIdx);
+    std::vector<ColorVertex> wallVerts;
+    wallVerts.reserve(static_cast<std::size_t>(mapW * mapH * 12));
+
+    for (int li = 0; li < layerCount; ++li) {
+        const PaintLayerView& layer = layers[li];
+        if (!layer.brush || layer.raised) {
+            continue;
         }
-        const auto raisedType = raisedBrush.cellTypeAt(cell);
-        if (landscape_core::tileTypeHasSurface(raisedType)) {
-            const int topIdx = LandBrush::atlasIndexByType(raisedType);
-            if (topIdx >= 0) {
-                appendTileQuad(topVerts, iso, cell, topIdx, -raisedHeight);
+        TexRange range;
+        range.base = static_cast<int>(texVerts.size());
+        range.atlas = layer.atlas;
+        for (const auto& [z, cell] : drawOrder) {
+            (void)z;
+            const auto type = layer.brush->cellTypeAt(cell);
+            if (!landscape_core::tileTypeHasSurface(type)) {
+                continue;
             }
+            const int idx = LandBrush::atlasIndexByType(type);
+            if (idx >= 0) {
+                appendTileQuad(texVerts, iso, cell, idx);
+            }
+        }
+        range.count = static_cast<int>(texVerts.size()) - range.base;
+        if (range.count > 0) {
+            flatRanges.push_back(range);
         }
     }
 
-    std::vector<ColorVertex> wallVerts;
-    wallVerts.reserve(static_cast<std::size_t>(brush.width() * brush.height() * 12));
-    for (const auto& [z, cell] : drawOrder) {
-        (void)z;
-        const auto raisedType = raisedBrush.cellTypeAt(cell);
-        if (!landscape_core::tileTypeHasSurface(raisedType)) {
+    for (int li = 0; li < layerCount; ++li) {
+        const PaintLayerView& layer = layers[li];
+        if (!layer.brush || !layer.raised) {
             continue;
         }
-        appendWallTriangles(wallVerts, iso, cell, raisedBrush.nodeMaskAt(cell), raisedHeight);
+        for (const auto& [z, cell] : drawOrder) {
+            (void)z;
+            const auto type = layer.brush->cellTypeAt(cell);
+            if (!landscape_core::tileTypeHasSurface(type)) {
+                continue;
+            }
+            appendWallTriangles(wallVerts, iso, cell, layer.brush->nodeMaskAt(cell), raisedHeight);
+        }
+
+        TexRange range;
+        range.base = static_cast<int>(texVerts.size());
+        range.atlas = layer.atlas;
+        for (const auto& [z, cell] : drawOrder) {
+            (void)z;
+            const auto type = layer.brush->cellTypeAt(cell);
+            if (!landscape_core::tileTypeHasSurface(type)) {
+                continue;
+            }
+            const int idx = LandBrush::atlasIndexByType(type);
+            if (idx >= 0) {
+                appendTileQuad(texVerts, iso, cell, idx, -raisedHeight);
+            }
+        }
+        range.count = static_cast<int>(texVerts.size()) - range.base;
+        if (range.count > 0) {
+            topRanges.push_back(range);
+        }
     }
 
     std::vector<ColorVertex> lineVerts;
-    lineVerts.reserve(static_cast<std::size_t>(brush.width() * brush.height() * 8 + 16));
+    lineVerts.reserve(static_cast<std::size_t>(mapW * mapH * 8 + 16));
 
     const glm::vec4 gridColor{0.45f, 0.48f, 0.52f, 0.55f};
-    for (int y = 0; y < brush.height(); ++y) {
-        for (int x = 0; x < brush.width(); ++x) {
+    for (int y = 0; y < mapH; ++y) {
+        for (int x = 0; x < mapW; ++x) {
             appendDiamondOutline(lineVerts, iso, {x, y}, gridColor);
         }
     }
@@ -507,31 +547,29 @@ void AtlasRenderer::render(
     vsParams.camera_offset[1] = camera.offset.y;
     vsParams.camera_zoom = camera.zoom;
 
-    const AtlasSlot& flatSlot = m_slots[static_cast<int>(m_layerAtlas[0])];
-    const AtlasSlot& topSlot = m_slots[static_cast<int>(m_layerAtlas[1])];
-    const bool hasFlat = !flatVerts.empty() && flatSlot.view.id != SG_INVALID_ID;
-    const bool hasTop = !topVerts.empty() && topSlot.view.id != SG_INVALID_ID;
-
-    // Painter order: flat ground, then cliff walls, then raised tops.
-    // Textured flat/top ranges share one buffer; walls/lines share another.
-    if (hasFlat || hasTop) {
-        std::vector<TexVertex> texVerts;
-        texVerts.reserve(flatVerts.size() + topVerts.size());
-        texVerts.insert(texVerts.end(), flatVerts.begin(), flatVerts.end());
-        texVerts.insert(texVerts.end(), topVerts.begin(), topVerts.end());
+    if (!texVerts.empty()) {
         sg_update_buffer(m_texVbuf, sg_range{texVerts.data(), texVerts.size() * sizeof(TexVertex)});
+    }
 
-        if (hasFlat) {
-            sg_bindings bind{};
-            bind.vertex_buffers[0] = m_texVbuf;
-            bind.views[0] = flatSlot.view;
-            bind.samplers[0] = m_sampler;
-
-            sg_apply_pipeline(m_texPip);
-            sg_apply_bindings(&bind);
-            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-            sg_draw(0, static_cast<int>(flatVerts.size()), 1);
+    // Painter order: flat ground layers, then cliff walls, then raised tops.
+    const auto drawTexRange = [&](const TexRange& range) {
+        const AtlasSlot& slot = m_slots[static_cast<int>(range.atlas)];
+        if (slot.view.id == SG_INVALID_ID) {
+            return;
         }
+        sg_bindings bind{};
+        bind.vertex_buffers[0] = m_texVbuf;
+        bind.views[0] = slot.view;
+        bind.samplers[0] = m_sampler;
+
+        sg_apply_pipeline(m_texPip);
+        sg_apply_bindings(&bind);
+        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+        sg_draw(range.base, range.count, 1);
+    };
+
+    for (const TexRange& range : flatRanges) {
+        drawTexRange(range);
     }
 
     std::vector<ColorVertex> colorVerts;
@@ -540,28 +578,20 @@ void AtlasRenderer::render(
     colorVerts.insert(colorVerts.end(), lineVerts.begin(), lineVerts.end());
     if (!colorVerts.empty()) {
         sg_update_buffer(m_colorVbuf, sg_range{colorVerts.data(), colorVerts.size() * sizeof(ColorVertex)});
+    }
 
+    if (!wallVerts.empty()) {
         sg_bindings bind{};
         bind.vertex_buffers[0] = m_colorVbuf;
 
-        if (!wallVerts.empty()) {
-            sg_apply_pipeline(m_wallPip);
-            sg_apply_bindings(&bind);
-            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-            sg_draw(0, static_cast<int>(wallVerts.size()), 1);
-        }
-    }
-
-    if (hasTop) {
-        sg_bindings bind{};
-        bind.vertex_buffers[0] = m_texVbuf;
-        bind.views[0] = topSlot.view;
-        bind.samplers[0] = m_sampler;
-
-        sg_apply_pipeline(m_texPip);
+        sg_apply_pipeline(m_wallPip);
         sg_apply_bindings(&bind);
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-        sg_draw(static_cast<int>(flatVerts.size()), static_cast<int>(topVerts.size()), 1);
+        sg_draw(0, static_cast<int>(wallVerts.size()), 1);
+    }
+
+    for (const TexRange& range : topRanges) {
+        drawTexRange(range);
     }
 
     if (!lineVerts.empty()) {

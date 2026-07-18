@@ -30,6 +30,14 @@ enum class AtlasKind : int {
     Flat = 1,
 };
 
+// One paint layer on the shared canvas: its own node grid, a top texture and
+// either flat (2D) or raised (3D, extruded with cliff walls) presentation.
+struct PaintLayerView {
+    const LandBrush* brush = nullptr;
+    AtlasKind atlas = AtlasKind::Grass;
+    bool raised = false;
+};
+
 class AtlasRenderer {
 public:
     struct VsParams {
@@ -51,14 +59,9 @@ public:
         int cols = 4,
         int rows = 6);
 
-    // Texture atlas is bound per paint layer: 0 = flat (2D), 1 = raised (3D).
-    // Both layers keep their own atlas and are drawn on the same canvas.
-    void setLayerAtlas(int layer, AtlasKind kind);
-    AtlasKind layerAtlas(int layer) const { return m_layerAtlas[layer == 1 ? 1 : 0]; }
-
     void render(
-        const LandBrush& brush,
-        const LandBrush& raisedBrush,
+        const PaintLayerView* layers,
+        int layerCount,
         const DiamondIso& iso,
         const topology_core::Camera2D& camera,
         int viewW,
@@ -124,7 +127,6 @@ private:
     sg_sampler m_sampler{};
 
     AtlasSlot m_slots[2]{};
-    AtlasKind m_layerAtlas[2]{AtlasKind::Grass, AtlasKind::Grass};
 
     int m_atlasCols = 4;
     int m_atlasRows = 6;

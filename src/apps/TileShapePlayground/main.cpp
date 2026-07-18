@@ -61,22 +61,30 @@ struct AppState {
 AppState g_state;
 DiamondIso g_iso;
 topology_core::Camera2D g_camera;
-LandBrush g_brush;
-LandBrush g_brushRaised;
 AtlasRenderer g_renderer;
 std::filesystem::path g_dataRoot;
 std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
-enum class BrushLayer : int {
-    Flat = 0,
-    Raised = 1,
+// Brush palette: three independent layers sharing one canvas. Each keeps its
+// own node grid and presentation (2D grass / 2D yellow / raised 3D).
+struct PaintLayer {
+    LandBrush brush;
+    AtlasKind atlas;
+    bool raised;
+    const char* name;
 };
-BrushLayer g_layer = BrushLayer::Flat;
+
+PaintLayer g_layers[3] = {
+    {{}, AtlasKind::Grass, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, "Yellow 2D"},
+    {{}, AtlasKind::Flat, true, "Raised 3D"},
+};
+int g_activeLayer = 0;
 float g_raisedHeight = 32.0f;
 
 LandBrush& activeBrush() {
-    return (g_layer == BrushLayer::Raised) ? g_brushRaised : g_brush;
+    return g_layers[g_activeLayer].brush;
 }
 
 bool looksLikeDataRoot(const std::filesystem::path& dir) {
@@ -109,7 +117,7 @@ std::filesystem::path findDataRootUpwards(std::filesystem::path startDir) {
 }
 
 void centerCamera(int viewW, int viewH) {
-    const glm::ivec2 mid{g_brush.width() / 2, g_brush.height() / 2};
+    const glm::ivec2 mid{g_layers[0].brush.width() / 2, g_layers[0].brush.height() / 2};
     const glm::vec2 world = g_iso.mapToField(mid);
     g_camera.zoom = 1.0f;
     g_camera.offset.x = static_cast<float>(viewW) * 0.5f - world.x * g_camera.zoom;
@@ -124,10 +132,29 @@ void applyBrushAtMouse() {
     activeBrush().setNode(*g_hoverNode, on);
 }
 
+bool g_demoPattern = false;
+
+// Painted programmatically in --demo mode: one raised blob, one lone raised
+// node, plus grass/yellow flat strokes — used for visual verification.
+void paintDemoPattern() {
+    for (int y = 9; y <= 12; ++y) {
+        for (int x = 9; x <= 12; ++x) {
+            g_layers[2].brush.setNode({x, y}, true);
+        }
+    }
+    g_layers[2].brush.setNode({16, 10}, true);
+    for (int x = 7; x <= 10; ++x) {
+        g_layers[0].brush.setNode({x, 16}, true);
+    }
+    for (int x = 13; x <= 16; ++x) {
+        g_layers[1].brush.setNode({x, 16}, true);
+    }
+}
+
 void updateHover() {
     const glm::vec2 world = g_camera.screenToWorld({g_state.mouseX, g_state.mouseY});
     const glm::ivec2 node = g_iso.fieldToNode(world);
-    if (g_brush.isNodeEditable(node)) {
+    if (g_layers[0].brush.isNodeEditable(node)) {
         g_hoverNode = node;
     } else {
         g_hoverNode.reset();
@@ -156,8 +183,12 @@ void init() {
     g_state.imgui_ok = true;
 
     g_renderer.init();
-    g_brush.reset(24, 24);
-    g_brushRaised.reset(24, 24);
+    for (PaintLayer& layer : g_layers) {
+        layer.brush.reset(24, 24);
+    }
+    if (g_demoPattern) {
+        paintDemoPattern();
+    }
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
     if (g_dataRoot.empty()) {
@@ -181,8 +212,6 @@ void init() {
             flat.rows)) {
         spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
     }
-    g_renderer.setLayerAtlas(0, AtlasKind::Grass);
-    g_renderer.setLayerAtlas(1, AtlasKind::Grass);
 
     centerCamera(sapp_width(), sapp_height());
 }
@@ -199,37 +228,15 @@ void drawImGui(int w, int h) {
     ImGui::Text("LMB paint  |  Ctrl+LMB erase  |  RMB pan  |  wheel zoom");
     ImGui::Separator();
 
-    int layer = static_cast<int>(g_layer);
-    ImGui::Text("Brush layer:");
-    if (ImGui::RadioButton("Flat (2D)", &layer, static_cast<int>(BrushLayer::Flat))) {
-        g_layer = BrushLayer::Flat;
+    ImGui::Text("Brush palette:");
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) {
+            ImGui::SameLine();
+        }
+        ImGui::RadioButton(g_layers[i].name, &g_activeLayer, i);
     }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Raised (3D)", &layer, static_cast<int>(BrushLayer::Raised))) {
-        g_layer = BrushLayer::Raised;
-    }
-    ImGui::SliderFloat("Raised height", &g_raisedHeight, 4.0f, 96.0f, "%.0f px");
-    ImGui::Separator();
-
-    // Each paint layer keeps its own atlas; both are stored and drawn together.
-    int tex2d = static_cast<int>(g_renderer.layerAtlas(0));
-    ImGui::Text("2D texture:");
-    if (ImGui::RadioButton("Grass##2d", &tex2d, static_cast<int>(AtlasKind::Grass))) {
-        g_renderer.setLayerAtlas(0, AtlasKind::Grass);
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Flat##2d", &tex2d, static_cast<int>(AtlasKind::Flat))) {
-        g_renderer.setLayerAtlas(0, AtlasKind::Flat);
-    }
-
-    int tex3d = static_cast<int>(g_renderer.layerAtlas(1));
-    ImGui::Text("3D texture:");
-    if (ImGui::RadioButton("Grass##3d", &tex3d, static_cast<int>(AtlasKind::Grass))) {
-        g_renderer.setLayerAtlas(1, AtlasKind::Grass);
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Flat##3d", &tex3d, static_cast<int>(AtlasKind::Flat))) {
-        g_renderer.setLayerAtlas(1, AtlasKind::Flat);
+    if (g_layers[g_activeLayer].raised) {
+        ImGui::SliderFloat("Raised height", &g_raisedHeight, 4.0f, 96.0f, "%.0f px");
     }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
@@ -248,7 +255,13 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: flat %d, raised %d", g_brush.onNodeCount(), g_brushRaised.onNodeCount());
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d",
+        g_layers[0].name,
+        g_layers[0].brush.onNodeCount(),
+        g_layers[1].name,
+        g_layers[1].brush.onNodeCount(),
+        g_layers[2].name,
+        g_layers[2].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -293,9 +306,13 @@ void frame() {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
+    PaintLayerView views[3];
+    for (int i = 0; i < 3; ++i) {
+        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].raised};
+    }
     g_renderer.render(
-        g_brush,
-        g_brushRaised,
+        views,
+        3,
         g_iso,
         g_camera,
         w,
@@ -303,7 +320,7 @@ void frame() {
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
         g_raisedHeight,
-        g_layer == BrushLayer::Raised);
+        g_layers[g_activeLayer].raised);
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -406,6 +423,9 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--smoke") {
             smoke = true;
+        }
+        if (std::string(argv[i]) == "--demo") {
+            g_demoPattern = true;
         }
     }
 
