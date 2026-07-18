@@ -181,7 +181,8 @@ void init() {
             flat.rows)) {
         spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
     }
-    g_renderer.setActiveAtlas(AtlasKind::Grass);
+    g_renderer.setLayerAtlas(0, AtlasKind::Grass);
+    g_renderer.setLayerAtlas(1, AtlasKind::Grass);
 
     centerCamera(sapp_width(), sapp_height());
 }
@@ -210,15 +211,26 @@ void drawImGui(int w, int h) {
     ImGui::SliderFloat("Raised height", &g_raisedHeight, 4.0f, 96.0f, "%.0f px");
     ImGui::Separator();
 
-    int atlas = static_cast<int>(g_renderer.activeAtlas());
-    if (ImGui::RadioButton("Grass", &atlas, static_cast<int>(AtlasKind::Grass))) {
-        g_renderer.setActiveAtlas(AtlasKind::Grass);
+    // Each paint layer keeps its own atlas; both are stored and drawn together.
+    int tex2d = static_cast<int>(g_renderer.layerAtlas(0));
+    ImGui::Text("2D texture:");
+    if (ImGui::RadioButton("Grass##2d", &tex2d, static_cast<int>(AtlasKind::Grass))) {
+        g_renderer.setLayerAtlas(0, AtlasKind::Grass);
     }
     ImGui::SameLine();
-    if (ImGui::RadioButton("Flat (generated)", &atlas, static_cast<int>(AtlasKind::Flat))) {
-        g_renderer.setActiveAtlas(AtlasKind::Flat);
+    if (ImGui::RadioButton("Flat##2d", &tex2d, static_cast<int>(AtlasKind::Flat))) {
+        g_renderer.setLayerAtlas(0, AtlasKind::Flat);
     }
-    ImGui::Text("Asset: %s", atlas == static_cast<int>(AtlasKind::Flat) ? "Flat" : "Grass");
+
+    int tex3d = static_cast<int>(g_renderer.layerAtlas(1));
+    ImGui::Text("3D texture:");
+    if (ImGui::RadioButton("Grass##3d", &tex3d, static_cast<int>(AtlasKind::Grass))) {
+        g_renderer.setLayerAtlas(1, AtlasKind::Grass);
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Flat##3d", &tex3d, static_cast<int>(AtlasKind::Flat))) {
+        g_renderer.setLayerAtlas(1, AtlasKind::Flat);
+    }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);

@@ -301,8 +301,8 @@ bool AtlasRenderer::loadAtlasFromRgba(
     return ok;
 }
 
-void AtlasRenderer::setActiveAtlas(AtlasKind kind) {
-    m_active = kind;
+void AtlasRenderer::setLayerAtlas(int layer, AtlasKind kind) {
+    m_layerAtlas[layer == 1 ? 1 : 0] = kind;
 }
 
 glm::vec4 AtlasRenderer::atlasUvRect(int tileIndex) const {
@@ -507,24 +507,26 @@ void AtlasRenderer::render(
     vsParams.camera_offset[1] = camera.offset.y;
     vsParams.camera_zoom = camera.zoom;
 
-    const AtlasSlot& slot = m_slots[static_cast<int>(m_active)];
-    const bool hasAtlas = slot.view.id != SG_INVALID_ID;
+    const AtlasSlot& flatSlot = m_slots[static_cast<int>(m_layerAtlas[0])];
+    const AtlasSlot& topSlot = m_slots[static_cast<int>(m_layerAtlas[1])];
+    const bool hasFlat = !flatVerts.empty() && flatSlot.view.id != SG_INVALID_ID;
+    const bool hasTop = !topVerts.empty() && topSlot.view.id != SG_INVALID_ID;
 
     // Painter order: flat ground, then cliff walls, then raised tops.
     // Textured flat/top ranges share one buffer; walls/lines share another.
-    if (hasAtlas && (!flatVerts.empty() || !topVerts.empty())) {
+    if (hasFlat || hasTop) {
         std::vector<TexVertex> texVerts;
         texVerts.reserve(flatVerts.size() + topVerts.size());
         texVerts.insert(texVerts.end(), flatVerts.begin(), flatVerts.end());
         texVerts.insert(texVerts.end(), topVerts.begin(), topVerts.end());
         sg_update_buffer(m_texVbuf, sg_range{texVerts.data(), texVerts.size() * sizeof(TexVertex)});
 
-        sg_bindings bind{};
-        bind.vertex_buffers[0] = m_texVbuf;
-        bind.views[0] = slot.view;
-        bind.samplers[0] = m_sampler;
+        if (hasFlat) {
+            sg_bindings bind{};
+            bind.vertex_buffers[0] = m_texVbuf;
+            bind.views[0] = flatSlot.view;
+            bind.samplers[0] = m_sampler;
 
-        if (!flatVerts.empty()) {
             sg_apply_pipeline(m_texPip);
             sg_apply_bindings(&bind);
             sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
@@ -550,10 +552,10 @@ void AtlasRenderer::render(
         }
     }
 
-    if (hasAtlas && !topVerts.empty()) {
+    if (hasTop) {
         sg_bindings bind{};
         bind.vertex_buffers[0] = m_texVbuf;
-        bind.views[0] = slot.view;
+        bind.views[0] = topSlot.view;
         bind.samplers[0] = m_sampler;
 
         sg_apply_pipeline(m_texPip);
