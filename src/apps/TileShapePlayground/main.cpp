@@ -62,10 +62,22 @@ AppState g_state;
 DiamondIso g_iso;
 topology_core::Camera2D g_camera;
 LandBrush g_brush;
+LandBrush g_brushRaised;
 AtlasRenderer g_renderer;
 std::filesystem::path g_dataRoot;
 std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
+
+enum class BrushLayer : int {
+    Flat = 0,
+    Raised = 1,
+};
+BrushLayer g_layer = BrushLayer::Flat;
+float g_raisedHeight = 32.0f;
+
+LandBrush& activeBrush() {
+    return (g_layer == BrushLayer::Raised) ? g_brushRaised : g_brush;
+}
 
 bool looksLikeDataRoot(const std::filesystem::path& dir) {
     std::error_code ec;
@@ -109,7 +121,7 @@ void applyBrushAtMouse() {
         return;
     }
     const bool on = !g_ctrlDown && !g_state.eraseMode;
-    g_brush.setNode(*g_hoverNode, on);
+    activeBrush().setNode(*g_hoverNode, on);
 }
 
 void updateHover() {
@@ -145,6 +157,7 @@ void init() {
 
     g_renderer.init();
     g_brush.reset(24, 24);
+    g_brushRaised.reset(24, 24);
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
     if (g_dataRoot.empty()) {
@@ -185,6 +198,18 @@ void drawImGui(int w, int h) {
     ImGui::Text("LMB paint  |  Ctrl+LMB erase  |  RMB pan  |  wheel zoom");
     ImGui::Separator();
 
+    int layer = static_cast<int>(g_layer);
+    ImGui::Text("Brush layer:");
+    if (ImGui::RadioButton("Flat (2D)", &layer, static_cast<int>(BrushLayer::Flat))) {
+        g_layer = BrushLayer::Flat;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Raised (3D)", &layer, static_cast<int>(BrushLayer::Raised))) {
+        g_layer = BrushLayer::Raised;
+    }
+    ImGui::SliderFloat("Raised height", &g_raisedHeight, 4.0f, 96.0f, "%.0f px");
+    ImGui::Separator();
+
     int atlas = static_cast<int>(g_renderer.activeAtlas());
     if (ImGui::RadioButton("Grass", &atlas, static_cast<int>(AtlasKind::Grass))) {
         g_renderer.setActiveAtlas(AtlasKind::Grass);
@@ -203,18 +228,18 @@ void drawImGui(int w, int h) {
         ImGui::Text("Hover node: (%d, %d) %s",
             g_hoverNode->x,
             g_hoverNode->y,
-            g_brush.nodeIsOn(*g_hoverNode) ? "ON" : "off");
-        const auto type = g_brush.cellTypeAt(cell);
+            activeBrush().nodeIsOn(*g_hoverNode) ? "ON" : "off");
+        const auto type = activeBrush().cellTypeAt(cell);
         ImGui::Text("Cell type: %s (atlas %d)",
             landscape_core::tileTypeName(type).data(),
             LandBrush::atlasIndexByType(type));
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %d", g_brush.onNodeCount());
+    ImGui::Text("On nodes: flat %d, raised %d", g_brush.onNodeCount(), g_brushRaised.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
-    if (ImGui::Button("Clear map")) {
-        g_brush.clear();
+    if (ImGui::Button("Clear layer")) {
+        activeBrush().clear();
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset camera")) {
@@ -258,12 +283,15 @@ void frame() {
 
     g_renderer.render(
         g_brush,
+        g_brushRaised,
         g_iso,
         g_camera,
         w,
         h,
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
-        g_hoverNode.has_value());
+        g_hoverNode.has_value(),
+        g_raisedHeight,
+        g_layer == BrushLayer::Raised);
 
     if (g_state.imgui_ok) {
         simgui_render();

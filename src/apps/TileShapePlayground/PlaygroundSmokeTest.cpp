@@ -1,10 +1,14 @@
 #include "PlaygroundSmokeTest.h"
 
+#include <cmath>
+
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include "DiamondIso.h"
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
+#include "RaisedGeometry.h"
 
 bool runTileShapeSmokeTest() {
     LandBrush brush;
@@ -101,6 +105,78 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator");
+    // --- Raised (3D) contour geometry: axis-parallel segments meeting at the
+    // cell center ("corner built from edge-parallel lines", not a diagonal).
+    DiamondIso iso;
+    const glm::ivec2 cell{2, 2};
+    const glm::vec2 center = iso.mapToField(cell);
+    const auto near2 = [](const glm::vec2& a, const glm::vec2& b) {
+        return std::abs(a.x - b.x) < 1e-3f && std::abs(a.y - b.y) < 1e-3f;
+    };
+    const auto axisParallelOk = [](const ContourSegment& seg) {
+        const glm::vec2 dir = seg.center - seg.edgeMid;
+        const glm::vec2 axisDir = (seg.axis == 0) ? glm::vec2(64.0f, 32.0f) : glm::vec2(-64.0f, 32.0f);
+        const float cross = dir.x * axisDir.y - dir.y * axisDir.x;
+        return std::abs(cross) < 1e-3f;
+    };
+
+    using T = landscape_core::LandscapeTileType;
+    const auto fullSegs = cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::Full));
+    if (!fullSegs.empty()) {
+        spdlog::error("TEST FAIL TileShape: Full cell must have no contour segments");
+        return false;
+    }
+    const auto emptySegs = cellContourSegments(iso, cell, {false, false, false, false});
+    if (!emptySegs.empty()) {
+        spdlog::error("TEST FAIL TileShape: empty cell must have no contour segments");
+        return false;
+    }
+
+    const auto cornerSegs = cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::LeftCorner));
+    if (cornerSegs.size() != 2) {
+        spdlog::error("TEST FAIL TileShape: LeftCorner must have 2 contour segments, got {}", cornerSegs.size());
+        return false;
+    }
+    for (const ContourSegment& seg : cornerSegs) {
+        if (!near2(seg.center, center)) {
+            spdlog::error("TEST FAIL TileShape: contour segment does not end at cell center");
+            return false;
+        }
+        if (!axisParallelOk(seg)) {
+            spdlog::error("TEST FAIL TileShape: contour segment not parallel to a grid axis");
+            return false;
+        }
+    }
+    if (near2(cornerSegs[0].edgeMid, cornerSegs[1].edgeMid)) {
+        spdlog::error("TEST FAIL TileShape: corner segments must start at two distinct edge midpoints");
+        return false;
+    }
+
+    const auto lineSegs = cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::RightUpLine));
+    if (lineSegs.size() != 2) {
+        spdlog::error("TEST FAIL TileShape: RightUpLine must have 2 contour segments, got {}", lineSegs.size());
+        return false;
+    }
+    const auto saddleSegs =
+        cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::LeftRightCorners));
+    if (saddleSegs.size() != 4) {
+        spdlog::error(
+            "TEST FAIL TileShape: LeftRightCorners must have 4 contour segments, got {}",
+            saddleSegs.size());
+        return false;
+    }
+
+    // Layers are independent: painting raised nodes must not change flat cells.
+    LandBrush flatLayer;
+    LandBrush raisedLayer;
+    flatLayer.reset(8, 8);
+    raisedLayer.reset(8, 8);
+    raisedLayer.setNode({4, 4}, true);
+    if (flatLayer.cellTypeAt({4, 4}) != T::Unknown || raisedLayer.cellTypeAt({4, 4}) == T::Unknown) {
+        spdlog::error("TEST FAIL TileShape: flat/raised layers are not independent");
+        return false;
+    }
+
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + raised contour");
     return true;
 }
