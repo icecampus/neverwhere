@@ -1,6 +1,7 @@
 #include "PlaygroundSmokeTest.h"
 
 #include <cmath>
+#include <cstring>
 
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
@@ -9,6 +10,7 @@
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
 #include "RaisedGeometry.h"
+#include "RockWalls.h"
 
 bool runTileShapeSmokeTest() {
     LandBrush brush;
@@ -177,6 +179,89 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + raised contour");
+    // --- Rock walls: boundary chains ---
+    {
+        LandBrush b;
+        b.reset(8, 8);
+        b.setNode({4, 4}, true);
+        const auto chains = analyzeRockBoundaries(b);
+        // The tuft boundary is the 1x1 square around the node: 8 segments
+        // (2 per adjacent cell), 4 convex corners at cell centers; chain
+        // passes straight (180 deg) through edge midpoints.
+        if (chains.size() != 1 || !chains[0].closed || chains[0].segments != 8 ||
+            chains[0].convexCorners != 4 || chains[0].concaveCorners != 0) {
+            spdlog::error(
+                "TEST FAIL TileShape: single node chain (n={}, closed={}, segs={}, convex={}, concave={})",
+                chains.size(),
+                chains.empty() ? -1 : (int)chains[0].closed,
+                chains.empty() ? -1 : chains[0].segments,
+                chains.empty() ? -1 : chains[0].convexCorners,
+                chains.empty() ? -1 : chains[0].concaveCorners);
+            return false;
+        }
+    }
+    {
+        LandBrush b;
+        b.reset(8, 8);
+        for (int y = 3; y <= 4; ++y) {
+            for (int x = 3; x <= 4; ++x) {
+                b.setNode({x, y}, true);
+            }
+        }
+        const auto chains = analyzeRockBoundaries(b);
+        if (chains.size() != 1 || !chains[0].closed || chains[0].convexCorners != 4 ||
+            chains[0].concaveCorners != 0) {
+            spdlog::error(
+                "TEST FAIL TileShape: 2x2 block chain (n={}, closed={}, convex={}, concave={})",
+                chains.size(),
+                chains.empty() ? -1 : (int)chains[0].closed,
+                chains.empty() ? -1 : chains[0].convexCorners,
+                chains.empty() ? -1 : chains[0].concaveCorners);
+            return false;
+        }
+    }
+    {
+        LandBrush b;
+        b.reset(8, 8);
+        b.setNode({3, 4}, true);
+        b.setNode({4, 3}, true); // diagonal saddle at cell (3,3)
+        const auto chains = analyzeRockBoundaries(b);
+        int joins = 0;
+        for (const RockChainInfo& c : chains) {
+            joins += c.diagonalJoins;
+        }
+        if (joins < 1) {
+            spdlog::error("TEST FAIL TileShape: saddle diagonal join not found");
+            return false;
+        }
+    }
+    {
+        LandBrush b;
+        b.reset(8, 8);
+        b.setNode({4, 4}, true);
+        const RockWallParams params;
+        const RockWallBuild w1 = buildRockWalls(b, 32.0f, params);
+        const RockWallBuild w2 = buildRockWalls(b, 32.0f, params);
+        if (w1.verts.empty() || w1.quadCount == 0) {
+            spdlog::error("TEST FAIL TileShape: rock walls are empty");
+            return false;
+        }
+        if (w1.verts.size() != w2.verts.size() ||
+            std::memcmp(w1.verts.data(), w2.verts.data(), w1.verts.size() * sizeof(ColorVertex)) != 0) {
+            spdlog::error("TEST FAIL TileShape: rock walls are not deterministic");
+            return false;
+        }
+        if (!(w1.maxAbsOffset > 0.0f && w1.maxAbsOffset <= params.amplitude + 1e-4f)) {
+            spdlog::error("TEST FAIL TileShape: displacement clamp ({})", w1.maxAbsOffset);
+            return false;
+        }
+        if (std::abs(rockWallOffset(params, 4.5f, 4.0f, 1.0f)) > 1e-6f ||
+            std::abs(rockWallOffset(params, 4.5f, 4.0f, 0.0f)) > 1e-6f) {
+            spdlog::error("TEST FAIL TileShape: seam envelope is not zero at edges");
+            return false;
+        }
+    }
+
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + raised contour + rock walls");
     return true;
 }

@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 
 #include "RaisedGeometry.h"
+#include "RockWalls.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -426,7 +427,8 @@ void AtlasRenderer::render(
     glm::ivec2 hoverNode,
     bool hasHover,
     float raisedHeight,
-    bool hoverRaised) {
+    bool hoverRaised,
+    const RockWallParams* rockWalls) {
 
     if (!m_ready || m_texPip.id == SG_INVALID_ID || !layers || layerCount <= 0 || !layers[0].brush) {
         return;
@@ -492,13 +494,20 @@ void AtlasRenderer::render(
         if (!layer.brush || !layer.raised) {
             continue;
         }
-        for (const auto& [z, cell] : drawOrder) {
-            (void)z;
-            const auto type = layer.brush->cellTypeAt(cell);
-            if (!landscape_core::tileTypeHasSurface(type)) {
-                continue;
+        if (rockWalls) {
+            // Production-style rock cliffs: global contour chains with bevels,
+            // noise-displaced terraces and baked colors.
+            RockWallBuild wb = buildRockWalls(*layer.brush, raisedHeight, *rockWalls);
+            wallVerts.insert(wallVerts.end(), wb.verts.begin(), wb.verts.end());
+        } else {
+            for (const auto& [z, cell] : drawOrder) {
+                (void)z;
+                const auto type = layer.brush->cellTypeAt(cell);
+                if (!landscape_core::tileTypeHasSurface(type)) {
+                    continue;
+                }
+                appendWallTriangles(wallVerts, iso, cell, layer.brush->nodeMaskAt(cell), raisedHeight);
             }
-            appendWallTriangles(wallVerts, iso, cell, layer.brush->nodeMaskAt(cell), raisedHeight);
         }
 
         TexRange range;

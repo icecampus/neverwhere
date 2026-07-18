@@ -14,6 +14,7 @@
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
 #include "PlaygroundSmokeTest.h"
+#include "RockWalls.h"
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -82,6 +83,8 @@ PaintLayer g_layers[3] = {
 };
 int g_activeLayer = 0;
 float g_raisedHeight = 32.0f;
+bool g_rockWalls = true;
+RockWallParams g_rockParams;
 
 LandBrush& activeBrush() {
     return g_layers[g_activeLayer].brush;
@@ -249,6 +252,11 @@ void drawImGui(int w, int h) {
     }
     if (g_layers[g_activeLayer].raised) {
         ImGui::SliderFloat("Raised height", &g_raisedHeight, 4.0f, 96.0f, "%.0f px");
+        ImGui::Checkbox("Rock walls", &g_rockWalls);
+        if (g_rockWalls) {
+            ImGui::SliderFloat("Rock amplitude", &g_rockParams.amplitude, 0.0f, 0.6f, "%.2f");
+            ImGui::SliderFloat("Corner bevel", &g_rockParams.cornerBevel, 0.0f, 0.45f, "%.2f");
+        }
     }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
@@ -332,7 +340,8 @@ void frame() {
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
         g_raisedHeight,
-        g_layers[g_activeLayer].raised);
+        g_layers[g_activeLayer].raised,
+        g_rockWalls ? &g_rockParams : nullptr);
 
     if (g_state.imgui_ok) {
         simgui_render();

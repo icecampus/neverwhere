@@ -30,6 +30,13 @@ enum class AtlasKind : int {
     Flat = 1,
 };
 
+struct ColorVertex {
+    float x, y;
+    float r, g, b, a;
+};
+
+struct RockWallParams;
+
 // One paint layer on the shared canvas: its own node grid, a top texture and
 // either flat (2D) or raised (3D, extruded with cliff walls) presentation.
 struct PaintLayerView {
@@ -69,7 +76,8 @@ public:
         glm::ivec2 hoverNode,
         bool hasHover,
         float raisedHeight,
-        bool hoverRaised);
+        bool hoverRaised,
+        const RockWallParams* rockWalls = nullptr);
 
 private:
     struct AtlasSlot {
@@ -80,11 +88,6 @@ private:
     struct TexVertex {
         float x, y;
         float u, v;
-    };
-
-    struct ColorVertex {
-        float x, y;
-        float r, g, b, a;
     };
 
     void ensurePipelines();
