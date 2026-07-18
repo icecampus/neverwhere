@@ -11,6 +11,7 @@
 
 #include "AtlasRenderer.h"
 #include "DiamondIso.h"
+#include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
 #include "PlaygroundSmokeTest.h"
 
@@ -153,9 +154,21 @@ void init() {
     spdlog::info("dataRoot={}", g_dataRoot.string());
 
     const auto atlasPath = g_dataRoot / "resources" / "assets" / "landscape" / "Grass" / "atlas.png";
-    if (!g_renderer.loadAtlas(atlasPath.string(), 4, 6)) {
+    if (!g_renderer.loadAtlasFromFile(AtlasKind::Grass, atlasPath.string(), 4, 6)) {
         spdlog::error("TileShapePlayground: Grass atlas missing at {}", atlasPath.string());
     }
+
+    const FlatAtlasImage flat = generateFlatAtlas();
+    if (!g_renderer.loadAtlasFromRgba(
+            AtlasKind::Flat,
+            flat.rgba.data(),
+            flat.width,
+            flat.height,
+            flat.cols,
+            flat.rows)) {
+        spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
+    }
+    g_renderer.setActiveAtlas(AtlasKind::Grass);
 
     centerCamera(sapp_width(), sapp_height());
 }
@@ -168,8 +181,19 @@ void drawImGui(int w, int h) {
     const glm::ivec2 cell = g_iso.fieldToMap(world);
 
     ImGui::Begin("TileShapePlayground");
-    ImGui::Text("Vertex land brush + Grass atlas");
+    ImGui::Text("Vertex land brush");
     ImGui::Text("LMB paint  |  Ctrl+LMB erase  |  RMB pan  |  wheel zoom");
+    ImGui::Separator();
+
+    int atlas = static_cast<int>(g_renderer.activeAtlas());
+    if (ImGui::RadioButton("Grass", &atlas, static_cast<int>(AtlasKind::Grass))) {
+        g_renderer.setActiveAtlas(AtlasKind::Grass);
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Flat (generated)", &atlas, static_cast<int>(AtlasKind::Flat))) {
+        g_renderer.setActiveAtlas(AtlasKind::Flat);
+    }
+    ImGui::Text("Asset: %s", atlas == static_cast<int>(AtlasKind::Flat) ? "Flat" : "Grass");
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);

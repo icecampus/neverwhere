@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,11 @@
 #include "LandBrush.h"
 #include <topology_core/camera2d.h>
 
+enum class AtlasKind : int {
+    Grass = 0,
+    Flat = 1,
+};
+
 class AtlasRenderer {
 public:
     struct VsParams {
@@ -35,7 +41,17 @@ public:
     void init();
     void shutdown();
 
-    bool loadAtlas(const std::string& path, int cols = 4, int rows = 6);
+    bool loadAtlasFromFile(AtlasKind kind, const std::string& path, int cols = 4, int rows = 6);
+    bool loadAtlasFromRgba(
+        AtlasKind kind,
+        const std::uint8_t* rgba,
+        int width,
+        int height,
+        int cols = 4,
+        int rows = 6);
+
+    void setActiveAtlas(AtlasKind kind);
+    AtlasKind activeAtlas() const { return m_active; }
 
     void render(
         const LandBrush& brush,
@@ -47,6 +63,11 @@ public:
         bool hasHover);
 
 private:
+    struct AtlasSlot {
+        sg_image image{};
+        sg_view view{};
+    };
+
     struct TexVertex {
         float x, y;
         float u, v;
@@ -59,6 +80,13 @@ private:
 
     void ensurePipelines();
     void destroyPipelines();
+    void destroySlot(AtlasSlot& slot);
+    bool uploadSlot(
+        AtlasSlot& slot,
+        const void* rgba,
+        int width,
+        int height,
+        const char* label);
     glm::vec4 atlasUvRect(int tileIndex) const;
     void appendTileQuad(std::vector<TexVertex>& out, const DiamondIso& iso, glm::ivec2 cell, int tileIndex);
     void appendDiamondOutline(std::vector<ColorVertex>& out, const DiamondIso& iso, glm::ivec2 cell, glm::vec4 color);
@@ -70,9 +98,10 @@ private:
     sg_shader m_colorShd{};
     sg_buffer m_texVbuf{};
     sg_buffer m_colorVbuf{};
-    sg_image m_atlas{};
-    sg_view m_atlasView{};
     sg_sampler m_sampler{};
+
+    AtlasSlot m_slots[2]{};
+    AtlasKind m_active = AtlasKind::Grass;
 
     int m_atlasCols = 4;
     int m_atlasRows = 6;

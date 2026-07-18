@@ -198,18 +198,51 @@ void AtlasRenderer::shutdown() {
         sg_destroy_sampler(m_sampler);
         m_sampler = {};
     }
-    if (m_atlasView.id != SG_INVALID_ID) {
-        sg_destroy_view(m_atlasView);
-        m_atlasView = {};
-    }
-    if (m_atlas.id != SG_INVALID_ID) {
-        sg_destroy_image(m_atlas);
-        m_atlas = {};
-    }
+    destroySlot(m_slots[0]);
+    destroySlot(m_slots[1]);
     m_ready = false;
 }
 
-bool AtlasRenderer::loadAtlas(const std::string& path, int cols, int rows) {
+void AtlasRenderer::destroySlot(AtlasSlot& slot) {
+    if (slot.view.id != SG_INVALID_ID) {
+        sg_destroy_view(slot.view);
+        slot.view = {};
+    }
+    if (slot.image.id != SG_INVALID_ID) {
+        sg_destroy_image(slot.image);
+        slot.image = {};
+    }
+}
+
+bool AtlasRenderer::uploadSlot(
+    AtlasSlot& slot,
+    const void* rgba,
+    int width,
+    int height,
+    const char* label) {
+
+    destroySlot(slot);
+
+    sg_image_desc desc = {};
+    desc.width = width;
+    desc.height = height;
+    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.data.mip_levels[0].ptr = rgba;
+    desc.data.mip_levels[0].size = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    desc.label = label;
+    slot.image = sg_make_image(&desc);
+    if (slot.image.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_image failed ({})", label ? label : "?");
+        return false;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = slot.image;
+    slot.view = sg_make_view(&viewDesc);
+    return slot.view.id != SG_INVALID_ID;
+}
+
+bool AtlasRenderer::loadAtlasFromFile(AtlasKind kind, const std::string& path, int cols, int rows) {
     m_atlasCols = cols;
     m_atlasRows = rows;
 
@@ -223,36 +256,51 @@ bool AtlasRenderer::loadAtlas(const std::string& path, int cols, int rows) {
         return false;
     }
 
-    if (m_atlasView.id != SG_INVALID_ID) {
-        sg_destroy_view(m_atlasView);
-        m_atlasView = {};
-    }
-    if (m_atlas.id != SG_INVALID_ID) {
-        sg_destroy_image(m_atlas);
-        m_atlas = {};
-    }
-
-    sg_image_desc desc = {};
-    desc.width = w;
-    desc.height = h;
-    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    desc.data.mip_levels[0].ptr = pixels;
-    desc.data.mip_levels[0].size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
-    desc.label = "grass-atlas";
-    m_atlas = sg_make_image(&desc);
+    const char* label = (kind == AtlasKind::Grass) ? "grass-atlas" : "flat-atlas-file";
+    const bool ok = uploadSlot(m_slots[static_cast<int>(kind)], pixels, w, h, label);
     stbi_image_free(pixels);
 
-    if (m_atlas.id == SG_INVALID_ID) {
-        spdlog::error("AtlasRenderer: sg_make_image failed for '{}'", path);
+    if (ok) {
+        spdlog::info("AtlasRenderer: loaded {} into slot {} ({}x{}, {}x{} tiles)",
+            path,
+            static_cast<int>(kind),
+            w,
+            h,
+            cols,
+            rows);
+    }
+    return ok;
+}
+
+bool AtlasRenderer::loadAtlasFromRgba(
+    AtlasKind kind,
+    const std::uint8_t* rgba,
+    int width,
+    int height,
+    int cols,
+    int rows) {
+
+    if (!rgba || width <= 0 || height <= 0) {
         return false;
     }
 
-    sg_view_desc viewDesc = {};
-    viewDesc.texture.image = m_atlas;
-    m_atlasView = sg_make_view(&viewDesc);
+    m_atlasCols = cols;
+    m_atlasRows = rows;
+    const char* label = (kind == AtlasKind::Flat) ? "flat-atlas" : "rgba-atlas";
+    const bool ok = uploadSlot(m_slots[static_cast<int>(kind)], rgba, width, height, label);
+    if (ok) {
+        spdlog::info("AtlasRenderer: uploaded RGBA slot {} ({}x{}, {}x{} tiles)",
+            static_cast<int>(kind),
+            width,
+            height,
+            cols,
+            rows);
+    }
+    return ok;
+}
 
-    spdlog::info("AtlasRenderer: loaded {} ({}x{}, {}x{} tiles)", path, w, h, cols, rows);
-    return true;
+void AtlasRenderer::setActiveAtlas(AtlasKind kind) {
+    m_active = kind;
 }
 
 glm::vec4 AtlasRenderer::atlasUvRect(int tileIndex) const {
@@ -397,18 +445,23 @@ void AtlasRenderer::render(
     vsParams.camera_offset[1] = camera.offset.y;
     vsParams.camera_zoom = camera.zoom;
 
-    if (!texVerts.empty() && m_atlasView.id != SG_INVALID_ID) {
-        sg_update_buffer(m_texVbuf, sg_range{texVerts.data(), texVerts.size() * sizeof(TexVertex)});
+    if (!texVerts.empty()) {
+        const AtlasSlot& slot = m_slots[static_cast<int>(m_active)];
+        if (slot.view.id == SG_INVALID_ID) {
+            // fall through — nothing to draw for missing atlas
+        } else {
+            sg_update_buffer(m_texVbuf, sg_range{texVerts.data(), texVerts.size() * sizeof(TexVertex)});
 
-        sg_bindings bind{};
-        bind.vertex_buffers[0] = m_texVbuf;
-        bind.views[0] = m_atlasView;
-        bind.samplers[0] = m_sampler;
+            sg_bindings bind{};
+            bind.vertex_buffers[0] = m_texVbuf;
+            bind.views[0] = slot.view;
+            bind.samplers[0] = m_sampler;
 
-        sg_apply_pipeline(m_texPip);
-        sg_apply_bindings(&bind);
-        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-        sg_draw(0, static_cast<int>(texVerts.size()), 1);
+            sg_apply_pipeline(m_texPip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+            sg_draw(0, static_cast<int>(texVerts.size()), 1);
+        }
     }
 
     if (!colorVerts.empty()) {

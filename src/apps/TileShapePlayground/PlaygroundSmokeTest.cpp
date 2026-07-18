@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
 
 bool runTileShapeSmokeTest() {
@@ -73,6 +74,33 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + atlas mapping");
+    const auto fullMask = landscape_core::tileTypeToNodeMask(landscape_core::LandscapeTileType::Full);
+    if (!fullMask[0] || !fullMask[1] || !fullMask[2] || !fullMask[3]) {
+        spdlog::error("TEST FAIL TileShape: Full mask is not all-true");
+        return false;
+    }
+
+    const FlatAtlasImage flat = generateFlatAtlas();
+    if (flat.width != 256 || flat.height != 384 || flat.rgba.size() != 256u * 384u * 4u) {
+        spdlog::error("TEST FAIL TileShape: flat atlas size {}x{} (bytes {})",
+            flat.width,
+            flat.height,
+            flat.rgba.size());
+        return false;
+    }
+    if (flatAtlasOpaquePixelCount(flat, 0) <= 0) {
+        spdlog::error("TEST FAIL TileShape: Full tile (index 0) has no opaque pixels");
+        return false;
+    }
+    if (flatAtlasOpaquePixelCount(flat, 22) != 0) {
+        spdlog::error("TEST FAIL TileShape: unused slot 22 should be empty");
+        return false;
+    }
+    if (flatAtlasOpaquePixelCount(flat, 8) <= 0) {
+        spdlog::error("TEST FAIL TileShape: UpCorner tile (index 8) has no opaque pixels");
+        return false;
+    }
+
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator");
     return true;
 }
