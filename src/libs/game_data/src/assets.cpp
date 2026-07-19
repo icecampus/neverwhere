@@ -26,20 +26,28 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
         }
 
         if (!j.contains("uuid")) continue;
-        if (!j.contains("slice")) continue; // MVP: only slice assets for landscape
 
         AssetData asset = j.get<AssetData>();
         asset.indexPath = entry.path();
-        if (!asset.slice) continue;
+        if (!asset.slice && !asset.image) continue; // nothing renderable
 
         AssetIndexEntry idx;
         idx.uuid = asset.uuid;
         idx.layerType = asset.layerType;
-        idx.atlasPath = asset.root() / asset.slice->atlas;
+        idx.pivot = asset.pivot;
 
-        // Convention from editor: split atlas into 4x6 tiles
-        idx.cols = 4;
-        idx.rows = 6;
+        if (asset.slice) {
+            idx.atlasPath = asset.root() / asset.slice->atlas;
+
+            // Convention from editor: split atlas into 4x6 tiles
+            idx.cols = 4;
+            idx.rows = 6;
+        }
+
+        if (asset.image) {
+            idx.imagePath = asset.root() / asset.image->imageFilename;
+            idx.widthCells = asset.image->width;
+        }
 
         index.byUuid[idx.uuid] = idx;
     }

@@ -7,6 +7,8 @@ nw_add_lib_sources(
         pch.h
         include/topology_core/staggered_isometry.h
         src/staggered_isometry.cpp
+        include/topology_core/diamond_isometry.h
+        src/diamond_isometry.cpp
         include/topology_core/camera2d.h
     LIBS
         glm::glm-header-only

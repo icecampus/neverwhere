@@ -1,4 +1,4 @@
-#include "render_core/landscape_renderer.h"
+#include "render_core/sprite_renderer.h"
 
 #include <algorithm>
 
@@ -62,24 +62,24 @@ float4 main(PSIn inp): SV_Target0 {
 }
 )";
 
-void LandscapeRenderer::init() {
+void SpriteRenderer::init() {
     ensurePipeline();
 
-    // Dynamic vertex buffer for many quads (6 vertices per tile)
+    // Dynamic vertex buffer for many quads (6 vertices per sprite)
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 6 * 65536 * (int)sizeof(Vertex);
     buf_desc.usage.dynamic_update = true;
-    buf_desc.label = "landscape-verts";
+    buf_desc.label = "sprite-verts";
     vbuf = sg_make_buffer(&buf_desc);
 
     bind.vertex_buffers[0] = vbuf;
 }
 
-void LandscapeRenderer::shutdown() {
-    for (auto& [_, a] : atlases) {
-        a.atlas.destroy();
+void SpriteRenderer::shutdown() {
+    for (auto& [_, s] : sprites) {
+        s.texture.destroy();
     }
-    atlases.clear();
+    sprites.clear();
 
     if (vbuf.id != SG_INVALID_ID) {
         sg_destroy_buffer(vbuf);
@@ -88,7 +88,7 @@ void LandscapeRenderer::shutdown() {
     destroyPipeline();
 }
 
-void LandscapeRenderer::ensurePipeline() {
+void SpriteRenderer::ensurePipeline() {
     if (pip.id != SG_INVALID_ID) return;
 
     sg_shader_desc shd_desc = {};
@@ -150,68 +150,74 @@ void LandscapeRenderer::ensurePipeline() {
     pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
     pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
     pip_desc.depth.write_enabled = false;
-    pip_desc.label = "landscape-pipeline";
+    pip_desc.label = "sprite-pipeline";
     pip = sg_make_pipeline(&pip_desc);
 }
 
-void LandscapeRenderer::destroyPipeline() {
+void SpriteRenderer::destroyPipeline() {
     if (pip.id != SG_INVALID_ID) {
         sg_destroy_pipeline(pip);
         pip.id = SG_INVALID_ID;
     }
 }
 
-void LandscapeRenderer::ensureAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows) {
-    auto it = atlases.find(assetUuid);
-    if (it != atlases.end() && it->second.atlas.valid()) {
+void SpriteRenderer::ensureImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
+    auto it = sprites.find(assetUuid);
+    if (it != sprites.end() && it->second.texture.valid()) {
         return;
     }
 
-    AtlasGpu gpu;
-    gpu.atlas.createFromFile(atlasPath, cols, rows);
+    SpriteGpu gpu;
+    // Plain image held as a 1x1 "atlas" — reuses the existing GPU upload path.
+    gpu.texture.createFromFile(imagePath, 1, 1);
+    gpu.pivot = pivot;
 
-    // Match editor behaviour: scale tile to cellWidth
-    const float cellWidth = 128.0f;
-    const float tileW = (float)gpu.atlas.tileWidth();
-    const float tileH = (float)gpu.atlas.tileHeight();
-    gpu.scale = (tileW > 0.0f) ? (cellWidth / tileW) : 1.0f;
-    gpu.tileSize = glm::vec2(tileW * gpu.scale, tileH * gpu.scale);
+    const float imgW = (float)gpu.texture.atlasWidth();
+    const float imgH = (float)gpu.texture.atlasHeight();
+    gpu.aspect = (imgW > 0.0f) ? (imgH / imgW) : 1.0f;
 
-    atlases[assetUuid] = std::move(gpu);
+    // Editor semantics (ImageAsset::getScreenSize): screen width = cellWidth * widthCells,
+    // height follows the image aspect. cellWidth is applied at render time from iso dims,
+    // so here we only keep the per-asset width factor.
+    gpu.widthCells = widthCells;
+
+    sprites[assetUuid] = std::move(gpu);
 }
 
-void LandscapeRenderer::render(
-    const std::vector<LandscapeTile>& tiles,
+void SpriteRenderer::render(
+    const std::vector<SpriteInstance>& spriteList,
     const topology_core::DiamondIsometry& iso,
     const topology_core::Camera2D& camera,
     int viewWidth,
     int viewHeight) {
 
-    if (tiles.empty()) return;
+    if (spriteList.empty()) return;
     if (pip.id == SG_INVALID_ID || vbuf.id == SG_INVALID_ID) return;
 
-    // Group tiles by atlas uuid (bind texture per group)
-    std::unordered_map<std::string, std::vector<const LandscapeTile*>> groups;
-    groups.reserve(atlases.size() + 4);
-    for (const auto& t : tiles) {
-        groups[t.assetUuid].push_back(&t);
+    // Group sprites by texture uuid (bind texture per group)
+    std::unordered_map<std::string, std::vector<const SpriteInstance*>> groups;
+    groups.reserve(sprites.size() + 4);
+    for (const auto& s : spriteList) {
+        groups[s.assetUuid].push_back(&s);
     }
 
     // Build one merged vertex stream: sokol allows only ONE sg_update_buffer
-    // per buffer per frame, so all atlas groups go into a single update and
+    // per buffer per frame, so all texture groups go into a single update and
     // are drawn as per-group vertex ranges with their own texture binding.
     scratchVerts.clear();
     scratchDraws.clear();
 
+    const glm::vec2 cellSize = iso.dims.cellSize();
+
     for (auto& [uuid, group] : groups) {
-        auto it = atlases.find(uuid);
-        if (it == atlases.end() || !it->second.atlas.valid()) {
+        auto it = sprites.find(uuid);
+        if (it == sprites.end() || !it->second.texture.valid()) {
             continue;
         }
-        const AtlasGpu& atlas = it->second;
+        const SpriteGpu& sprite = it->second;
 
         // Stable-ish draw order
-        std::sort(group.begin(), group.end(), [&](const LandscapeTile* a, const LandscapeTile* b) {
+        std::sort(group.begin(), group.end(), [&](const SpriteInstance* a, const SpriteInstance* b) {
             const std::uint64_t za = iso.zOffset(a->cell);
             const std::uint64_t zb = iso.zOffset(b->cell);
             return za < zb;
@@ -219,17 +225,20 @@ void LandscapeRenderer::render(
 
         const int baseVertex = (int)scratchVerts.size();
 
-        for (const LandscapeTile* t : group) {
-            const glm::vec2 fieldPos = iso.mapToField(t->cell);
+        for (const SpriteInstance* s : group) {
+            // Editor semantics (Tile2DView.qml): image center is offset from the
+            // cell center by cellSize * pivot; width = cellWidth * widthCells.
+            const glm::vec2 fieldPos = iso.mapToField(s->cell) + cellSize * sprite.pivot;
             const glm::vec2 screenCenter = camera.worldToScreen(fieldPos);
 
-            // Editor parity: the QML Scale transform scales tile size together
-            // with positions, so the quad must grow/shrink with camera zoom.
-            const glm::vec2 size = atlas.tileSize * camera.zoom;
+            const glm::vec2 size(
+                cellSize.x * sprite.widthCells * camera.zoom,
+                cellSize.x * sprite.widthCells * sprite.aspect * camera.zoom);
+
             const glm::vec2 tl = screenCenter - size * 0.5f;
             const glm::vec2 br = screenCenter + size * 0.5f;
 
-            const TileUV uv = atlas.atlas.tileUv(t->tileIndex);
+            const TileUV uv = sprite.texture.tileUv(0);
 
             const float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
 
@@ -243,7 +252,7 @@ void LandscapeRenderer::render(
             scratchVerts.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {r, g, b, a}});
         }
 
-        scratchDraws.push_back({&atlas, baseVertex, (int)scratchVerts.size() - baseVertex});
+        scratchDraws.push_back({&sprite, baseVertex, (int)scratchVerts.size() - baseVertex});
     }
 
     if (scratchVerts.empty()) return;
@@ -257,8 +266,8 @@ void LandscapeRenderer::render(
     sg_apply_uniforms(0, &uniform_range);
 
     for (const DrawGroup& draw : scratchDraws) {
-        bind.views[0] = draw.atlas->atlas.sgView();
-        bind.samplers[0] = draw.atlas->atlas.sgSampler();
+        bind.views[0] = draw.sprite->texture.sgView();
+        bind.samplers[0] = draw.sprite->texture.sgSampler();
         sg_apply_bindings(&bind);
 
         sg_draw(draw.baseVertex, draw.vertexCount, 1);
@@ -266,4 +275,3 @@ void LandscapeRenderer::render(
 }
 
 } // namespace render_core
-

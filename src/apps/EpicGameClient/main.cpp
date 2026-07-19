@@ -17,9 +17,9 @@
 #include <game_data/types.h>
 
 #include <topology_core/camera2d.h>
-#include <topology_core/staggered_isometry.h>
+#include <topology_core/diamond_isometry.h>
 
-#include <render_core/landscape_renderer.h>
+#include <render_core/world_renderer.h>
 
 // Sokol (implementation)
 #define SOKOL_IMPL
@@ -62,6 +62,10 @@ struct AppState {
 
     float mouseX = 0.0f;
     float mouseY = 0.0f;
+
+    // Overlay toggles (editor parity)
+    bool showGrid = true;
+    bool showCursor = true;
 };
 
 static AppState g_state;
@@ -70,10 +74,10 @@ static AppState g_state;
 static std::unique_ptr<game_runtime::Runtime> g_runtime;
 
 // Rendering
-static topology_core::StaggeredIsometry g_iso;
+static topology_core::DiamondIsometry g_iso;
 static topology_core::Camera2D g_camera;
-static render_core::LandscapeRenderer g_land;
-static std::vector<render_core::LandscapeTile> g_tiles;
+static render_core::WorldRenderer g_worldRenderer;
+static render_core::WorldFrame g_frame;
 static game_data::AssetIndex g_assetIndex;
 
 static bool looksLikeDataRoot(const std::filesystem::path& dir) {
@@ -113,17 +117,13 @@ static std::filesystem::path getExecutableDir() {
 }
 #endif
 
-static void updateTilesFromWorld() {
-    if (!g_runtime || !g_runtime->currentSession()) return;
-    
-    g_tiles.clear();
-    auto& world = g_runtime->currentSession()->world();
-    
-    // Получаем слой ландшафта из мира
-    const auto* layer = world.getLayer(game_data::LayerType::BaseLandscape);
-    if (!layer) return;
-    
-    for (const auto& obj : *layer) {
+// Pure data: map objects -> render lists. Layer order follows the editor:
+// BaseLandscape first, then Decoration and GameplayInteractive sprites on top.
+static void collectWorldFrame(const game_data::Map& map, render_core::WorldFrame& frame) {
+    frame.landscapeTiles.clear();
+    frame.sprites.clear();
+
+    for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
         if (obj.type != game_data::GameObjectType::Landscape) continue;
         if (!obj.landscapeData) continue;
 
@@ -131,28 +131,57 @@ static void updateTilesFromWorld() {
         t.cell = obj.position;
         t.assetUuid = obj.assetUuid;
         t.tileIndex = obj.landscapeData->tileIndex;
-        g_tiles.push_back(std::move(t));
+        frame.landscapeTiles.push_back(std::move(t));
     }
-    
-    // Загружаем необходимые атласы
-    std::unordered_set<std::string> uniqueAtlases;
-    for (const auto& t : g_tiles) {
-        uniqueAtlases.insert(t.assetUuid);
+
+    for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
+        for (const auto& obj : map.layer(layerType)) {
+            if (obj.type == game_data::GameObjectType::Landscape) continue;
+
+            render_core::SpriteInstance s;
+            s.cell = obj.position;
+            s.assetUuid = obj.assetUuid;
+            frame.sprites.push_back(std::move(s));
+        }
     }
-    
-    for (const auto& uuid : uniqueAtlases) {
-        const game_data::AssetIndexEntry* entry = g_assetIndex.find(uuid);
+}
+
+// GPU: upload textures for all assets referenced by the frame.
+static void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const render_core::WorldFrame& frame) {
+    std::unordered_set<std::string> uniqueAssets;
+    for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
+
+    for (const auto& uuid : uniqueAssets) {
+        const game_data::AssetIndexEntry* entry = assetIndex.find(uuid);
         if (!entry) {
-            spdlog::warn("Atlas not found for assetUuid={}", uuid);
+            spdlog::warn("Asset not found for assetUuid={}", uuid);
             continue;
         }
-        g_land.ensureAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
+        if (entry->isSlice()) {
+            g_worldRenderer.ensureLandscapeAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
+        }
+        if (entry->isImage()) {
+            g_worldRenderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);
+        }
     }
+}
+
+static void rebuildWorld() {
+    if (!g_runtime || !g_runtime->currentSession()) return;
+    const game_data::Map* map = g_runtime->currentSession()->world().map();
+    if (!map) return;
+
+    collectWorldFrame(*map, g_frame);
+    ensureWorldAssets(g_assetIndex, g_frame);
+
+    spdlog::info("World collected: {} landscape tiles, {} sprites",
+        g_frame.landscapeTiles.size(), g_frame.sprites.size());
 }
 
 static void init(void) {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("EpicGameRuntime: init()");
+    spdlog::info("EpicGameClient: init()");
 
     stm_setup();
     g_state.last_time = stm_now();
@@ -163,17 +192,12 @@ static void init(void) {
     sg_setup(&desc);
     g_state.gfx_ok = sg_isvalid();
 
-    spdlog::info("EpicGameRuntime: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
+    spdlog::info("EpicGameClient: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
 
     if (g_state.gfx_ok && g_runtime && g_runtime->currentSession()) {
         try {
-            // Инициализируем рендерер
-            g_land.init();
-            
-            // Обновляем тайлы из игрового мира
-            updateTilesFromWorld();
-            
-            spdlog::info("Loaded tiles: {}", g_tiles.size());
+            g_worldRenderer.init();
+            rebuildWorld();
         } catch (const std::exception& e) {
             spdlog::error("Init renderer failed: {}", e.what());
         }
@@ -181,7 +205,7 @@ static void init(void) {
         simgui_desc_t imgui_desc = {};
         simgui_setup(&imgui_desc);
         g_state.imgui_ok = true;
-        spdlog::info("EpicGameRuntime: simgui_setup() OK");
+        spdlog::info("EpicGameClient: simgui_setup() OK");
     }
 }
 
@@ -206,6 +230,13 @@ static void frame(void) {
     const int w = sapp_width();
     const int h = sapp_height();
 
+    const glm::vec2 screenPos(g_state.mouseX, g_state.mouseY);
+    const glm::vec2 worldPos = g_camera.screenToWorld(screenPos);
+    const glm::ivec2 hoveredCell = g_iso.fieldToMap(worldPos);
+
+    g_frame.showGrid = g_state.showGrid;
+    g_frame.cursorCell = g_state.showCursor ? std::optional<glm::ivec2>(hoveredCell) : std::nullopt;
+
     if (g_state.imgui_ok) {
         simgui_frame_desc_t fd = {};
         fd.width = w;
@@ -215,24 +246,25 @@ static void frame(void) {
         simgui_new_frame(&fd);
 
         ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-        ImGui::SetNextWindowSize(ImVec2(420.0f, 170.0f), ImGuiCond_Once);
-        const glm::vec2 screenPos(g_state.mouseX, g_state.mouseY);
-        const glm::vec2 worldPos = g_camera.screenToWorld(screenPos);
-        const glm::ivec2 hoveredCell = g_iso.fieldToMap(worldPos);
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 210.0f), ImGuiCond_Once);
 
-        ImGui::Begin("EpicGameRuntime (debug)");
+        ImGui::Begin("EpicGameClient (debug)");
         ImGui::Text("Frame: %d", g_state.frame_index);
         ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
         ImGui::Text("Size: %dx%d  DPI: %.2f", w, h, sapp_dpi_scale());
         ImGui::Text("Camera offset: (%.1f, %.1f)", g_camera.offset.x, g_camera.offset.y);
         ImGui::Text("Camera zoom: %.3f", g_camera.zoom);
         ImGui::Text("Hovered cell: (%d, %d)", hoveredCell.x, hoveredCell.y);
+        ImGui::Checkbox("Show grid", &g_state.showGrid);
+        ImGui::SameLine();
+        ImGui::Checkbox("Show cursor", &g_state.showCursor);
         ImGui::Separator();
-        ImGui::Text("Tiles (BaseLandscape): %d", (int)g_tiles.size());
+        ImGui::Text("Landscape tiles: %d", (int)g_frame.landscapeTiles.size());
+        ImGui::Text("Sprites: %d", (int)g_frame.sprites.size());
         if (g_runtime && g_runtime->currentSession()) {
             auto* session = g_runtime->currentSession();
             ImGui::Text("Session time: %.1f s", session->sessionTime());
-            ImGui::Text("World day: %d %02d:%02d", 
+            ImGui::Text("World day: %d %02d:%02d",
                 session->world().getDay(),
                 session->world().getHour(),
                 session->world().getMinute());
@@ -248,10 +280,8 @@ static void frame(void) {
     pass.action = action;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
-    // World rendering (MVP: landscape)
-    if (!g_tiles.empty()) {
-        g_land.render(g_tiles, g_iso, g_camera, w, h);
-    }
+    // World rendering (editor parity: landscape + sprites + overlays)
+    g_worldRenderer.render(g_frame, g_iso, g_camera, w, h);
     if (g_state.imgui_ok) {
         simgui_render();
     }
@@ -260,16 +290,16 @@ static void frame(void) {
 }
 
 static void cleanup(void) {
-    spdlog::info("EpicGameRuntime: cleanup()");
-    
+    spdlog::info("EpicGameClient: cleanup()");
+
     // Cleanup Runtime
     g_runtime.reset();
-    
+
     if (g_state.imgui_ok) {
         simgui_shutdown();
         g_state.imgui_ok = false;
     }
-    g_land.shutdown();
+    g_worldRenderer.shutdown();
     if (sg_isvalid()) {
         sg_shutdown();
     }
@@ -337,12 +367,93 @@ static void event(const sapp_event* ev) {
     }
 }
 
+// Data-only smoke scenario (AGENTS.md): key operations without window/GPU.
+static int runSmokeTest(const std::filesystem::path& mapPath, const std::filesystem::path& assetsRoot) {
+    spdlog::set_level(spdlog::level::info);
+    spdlog::info("EpicGameClient: --smoke run");
+
+    int failures = 0;
+    const auto check = [&failures](bool ok, const std::string& name) {
+        if (ok) {
+            spdlog::info("TEST PASS: {}", name);
+        } else {
+            spdlog::error("TEST FAIL: {}", name);
+            failures++;
+        }
+    };
+
+    // 1. Asset index loads and contains both slice and image assets.
+    game_data::AssetIndex assetIndex;
+    try {
+        assetIndex = game_data::AssetIndex::load(assetsRoot);
+    } catch (const std::exception& e) {
+        spdlog::error("TEST FAIL: asset index load threw ({})", e.what());
+        return 1;
+    }
+    check(!assetIndex.byUuid.empty(), "asset index is not empty");
+
+    std::size_t sliceCount = 0;
+    std::size_t imageCount = 0;
+    for (const auto& [_, entry] : assetIndex.byUuid) {
+        if (entry.isSlice()) sliceCount++;
+        if (entry.isImage()) imageCount++;
+    }
+    check(sliceCount > 0, "asset index has slice (atlas) assets");
+    check(imageCount > 0, "asset index has image (Tile2D) assets");
+
+    // 2. Map loads and produces render lists.
+    game_data::Map map;
+    try {
+        map = game_data::Map::load(mapPath);
+    } catch (const std::exception& e) {
+        spdlog::error("TEST FAIL: map load threw ({})", e.what());
+        return 1;
+    }
+
+    render_core::WorldFrame frame;
+    collectWorldFrame(map, frame);
+    check(!frame.landscapeTiles.empty(), "map has landscape tiles");
+    check(!frame.sprites.empty(), "map has Tile2D sprites");
+
+    // 3. Every referenced asset resolves in the index.
+    std::size_t missing = 0;
+    for (const auto& t : frame.landscapeTiles) {
+        if (!assetIndex.find(t.assetUuid)) missing++;
+    }
+    for (const auto& s : frame.sprites) {
+        if (!assetIndex.find(s.assetUuid)) {
+            missing++;
+            spdlog::warn("Missing sprite asset assetUuid={}", s.assetUuid);
+        }
+    }
+    check(missing == 0, "all map assetUuids resolve in asset index");
+
+    // 4. Isometry round-trip on a sample of cells.
+    topology_core::DiamondIsometry iso;
+    bool roundTripOk = true;
+    for (const glm::ivec2 cell : {glm::ivec2(0, 0), glm::ivec2(1, 1), glm::ivec2(3, 12), glm::ivec2(-2, 5), glm::ivec2(10, -7), glm::ivec2(-4, -9)}) {
+        if (iso.fieldToMap(iso.mapToField(cell)) != cell) {
+            spdlog::error("Round-trip mismatch at cell ({}, {})", cell.x, cell.y);
+            roundTripOk = false;
+        }
+    }
+    check(roundTripOk, "diamond isometry fieldToMap(mapToField(cell)) == cell");
+
+    // 5. Visible cell bounds for a viewport are sane.
+    const topology_core::CellRegion region = iso.visibleCellBounds(glm::vec2(1280.0f, 720.0f), glm::vec2(0.0f, 0.0f));
+    check(region.min.x <= region.max.x && region.min.y <= region.max.y, "visibleCellBounds is non-empty");
+
+    spdlog::info(failures == 0 ? "TEST PASS: smoke scenario finished OK" : "TEST FAIL: {} check(s) failed", failures);
+    return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char* argv[]) {
     // Parse CLI arguments
     std::filesystem::path mapPath = "resources/chapters/Base/maps/map.json";
     std::filesystem::path assetsRoot = "resources/assets";
     std::filesystem::path dataRoot;
-    
+    bool smoke = false;
+
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
         if ((arg == "--map") && (i + 1 < argc)) {
@@ -351,6 +462,8 @@ int main(int argc, char* argv[]) {
             assetsRoot = argv[++i];
         } else if ((arg == "--data-root") && (i + 1 < argc)) {
             dataRoot = argv[++i];
+        } else if (arg == "--smoke") {
+            smoke = true;
         }
     }
 
@@ -382,8 +495,12 @@ int main(int argc, char* argv[]) {
     }
 
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("EpicGameRuntime: dataRoot={}", dataRoot.empty() ? "<none>" : dataRoot.string());
-    
+    spdlog::info("EpicGameClient: dataRoot={}", dataRoot.empty() ? "<none>" : dataRoot.string());
+
+    if (smoke) {
+        return runSmokeTest(mapPath, assetsRoot);
+    }
+
     // Load assets index
     try {
         g_assetIndex = game_data::AssetIndex::load(assetsRoot);
@@ -394,33 +511,33 @@ int main(int argc, char* argv[]) {
 
     // Create and initialize Runtime
     game_runtime::RuntimeConfig config;
-    config.windowTitle = "EpicGameRuntime";
+    config.windowTitle = "EpicGameClient";
     config.defaultMap = mapPath;
     config.assetsRoot = assetsRoot;
     config.dataRoot = dataRoot;
     config.enableEditorExtensions = false; // Standalone player mode
-    
+
     g_runtime = std::make_unique<game_runtime::Runtime>(config);
-    
+
     if (!g_runtime->initialize()) {
         spdlog::error("Failed to initialize Runtime");
         return 1;
     }
-    
+
     // Create game session from fixture
     auto fixture = game_runtime::Fixture::create()
         .withName("Default Session")
         .withMap(mapPath.string())
         .newGame()
         .build();
-    
+
     auto* session = g_runtime->createSession(fixture);
-    
+
     if (!session) {
         spdlog::error("Failed to create game session");
         return 1;
     }
-    
+
     spdlog::info("Game session created successfully");
 
     // Run Sokol app
@@ -432,7 +549,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "EpicGameRuntime";
+    desc.window_title = "EpicGameClient";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32.console_utf8 = true;

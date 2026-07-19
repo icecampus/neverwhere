@@ -11,7 +11,7 @@
 #include <game_data/assets.h>
 #include <render_core/landscape_renderer.h>
 #include <topology_core/camera2d.h>
-#include <topology_core/staggered_isometry.h>
+#include <topology_core/diamond_isometry.h>
 #include <spdlog/spdlog.h>
 
 #include <math/vec.h>
@@ -74,7 +74,7 @@ void RuntimeMapView::initialize()
     }
     
     // Initialize renderer components
-    m_iso = std::make_unique<topology_core::StaggeredIsometry>();
+    m_iso = std::make_unique<topology_core::DiamondIsometry>();
     m_camera = std::make_unique<topology_core::Camera2D>();
     m_landRenderer = std::make_unique<render_core::LandscapeRenderer>();
     

@@ -16,6 +16,11 @@ struct SliceAssetData {
     std::string atlas;
 };
 
+struct ImageAssetData {
+    std::string imageFilename;
+    float width = 1.0f; // width in map cells (screenWidth = cellWidth * width)
+};
+
 struct AssetData {
     std::filesystem::path indexPath;
     std::string uuid;
@@ -23,6 +28,7 @@ struct AssetData {
     glm::vec2 pivot{0.0f, 0.0f};
 
     std::optional<SliceAssetData> slice;
+    std::optional<ImageAssetData> image;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -30,6 +36,11 @@ struct AssetData {
 inline void from_json(const nlohmann::json& j, SliceAssetData& d) {
     j.at("thumbnail").get_to(d.thumbnail);
     j.at("atlas").get_to(d.atlas);
+}
+
+inline void from_json(const nlohmann::json& j, ImageAssetData& d) {
+    j.at("imageFilename").get_to(d.imageFilename);
+    j.at("width").get_to(d.width);
 }
 
 inline void from_json(const nlohmann::json& j, AssetData& a) {
@@ -50,14 +61,28 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
     }
+
+    if (j.contains("image") && !j["image"].is_null()) {
+        a.image = j["image"].get<ImageAssetData>();
+    }
 }
 
 struct AssetIndexEntry {
     std::string uuid;
     LayerType layerType{LayerType::Decoration};
+    glm::vec2 pivot{0.0f, 0.0f};
+
+    // Slice (atlas) assets — landscape tiles.
     std::filesystem::path atlasPath;
     int cols = 4;
     int rows = 6;
+
+    // Plain image assets — Tile2D sprites.
+    std::filesystem::path imagePath;
+    float widthCells = 1.0f;
+
+    bool isSlice() const { return !atlasPath.empty(); }
+    bool isImage() const { return !imagePath.empty(); }
 };
 
 struct AssetIndex {

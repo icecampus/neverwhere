@@ -10,13 +10,13 @@
 // Forward declarations
 namespace game_runtime { class Runtime; class GameSession; }
 namespace render_core { class LandscapeRenderer; struct LandscapeTile; }
-namespace topology_core { class StaggeredIsometry; class Camera2D; }
+namespace topology_core { class DiamondIsometry; class Camera2D; }
 
 /**
  * @brief QML элемент для рендеринга карты через Runtime (OpenGL)
  * 
  * Заменяет стандартный QML-рендеринг на OpenGL рендеринг через LandscapeRenderer.
- * Работает аналогично EpicGameRuntime, но встраивается в QML.
+ * Работает аналогично EpicGameClient, но встраивается в QML.
  */
 class RuntimeMapView : public QQuickItem, protected QOpenGLFunctions
 {
@@ -79,9 +79,9 @@ private:
     std::unique_ptr<game_runtime::Runtime> m_runtime;
     game_runtime::GameSession* m_session = nullptr;
 
-    // Renderer (shared with EpicGameRuntime)
+    // Renderer (shared with EpicGameClient)
     std::unique_ptr<render_core::LandscapeRenderer> m_landRenderer;
-    std::unique_ptr<topology_core::StaggeredIsometry> m_iso;
+    std::unique_ptr<topology_core::DiamondIsometry> m_iso;
     std::unique_ptr<topology_core::Camera2D> m_camera;
     std::vector<render_core::LandscapeTile> m_tiles;
     

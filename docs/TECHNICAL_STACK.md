@@ -13,7 +13,7 @@
 |---|---|---|
 | Язык | C++20 (MSVC; Clang для Emscripten) | — |
 | Сборка | CMake 3.20+, vcpkg (submodule), presets `vs2022`/`emscripten` | `CMakePresets.json`, `cmake/utils.cmake` |
-| Рендер | Sokol GFX (`sokol_gfx`), `sokol_app`/`sokol_time`/`sokol_glue` | `src/libs/graphics`, runtime + playgrounds |
+| Рендер | Sokol GFX (`sokol_gfx`), `sokol_app`/`sokol_time`/`sokol_glue` | `src/libs/render_core` (общий рендер мира), `src/libs/graphics` (legacy GL-клей), apps + playgrounds |
 | GL-загрузчик | glad (Windows) | — |
 | Сериализация | nlohmann::json | `src/libs/game_data` |
 | Математика | glm | `src/libs/math` |
@@ -21,7 +21,7 @@
 | Логирование | spdlog (non-emscripten) | — |
 | Прочее | magic_enum, Boost (uuid, lexical_cast, container_hash), stb | — |
 | UI редактора | Qt6 (qml, quick, widgets, quickcontrols2, shader tools, core5compat) | `src/apps/EpicMapEditor` |
-| UI рантайма | Dear ImGui (через `util/sokol_imgui.h`) | `src/apps/EpicGameRuntime` |
+| UI рантайма | Dear ImGui (через `util/sokol_imgui.h`) | `src/apps/EpicGameClient` |
 | Тесты | gtest | `src/libs/tests` |
 
 ### CMake-макросы (настоящие)
@@ -154,13 +154,23 @@
 spdlog — стандартный логгер для приложений/библиотек (запуск, инспекция, ошибки,
 состояние графической инициализации).
 
-## Рендер-слой (цель) `[концепт]`
+## Рендер-слой (цель) `[есть]` (ядро), `[концепт]` (editor-shell)
 Цель: один рендер мира, но разные shell/backend:
-- **EpicMapEditor (Qt):** shell на QtQuick + QML overlay;
-- **EpicGameRuntime (Standalone):** shell без Qt (`sokol_app`) + runtime UI на ImGui.
+- **EpicGameClient (Standalone):** shell без Qt (`sokol_app`) + debug UI на ImGui — `[есть]`.
+  Рендерит карту по паритету с редактором: diamond-изометрия, ландшафт из атласов,
+  Tile2D-спрайты (pivot/width-семантика редактора), сетка и курсор ячейки.
+- **EpicMapEditor (Qt):** shell на QtQuick + QML overlay — пока рисует своими
+  QML-делегатами; переход на общий `WorldRenderer` (FBO-путь) — следующий шаг.
+
+**Общее ядро `[есть]`:** `src/libs/render_core` — `WorldRenderer` (фасад),
+`LandscapeRenderer` (тайлы из атласов), `SpriteRenderer` (Tile2D), `OverlayRenderer`
+(линии сетки/курсора). Вход — plain-данные (`WorldFrame`), без Qt и без game-типов.
+Единая топология мира — `topology_core::DiamondIsometry` (No-Qt порт редакторской
+математики); `StaggeredIsometry` остаётся только для playground'ов.
 
 Оформление в виде отдельных либ `graphics_core` / `graphics_shell_qtquick` /
-`graphics_shell_sokolapp` — пока не сделано (см. выше).
+`graphics_shell_sokolapp` — пока не делаем, ядро живёт в `render_core`,
+шеллы — inline в приложениях.
 
 ## Play-Test Host + Fixtures (Editor → Runtime) `[заготовка]`
 - Редактор запускает рантайм на текущей карте/главе без «полной игры», но рантайм должен

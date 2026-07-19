@@ -288,7 +288,7 @@ ModeNeighbours getNeighboursNodeForCell(const math::ivec2& cellPosition) {
 ### Рантайм/3D: `landscape_core::nodeMaskToTileType`
 
 Та же таблица 16 масок → 16 типов, но в чистой (без Qt) библиотеке, чтобы её
-можно было использовать в `EpicGameRuntime` и в `landscape_mesh`.
+можно было использовать в `EpicGameClient` и в `landscape_mesh`.
 
 ### Кто гарантирует совпадение — тест
 

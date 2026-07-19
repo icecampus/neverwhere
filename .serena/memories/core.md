@@ -1,7 +1,7 @@
 # Neverwhere — Core
 
 **Project**: 2D engine/suite for system-driven games (life-sim, narrative casual).
-**Two main apps**: EpicMapEditor (Qt/QML) и EpicGameRuntime (standalone + ImGui).
+**Two main apps**: EpicMapEditor (Qt/QML) и EpicGameClient (standalone sokol_app + ImGui).
 **Build**: CMake 3.20+, vcpkg (submodule at `toolchain/vcpkg`), Visual Studio 2022.
 **Language**: C++20, Qt6 (QML/Quick/Widgets).
 
@@ -18,7 +18,7 @@
   - `tests/` — unit tests
 - `src/apps/` — applications:
   - `EpicMapEditor/` — main editor (Qt/QML)
-  - `EpicGameRuntime/` — game runtime
+  - `EpicGameClient/` — game client (sokol_app + ImGui, общий WorldRenderer)
   - `EcsPlayground/`, `RttrPlayground/`, `MeshGenerationPlayground/`, `Landscape3dPlayground/`, `SplattingPlayground/` — prototypes/experiments
 - `src/refs/` — reference implementations (AParis69 volumetric terrains, rock fracturing)
 - `vcpkg_overlays/ports/` — custom vcpkg overlay ports (sokol+imgui compat)
@@ -27,7 +27,7 @@
 - ECS via EnTT, reflection via RTTR, serialization via nlohmann::json
 - Rendering: Sokol GFX (`sokol_gfx`) shared core, different shells:
   - Editor: QtQuick/FBO (`QQuickFramebufferObject`)
-  - Runtime: standalone (`sokol_app`) + ImGui
+  - Client: standalone (`sokol_app`) + ImGui
 - CMake macros: `nw_add_qml_app(...)` for QML apps, `nw_add_lib_sources(...)` for libs
 - PCH: `pch.h` in each lib/app
 
