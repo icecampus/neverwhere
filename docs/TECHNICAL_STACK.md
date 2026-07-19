@@ -13,7 +13,7 @@
 |---|---|---|
 | Язык | C++20 (MSVC; Clang для Emscripten) | — |
 | Сборка | CMake 3.20+, vcpkg (submodule), presets `vs2022`/`emscripten` | `CMakePresets.json`, `cmake/utils.cmake` |
-| Рендер | Sokol GFX (`sokol_gfx`), `sokol_app`/`sokol_time`/`sokol_glue` | `src/libs/render_core` (общий рендер мира), `src/libs/graphics` (legacy GL-клей), apps + playgrounds |
+| Рендер | Sokol GFX (`sokol_gfx`), `sokol_app`/`sokol_time`/`sokol_glue` | `src/libs/render_core` (общий рендер мира), GL-клей для Qt — внутри `EcsPlayground`, apps + playgrounds |
 | GL-загрузчик | glad (Windows) | — |
 | Сериализация | nlohmann::json | `src/libs/game_data` |
 | Математика | glm | `src/libs/math` |
@@ -77,8 +77,9 @@
 функциональность (если есть) разложена иначе:
 
 - **`graphics_core` / `graphics_shell_qtquick` / `graphics_shell_sokolapp`** — целевые либы
-  с общим рендер-ядром и двумя шеллами. Сейчас: общий код в `src/libs/graphics` +
-  `src/libs/render_core`, шеллы — inline в приложениях.
+  с общим рендер-ядром и двумя шеллами. Сейчас: общий код в `src/libs/render_core`,
+  шеллы — inline в приложениях. (Бывшая либа `src/libs/graphics` удалена: её GL-клей
+  переехал в `EcsPlayground` — единственного потребителя.)
 - **`editor_qt_adapters`** — целевой target для Qt-экспорта enum'ов и view-models. Сейчас
   Qt-модели живут прямо в `src/libs/core`.
 - **`IProfileStore` / `IInventoryStore` / `ISaveGameStore`** — целевые интерфейсы «хранилищ»

@@ -34,9 +34,6 @@ sg_pipeline pip;
 sg_bindings bind;
 sg_buffer vbuf;
 
-static int frame_width = 800;
-static int frame_height = 600;
-
 // Shader source
 const char* vs_src = R"(
 #version 330
@@ -73,10 +70,10 @@ void init() {
 
     sg_desc desc = {};
     desc.logger.func = slog_func;
-    // Important: We don't want Sokol to manage the context creation or swap chain, 
+    // Important: We don't want Sokol to manage the context creation or swap chain,
     // as Qt handles that.
     sg_setup(&desc);
-    
+
     if (!sg_isvalid()) {
         spdlog::error("Failed to initialize Sokol GFX");
         return;
@@ -105,11 +102,11 @@ void init() {
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-    
+
     // Explicitly disable depth format expectation for the pipeline
     // because we will render to an FBO pass that might not have depth wrapped.
     pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
-    
+
     pip_desc.label = "quad-pipeline";
     pip = sg_make_pipeline(&pip_desc);
 
@@ -130,31 +127,6 @@ void init() {
     is_initialized = true;
 }
 
-// Legacy/Default begin_frame (for direct window rendering if used)
-void begin_frame(int width, int height) {
-    if (!is_initialized) return;
-    
-    // CRITICAL: Reset Sokol's state cache because Qt has messed with GL state since the last frame
-    sg_reset_state_cache();
-    
-    frame_width = width;
-    frame_height = height;
-
-    sg_pass_action action = {};
-    action.colors[0].load_action = SG_LOADACTION_LOAD; 
-    
-    // We use the default framebuffer (0), which is usually the window surface in Qt OpenGL.
-    sg_pass pass = {};
-    pass.action = action;
-    pass.swapchain.width = width;
-    pass.swapchain.height = height;
-    pass.swapchain.sample_count = 1;
-    pass.swapchain.color_format = SG_PIXELFORMAT_RGBA8;
-    pass.swapchain.depth_format = SG_PIXELFORMAT_NONE;
-    pass.swapchain.gl.framebuffer = 0;
-    sg_begin_pass(&pass);
-}
-
 void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_height) {
     if (!is_initialized || vertices.empty()) return;
 
@@ -173,17 +145,6 @@ void draw_rects(const std::vector<Vertex>& vertices, int view_width, int view_he
 
     // Draw
     sg_draw(0, (int)vertices.size(), 1);
-}
-
-void end_frame() {
-    if (!is_initialized) return;
-    sg_end_pass();
-    // CRITICAL: Do NOT call sg_commit() here when rendering to an offscreen pass (FBO)
-    // sg_commit(); 
-}
-
-void render_test_frame() {
-    // Legacy
 }
 
 }

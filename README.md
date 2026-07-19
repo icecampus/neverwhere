@@ -36,7 +36,7 @@ Neverwhere — это **узкоспециализированный 2D engine/s
 | `game_data` | есть | `src/libs/game_data` (`assets.h`, `map.h`, `types.h`) |
 | `resources_manifest` | частично | есть `AssetIndex` (загрузка индекса ассетов), но как отдельный «манифест» не выделен |
 | `balance_tables` | концепт | в коде пока нет |
-| `render core` (Sokol) | есть | `src/libs/render_core` (`WorldRenderer`, `LandscapeRenderer`, `SpriteRenderer`, `OverlayRenderer`) + legacy GL-клей в `src/libs/graphics` |
+| `render core` (Sokol) | есть | `src/libs/render_core` (`WorldRenderer`, `LandscapeRenderer`, `SpriteRenderer`, `OverlayRenderer`); GL-клей для QtQuick — внутри `EcsPlayground` |
 | `editor_qt_adapters` | частично | Qt-модели-адаптеры (`QAbstractListModel` поверх EnTT) реально есть в `src/libs/core/models/`, но модуля с таким именем нет |
 | `graphics_shell_qtquick` | есть (по сути) | `RuntimeMapView` (`src/apps/EpicMapEditor/src/runtime_map_view.*`) — встраивает рендер в QML |
 | `graphics_shell_sokolapp` | есть (по сути) | весь `src/apps/EpicGameClient/main.cpp` — это шелл на `sokol_app` |

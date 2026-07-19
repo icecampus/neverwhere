@@ -18,7 +18,6 @@ target_link_libraries(neverwhere_tests PRIVATE
     core
     math
     base_data
-    generators
     landscape_core
     landscape_mesh
     utils
@@ -33,6 +32,5 @@ endif()
 # Group in IDE solution tree (Visual Studio "tests" folder, next to libs/_apps).
 set_property(TARGET neverwhere_tests PROPERTY FOLDER tests)
 
-# Enable testing
-enable_testing()
+# Test registration (enable_testing() lives in the root CMakeLists.txt)
 add_test(NAME neverwhere_tests COMMAND neverwhere_tests)

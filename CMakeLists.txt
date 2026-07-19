@@ -74,6 +74,8 @@ if(EMSCRIPTEN)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sFULL_ES2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2")
 endif()
 
+enable_testing()
+
 add_subdirectory(src/libs)
 add_subdirectory(src/apps)
 add_subdirectory(src/tests)

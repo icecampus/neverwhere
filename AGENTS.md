@@ -66,6 +66,9 @@
 
 ## Тестирование и прототипы
 
+- Unit-тесты (gtest) — `src/tests/<domain>/<name>_test.cpp`, подхватываются GLOB'ом автоматически; бинарь `neverwhere_tests`.
+  - Сборка: `cmake --build --preset debug --target neverwhere_tests`.
+  - Запуск: `ctest --test-dir _intermediate_64 -C Debug --output-on-failure` или напрямую `_intermediate_64/Debug/neverwhere_tests.exe`.
 - Новые тестовые приложения и прототипы — под `src/apps/<PrototypeName>`.
 - Таргеты прототипов/тестов **обязаны** иметь суффикс `Playground` (напр. `RttrPlayground`, `EcsPlayground`).
 - GUI-прототипы — `nw_add_qml_app`, CLI-прототипы — `nw_add_console_app`.

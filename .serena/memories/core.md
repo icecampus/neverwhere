@@ -8,13 +8,12 @@
 ## Source layout
 - `src/libs/` — shared libraries:
   - `core/` — editor core (Qt models, map, assets library, tools, topology)
-  - `graphics/` — render core (Sokol GFX API)
+  - `render_core/` — общий рендер мира (WorldRenderer/Landscape/Sprite/Overlay, атласы)
   - `game_data/` — pure data layer (no Qt): JSON schemas, map/assets types
   - `game_runtime/` — runtime logic
   - `landscape_core/`, `landscape_mesh/` — landscape generation
-  - `topology_core/` — topology/isometry math
-  - `render_core/` — rendering utilities
-  - `math/`, `containers/`, `utils/`, `generators/`, `ui/`, `base_data/`
+  - `topology_core/` — topology/isometry math (diamond + staggered, camera)
+  - `math/`, `utils/`, `generators/`, `ui/`, `base_data/`
   - `tests/` — unit tests
 - `src/apps/` — applications:
   - `EpicMapEditor/` — main editor (Qt/QML)
