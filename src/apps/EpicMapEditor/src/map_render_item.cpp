@@ -15,11 +15,13 @@
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFunctions>
 #include <QTimer>
+#include <QElapsedTimer>
 
 #include <atomic>
 #include <mutex>
 
 #include "map_frame_bridge.h"
+#include "water_background.h"
 
 namespace {
 
@@ -56,7 +58,10 @@ public:
         // Per-item sg resources only; sg_shutdown is global (aboutToQuit).
         if (m_colorAttView.id != SG_INVALID_ID) sg_destroy_view(m_colorAttView);
         if (m_passImg.id != SG_INVALID_ID) sg_destroy_image(m_passImg);
-        if (m_worldInit) m_worldRenderer.shutdown();
+        if (m_worldInit) {
+            m_water.shutdown();
+            m_worldRenderer.shutdown();
+        }
     }
 
     void synchronize(QQuickFramebufferObject* item) override {
@@ -86,6 +91,8 @@ public:
             // The Qt FBO depth attachment is not wrapped into the sokol pass
             // (EcsPlayground battle rules), so pipelines must expect no depth.
             m_worldRenderer.init(SG_PIXELFORMAT_NONE);
+            m_water.init(SG_PIXELFORMAT_NONE);
+            m_time.start();
             m_worldInit = true;
         }
 
@@ -120,6 +127,9 @@ public:
         topology_core::Camera2D camera;
         camera.offset = m_cameraOffset;
         camera.zoom = m_cameraZoom;
+
+        // Water caustics background first (world-space quad), the map on top.
+        m_water.render(camera, m_width, m_height, (float)m_time.elapsed() / 1000.0f);
         m_worldRenderer.render(m_frame, m_iso, camera, m_width, m_height);
 
         sg_end_pass();
@@ -182,6 +192,8 @@ private:
     render_core::WorldRenderer m_worldRenderer;
     render_core::WorldFrame m_frame;
     topology_core::DiamondIsometry m_iso;
+    WaterBackground m_water;
+    QElapsedTimer m_time;
 
     glm::vec2 m_cameraOffset{0.0f, 0.0f};
     float m_cameraZoom = 1.0f;

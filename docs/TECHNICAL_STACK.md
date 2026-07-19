@@ -70,7 +70,9 @@
   правила интеграции (см. ниже); GL-клей живёт в `EcsPlayground/graphics/`.
 - **Удалено:** `RuntimeMapView` (недоподключенная заготовка через
   `beforeRendering`/`afterRendering`), QSG-версии `DiamondGrid`/`DiamondCursor`,
-  Mandelbrot-`CustomItem` — заменены `MapRenderItem`.
+  Mandelbrot-`CustomItem` — заменены `MapRenderItem`. Водный фон старого
+  `CustomItem` (каустики) восстановлен в новом пути: `src/water_background.*`
+  (world-space квад 20000×20000 перед миром, iTime-анимация).
 
 ---
 
