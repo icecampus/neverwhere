@@ -14,43 +14,10 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from tools.debug_mcp.debugger_mcp import (
-    debug_breakpoint_disable,
-    debug_breakpoint_enable,
-    debug_breakpoint_list,
-    debug_breakpoint_remove,
-    debug_breakpoint_set,
-    debug_breakpoint_set_bulk,
-    debug_continue,
-    debug_contract_get,
-    debug_crash_dump_analyze,
-    debug_expression_eval,
-    debug_frame_select,
-    debug_heap_stat,
-    debug_interrupt,
-    debug_launch_then_attach,
-    debug_memory_read,
-    debug_modules_get,
-    debug_pdb_resolve,
-    debug_process_find,
-    debug_resolve_cdb,
-    debug_run_until_stop,
-    debug_scopes_get,
-    debug_self_check,
-    debug_session_cleanup,
-    debug_session_list,
-    debug_session_start,
-    debug_session_status,
-    debug_session_stop,
-    debug_session_wait_ready,
-    debug_stack_get,
-    debug_step_into,
-    debug_step_out,
-    debug_step_over,
-    debug_thread_select,
-    debug_threads_get,
-    debug_watchpoint_set,
-)
+# Import the backend as a module, not by name: the @mcp.tool() wrappers
+# below reuse the backend function names, and same-named imports would be
+# shadowed by the wrappers, making every tool recurse into itself.
+from tools.debug_mcp import debugger_mcp as _dbg
 from tools.debug_mcp.exe_resolver import (
     debug_overrides_payload,
     write_active_debug_config,
@@ -91,19 +58,19 @@ mcp = FastMCP("neverwhere-debug", instructions=_INSTRUCTIONS)
 @mcp.tool()
 def debug_self_check() -> dict:
     """Verify cdb + default exe + PDB + llvm-pdbutil availability. Call first."""
-    return debug_self_check()
+    return _dbg.debug_self_check()
 
 
 @mcp.tool()
 def debug_resolve_cdb(custom_path: str = "") -> dict:
     """Locate cdb.exe (CRASH_ANALYSIS_DEBUGGER_PATH, Windows Kits, vcpkg)."""
-    return debug_resolve_cdb(custom_path)
+    return _dbg.debug_resolve_cdb(custom_path)
 
 
 @mcp.tool()
 def debug_contract_get() -> dict:
     """Return the debugger MCP contract (session states, error kinds, etc.)."""
-    return debug_contract_get()
+    return _dbg.debug_contract_get()
 
 
 @mcp.tool()
@@ -150,7 +117,7 @@ def debug_session_start(
     reload_symbols: bool = True,
 ) -> dict:
     """Start a cdb session: launch an inferior, or attach to a running process."""
-    return debug_session_start(
+    return _dbg.debug_session_start(
         exe=exe,
         exe_target=exe_target,
         config=config,
@@ -183,7 +150,7 @@ def debug_launch_then_attach(
     reload_symbols: bool = False,
 ) -> dict:
     """Launch the inferior detached, then attach cdb after attach_delay_ms."""
-    return debug_launch_then_attach(
+    return _dbg.debug_launch_then_attach(
         exe=exe,
         exe_target=exe_target,
         config=config,
@@ -202,31 +169,31 @@ def debug_launch_then_attach(
 @mcp.tool()
 def debug_session_wait_ready(session_id: str, timeout_ms: int = 30000) -> dict:
     """Block until a freshly started session emits its READY marker."""
-    return debug_session_wait_ready(session_id, timeout_ms=timeout_ms)
+    return _dbg.debug_session_wait_ready(session_id, timeout_ms=timeout_ms)
 
 
 @mcp.tool()
 def debug_session_list() -> dict:
     """List all live cdb sessions."""
-    return debug_session_list()
+    return _dbg.debug_session_list()
 
 
 @mcp.tool()
 def debug_session_cleanup(session_id: str = "", force: bool = True) -> dict:
     """Reap stale sessions (or force-clean a specific one)."""
-    return debug_session_cleanup(session_id=session_id, force=force)
+    return _dbg.debug_session_cleanup(session_id=session_id, force=force)
 
 
 @mcp.tool()
 def debug_session_status(session_id: str) -> dict:
     """Snapshot of one session: state, inferior pid, last stop event, op log."""
-    return debug_session_status(session_id)
+    return _dbg.debug_session_status(session_id)
 
 
 @mcp.tool()
 def debug_session_stop(session_id: str, kill_process: bool = True, detach: bool = False) -> dict:
     """Stop a cdb session (kill inferior by default; detach keeps it running)."""
-    return debug_session_stop(session_id, kill_process=kill_process, detach=detach)
+    return _dbg.debug_session_stop(session_id, kill_process=kill_process, detach=detach)
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +213,7 @@ def debug_breakpoint_set(
     module: str = "",
 ) -> dict:
     """Set a breakpoint (source file:line, symbol, or address)."""
-    return debug_breakpoint_set(
+    return _dbg.debug_breakpoint_set(
         session_id,
         source_file=source_file,
         line=line,
@@ -262,67 +229,67 @@ def debug_breakpoint_set(
 @mcp.tool()
 def debug_breakpoint_set_bulk(session_id: str, breakpoints: list[dict]) -> dict:
     """Set many breakpoints in one shot."""
-    return debug_breakpoint_set_bulk(session_id, breakpoints)
+    return _dbg.debug_breakpoint_set_bulk(session_id, breakpoints)
 
 
 @mcp.tool()
 def debug_breakpoint_list(session_id: str) -> dict:
     """List all breakpoints in the session."""
-    return debug_breakpoint_list(session_id)
+    return _dbg.debug_breakpoint_list(session_id)
 
 
 @mcp.tool()
 def debug_breakpoint_remove(session_id: str, breakpoint_id: str) -> dict:
     """Remove a breakpoint by id."""
-    return debug_breakpoint_remove(session_id, breakpoint_id)
+    return _dbg.debug_breakpoint_remove(session_id, breakpoint_id)
 
 
 @mcp.tool()
 def debug_breakpoint_enable(session_id: str, breakpoint_id: str) -> dict:
     """Enable a disabled breakpoint."""
-    return debug_breakpoint_enable(session_id, breakpoint_id)
+    return _dbg.debug_breakpoint_enable(session_id, breakpoint_id)
 
 
 @mcp.tool()
 def debug_breakpoint_disable(session_id: str, breakpoint_id: str) -> dict:
     """Disable a breakpoint without removing it."""
-    return debug_breakpoint_disable(session_id, breakpoint_id)
+    return _dbg.debug_breakpoint_disable(session_id, breakpoint_id)
 
 
 @mcp.tool()
 def debug_run_until_stop(session_id: str, timeout_ms: int = 30000) -> dict:
     """Continue the inferior until it stops (breakpoint / exception / exit)."""
-    return debug_run_until_stop(session_id, timeout_ms=timeout_ms)
+    return _dbg.debug_run_until_stop(session_id, timeout_ms=timeout_ms)
 
 
 @mcp.tool()
 def debug_continue(session_id: str, timeout_ms: int = 30000) -> dict:
     """Continue execution."""
-    return debug_continue(session_id, timeout_ms=timeout_ms)
+    return _dbg.debug_continue(session_id, timeout_ms=timeout_ms)
 
 
 @mcp.tool()
 def debug_step_over(session_id: str, timeout_ms: int = 30000) -> dict:
     """Step over the current line."""
-    return debug_step_over(session_id, timeout_ms=timeout_ms)
+    return _dbg.debug_step_over(session_id, timeout_ms=timeout_ms)
 
 
 @mcp.tool()
 def debug_step_into(session_id: str, timeout_ms: int = 30000) -> dict:
     """Step into the current call."""
-    return debug_step_into(session_id, timeout_ms=timeout_ms)
+    return _dbg.debug_step_into(session_id, timeout_ms=timeout_ms)
 
 
 @mcp.tool()
 def debug_step_out(session_id: str, timeout_ms: int = 30000) -> dict:
     """Step out of the current frame."""
-    return debug_step_out(session_id, timeout_ms=timeout_ms)
+    return _dbg.debug_step_out(session_id, timeout_ms=timeout_ms)
 
 
 @mcp.tool()
 def debug_interrupt(session_id: str) -> dict:
     """Asynchronously break a running inferior (CTRL_BREAK_EVENT)."""
-    return debug_interrupt(session_id)
+    return _dbg.debug_interrupt(session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -332,19 +299,19 @@ def debug_interrupt(session_id: str) -> dict:
 @mcp.tool()
 def debug_stack_get(session_id: str) -> dict:
     """Get the current thread's call stack."""
-    return debug_stack_get(session_id)
+    return _dbg.debug_stack_get(session_id)
 
 
 @mcp.tool()
 def debug_frame_select(session_id: str, frame: int) -> dict:
     """Select a stack frame as the current context (for locals/eval)."""
-    return debug_frame_select(session_id, frame)
+    return _dbg.debug_frame_select(session_id, frame)
 
 
 @mcp.tool()
 def debug_scopes_get(session_id: str, name_filter: str = "") -> dict:
     """Get locals/arguments in the current frame."""
-    return debug_scopes_get(session_id, name_filter=name_filter)
+    return _dbg.debug_scopes_get(session_id, name_filter=name_filter)
 
 
 @mcp.tool()
@@ -355,31 +322,31 @@ def debug_expression_eval(
     thread_id: int | None = None,
 ) -> dict:
     """Evaluate a C++ expression in the current frame."""
-    return debug_expression_eval(session_id, expression, frame=frame, thread_id=thread_id)
+    return _dbg.debug_expression_eval(session_id, expression, frame=frame, thread_id=thread_id)
 
 
 @mcp.tool()
 def debug_memory_read(session_id: str, address: str, size: int, format: str = "bytes") -> dict:
     """Read a chunk of inferior memory."""
-    return debug_memory_read(session_id, address, size, format=format)
+    return _dbg.debug_memory_read(session_id, address, size, format=format)
 
 
 @mcp.tool()
 def debug_registers_get(session_id: str) -> dict:
     """Read CPU registers for the current thread."""
-    return debug_registers_get(session_id)
+    return _dbg.debug_registers_get(session_id)
 
 
 @mcp.tool()
 def debug_threads_get(session_id: str) -> dict:
     """List all threads in the inferior."""
-    return debug_threads_get(session_id)
+    return _dbg.debug_threads_get(session_id)
 
 
 @mcp.tool()
 def debug_thread_select(session_id: str, thread_id: int) -> dict:
     """Switch the current thread."""
-    return debug_thread_select(session_id, thread_id)
+    return _dbg.debug_thread_select(session_id, thread_id)
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +356,7 @@ def debug_thread_select(session_id: str, thread_id: int) -> dict:
 @mcp.tool()
 def debug_modules_get(session_id: str, filter_text: str = "") -> dict:
     """List loaded modules (exe + DLLs), optionally filtered."""
-    return debug_modules_get(session_id, filter_text=filter_text)
+    return _dbg.debug_modules_get(session_id, filter_text=filter_text)
 
 
 @mcp.tool()
@@ -402,7 +369,7 @@ def debug_pdb_resolve(
     build_dir: str = "",
 ) -> dict:
     """Resolve a symbol/file:line to an address via PDB (llvm-pdbutil fallback)."""
-    return debug_pdb_resolve(
+    return _dbg.debug_pdb_resolve(
         symbol=symbol,
         source_file=source_file,
         line=line,
@@ -420,7 +387,7 @@ def debug_crash_dump_analyze(
     timeout_ms: int = 120000,
 ) -> dict:
     """Post-mortem: analyze a saved .dmp via ``cdb -z`` (``k``, exception code)."""
-    return debug_crash_dump_analyze(
+    return _dbg.debug_crash_dump_analyze(
         dump_path,
         symbols=symbols,
         top_frames=top_frames,
@@ -431,7 +398,7 @@ def debug_crash_dump_analyze(
 @mcp.tool()
 def debug_heap_stat(session_id: str) -> dict:
     """Heap statistics for the inferior (per-heap usage)."""
-    return debug_heap_stat(session_id)
+    return _dbg.debug_heap_stat(session_id)
 
 
 @mcp.tool()
@@ -443,7 +410,7 @@ def debug_watchpoint_set(
     size: int = 4,
 ) -> dict:
     """Set a hardware data breakpoint (read / write / execute)."""
-    return debug_watchpoint_set(
+    return _dbg.debug_watchpoint_set(
         session_id,
         address=address,
         expression=expression,
@@ -455,7 +422,13 @@ def debug_watchpoint_set(
 @mcp.tool()
 def debug_process_find(name_query: str, limit: int = 20) -> dict:
     """Find running processes by name (for attach). Returns PIDs + match scores."""
-    return debug_process_find(name_query, limit=limit)
+    return _dbg.debug_process_find(name_query, limit=limit)
+
+
+@mcp.tool()
+def debug_process_terminate(process_id: int, expected_name: str) -> dict:
+    """Terminate a process by id, guarded by an exact image-name match."""
+    return _dbg.debug_process_terminate(process_id=process_id, expected_name=expected_name)
 
 
 if __name__ == "__main__":

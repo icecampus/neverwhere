@@ -597,37 +597,45 @@ def resolve_source_line_address(
     pdb_path = exe_path.with_suffix(".pdb")
     if not pdb_path.is_file():
         return None
-    modules_text = _run_pdbutil(["dump", "--modules", "--files", str(pdb_path)])
+    try:
+        modules_text = _run_pdbutil(["dump", "--modules", "--files", str(pdb_path)])
+    except RuntimeError:
+        # cdb can still bind a deferred source breakpoint through its own
+        # symbol reader when llvm-pdbutil rejects an otherwise debuggable PDB.
+        return None
     module_ids = _parse_pdb_modules_for_source(modules_text, source_file)
     if not module_ids:
         return None
 
-    sections = _parse_pe_sections(exe_path)
-    module_name = _derive_cdb_module_name(exe_path)
-    module_base = _runtime_module_base(session, module_name)
-    if module_base is None:
-        return None
+    try:
+        sections = _parse_pe_sections(exe_path)
+        module_name = _derive_cdb_module_name(exe_path)
+        module_base = _runtime_module_base(session, module_name)
+        if module_base is None:
+            return None
 
-    candidates: list[dict[str, Any]] = []
-    for module_id in module_ids:
-        lines_text = _run_pdbutil(["dump", "-l", f"--modi={module_id}", str(pdb_path)])
-        for section_index, offset in _parse_pdb_line_records(lines_text, source_file, line):
-            section_rva = sections.get(section_index)
-            if section_rva is None:
-                continue
-            rva = section_rva + offset
-            va = module_base + rva
-            candidates.append(
-                {
-                    "module_id": module_id,
-                    "section": section_index,
-                    "offset": offset,
-                    "rva": rva,
-                    "address": f"0x{va:016X}",
-                    "module_name": module_name,
-                    "pdb_path": str(pdb_path),
-                }
-            )
+        candidates: list[dict[str, Any]] = []
+        for module_id in module_ids:
+            lines_text = _run_pdbutil(["dump", "-l", f"--modi={module_id}", str(pdb_path)])
+            for section_index, offset in _parse_pdb_line_records(lines_text, source_file, line):
+                section_rva = sections.get(section_index)
+                if section_rva is None:
+                    continue
+                rva = section_rva + offset
+                va = module_base + rva
+                candidates.append(
+                    {
+                        "module_id": module_id,
+                        "section": section_index,
+                        "offset": offset,
+                        "rva": rva,
+                        "address": f"0x{va:016X}",
+                        "module_name": module_name,
+                        "pdb_path": str(pdb_path),
+                    }
+                )
+    except RuntimeError:
+        return None
     return candidates[0] if candidates else None
 
 
@@ -2925,11 +2933,11 @@ def debug_pdb_resolve(
     if source_file and line > 0:
         if pdb.is_file() and find_llvm_pdbutil():
             try:
-                modules_text = _run_pdbutil(["dump", "modules", "-p", str(pdb)])
+                modules_text = _run_pdbutil(["dump", "--modules", "--files", str(pdb)])
                 module_ids = _parse_pdb_modules_for_source(modules_text, source_file)
                 line_records: list[dict[str, Any]] = []
                 for module_id in module_ids:
-                    lines_text = _run_pdbutil(["dump", "lines", "-p", str(pdb), "-m", str(module_id)])
+                    lines_text = _run_pdbutil(["dump", "-l", f"--modi={module_id}", str(pdb)])
                     for section_index, offset in _parse_pdb_line_records(lines_text, source_file, line):
                         line_records.append(
                             {
@@ -3128,7 +3136,7 @@ def debug_process_find(name_query: str, *, limit: int = 20) -> dict[str, Any]:
                 "invalid_input",
                 "name_query must be non-empty",
                 recoverable=True,
-                suggested_next_actions=["Pass a process name fragment such as DescTest or AppMetricaEvents."],
+                suggested_next_actions=["Pass a process name fragment such as EpicMapEditor or MeshGenerationPlayground."],
             ),
         )
     try:
@@ -3156,6 +3164,87 @@ def debug_process_find(name_query: str, *, limit: int = 20) -> dict[str, Any]:
             "matches": matches,
             "match_count": len(matches),
         },
+    )
+
+
+def debug_process_terminate(*, process_id: int, expected_name: str) -> dict[str, Any]:
+    expected_normalized = _normalize_process_name(expected_name)
+    if process_id <= 0 or not expected_normalized:
+        return _envelope(
+            ok=False,
+            session_id=None,
+            state=None,
+            summary="Process id and exact expected name are required",
+            error=_error(
+                "invalid_input",
+                "process_id must be positive and expected_name must be non-empty",
+                recoverable=True,
+                suggested_next_actions=[
+                    "Call debug_process_find to obtain a process id and exact image name.",
+                ],
+            ),
+        )
+    try:
+        process = next(
+            (item for item in _list_processes() if int(item["process_id"]) == process_id),
+            None,
+        )
+    except Exception as exc:
+        return _envelope(
+            ok=False,
+            session_id=None,
+            state=None,
+            summary="Unable to inspect target process",
+            error=_error("process_query_failed", str(exc), recoverable=True),
+        )
+    if process is None:
+        return _envelope(
+            ok=False,
+            session_id=None,
+            state=None,
+            summary="Target process is no longer running",
+            error=_error(
+                "process_not_found",
+                f"No process with id {process_id}",
+                recoverable=True,
+                suggested_next_actions=["Call debug_process_find again before retrying."],
+            ),
+        )
+    if process["process_name_normalized"] != expected_normalized:
+        return _envelope(
+            ok=False,
+            session_id=None,
+            state=None,
+            summary="Target process name did not match",
+            error=_error(
+                "process_name_mismatch",
+                f"Process {process_id} is '{process['process_name']}', not '{expected_name}'",
+                recoverable=False,
+            ),
+            data={"process": process},
+        )
+
+    terminated = _kill_process_tree(process_id)
+    if not terminated or _process_exists(process_id):
+        return _envelope(
+            ok=False,
+            session_id=None,
+            state=None,
+            summary="Failed to terminate target process",
+            error=_error(
+                "terminate_failed",
+                f"Unable to terminate process {process_id} ({process['process_name']})",
+                recoverable=True,
+                suggested_next_actions=["Check whether another debugger or elevated process owns the target."],
+            ),
+            data={"process": process, "terminated": terminated},
+        )
+    return _envelope(
+        ok=True,
+        session_id=None,
+        state=None,
+        summary="Terminated target process",
+        data={"process": process, "terminated": True},
     )
 
 

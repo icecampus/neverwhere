@@ -12,7 +12,8 @@ class EditorSceneRegistry;
 
 // Raw TCP + line-delimited JSON RPC server for editor automation.
 //
-// Listens on 127.0.0.1:9876 by default. Each request is one line of JSON
+// Listens on 127.0.0.1:9877 by default (9876 is taken by the blender MCP
+// SSE endpoint, see .mcp.json). Each request is one line of JSON
 // terminated by '\n'; each response is one JSON line terminated by '\n'.
 // Commands run on the GUI thread (QTcpServer is created there), so they
 // may safely touch QObject/QML state directly.
@@ -27,7 +28,7 @@ public:
     EditorRpcServer(CoreContext* core, EditorSceneRegistry* registry, QObject* parent = nullptr);
 
     // Returns false (and logs a warning) if the port is already in use.
-    bool start(const QHostAddress& addr = QHostAddress::LocalHost, quint16 port = 9876);
+    bool start(const QHostAddress& addr = QHostAddress::LocalHost, quint16 port = 9877);
 
 signals:
     // Emitted by the load_chapter command; MainWindow.qml opens a Workspace tab.

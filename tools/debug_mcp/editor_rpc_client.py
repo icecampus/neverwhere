@@ -1,6 +1,6 @@
 """Thin Python client for the EpicMapEditor RPC server (raw TCP + line-JSON).
 
-The editor listens on 127.0.0.1:9876 by default. Each request is one JSON
+The editor listens on 127.0.0.1:9877 by default. Each request is one JSON
 object terminated by '\\n'; each response is one JSON object terminated by '\\n'.
 
 Usage:
@@ -27,7 +27,7 @@ class EditorRpcError(RuntimeError):
 
 
 class EditorRpcClient:
-    def __init__(self, host: str = "127.0.0.1", port: int = 9876, timeout: float = 10.0):
+    def __init__(self, host: str = "127.0.0.1", port: int = 9877, timeout: float = 10.0):
         self.sock = socket.create_connection((host, port), timeout=timeout)
         self.sock.settimeout(timeout)
         self._buf = b""

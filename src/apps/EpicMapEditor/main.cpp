@@ -152,7 +152,7 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
     engine.rootContext()->setContextProperty("core", coreContext);
 
     // Editor automation: registry bridges QML scene objects to C++,
-    // RPC server exposes them over TCP on 127.0.0.1:9876.
+    // RPC server exposes them over TCP on 127.0.0.1:9877.
     auto sceneRegistry = new EditorSceneRegistry(&engine);
     engine.rootContext()->setContextProperty("sceneRegistry", sceneRegistry);
 
@@ -160,7 +160,7 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
     engine.rootContext()->setContextProperty("rpcServer", rpcServer);
     if (!rpcServer->start())
     {
-        qWarning() << "Editor RPC server failed to start on 127.0.0.1:9876";
+        qWarning() << "Editor RPC server failed to start on 127.0.0.1:9877";
     }
 }
 
