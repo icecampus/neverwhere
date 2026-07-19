@@ -1,7 +1,7 @@
 if(MSVC)
 	nw_add_lib(
 		GROUP 
-			libs 
+			libs/editor 
 		LIBS 
 		 	Boost::lexical_cast
 			magic_enum::magic_enum 
@@ -20,7 +20,7 @@ if(MSVC)
 else()
 	nw_add_lib(
 		GROUP 
-			libs 
+			libs/editor 
 		LIBS 
 		 	Boost::lexical_cast
 			magic_enum::magic_enum 

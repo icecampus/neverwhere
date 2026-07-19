@@ -3,7 +3,7 @@ if(EMSCRIPTEN)
 		NAME
 			ui
 		GROUP 
-			libs 
+			libs/editor 
 		SOURCES 
 			lib.h
 			tabs_model.h
@@ -19,7 +19,7 @@ elseif(MSVC)
 		NAME
 			ui
 		GROUP 
-			libs 
+			libs/editor 
 		SOURCES 
 			lib.h
 			main_window.h
@@ -38,7 +38,7 @@ else()
 		NAME
 			ui
 		GROUP 
-			libs 
+			libs/editor 
 		SOURCES 
 			lib.h
 			main_window.h

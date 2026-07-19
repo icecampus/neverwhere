@@ -4,7 +4,7 @@ find_package(glm CONFIG REQUIRED)
 
 nw_add_lib_sources(
     NAME game_data
-    GROUP libs
+    GROUP libs/common
     SOURCES
         pch.h
         include/game_data/types.h

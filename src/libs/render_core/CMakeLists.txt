@@ -14,7 +14,7 @@ endif()
 
 nw_add_lib_sources(
     NAME render_core
-    GROUP libs
+    GROUP libs/common
     SOURCES
         pch.h
         include/render_core/sokol_config.h

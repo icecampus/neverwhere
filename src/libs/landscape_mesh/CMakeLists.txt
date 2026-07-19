@@ -2,7 +2,7 @@ find_package(FastNoise2 CONFIG REQUIRED)
 
 nw_add_lib_sources(
     NAME landscape_mesh
-    GROUP libs
+    GROUP libs/client
     SOURCES
         pch.h
         include/landscape_mesh/landscape_mesh.h

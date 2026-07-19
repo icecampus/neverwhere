@@ -4,7 +4,7 @@ find_package(spdlog CONFIG REQUIRED)
 
 nw_add_lib_sources(
     NAME game_runtime
-    GROUP libs
+    GROUP libs/common
     SOURCES
         pch.h
         include/game_runtime/game_types.h

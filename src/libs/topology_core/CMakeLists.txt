@@ -2,7 +2,7 @@ find_package(glm CONFIG REQUIRED)
 
 nw_add_lib_sources(
     NAME topology_core
-    GROUP libs
+    GROUP libs/common
     SOURCES
         pch.h
         include/topology_core/staggered_isometry.h

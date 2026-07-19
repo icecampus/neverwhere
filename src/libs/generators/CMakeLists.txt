@@ -1,6 +1,6 @@
 nw_add_lib(
 	GROUP 
-		libs 
+		libs/editor 
 	LIBS 
 		magic_enum::magic_enum 
 		Qt6::Core

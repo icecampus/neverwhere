@@ -1,6 +1,6 @@
 nw_add_lib(
 	GROUP 
-		libs 
+		libs/editor 
 	LIBS 
 		Boost::container_hash
 		magic_enum::magic_enum 

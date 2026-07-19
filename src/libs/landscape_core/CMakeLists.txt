@@ -1,6 +1,6 @@
 nw_add_lib_sources(
     NAME landscape_core
-    GROUP libs
+    GROUP libs/client
     SOURCES
         pch.h
         include/landscape_core/landscape_logic.h
