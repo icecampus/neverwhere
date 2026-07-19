@@ -1,11 +1,16 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls 2.15
 import Game 1.0
 import "Workspace"
 
  SplitView 
 {
+    id: workspace
+
     property var chapter: null
+
+    // Play-test: forwarded from MapView's PlayControl up to MainWindow.
+    signal playRequested(var chapter, real camX, real camY, real camZoom)
 
     function load(data)
     {
@@ -45,6 +50,15 @@ import "Workspace"
         border.color: colorPalette.border // Граница (#404040)
 
         assetsContext: assetsContext
+        chapter: workspace.chapter
+
+        onPlayRequested: (ch, camX, camY, camZoom) =>
+        {
+            // MUST be qualified: MapView has its own playRequested signal, and
+            // an unqualified call re-emits THAT (infinite signal loop, the
+            // click dies there). We need the Workspace-level signal instead.
+            workspace.playRequested(ch, camX, camY, camZoom)
+        }
     }
 
     RightPanel 

@@ -181,7 +181,15 @@ spdlog — стандартный логгер для приложений/би�
 - **EpicGameClient (Standalone):** shell без Qt (`sokol_app`, D3D11) + debug UI на ImGui.
 - **EpicMapEditor (Qt):** shell на QtQuick — `MapRenderItem` (QQuickFramebufferObject,
   GLCORE) + QML overlay (панели, тулзы, индикаторы). Карта рисуется тем же
-  `WorldRenderer`, что в клиенте; мост Qt-моделей — `map_frame_bridge`.
+  `WorldRenderer`, что в клиенте.
+
+**Источники кадра `MapFrameSource` `[есть]`:** `MapRenderItem` не привязан к
+моделям — мировые данные даёт втыкаемый источник (`buildWorldFrame`/
+`ensureFrameAssets`/`tick`, `src/apps/EpicMapEditor/src/frame_source.h`):
+- `ModelFrameSource` — редакторская вкладка (Qt-модели карты, живые правки);
+- `RuntimeFrameSource` — игровая Play-Test вкладка (изолированный
+  `game_runtime::Runtime` + сессия из `Fixture`, мок-профиль `newGame()`).
+Сбор кадра из `game_data::Map` общий с клиентом — `render_core/world_frame_builder`.
 
 **Общее ядро `[есть]`:** `src/libs/render_core` — `WorldRenderer` (фасад),
 `LandscapeRenderer` (тайлы из атласов), `SpriteRenderer` (Tile2D), `OverlayRenderer`
@@ -196,9 +204,23 @@ FBO редактора — NONE).
 `graphics_shell_sokolapp` — не требуется, ядро живёт в `render_core`,
 шеллы — inline в приложениях.
 
-## Play-Test Host + Fixtures (Editor → Runtime) `[заготовка]`
-- Редактор запускает рантайм на текущей карте/главе без «полной игры», но рантайм должен
-  получать всё, что нужно для логики.
-- Текущий подход — `game_runtime::Fixture` (декларативное описание начального состояния
-  мира: карта, персонажи, инвентари, квесты, время). Билдер и (де)сериализация реализованы.
+## Play-Test Host + Fixtures (Editor → Runtime) `[в работе]`
+- Реализовано игровой вкладкой в редакторе (`TabType.Game`, `qml/GameTab.qml`):
+  кнопка ▶ на канвасе (`PlayControl`) → `TabContentCreator.playChapter` → изолированный
+  `game_runtime::Runtime` + сессия из `Fixture` (`newGame()`-мок). Одна вкладка на
+  главу (дедуп по имени «▶ <глава>»), повторный Play = перезапуск (канал `extraData`
+  с nonce → `RuntimeFrameSource.restart()`). Тик — из `synchronize()` рендер-итема
+  (игра на паузе, когда вкладка скрыта). RPC-оп `play` для автоматизации.
+- Текущий подход к данным — `game_runtime::Fixture` (декларативное описание начального
+  состояния мира: карта, персонажи, инвентари, квесты, время). Билдер и
+  (де)сериализация реализованы. Управление моками профиля — следующий шаг.
 - Целевые интерфейсы `IProfileStore` / `IInventoryStore` / `ISaveGameStore` — пока концепт.
+
+## Известные проблемы
+- **Геометрия окна редактора на High-DPI:** кастомная рамка `EpicEditorWindow`
+  (`src/libs/ui/main_window.cpp`) перехватывает `WM_NCCALCSIZE`/`WM_GETMINMAXINFO`,
+  а `WM_SIZE` раньше глотался на смене maximize → `QWindow::geometry` и QML-контент
+  застревали на декларированных 1920x1080 независимо от реального размера окна
+  (правая часть уезжала за экран: `RightPanel`, правые оверлеи). Частично исправлено
+  (WM_SIZE больше не глотается), но максимизация по-прежнему работает нестандартно —
+  отдельная задача по переработке рамки окна.

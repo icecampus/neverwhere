@@ -20,6 +20,7 @@
 #include <topology_core/diamond_isometry.h>
 
 #include <render_core/world_renderer.h>
+#include <render_core/world_frame_builder.h>
 
 // Sokol (implementation)
 #define SOKOL_IMPL
@@ -117,63 +118,15 @@ static std::filesystem::path getExecutableDir() {
 }
 #endif
 
-// Pure data: map objects -> render lists. Layer order follows the editor:
-// BaseLandscape first, then Decoration and GameplayInteractive sprites on top.
-static void collectWorldFrame(const game_data::Map& map, render_core::WorldFrame& frame) {
-    frame.landscapeTiles.clear();
-    frame.sprites.clear();
-
-    for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
-        if (obj.type != game_data::GameObjectType::Landscape) continue;
-        if (!obj.landscapeData) continue;
-
-        render_core::LandscapeTile t;
-        t.cell = obj.position;
-        t.assetUuid = obj.assetUuid;
-        t.tileIndex = obj.landscapeData->tileIndex;
-        frame.landscapeTiles.push_back(std::move(t));
-    }
-
-    for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
-        for (const auto& obj : map.layer(layerType)) {
-            if (obj.type == game_data::GameObjectType::Landscape) continue;
-
-            render_core::SpriteInstance s;
-            s.cell = obj.position;
-            s.assetUuid = obj.assetUuid;
-            frame.sprites.push_back(std::move(s));
-        }
-    }
-}
-
-// GPU: upload textures for all assets referenced by the frame.
-static void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const render_core::WorldFrame& frame) {
-    std::unordered_set<std::string> uniqueAssets;
-    for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
-    for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
-
-    for (const auto& uuid : uniqueAssets) {
-        const game_data::AssetIndexEntry* entry = assetIndex.find(uuid);
-        if (!entry) {
-            spdlog::warn("Asset not found for assetUuid={}", uuid);
-            continue;
-        }
-        if (entry->isSlice()) {
-            g_worldRenderer.ensureLandscapeAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
-        }
-        if (entry->isImage()) {
-            g_worldRenderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);
-        }
-    }
-}
-
+// Pure data + GPU upload live in render_core/world_frame_builder (shared with
+// the editor's play-test tab).
 static void rebuildWorld() {
     if (!g_runtime || !g_runtime->currentSession()) return;
     const game_data::Map* map = g_runtime->currentSession()->world().map();
     if (!map) return;
 
-    collectWorldFrame(*map, g_frame);
-    ensureWorldAssets(g_assetIndex, g_frame);
+    render_core::collectWorldFrame(*map, g_frame);
+    render_core::ensureWorldAssets(g_assetIndex, g_frame, g_worldRenderer);
 
     spdlog::info("World collected: {} landscape tiles, {} sprites",
         g_frame.landscapeTiles.size(), g_frame.sprites.size());
@@ -411,7 +364,7 @@ static int runSmokeTest(const std::filesystem::path& mapPath, const std::filesys
     }
 
     render_core::WorldFrame frame;
-    collectWorldFrame(map, frame);
+    render_core::collectWorldFrame(map, frame);
     check(!frame.landscapeTiles.empty(), "map has landscape tiles");
     check(!frame.sprites.empty(), "map has Tile2D sprites");
 

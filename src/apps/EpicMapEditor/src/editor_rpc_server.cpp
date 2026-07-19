@@ -90,6 +90,7 @@ QByteArray EditorRpcServer::_dispatch(const QJsonObject& req)
     if (op == "status")          return _cmdStatus(args);
     if (op == "list_chapters")   return _cmdListChapters(args);
     if (op == "load_chapter")    return _cmdLoadChapter(args);
+    if (op == "play")            return _cmdPlay(args);
     if (op == "list_assets")     return _cmdListAssets(args);
     if (op == "select_asset")    return _cmdSelectAsset(args);
     if (op == "select_tool")     return _cmdSelectTool(args);
@@ -198,6 +199,29 @@ QByteArray EditorRpcServer::_cmdLoadChapter(const QJsonObject& args)
     d["name"] = ch->name();
     d["uuid"] = ch->getUuid().toString(QUuid::WithoutBraces);
     d["hint"] = QStringLiteral("poll 'status' until map_loaded=true");
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdPlay(const QJsonObject& args)
+{
+    QString name = args.value("name").toString().trimmed();
+    if (name.isEmpty())
+        return _error("invalid_input", "name is required");
+
+    ChaptersModel* model = m_core ? m_core->getChaptersModel() : nullptr;
+    if (!model)
+        return _error("no_chapters_model", "chapters model not available");
+
+    Chapter* ch = findChapterByName(model, name);
+    if (!ch)
+        return _error("not_found", "chapter not found: " + name);
+
+    // Ask MainWindow.qml to open (or restart) the play-test tab for the chapter.
+    emit playChapterRequested(ch->name(), ch->getUuid().toString(QUuid::WithoutBraces));
+
+    QJsonObject d;
+    d["name"] = ch->name();
+    d["uuid"] = ch->getUuid().toString(QUuid::WithoutBraces);
     return _ok(d);
 }
 

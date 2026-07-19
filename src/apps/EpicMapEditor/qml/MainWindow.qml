@@ -1,4 +1,4 @@
-﻿import QtQuick 2.15
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 import Qt.labs.qmlmodels
@@ -40,6 +40,10 @@ Item
         function onLoadChapterRequested(name, uuid)
         {
             tabsContentCreator.openChapterByUuid(name, uuid)
+        }
+        function onPlayChapterRequested(name, uuid)
+        {
+            tabsContentCreator.playChapter(name, uuid, undefined, undefined, undefined)
         }
     }
 
@@ -122,6 +126,34 @@ Item
                             element.item.parent = worspaceWrapper
                             element.item.anchors.fill = worspaceWrapper
                             element.item.load(element.data)
+
+                            // Play-control on the map canvas -> open/restart the game tab.
+                            element.item.playRequested.connect(function (chapter, camX, camY, camZoom)
+                            {
+                                tabsContentCreator.playChapter(chapter.name, chapter.uuid, camX, camY, camZoom)
+                            })
+                        }
+                    }
+                }
+                DelegateChoice
+                {
+                    roleValue: TabType.Game
+                    delegate: Rectangle
+                    {
+                        id: gameWrapper
+                        color: "black"
+                        Component.onCompleted:
+                        {
+                            element.item.parent = gameWrapper
+                            element.item.anchors.fill = gameWrapper
+                            element.item.load(element.data, element.extraData)
+
+                            // Repeated Play on an already open game tab pushes
+                            // fresh extraData -> restart the session.
+                            element.extraDataChanged.connect(function ()
+                            {
+                                element.item.applyExtraData(element.extraData)
+                            })
                         }
                     }
                 }

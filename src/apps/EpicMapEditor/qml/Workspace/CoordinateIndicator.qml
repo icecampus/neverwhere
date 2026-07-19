@@ -12,9 +12,9 @@ Item
     {
         id: background
         anchors.fill: parent
-        color: colorPalette.surface2 // Используем цвет фона из палитры
-        opacity: 0.7 // Полупрозрачность
-        radius: 5 // Скругленные углы
+        color: colorPalette.surface2 // РСЃРїРѕР»СЊР·СѓРµРј С†РІРµС‚ С„РѕРЅР° РёР· РїР°Р»РёС‚СЂС‹
+        opacity: 0.7 // РџРѕР»СѓРїСЂРѕР·СЂР°С‡РЅРѕСЃС‚СЊ
+        radius: 5 // РЎРєСЂСѓРіР»РµРЅРЅС‹Рµ СѓРіР»С‹
     }
         
     Image
@@ -35,18 +35,12 @@ Item
         anchors.left: icon.right
         anchors.leftMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        color: colorPalette.textPrimary // Цвет текста из палитры
+        color: colorPalette.textPrimary // Р¦РІРµС‚ С‚РµРєСЃС‚Р° РёР· РїР°Р»РёС‚СЂС‹
         font.pixelSize: 16
         text: showCoordinates ? "(" + hoveredCell.x + ", " + hoveredCell.y + ")" : ""
     }
         
-    Glow 
-    {
-        anchors.fill: coordinateText
-        radius: 3
-        samples: 17
-        color: colorPalette.neonOrange // Свечение из палитры
-        source: coordinateText
-        visible: showCoordinates
-    }
+    // Glow (Qt5Compat.GraphicalEffects) removed: shader-effect items broke
+    // rendering of the whole overlay on the current GL/RHI path.
+    // The plain text stays readable on the translucent plate.
 }

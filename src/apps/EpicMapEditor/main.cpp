@@ -17,13 +17,16 @@
 #include <filesystem>
 
 // Qt's `slots` macro breaks Sokol internals which use a field with that name
-// (the bridge header pulls sokol through render_core).
+// (render_core headers pull sokol).
 #ifdef slots
 #undef slots
 #endif
 
+#include <render_core/world_renderer.h>
+
 #include "src/map_render_item.h"
-#include "src/map_frame_bridge.h"
+#include "src/model_frame_source.h"
+#include "src/runtime_frame_source.h"
 
 static QFile* g_logFile = nullptr;
 
@@ -107,6 +110,10 @@ void registreTypes()
     // FBO-based map view on the shared sokol WorldRenderer (replaces the old
     // QML tile delegates, QSG DiamondGrid/DiamondCursor and RuntimeMapView).
     qmlRegisterType<MapRenderItem>("Game", 1, 0, "MapRenderItem");
+
+    // Frame sources for MapRenderItem: editor models / game runtime.
+    qmlRegisterType<ModelFrameSource>("Game", 1, 0, "ModelFrameSource");
+    qmlRegisterType<RuntimeFrameSource>("Game", 1, 0, "RuntimeFrameSource");
 
     qmlRegisterType<PropertyContainersModel>("Game", 1, 0, "PropertyContainersModel");
 
@@ -224,8 +231,11 @@ static int runSmokeTest()
     MapModel mapModel;
     mapModel.load(QString::fromStdString(mapPath.string()));
 
+    ModelFrameSource source;
+    source.setMapModel(&mapModel);
+
     render_core::WorldFrame frame;
-    map_frame_bridge::buildWorldFrame(mapModel, frame);
+    source.buildWorldFrame(frame);
     check(!frame.landscapeTiles.empty(), "map has landscape tiles");
     check(!frame.sprites.empty(), "map has Tile2D sprites");
 

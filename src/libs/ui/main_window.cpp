@@ -78,12 +78,15 @@ bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, q
 	{
         case WM_SIZE:
         {
-	        if (const auto maximized = msg->wParam == SIZE_MAXIMIZED; maximized != _maximized)
-	        {
+            // Refresh the custom frame on maximize/restore, but NEVER consume
+            // the event: swallowing WM_SIZE here kept QWindow::geometry stale
+            // (QML content stuck at the declared 1920x1080 while the OS window
+            // had another size — everything right-anchored went off-screen).
+            if (const auto maximized = msg->wParam == SIZE_MAXIMIZED; maximized != _maximized)
+            {
 		        _maximized = maximized;
 		        HWND hWnd = (HWND)winId();
 		        SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
-                return true;
 	        }
 	        break;
         }

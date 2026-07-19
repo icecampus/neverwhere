@@ -30,11 +30,15 @@ nw_add_lib_sources(
         src/overlay_renderer.cpp
         include/render_core/world_renderer.h
         src/world_renderer.cpp
+        include/render_core/world_frame_builder.h
+        src/world_frame_builder.cpp
         include/render_core/mesh_preview_renderer.h
         src/mesh_preview_renderer.cpp
     LIBS
         glm::glm-header-only
         topology_core
+        game_data
+        spdlog::spdlog_header_only
 )
 
 target_include_directories(render_core

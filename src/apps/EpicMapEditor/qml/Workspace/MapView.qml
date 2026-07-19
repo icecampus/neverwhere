@@ -6,11 +6,16 @@ import "MapView"
 Rectangle
 {
     property var assetsContext: null
+    property var chapter: null
     property var hoveredCell: math.ivec2(1, 1)
     property bool showCoordinates: true
     property alias model: mapModel
     property alias isoView: isoView
     property alias toolsSelector: toolsSelector
+
+    // Play-test: emitted by the PlayControl overlay; Workspace forwards it
+    // up to MainWindow, which opens (or restarts) the game tab.
+    signal playRequested(var chapter, real camX, real camY, real camZoom)
 
     function load(path)
     {
@@ -45,13 +50,19 @@ Rectangle
     // Unified map rendering: the same sokol WorldRenderer the game client
     // uses, drawn into an FBO item. Camera stays on the shared isoView so
     // tools/RPC keep their single screenToMap source of truth.
+    ModelFrameSource
+    {
+        id: modelSource
+        mapModel: mapModel
+        assetsLibrary: core.assetsLibrary
+    }
+
     MapRenderItem
     {
         id: mapRenderItem
         anchors.fill: parent
 
-        mapModel: mapModel
-        assetsLibrary: core.assetsLibrary
+        frameSource: modelSource
 
         cameraX: isoView.cameraX
         cameraY: isoView.cameraY
@@ -92,11 +103,23 @@ Rectangle
         height: 30
     }
 
+    // Play-test: open/restart the game tab for this chapter (top-left overlay).
+    PlayControl
+    {
+        id: playControl
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: 10
+
+        onPlayClicked: playRequested(chapter, isoView.cameraX, isoView.cameraY, isoView.cameraZoom)
+    }
+
     Tools
     {
         anchors.top: parent.top
         anchors.left: parent.left
-        anchors.margins: 10
+        anchors.leftMargin: 10
+        anchors.topMargin: 10 + playControl.height + 10
 
         toolsModel: toolsSelector.toolsModel
         onToolClicked:(index) =>

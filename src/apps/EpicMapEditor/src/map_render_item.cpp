@@ -20,7 +20,8 @@
 #include <atomic>
 #include <mutex>
 
-#include "map_frame_bridge.h"
+#include <render_core/world_renderer.h>
+
 #include "water_background.h"
 
 namespace {
@@ -70,24 +71,26 @@ public:
 
     void synchronize(QQuickFramebufferObject* item) override {
         auto* mapItem = static_cast<MapRenderItem*>(item);
-        // Qt blocks the GUI thread during synchronize — safe to read the models.
+        // Qt blocks the GUI thread during synchronize — safe to read the models
+        // and to tick the source (game logic) right here.
         m_cameraOffset = {mapItem->cameraX(), mapItem->cameraY()};
         m_cameraZoom = mapItem->cameraZoom();
         m_cursorCell = mapItem->cursorCell();
         m_showGrid = mapItem->showGrid();
-        m_assetsLibrary = mapItem->assetsLibrary();
+        m_frameSource = mapItem->frameSource();
+
+        if (m_frameSource) {
+            m_frameSource->tick();
+            m_frameSource->buildWorldFrame(m_frame);
+        } else {
+            m_frame.landscapeTiles.clear();
+            m_frame.sprites.clear();
+        }
 
         // QML coordinates (mouse, camera, isoView) are logical pixels;
         // capture the item's logical size for DPI-correct rendering.
         m_logicalWidth = (float)mapItem->width();
         m_logicalHeight = (float)mapItem->height();
-
-        if (MapModel* model = mapItem->mapModel()) {
-            map_frame_bridge::buildWorldFrame(*model, m_frame);
-        } else {
-            m_frame.landscapeTiles.clear();
-            m_frame.sprites.clear();
-        }
     }
 
     void render() override {
@@ -119,7 +122,11 @@ public:
         }
 
         QOpenGLFramebufferObject* fbo = framebufferObject();
-        if (fbo && (fbo->size().width() != m_width || fbo->size().height() != m_height || m_colorAttView.id == SG_INVALID_ID)) {
+        // Re-wrap when the FBO changes size OR when Qt reallocates its texture
+        // (hidden tabs get their FBO freed and recreated with a new texture id;
+        // a stale wrapped texture made one tab's render land in another tab's FBO).
+        if (fbo && (fbo->size().width() != m_width || fbo->size().height() != m_height
+                    || fbo->texture() != m_wrappedTexture || m_colorAttView.id == SG_INVALID_ID)) {
             updatePass(fbo);
         }
         if (m_colorAttView.id == SG_INVALID_ID) {
@@ -129,8 +136,8 @@ public:
         m_frame.showGrid = m_showGrid;
         m_frame.cursorCell = glm::ivec2(m_cursorCell.x(), m_cursorCell.y());
 
-        if (m_assetsLibrary) {
-            map_frame_bridge::ensureFrameAssets(*m_assetsLibrary, m_frame, m_worldRenderer);
+        if (m_frameSource) {
+            m_frameSource->ensureFrameAssets(m_frame, m_worldRenderer);
         }
 
         sg_pass_action action = {};
@@ -192,6 +199,7 @@ private:
 
         m_width = fbo->size().width();
         m_height = fbo->size().height();
+        m_wrappedTexture = fbo->texture();
 
         // Wrap the Qt FBO color texture as a sokol image (EcsPlayground pattern).
         sg_image_desc color_desc = {};
@@ -201,7 +209,7 @@ private:
         // Qt FBO color textures are GL_RGBA8.
         color_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
         color_desc.gl_texture_target = GL_TEXTURE_2D; // required!
-        color_desc.gl_textures[0] = fbo->texture();
+        color_desc.gl_textures[0] = m_wrappedTexture;
         m_passImg = sg_make_image(&color_desc);
 
         sg_view_desc view_desc = {};
@@ -211,6 +219,7 @@ private:
 
     int m_width = 0;
     int m_height = 0;
+    GLuint m_wrappedTexture = 0;
     sg_image m_passImg{SG_INVALID_ID};
     sg_view m_colorAttView{SG_INVALID_ID};
 
@@ -227,7 +236,7 @@ private:
     bool m_showGrid = true;
     float m_logicalWidth = 0.0f;
     float m_logicalHeight = 0.0f;
-    AssetsLibraryModel* m_assetsLibrary = nullptr;
+    MapFrameSource* m_frameSource = nullptr;
 };
 
 } // namespace
@@ -251,17 +260,10 @@ QQuickFramebufferObject::Renderer* MapRenderItem::createRenderer() const {
     return new MapRenderItemRenderer();
 }
 
-void MapRenderItem::setMapModel(MapModel* model) {
-    if (m_mapModel == model) return;
-    m_mapModel = model;
-    emit mapModelChanged();
-    update();
-}
-
-void MapRenderItem::setAssetsLibrary(AssetsLibraryModel* library) {
-    if (m_assetsLibrary == library) return;
-    m_assetsLibrary = library;
-    emit assetsLibraryChanged();
+void MapRenderItem::setFrameSource(MapFrameSource* source) {
+    if (m_frameSource == source) return;
+    m_frameSource = source;
+    emit frameSourceChanged();
     update();
 }
 

@@ -1,5 +1,12 @@
 #include "pch.h"
-#include "map_frame_bridge.h"
+#include "model_frame_source.h"
+
+// Qt's `slots` macro breaks Sokol internals which use a field with that name.
+#ifdef slots
+#undef slots
+#endif
+
+#include <render_core/world_renderer.h>
 
 #include <unordered_set>
 
@@ -7,19 +14,17 @@
 
 #include <QUuid>
 
-#include "core/map/map_model.h"
 #include "core/game_object.h"
-#include "core/assets_library/assets_library_model.h"
 #include "core/assets_library/asset.h"
 
-namespace map_frame_bridge {
-
-void buildWorldFrame(MapModel& mapModel, render_core::WorldFrame& outFrame) {
+void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.landscapeTiles.clear();
     outFrame.sprites.clear();
 
+    if (!m_mapModel) return;
+
     // BaseLandscape layer -> landscape tiles (same order as the game client).
-    if (LayerModel* layer = mapModel.layer(LayerTypes::BaseLandscape)) {
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::BaseLandscape)) {
         layer->iterate([&outFrame](GameObject& obj) {
             const BaseData::GameObject data = obj.getData();
             if (data.type != GameObjectTypes::Landscape || !data.landscapeData) return;
@@ -34,7 +39,7 @@ void buildWorldFrame(MapModel& mapModel, render_core::WorldFrame& outFrame) {
 
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
-        LayerModel* layer = mapModel.layer(layerType);
+        LayerModel* layer = m_mapModel->layer(layerType);
         if (!layer) continue;
 
         layer->iterate([&outFrame](GameObject& obj) {
@@ -49,13 +54,15 @@ void buildWorldFrame(MapModel& mapModel, render_core::WorldFrame& outFrame) {
     }
 }
 
-void ensureFrameAssets(AssetsLibraryModel& assetsLibrary, const render_core::WorldFrame& frame, render_core::WorldRenderer& renderer) {
+void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, render_core::WorldRenderer& renderer) {
+    if (!m_assetsLibrary) return;
+
     std::unordered_set<std::string> uniqueAssets;
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
-        Asset* asset = assetsLibrary.getAsset(QUuid::fromString(QString::fromStdString(uuid)));
+        Asset* asset = m_assetsLibrary->getAsset(QUuid::fromString(QString::fromStdString(uuid)));
         if (!asset) continue;
 
         const BaseData::AssetData& data = asset->getData();
@@ -70,4 +77,14 @@ void ensureFrameAssets(AssetsLibraryModel& assetsLibrary, const render_core::Wor
     }
 }
 
-} // namespace map_frame_bridge
+void ModelFrameSource::setMapModel(MapModel* model) {
+    if (m_mapModel == model) return;
+    m_mapModel = model;
+    emit mapModelChanged();
+}
+
+void ModelFrameSource::setAssetsLibrary(AssetsLibraryModel* library) {
+    if (m_assetsLibrary == library) return;
+    m_assetsLibrary = library;
+    emit assetsLibraryChanged();
+}

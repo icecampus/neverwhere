@@ -33,6 +33,8 @@ public:
 signals:
     // Emitted by the load_chapter command; MainWindow.qml opens a Workspace tab.
     void loadChapterRequested(const QString& name, const QString& uuid);
+    // Emitted by the play command; MainWindow.qml opens/restarts a Game tab.
+    void playChapterRequested(const QString& name, const QString& uuid);
 
 private slots:
     void _onNewConnection();
@@ -50,6 +52,7 @@ private:
     QByteArray _cmdStatus(const QJsonObject& args);
     QByteArray _cmdListChapters(const QJsonObject& args);
     QByteArray _cmdLoadChapter(const QJsonObject& args);
+    QByteArray _cmdPlay(const QJsonObject& args);
     QByteArray _cmdListAssets(const QJsonObject& args);
     QByteArray _cmdSelectAsset(const QJsonObject& args);
     QByteArray _cmdSelectTool(const QJsonObject& args);

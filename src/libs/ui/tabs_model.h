@@ -14,6 +14,7 @@ namespace TabType
     {
         Home,
         Workspace,
+        Game,   // play-test tab: isolated game runtime on a chapter's map
     };
     Q_ENUM_NS(Type);
 } // namespace TabType
