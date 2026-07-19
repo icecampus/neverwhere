@@ -22,7 +22,10 @@ struct LandscapeTile {
 
 class LandscapeRenderer {
 public:
-    void init();
+    // depthFormat must match the pass the renderer draws into:
+    // SG_PIXELFORMAT_DEPTH_STENCIL for the sokol_app swapchain (game client),
+    // SG_PIXELFORMAT_NONE for a Qt FBO without a wrapped depth attachment (editor).
+    void init(sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL);
     void shutdown();
 
     // Provide atlas for an assetUuid (lazy GPU upload can also be done by caller).
@@ -59,6 +62,7 @@ private:
     sg_pipeline pip{SG_INVALID_ID};
     sg_buffer vbuf{SG_INVALID_ID};
     sg_bindings bind{};
+    sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
 
     std::unordered_map<std::string, AtlasGpu> atlases;
 

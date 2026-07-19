@@ -61,13 +61,16 @@
   (там живут отдельные модели вроде `core/models/chapters_model`).
 
 ### Sokol ↔ QtQuick
-- **В коде (прототип):** `src/apps/EcsPlayground/GameView.*` — через
-  `QQuickFramebufferObject::Renderer`.
-- **В коде (продакшн-редактор):** `src/apps/EpicMapEditor/src/runtime_map_view.*` —
-  `RuntimeMapView` наследует `QQuickItem` + `QOpenGLFunctions`, рендер заведён через
-  сигналы `QQuickWindow::beforeRendering`/`afterRendering` и слоты `sync()`/`render()`
-  (`Qt::DirectConnection`). **Внимание:** это другой путь, чем в прототипе, и рендер там
-  пока подключён не до конца (`LandscapeRenderer::init()` временно закомментирован).
+- **В коде (продакшн-редактор):** `src/apps/EpicMapEditor/src/map_render_item.*` —
+  `MapRenderItem : QQuickFramebufferObject`, рендерит карту общим `WorldRenderer`
+  в FBO; мост Qt-моделей — `src/apps/EpicMapEditor/src/map_frame_bridge.*`.
+  Qt Quick форсирован в OpenGL (`main.cpp`), sokol — GLCORE с runtime-выбором
+  шейдеров по `sg_query_backend()` в `render_core`.
+- **В коде (прототип):** `src/apps/EcsPlayground/GameView.*` — там же боевые
+  правила интеграции (см. ниже); GL-клей живёт в `EcsPlayground/graphics/`.
+- **Удалено:** `RuntimeMapView` (недоподключенная заготовка через
+  `beforeRendering`/`afterRendering`), QSG-версии `DiamondGrid`/`DiamondCursor`,
+  Mandelbrot-`CustomItem` — заменены `MapRenderItem`.
 
 ---
 
@@ -93,10 +96,8 @@
 
 ## Боевая кухня: интеграция Sokol с QtQuick (из прототипа)
 
-Ниже — правила, выработанные в `src/apps/EcsPlayground/GameView.cpp`. Относится к пути через
-`QQuickFramebufferObject`. Если продакшн-редактор окончательно переходит на
-`QQuickItem` + `QOpenGLFunctions` (`RuntimeMapView`), часть пунктов про FBO теряет смысл —
-но общие принципы работы Sokol внутри Qt остаются актуальными.
+Ниже — правила, выработанные в `src/apps/EcsPlayground/GameView.cpp` и дополненные
+продакшн-путём `src/apps/EpicMapEditor/src/map_render_item.cpp` (тот же FBO-подход).
 
 - **Принудительный графический API:** для совместимости Sokol + QtQuick требуется OpenGL:
   `QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL)`.
@@ -107,6 +108,9 @@
 - **Рендер в FBO (для пути QQuickFramebufferObject):** текстуру
   `QOpenGLFramebufferObject` оборачивать в `sg_image` (`gl_texture_target = GL_TEXTURE_2D`),
   создавать `sg_view` для color attachment и передавать в `sg_pass.attachments`.
+- **Зеркалирование по Y:** sokol рисует в FBO-текстуру с GL-ориентацией (row 0 = низ),
+  Qt Quick показывает её без флипа → картинка перевёрнута относительно sokol_app.
+  Ставить `setMirrorVertically(true)` на item (проверено скриншот-сравнением с клиентом).
 - **Depth/stencil:** если depth не оборачиваем в pass, в pipeline отключать ожидание depth:
   `pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE`.
 - **Коммит кадра:** `sg_commit()` ровно один раз на кадр на верхнем уровне рендера
@@ -155,22 +159,24 @@
 spdlog — стандартный логгер для приложений/библиотек (запуск, инспекция, ошибки,
 состояние графической инициализации).
 
-## Рендер-слой (цель) `[есть]` (ядро), `[концепт]` (editor-shell)
-Цель: один рендер мира, но разные shell/backend:
-- **EpicGameClient (Standalone):** shell без Qt (`sokol_app`) + debug UI на ImGui — `[есть]`.
-  Рендерит карту по паритету с редактором: diamond-изометрия, ландшафт из атласов,
-  Tile2D-спрайты (pivot/width-семантика редактора), сетка и курсор ячейки.
-- **EpicMapEditor (Qt):** shell на QtQuick + QML overlay — пока рисует своими
-  QML-делегатами; переход на общий `WorldRenderer` (FBO-путь) — следующий шаг.
+## Рендер-слой (цель) `[есть]`
+Цель достигнута: один рендер мира, два shell/backend:
+- **EpicGameClient (Standalone):** shell без Qt (`sokol_app`, D3D11) + debug UI на ImGui.
+- **EpicMapEditor (Qt):** shell на QtQuick — `MapRenderItem` (QQuickFramebufferObject,
+  GLCORE) + QML overlay (панели, тулзы, индикаторы). Карта рисуется тем же
+  `WorldRenderer`, что в клиенте; мост Qt-моделей — `map_frame_bridge`.
 
 **Общее ядро `[есть]`:** `src/libs/render_core` — `WorldRenderer` (фасад),
 `LandscapeRenderer` (тайлы из атласов), `SpriteRenderer` (Tile2D), `OverlayRenderer`
 (линии сетки/курсора). Вход — plain-данные (`WorldFrame`), без Qt и без game-типов.
+Бэкенд выбирается в рантайме (`sg_query_backend()`): клиент — D3D11, редактор — GLCORE;
+формат depth у пайплайнов — параметр `init()` (swapchain клиента — DEPTH_STENCIL,
+FBO редактора — NONE).
 Единая топология мира — `topology_core::DiamondIsometry` (No-Qt порт редакторской
 математики); `StaggeredIsometry` остаётся только для playground'ов.
 
 Оформление в виде отдельных либ `graphics_core` / `graphics_shell_qtquick` /
-`graphics_shell_sokolapp` — пока не делаем, ядро живёт в `render_core`,
+`graphics_shell_sokolapp` — не требуется, ядро живёт в `render_core`,
 шеллы — inline в приложениях.
 
 ## Play-Test Host + Fixtures (Editor → Runtime) `[заготовка]`

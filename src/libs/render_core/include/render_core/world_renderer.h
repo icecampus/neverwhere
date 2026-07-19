@@ -33,7 +33,10 @@ struct WorldFrame {
 // then overlays (grid, cell cursor) on top.
 class WorldRenderer {
 public:
-    void init();
+    // depthFormat must match the pass the renderer draws into:
+    // SG_PIXELFORMAT_DEPTH_STENCIL for the sokol_app swapchain (game client, default),
+    // SG_PIXELFORMAT_NONE for a Qt FBO without a wrapped depth attachment (editor).
+    void init(sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL);
     void shutdown();
 
     void ensureLandscapeAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows);

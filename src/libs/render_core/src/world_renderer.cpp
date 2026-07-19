@@ -4,10 +4,10 @@
 
 namespace render_core {
 
-void WorldRenderer::init() {
-    landscapeRenderer.init();
-    spriteRenderer.init();
-    overlayRenderer.init();
+void WorldRenderer::init(sg_pixel_format depthFormat) {
+    landscapeRenderer.init(depthFormat);
+    spriteRenderer.init(depthFormat);
+    overlayRenderer.init(depthFormat);
 }
 
 void WorldRenderer::shutdown() {

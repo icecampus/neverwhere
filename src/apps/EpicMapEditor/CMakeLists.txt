@@ -1,4 +1,5 @@
 find_package(imgui CONFIG REQUIRED)
+find_package(glad CONFIG REQUIRED)
 
 nw_add_qml_app(
     GROUP 
@@ -11,6 +12,7 @@ nw_add_qml_app(
         render_core
         topology_core
         imgui::imgui
+        glad::glad
         Qt6::Core 
         Qt6::Qml
         Qt6::Quick
@@ -20,6 +22,11 @@ nw_add_qml_app(
         Qt6::QuickControls2
         Qt6::Network
     )
+
+# The editor renders the map through sokol inside a Qt OpenGL context
+# (QQuickFramebufferObject + FBO texture wrap), so the whole app is GLCORE
+# (render_core picks shader sources per active backend at runtime).
+target_compile_definitions(${AppName} PRIVATE SOKOL_GLCORE)
 
 # Sokol is header-only
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")
@@ -43,17 +50,6 @@ endif()
 
 accumulate_files_relative(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} png_resources png)
 # message(FATAL_ERROR "png_resources: ${png_resources}")
-
-qt6_add_shaders(${AppName} "${AppName}_shaders"
-    BATCHABLE
-    PRECOMPILE
-    OPTIMIZED
-    PREFIX
-        "/scenegraph/custommaterial"
-    FILES
-        "shaders/mandelbrot.vert"
-        "shaders/mandelbrot.frag"
-)
 
 if(APPLE AND CMAKE_GENERATOR MATCHES "Xcode")
     # Отключаем встроенную подпись Xcode (чтобы не конфликтовала)

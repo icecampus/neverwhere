@@ -50,7 +50,8 @@ float4 main(PSIn inp): SV_Target0 {
 }
 )";
 
-void OverlayRenderer::init() {
+void OverlayRenderer::init(sg_pixel_format depthFormat_) {
+    depthFormat = depthFormat_;
     ensurePipeline();
 
     // Dynamic vertex buffer for many line segments (2 vertices per segment)
@@ -75,18 +76,20 @@ void OverlayRenderer::ensurePipeline() {
     if (pip.id != SG_INVALID_ID) return;
 
     sg_shader_desc shd_desc = {};
-#if defined(SOKOL_D3D11)
-    shd_desc.vertex_func.source = vs_src_hlsl;
-    shd_desc.fragment_func.source = fs_src_hlsl;
-    // semantics for D3D11
-    shd_desc.attrs[0].hlsl_sem_name = "TEXCOORD";
-    shd_desc.attrs[0].hlsl_sem_index = 0;
-    shd_desc.attrs[1].hlsl_sem_name = "TEXCOORD";
-    shd_desc.attrs[1].hlsl_sem_index = 1;
-#else
-    shd_desc.vertex_func.source = vs_src_glsl;
-    shd_desc.fragment_func.source = fs_src_glsl;
-#endif
+    // One render_core binary serves both shells: D3D11 (game client, sokol_app)
+    // and GLCORE (editor, Qt FBO) — pick shader sources by the active backend.
+    if (sg_query_backend() == SG_BACKEND_D3D11) {
+        shd_desc.vertex_func.source = vs_src_hlsl;
+        shd_desc.fragment_func.source = fs_src_hlsl;
+        // semantics for D3D11
+        shd_desc.attrs[0].hlsl_sem_name = "TEXCOORD";
+        shd_desc.attrs[0].hlsl_sem_index = 0;
+        shd_desc.attrs[1].hlsl_sem_name = "TEXCOORD";
+        shd_desc.attrs[1].hlsl_sem_index = 1;
+    } else {
+        shd_desc.vertex_func.source = vs_src_glsl;
+        shd_desc.fragment_func.source = fs_src_glsl;
+    }
 
     shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
     shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
@@ -107,9 +110,9 @@ void OverlayRenderer::ensurePipeline() {
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_LINES;
-    // We render into the default pass (created by sokol_app), which typically has a depth-stencil attachment.
-    // Even if we don't use depth testing, the pipeline depth format must match the pass depth format.
-    pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+    // The depth format must match the pass we render into (sokol_app swapchain
+    // has depth-stencil; a Qt FBO wrapper has none). We don't depth-test either way.
+    pip_desc.depth.pixel_format = depthFormat;
     pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
     pip_desc.depth.write_enabled = false;
     pip_desc.label = "overlay-pipeline";

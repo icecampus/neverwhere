@@ -18,7 +18,8 @@ struct LineSegment {
 // Input is in screen pixels — the caller applies camera transforms itself.
 class OverlayRenderer {
 public:
-    void init();
+    // See LandscapeRenderer::init for the depthFormat contract.
+    void init(sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL);
     void shutdown();
 
     void render(const std::vector<LineSegment>& lines, int viewWidth, int viewHeight);
@@ -32,6 +33,7 @@ private:
     sg_pipeline pip{SG_INVALID_ID};
     sg_buffer vbuf{SG_INVALID_ID};
     sg_bindings bind{};
+    sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
 
     std::vector<Vertex> scratchVerts;
 

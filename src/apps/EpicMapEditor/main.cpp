@@ -5,14 +5,25 @@
 #include <memory>
 #include "core/lib.h"
 #include "ui/lib.h"
-#include "src/runtime_map_view.h"
 #include "src/editor_scene_registry.h"
 #include "src/editor_rpc_server.h"
 #include <QQuickStyle>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QDateTime>
 #include <QFile>
 #include <QTextStream>
 #include <QtGlobal>
+#include <filesystem>
+
+// Qt's `slots` macro breaks Sokol internals which use a field with that name
+// (the bridge header pulls sokol through render_core).
+#ifdef slots
+#undef slots
+#endif
+
+#include "src/map_render_item.h"
+#include "src/map_frame_bridge.h"
 
 static QFile* g_logFile = nullptr;
 
@@ -93,13 +104,10 @@ void registreTypes()
     qmlRegisterType<DiamondIsometryView>("Game", 1, 0, "DiamondIsometryView");
     qmlRegisterType<diamond_dimensions>("Game", 1, 0, "diamond_dimensions");
 
-    qmlRegisterType<DiamondGrid>("Game", 1, 0, "DiamondGrid");
-    qmlRegisterType<DiamondCursor>("Game", 1, 0, "DiamondCursor");
-    
-    // RuntimeMapView - OpenGL rendering through Runtime
-    qmlRegisterType<RuntimeMapView>("Game", 1, 0, "RuntimeMapView");
+    // FBO-based map view on the shared sokol WorldRenderer (replaces the old
+    // QML tile delegates, QSG DiamondGrid/DiamondCursor and RuntimeMapView).
+    qmlRegisterType<MapRenderItem>("Game", 1, 0, "MapRenderItem");
 
-    
     qmlRegisterType<PropertyContainersModel>("Game", 1, 0, "PropertyContainersModel");
 
 
@@ -139,8 +147,6 @@ void registreTypes()
         "PropertiesContainerTypes",         // name in QML (does not have to match C++ name)
         "Error: only enums"                 // error in case someone tries to create a MyNamespace object
     );
-
-    qmlRegisterType<CustomItem>("Game", 1, 0, "CustomItem");
 }
 
 void registerGlobalObject(QQmlApplicationEngine& engine)
@@ -165,6 +171,82 @@ void registerGlobalObject(QQmlApplicationEngine& engine)
 }
 
 
+static bool looksLikeDataRoot(const std::filesystem::path& dir)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    return fs::exists(dir / "resources" / "assets", ec) && fs::exists(dir / "resources" / "chapters", ec);
+}
+
+static std::filesystem::path findDataRootUpwards(std::filesystem::path startDir)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    startDir = fs::weakly_canonical(startDir, ec);
+    if (startDir.empty()) startDir = fs::current_path(ec);
+    if (startDir.empty()) return {};
+
+    fs::path dir = startDir;
+    for (int i = 0; i < 16; i++)
+    {
+        if (looksLikeDataRoot(dir)) return dir;
+        if (!dir.has_parent_path()) break;
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
+
+// Data-only smoke scenario (AGENTS.md): key map operations without a window.
+static int runSmokeTest()
+{
+    int failures = 0;
+    const auto check = [&failures](bool ok, const char* name)
+    {
+        if (ok)
+        {
+            qInfo().noquote() << "TEST PASS:" << name;
+        }
+        else
+        {
+            qCritical().noquote() << "TEST FAIL:" << name;
+            failures++;
+        }
+    };
+
+    const std::filesystem::path dataRoot = findDataRootUpwards(std::filesystem::current_path());
+    check(!dataRoot.empty(), "data root resolved");
+    if (dataRoot.empty()) return 1;
+
+    const std::filesystem::path mapPath = dataRoot / "resources/chapters/Base/maps/map.json";
+
+    MapModel mapModel;
+    mapModel.load(QString::fromStdString(mapPath.string()));
+
+    render_core::WorldFrame frame;
+    map_frame_bridge::buildWorldFrame(mapModel, frame);
+    check(!frame.landscapeTiles.empty(), "map has landscape tiles");
+    check(!frame.sprites.empty(), "map has Tile2D sprites");
+
+    // Round-trip through the Qt isometry the tools use (same math as the renderer).
+    DiamondIsometryView iso;
+    bool roundTripOk = true;
+    for (const math::ivec2& cell : {math::ivec2(0, 0), math::ivec2(1, 1), math::ivec2(3, 12), math::ivec2(-2, 5), math::ivec2(10, -7)})
+    {
+        const math::ivec2 back = iso.fieldToMap(iso.mapToField(cell));
+        if (back.x != cell.x || back.y != cell.y)
+        {
+            qCritical().noquote() << "Round-trip mismatch at cell" << cell.x << cell.y;
+            roundTripOk = false;
+        }
+    }
+    check(roundTripOk, "diamond isometry fieldToMap(mapToField(cell)) == cell");
+
+    qInfo().noquote() << (failures == 0 ? "TEST PASS: smoke scenario finished OK" : "TEST FAIL: smoke scenario failed");
+    return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char* argv[])
 {
     // Capture QML/Qt warnings into a local log file to debug early exits.
@@ -175,14 +257,33 @@ int main(int argc, char* argv[])
     }
     qInstallMessageHandler(qtMessageToFile);
 
+    bool smoke = false;
+    for (int i = 1; i < argc; i++)
+    {
+        if (std::string_view(argv[i]) == "--smoke") smoke = true;
+    }
+
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-    
+
 
 
     QApplication app(argc, argv);
+
+    if (smoke)
+    {
+        return runSmokeTest();
+    }
+
     QQuickStyle::setStyle("Material");
-    
+
+    // The map is rendered through sokol inside a Qt OpenGL context
+    // (QQuickFramebufferObject), so Qt Quick must run on OpenGL.
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+
+    // Sokol is shared by all map views — shut it down globally, after items.
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, &app, []() { shutdownEditorSokol(); });
+
     registreTypes();
 
     QQmlApplicationEngine engine;

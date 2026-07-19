@@ -23,8 +23,8 @@ Neverwhere — это **узкоспециализированный 2D engine/s
 - **Runtime-логика (общая).** Игровой мир, сессия, цикл обновления, fixtures.
   Используется и в рантайме, и при плейтесте из редактора.
 - **Приложения (шеллы).** Два разных «кожуха» поверх общих слоёв:
-  - **EpicMapEditor** — Qt/QML. Рендер встроен в QtQuick через
-    `QQuickFramebufferObject`/`QQuickItem` + OpenGL.
+  - **EpicMapEditor** — Qt/QML. Карта рендерится общим sokol `WorldRenderer`
+    через `QQuickFramebufferObject` (`MapRenderItem`) + OpenGL; UI — QML.
   - **EpicGameClient** — standalone на `sokol_app`, UI на Dear ImGui.
 
 ### Что уже есть в коде, а что пока концепт
@@ -38,7 +38,7 @@ Neverwhere — это **узкоспециализированный 2D engine/s
 | `balance_tables` | концепт | в коде пока нет |
 | `render core` (Sokol) | есть | `src/libs/render_core` (`WorldRenderer`, `LandscapeRenderer`, `SpriteRenderer`, `OverlayRenderer`); GL-клей для QtQuick — внутри `EcsPlayground` |
 | `editor_qt_adapters` | частично | Qt-модели-адаптеры (`QAbstractListModel` поверх EnTT) реально есть в `src/libs/core/models/`, но модуля с таким именем нет |
-| `graphics_shell_qtquick` | есть (по сути) | `RuntimeMapView` (`src/apps/EpicMapEditor/src/runtime_map_view.*`) — встраивает рендер в QML |
+| `graphics_shell_qtquick` | есть | `MapRenderItem` (`src/apps/EpicMapEditor/src/map_render_item.*`) — общий `WorldRenderer` в QML через FBO |
 | `graphics_shell_sokolapp` | есть (по сути) | весь `src/apps/EpicGameClient/main.cpp` — это шелл на `sokol_app` |
 | `QML_UI` | есть | `src/apps/EpicMapEditor/qml/`, `resources.qrc` |
 | `ImGui_UI` | есть | `simgui` в `EpicGameClient/main.cpp` |
@@ -99,9 +99,9 @@ flowchart TB
 Редактор поверх этого добавляет **Qt/QML адаптеры** и инструменты редактирования, но базовые структуры и сериализация должны оставаться “чистыми”.
 
 ## Rendering
-Рендер мира общий, но **разные shell/backend**:
-- **Editor**: Qt/QML overlay, рендер мира встраивается в Qt (QtQuick/FBO)
-- **EpicGameClient**: standalone shell (`sokol_app`) + игровой UI на **Dear ImGui**
+Рендер мира общий (`render_core/WorldRenderer`), но **разные shell/backend**:
+- **Editor**: `MapRenderItem` (QQuickFramebufferObject, GLCORE) встраивает рендер в QtQuick; UI поверх — QML
+- **EpicGameClient**: standalone shell (`sokol_app`, D3D11) + игровой UI на **Dear ImGui**
 
 ## Play-Test в редакторе (концепт)
 Редактор должен уметь **запускать EpicGameClient на текущей редактируемой карте**.

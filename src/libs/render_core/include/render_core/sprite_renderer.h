@@ -23,7 +23,8 @@ struct SpriteInstance {
 
 class SpriteRenderer {
 public:
-    void init();
+    // See LandscapeRenderer::init for the depthFormat contract.
+    void init(sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL);
     void shutdown();
 
     // Provide image for an assetUuid. widthCells — image width in map cells
@@ -62,6 +63,7 @@ private:
     sg_pipeline pip{SG_INVALID_ID};
     sg_buffer vbuf{SG_INVALID_ID};
     sg_bindings bind{};
+    sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
 
     std::unordered_map<std::string, SpriteGpu> sprites;
 
