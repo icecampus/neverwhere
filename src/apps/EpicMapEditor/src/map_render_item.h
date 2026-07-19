@@ -67,7 +67,9 @@ private:
     bool m_showGrid = true;
 };
 
-// Global sokol shutdown for the editor — call from QGuiApplication::aboutToQuit
-// (sokol is shared by all MapRenderItem instances and must not be shut down
-// from an item/renderer destructor).
+// Marks sokol unavailable for the editor — call from QGuiApplication::aboutToQuit.
+// This intentionally does NOT call sg_shutdown(): at that point the GL context
+// is not current on the GUI thread, and sokol resource destruction requires it.
+// The flag makes render() early-out and renderer destructors skip their sg calls;
+// the GL driver reclaims everything when the context dies with the process.
 void shutdownEditorSokol();

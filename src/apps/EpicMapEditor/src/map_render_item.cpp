@@ -55,7 +55,11 @@ public:
     MapRenderItemRenderer() = default;
 
     ~MapRenderItemRenderer() override {
-        // Per-item sg resources only; sg_shutdown is global (aboutToQuit).
+        // After shutdownEditorSokol() the sg API must not be touched — the GL
+        // context is gone by then. Skipping the destroys at process exit is
+        // fine: the driver reclaims everything when the context dies.
+        if (!g_sokol.valid.load(std::memory_order_acquire)) return;
+
         if (m_colorAttView.id != SG_INVALID_ID) sg_destroy_view(m_colorAttView);
         if (m_passImg.id != SG_INVALID_ID) sg_destroy_image(m_passImg);
         if (m_worldInit) {
@@ -297,8 +301,11 @@ void MapRenderItem::setShowGrid(bool show) {
 }
 
 void shutdownEditorSokol() {
-    if (g_sokol.valid.load(std::memory_order_acquire)) {
-        sg_shutdown();
-        g_sokol.valid.store(false, std::memory_order_release);
-    }
+    // Do NOT call sg_shutdown() here: aboutToQuit fires on the GUI thread,
+    // where the Qt GL context is not current — GL resource destruction needs
+    // the (render-thread) context and debug-asserts otherwise (proven via
+    // cdb: wassert in _sg_gl_discard_buffer ← sg_shutdown). The process is
+    // exiting anyway, so just block further sg use: renderer destructors
+    // check this flag and skip their sg calls, and render() early-outs.
+    g_sokol.valid.store(false, std::memory_order_release);
 }
