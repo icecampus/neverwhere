@@ -73,6 +73,11 @@ public:
         m_showGrid = mapItem->showGrid();
         m_assetsLibrary = mapItem->assetsLibrary();
 
+        // QML coordinates (mouse, camera, isoView) are logical pixels;
+        // capture the item's logical size for DPI-correct rendering.
+        m_logicalWidth = (float)mapItem->width();
+        m_logicalHeight = (float)mapItem->height();
+
         if (MapModel* model = mapItem->mapModel()) {
             map_frame_bridge::buildWorldFrame(*model, m_frame);
         } else {
@@ -99,6 +104,16 @@ public:
         // Qt messes with the GL state between frames; drop sokol's state cache.
         sg_reset_state_cache();
 
+        // The GL context is shared with Qt: errors from the Qt render phase
+        // linger in glGetError and would trip sokol's debug _SG_GL_CHECK_ERROR
+        // asserts at our next call (observed: crash on opening a chapter tab).
+        // Drain them here — sokol still catches errors from OUR calls, because
+        // its checkpoints follow them within this same frame.
+        {
+            auto* glErr = QOpenGLContext::currentContext()->functions();
+            while (glErr->glGetError() != GL_NO_ERROR) { /* drain foreign errors */ }
+        }
+
         QOpenGLFramebufferObject* fbo = framebufferObject();
         if (fbo && (fbo->size().width() != m_width || fbo->size().height() != m_height || m_colorAttView.id == SG_INVALID_ID)) {
             updatePass(fbo);
@@ -124,13 +139,20 @@ public:
         pass.attachments.colors[0] = m_colorAttView;
         sg_begin_pass(&pass);
 
+        // Render in LOGICAL coordinates (QML space): the FBO itself is physical
+        // (item size * devicePixelRatio), but Qt maps it back onto the item, so
+        // using logical sizes keeps the mouse and the rendered world aligned on
+        // High-DPI displays (the grid cursor was offset from the mouse cursor).
+        const int viewW = (m_logicalWidth > 0.5f) ? (int)(m_logicalWidth + 0.5f) : m_width;
+        const int viewH = (m_logicalHeight > 0.5f) ? (int)(m_logicalHeight + 0.5f) : m_height;
+
         topology_core::Camera2D camera;
         camera.offset = m_cameraOffset;
         camera.zoom = m_cameraZoom;
 
         // Water caustics background first (world-space quad), the map on top.
-        m_water.render(camera, m_width, m_height, (float)m_time.elapsed() / 1000.0f);
-        m_worldRenderer.render(m_frame, m_iso, camera, m_width, m_height);
+        m_water.render(camera, viewW, viewH, (float)m_time.elapsed() / 1000.0f);
+        m_worldRenderer.render(m_frame, m_iso, camera, viewW, viewH);
 
         sg_end_pass();
         // Exactly one sg_commit per frame at the top level (EcsPlayground rules).
@@ -199,6 +221,8 @@ private:
     float m_cameraZoom = 1.0f;
     QPoint m_cursorCell{0, 0};
     bool m_showGrid = true;
+    float m_logicalWidth = 0.0f;
+    float m_logicalHeight = 0.0f;
     AssetsLibraryModel* m_assetsLibrary = nullptr;
 };
 
