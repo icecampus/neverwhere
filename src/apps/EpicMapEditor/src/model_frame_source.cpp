@@ -19,6 +19,7 @@
 
 void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.landscapeTiles.clear();
+    outFrame.raisedTiles.clear();
     outFrame.sprites.clear();
 
     if (!m_mapModel) return;
