@@ -21,6 +21,17 @@ struct ImageAssetData {
     float width = 1.0f; // width in map cells (screenWidth = cellWidth * width)
 };
 
+// Shape3D (raised) assets — slice atlas + raised presentation params
+// (mirror of BaseData::Shape3dAssetData; renderer-only fields).
+struct Shape3dAssetData {
+    std::string thumbnail;
+    std::string atlas;
+    float raisedHeight = 32.0f;
+    bool rockWalls = true;
+    float rockAmplitude = 0.28f;
+    float rockBevel = 0.3f;
+};
+
 struct AssetData {
     std::filesystem::path indexPath;
     std::string uuid;
@@ -29,6 +40,7 @@ struct AssetData {
 
     std::optional<SliceAssetData> slice;
     std::optional<ImageAssetData> image;
+    std::optional<Shape3dAssetData> shape3d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -36,6 +48,15 @@ struct AssetData {
 inline void from_json(const nlohmann::json& j, SliceAssetData& d) {
     j.at("thumbnail").get_to(d.thumbnail);
     j.at("atlas").get_to(d.atlas);
+}
+
+inline void from_json(const nlohmann::json& j, Shape3dAssetData& d) {
+    j.at("thumbnail").get_to(d.thumbnail);
+    j.at("atlas").get_to(d.atlas);
+    if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+    if (j.contains("rockWalls")) j.at("rockWalls").get_to(d.rockWalls);
+    if (j.contains("rockAmplitude")) j.at("rockAmplitude").get_to(d.rockAmplitude);
+    if (j.contains("rockBevel")) j.at("rockBevel").get_to(d.rockBevel);
 }
 
 inline void from_json(const nlohmann::json& j, ImageAssetData& d) {
@@ -57,6 +78,7 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     if (layerStr == "Decoration") a.layerType = LayerType::Decoration;
     else if (layerStr == "BaseLandscape") a.layerType = LayerType::BaseLandscape;
     else if (layerStr == "GameplayInteractive") a.layerType = LayerType::GameplayInteractive;
+    else if (layerStr == "RaisedLandscape") a.layerType = LayerType::RaisedLandscape;
 
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
@@ -64,6 +86,10 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("image") && !j["image"].is_null()) {
         a.image = j["image"].get<ImageAssetData>();
+    }
+
+    if (j.contains("shape3d") && !j["shape3d"].is_null()) {
+        a.shape3d = j["shape3d"].get<Shape3dAssetData>();
     }
 }
 
@@ -81,8 +107,16 @@ struct AssetIndexEntry {
     std::filesystem::path imagePath;
     float widthCells = 1.0f;
 
+    // Shape3D (raised) assets — raised landscape tiles with cliff walls.
+    bool shape3d = false;
+    float raisedHeight = 32.0f;
+    bool rockWalls = true;
+    float rockAmplitude = 0.28f;
+    float rockBevel = 0.3f;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
+    bool isShape3d() const { return shape3d; }
 };
 
 struct AssetIndex {

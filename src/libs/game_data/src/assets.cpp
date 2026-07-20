@@ -29,7 +29,7 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
 
         AssetData asset = j.get<AssetData>();
         asset.indexPath = entry.path();
-        if (!asset.slice && !asset.image) continue; // nothing renderable
+        if (!asset.slice && !asset.image && !asset.shape3d) continue; // nothing renderable
 
         AssetIndexEntry idx;
         idx.uuid = asset.uuid;
@@ -42,6 +42,17 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
             // Convention from editor: split atlas into 4x6 tiles
             idx.cols = 4;
             idx.rows = 6;
+        }
+
+        if (asset.shape3d) {
+            idx.atlasPath = asset.root() / asset.shape3d->atlas;
+            idx.cols = 4;
+            idx.rows = 6;
+            idx.shape3d = true;
+            idx.raisedHeight = asset.shape3d->raisedHeight;
+            idx.rockWalls = asset.shape3d->rockWalls;
+            idx.rockAmplitude = asset.shape3d->rockAmplitude;
+            idx.rockBevel = asset.shape3d->rockBevel;
         }
 
         if (asset.image) {

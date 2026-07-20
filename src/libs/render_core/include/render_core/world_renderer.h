@@ -19,6 +19,7 @@ namespace render_core {
 // (game client, Qt editor, playground) can fill it from its own data source.
 struct WorldFrame {
     std::vector<LandscapeTile> landscapeTiles;
+    std::vector<LandscapeTile> raisedTiles; // RaisedLandscape layer (3D tiles: walls + lifted top)
     std::vector<SpriteInstance> sprites;
 
     bool showGrid = true;
@@ -29,8 +30,9 @@ struct WorldFrame {
 };
 
 // Facade over the world renderers — the single world render shared by shells.
-// Draw order matches the editor's MapView.qml: landscape tiles, Tile2D sprites,
-// then overlays (grid, cell cursor) on top.
+// Draw order matches the editor's MapView.qml: flat landscape tiles, raised
+// landscape (cliff walls + lifted tops), Tile2D sprites, then overlays (grid,
+// cell cursor) on top.
 class WorldRenderer {
 public:
     // depthFormat must match the pass the renderer draws into:
@@ -40,6 +42,7 @@ public:
     void shutdown();
 
     void ensureLandscapeAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows);
+    void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 
     void render(

@@ -93,7 +93,13 @@ Map Map::load(const std::filesystem::path& chaptersPath)
     for (const LayerTypes::Type layerType : magic_enum::enum_values<LayerTypes::Type>()) 
     {
         auto layerName = magic_enum::enum_name(layerType);
-        Layer layer = j[layerName];
+        // Older map files may lack newer layer keys — treat them as empty
+        // (entry must still exist: Map::save addresses layers via .at()).
+        Layer layer;
+        if (j.contains(layerName) && j[layerName].is_array())
+        {
+            layer = j[layerName].get<Layer>();
+        }
         map[layerType] = layer;
     }
 

@@ -3,7 +3,13 @@
 namespace fs = std::filesystem;
 
 SliceAsset::SliceAsset(QObject* parent):
-    Asset(AssetTypes::slice, parent)
+    SliceAsset(AssetTypes::slice, parent)
+{
+
+}
+
+SliceAsset::SliceAsset(AssetTypes::Type type, QObject* parent):
+    Asset(type, parent)
 {
 
 }
@@ -12,8 +18,13 @@ void SliceAsset::load(const BaseData::AssetData& data)
 {
     Asset::load(data);
 
-    thumbnailPath = data.root() / data.sliceData->thumbnail;
-    atlasPath = data.root() / data.sliceData->atlas;
+    loadAtlasFiles(data.root() / data.sliceData->thumbnail, data.root() / data.sliceData->atlas);
+}
+
+void SliceAsset::loadAtlasFiles(const std::filesystem::path& thumbnail, const std::filesystem::path& atlas)
+{
+    thumbnailPath = thumbnail;
+    atlasPath = atlas;
 
     if (fs::exists(thumbnailPath))
     {

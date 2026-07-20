@@ -7,7 +7,13 @@
 
 
 LandscapePencil::LandscapePencil(QObject* parent):
-    Tool("LandscapePencil", "land_pencil", parent)
+    LandscapePencil("LandscapePencil", "land_pencil", parent)
+{
+
+}
+
+LandscapePencil::LandscapePencil(const QString& name, const QString& icon, QObject* parent):
+    Tool(name, icon, parent)
 {
 
 }

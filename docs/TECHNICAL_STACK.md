@@ -206,7 +206,20 @@ spdlog — стандартный логгер для приложений/би�
 формат depth у пайплайнов — параметр `init()` (swapchain клиента — DEPTH_STENCIL,
 FBO редактора — NONE).
 Единая топология мира — `topology_core::DiamondIsometry` (No-Qt порт редакторской
-математики); `StaggeredIsometry` остаётся только для playground'ов.
+математики, включая vertex-ноды `cellCornerNodes`/`nodeNeighbourCells`);
+`StaggeredIsometry` остаётся только для playground'ов.
+
+**Поднятая 3D-земля (порт TileShapePlayground) `[есть]`:** ассеты `shape3d`
+(`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
+`raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`) рисуются инструментом
+`Shape3dPencil` (наследник `LandscapePencil`) на отдельном слое `RaisedLandscape`
+— своя vertex-сетка нод, независимая от плоского `BaseLandscape`. Данные — те же
+`Landscape`-объекты (tileIndex); «3D» — презентация в `LandscapeRenderer`:
+стены (простые запечённые или RockWalls на FastNoise2) + верх со сдвигом
+`-raisedHeight`, painter's order без depth-buffer. Кадр: `WorldFrame.raisedTiles`
+(редактор — `ModelFrameSource`, клиент/play-таб — `world_frame_builder`).
+Ограничение: спрайты и поднятые клетки не z-сортируются между собой (дерево на
+поднятой клетке визуально «тонет») — отдельная задача.
 
 Оформление в виде отдельных либ `graphics_core` / `graphics_shell_qtquick` /
 `graphics_shell_sokolapp` — не требуется, ядро живёт в `render_core`,

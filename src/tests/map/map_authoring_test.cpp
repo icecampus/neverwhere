@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <boost/uuid/string_generator.hpp>
 #include <filesystem>
+#include <fstream>
 
 #include "assets_library/assets/image_asset.h"
 #include "assets_library/assets/slice_asset.h"
@@ -195,6 +196,71 @@ TEST(MapAuthoringTest, ReloadReplacesContent)
     EXPECT_EQ(total, 1);
 
     std::filesystem::remove(tmpPath);
+}
+
+TEST(MapAuthoringTest, RaisedLayerSaveLoadRoundTrip)
+{
+    MapModel map;
+    auto slice = makeSliceAsset(kSliceUuid, "landscape");
+
+    // Raised Landscape objects live on the RaisedLandscape layer (Shape3d
+    // assets); the authoring ops are layer-agnostic.
+    const std::vector<std::pair<math::ivec2, uint8_t>> updates = {
+        {math::ivec2(5, 5), 1}, {math::ivec2(6, 5), 1},
+        {math::ivec2(5, 6), 1}, {math::ivec2(6, 6), 1},
+    };
+    MapAuthoring::applyLandscapeUpdates(*map.layer(LayerTypes::RaisedLandscape), slice.get(), updates);
+
+    const QJsonObject before = MapAuthoring::dumpMap(map);
+
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_raised_roundtrip_test.json";
+    const QString path = QString::fromStdString(tmpPath.string());
+    map.save(path);
+
+    MapModel loaded;
+    loaded.load(path);
+    const QJsonObject after = MapAuthoring::dumpMap(loaded);
+
+    EXPECT_EQ(QJsonDocument(before).toJson(QJsonDocument::Compact),
+              QJsonDocument(after).toJson(QJsonDocument::Compact));
+
+    int raisedTotal = 0;
+    loaded.layer(LayerTypes::RaisedLandscape)->iterate([&raisedTotal](GameObject&) { ++raisedTotal; });
+    EXPECT_GT(raisedTotal, 0);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(MapAuthoringTest, LoadLegacyMapWithoutRaisedLayer)
+{
+    // Maps saved before the RaisedLandscape layer existed have no such key;
+    // loading must treat it as empty instead of throwing.
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_legacy_map_test.json";
+    {
+        std::ofstream file(tmpPath);
+        file << R"({
+            "BaseLandscape": [],
+            "Decoration": [],
+            "GameplayInteractive": []
+        })";
+    }
+
+    MapModel loaded;
+    ASSERT_NO_THROW(loaded.load(QString::fromStdString(tmpPath.string())));
+
+    int raisedTotal = 0;
+    loaded.layer(LayerTypes::RaisedLandscape)->iterate([&raisedTotal](GameObject&) { ++raisedTotal; });
+    EXPECT_EQ(raisedTotal, 0);
+
+    // Saving the loaded map must not throw either (layers addressed via .at()).
+    const std::filesystem::path outPath =
+        std::filesystem::temp_directory_path() / "map_authoring_legacy_map_out_test.json";
+    ASSERT_NO_THROW(loaded.save(QString::fromStdString(outPath.string())));
+
+    std::filesystem::remove(tmpPath);
+    std::filesystem::remove(outPath);
 }
 
 TEST(MapAuthoringTest, DumpSaveLoadRoundTrip)

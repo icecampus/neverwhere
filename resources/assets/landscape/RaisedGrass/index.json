@@ -1,0 +1,16 @@
+{
+  "uuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+  "layerType": "RaisedLandscape",
+  "pivot": {
+    "x": 0.0,
+    "y": 0.0
+  },
+  "shape3d": {
+    "thumbnail": "thumbnail.png",
+    "atlas": "atlas.png",
+    "raisedHeight": 32.0,
+    "rockWalls": true,
+    "rockAmplitude": 0.28,
+    "rockBevel": 0.3
+  }
+}

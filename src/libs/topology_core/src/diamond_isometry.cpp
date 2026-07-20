@@ -53,6 +53,66 @@ std::uint64_t DiamondIsometry::zOffset(const glm::ivec2& cellPosition) const {
          | static_cast<std::uint32_t>(cellPosition.x);
 }
 
+glm::ivec2 DiamondIsometry::fieldToNode(const glm::vec2& fieldPosition) const {
+    // Same diamond projection as fieldToMap, shifted by half a cell:
+    // nodes sit on diamond corners, not centers.
+    const glm::vec2 cellSz = dims.cellSize();
+    const float halfW = cellSz.x * 0.5f;
+    const float halfH = cellSz.y * 0.5f;
+
+    const float sx = fieldPosition.x / halfW;
+    const float sy = fieldPosition.y / halfH;
+
+    const float nx = (sx + sy) * 0.5f - 0.5f;
+    const float ny = (sy - sx) * 0.5f + 0.5f;
+
+    return glm::ivec2(static_cast<int>(std::round(nx)), static_cast<int>(std::round(ny)));
+}
+
+glm::vec2 DiamondIsometry::nodeToField(const glm::ivec2& nodePosition) const {
+    const glm::vec2 cellSz = dims.cellSize();
+    const float halfW = cellSz.x * 0.5f;
+    const float halfH = cellSz.y * 0.5f;
+
+    const float nx = static_cast<float>(nodePosition.x);
+    const float ny = static_cast<float>(nodePosition.y);
+
+    // Up-corner of cell (nx, ny) — no +halfH (unlike cell centers).
+    return glm::vec2((nx - ny) * halfW + halfW, (nx + ny) * halfH);
+}
+
+std::array<glm::ivec2, 4> DiamondIsometry::nodeNeighbourCells(const glm::ivec2& node) {
+    return {
+        glm::ivec2(node.x, node.y),
+        glm::ivec2(node.x - 1, node.y),
+        glm::ivec2(node.x, node.y - 1),
+        glm::ivec2(node.x - 1, node.y - 1),
+    };
+}
+
+std::array<glm::ivec2, 4> DiamondIsometry::cellCornerNodes(const glm::ivec2& cell) {
+    return {
+        glm::ivec2(cell.x, cell.y + 1),     // Left
+        glm::ivec2(cell.x, cell.y),         // Up
+        glm::ivec2(cell.x + 1, cell.y),     // Right
+        glm::ivec2(cell.x + 1, cell.y + 1), // Down
+    };
+}
+
+std::array<glm::vec2, 4> DiamondIsometry::cellDiamondCorners(const glm::ivec2& cell) const {
+    const glm::vec2 center = mapToField(cell);
+    const glm::vec2 cellSz = dims.cellSize();
+    const float halfW = cellSz.x * 0.5f;
+    const float halfH = cellSz.y * 0.5f;
+
+    return {
+        glm::vec2(center.x - halfW, center.y), // Left
+        glm::vec2(center.x, center.y - halfH), // Up
+        glm::vec2(center.x + halfW, center.y), // Right
+        glm::vec2(center.x, center.y + halfH), // Down
+    };
+}
+
 CellRegion DiamondIsometry::visibleCellBounds(const glm::vec2& viewSize, const glm::vec2& offset) const {
     // For the diamond grid, the visible region is the AABB of the screen
     // corners in cell space. Since fieldToMap is a clean affine map (no

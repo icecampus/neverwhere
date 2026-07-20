@@ -18,11 +18,12 @@ enum class GameObjectType : int {
     Cloud = 4,
 };
 
-// Matches string keys in existing map.json ("Decoration", "BaseLandscape", "GameplayInteractive")
+// Matches string keys in existing map.json ("Decoration", "BaseLandscape", ...)
 enum class LayerType : int {
     Decoration = 0,
     BaseLandscape = 1,
     GameplayInteractive = 2,
+    RaisedLandscape = 3,
 };
 
 struct LandscapeData {

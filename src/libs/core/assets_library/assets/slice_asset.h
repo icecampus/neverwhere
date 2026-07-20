@@ -25,7 +25,14 @@ public:
     //
     static TileSet::TileType subTileTypeByIndex(size_t tileIndex);
     size_t subTileIndexByType(TileSet::TileType type) const;
-    
+
+protected:
+    // For subclasses carrying their own AssetTypes value (Shape3dAsset).
+    SliceAsset(AssetTypes::Type type, QObject* parent);
+
+    // Loads thumbnail/atlas images and splits the atlas (4x6) into tiles.
+    void loadAtlasFiles(const std::filesystem::path& thumbnail, const std::filesystem::path& atlas);
+
 protected:
     QString getUrlInternal() const override;
 

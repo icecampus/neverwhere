@@ -4,6 +4,7 @@
 
 #include "assets/image_asset.h"
 #include "assets/slice_asset.h"
+#include "assets/shape3d_asset.h"
 #include "assets_pack_model.h"
 #include "base_data/lib.h"
 
@@ -42,6 +43,13 @@ void AssetsLoader::loadAsset(const BaseData::AssetData& assetData, AssetsPackMod
     if (assetData.sliceData.has_value() )
     {
         auto asset = std::make_unique<SliceAsset>(pack);
+        asset->load(assetData);
+        pack->addElement(std::move(asset));
+    }
+
+    if (assetData.shape3dData.has_value() )
+    {
+        auto asset = std::make_unique<Shape3dAsset>(pack);
         asset->load(assetData);
         pack->addElement(std::move(asset));
     }

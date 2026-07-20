@@ -43,6 +43,10 @@
 > + `OverlayRenderer`), клиент `EpicGameClient` на этом ядре (паритет с редактором),
 > анализ тайлов в `docs/TILE_RESOLUTION_ANALYSIS.md`, плюс песочницы
 > (`Landscape3dPlayground`, `MeshGenerationPlayground`, `SplattingPlayground`).
+> **Поднятая 3D-земля `[есть]`:** порт TileShapePlayground — ассеты `shape3d`
+> (атлас + `raisedHeight`/RockWalls-параметры) рисуются `Shape3dPencil` на слое
+> `RaisedLandscape` (vertex-centric, своя сетка нод); рендер — стены + верх со
+> сдвигом в `LandscapeRenderer`, паритет с клиентом через `WorldFrame.raisedTiles`.
 *   **Многослойность:** Поддержка множества слоев высоты и тайлов.
 *   **Smart Blending:** Продвинутая система смешивания материалов (авто-переходы песок -> трава -> камень) без видимых швов.
 *   **Авто-декорирование:** Процедурная кисть для нанесения декалей (камни, цветы, трещины) и вариаций тайлов, чтобы избежать "тайлового шума".

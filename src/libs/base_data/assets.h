@@ -11,7 +11,8 @@ namespace AssetTypes
     enum Type
     {
         image,
-        slice
+        slice,
+        shape3d
     };
     Q_ENUM_NS(Type);
 }
@@ -34,6 +35,22 @@ namespace BaseData
         NLOHMANN_DEFINE_TYPE_INTRUSIVE(SliceAssetData, thumbnail, atlas);
     };
 
+    // Shape3D: slice atlas + raised presentation params (ported from
+    // TileShapePlayground). Objects are plain Landscape tiles on the
+    // RaisedLandscape layer; these params drive the renderer only.
+    struct Shape3dAssetData
+    {
+        std::string thumbnail;
+        std::string atlas;
+        float raisedHeight{32.0f};
+        bool rockWalls{true};
+        float rockAmplitude{0.28f};
+        float rockBevel{0.3f};
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Shape3dAssetData,
+            thumbnail, atlas, raisedHeight, rockWalls, rockAmplitude, rockBevel);
+    };
+
     //Asset
     struct AssetData
     {
@@ -45,6 +62,7 @@ namespace BaseData
 
         std::optional<ImageAssetData> imageData;
         std::optional<SliceAssetData> sliceData;
+        std::optional<Shape3dAssetData> shape3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

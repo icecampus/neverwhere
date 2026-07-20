@@ -37,6 +37,20 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         });
     }
 
+    // RaisedLandscape layer -> raised 3D tiles (Shape3d assets, walls + offset top).
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::RaisedLandscape)) {
+        layer->iterate([&outFrame](GameObject& obj) {
+            const BaseData::GameObject data = obj.getData();
+            if (data.type != GameObjectTypes::Landscape || !data.landscapeData) return;
+
+            render_core::LandscapeTile t;
+            t.cell = data.position;
+            t.assetUuid = boost::uuids::to_string(data.assetUuid);
+            t.tileIndex = data.landscapeData->tileIndex;
+            outFrame.raisedTiles.push_back(std::move(t));
+        });
+    }
+
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
         LayerModel* layer = m_mapModel->layer(layerType);
@@ -59,6 +73,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
 
     std::unordered_set<std::string> uniqueAssets;
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.raisedTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -67,6 +82,15 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
 
         const BaseData::AssetData& data = asset->getData();
 
+        if (data.shape3dData) {
+            // Raised tiles: same 4x6 atlas convention + presentation params.
+            render_core::RaisedParams params;
+            params.height = data.shape3dData->raisedHeight;
+            params.rockWalls = data.shape3dData->rockWalls;
+            params.amplitude = data.shape3dData->rockAmplitude;
+            params.bevel = data.shape3dData->rockBevel;
+            renderer.ensureRaisedAtlas(uuid, data.root() / data.shape3dData->atlas, 4, 6, params);
+        }
         if (data.sliceData) {
             // Editor convention: landscape atlases are split into 4x6 tiles.
             renderer.ensureLandscapeAtlas(uuid, data.root() / data.sliceData->atlas, 4, 6);

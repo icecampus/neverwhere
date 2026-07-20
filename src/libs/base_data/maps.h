@@ -30,7 +30,8 @@ namespace LayerTypes
     {
         Decoration,
         BaseLandscape,
-        GameplayInteractive
+        GameplayInteractive,
+        RaisedLandscape
     };
     Q_ENUM_NS(Type);
 }

@@ -20,6 +20,10 @@ void WorldRenderer::ensureLandscapeAtlas(const std::string& assetUuid, const std
     landscapeRenderer.ensureAtlas(assetUuid, atlasPath, cols, rows);
 }
 
+void WorldRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params) {
+    landscapeRenderer.ensureRaisedAtlas(assetUuid, atlasPath, cols, rows, params);
+}
+
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
     spriteRenderer.ensureImage(assetUuid, imagePath, widthCells, pivot);
 }
@@ -45,6 +49,7 @@ void WorldRenderer::render(
     int viewHeight) {
 
     landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight);
+    landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
     spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
 
     scratchLines.clear();

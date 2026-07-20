@@ -317,10 +317,15 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     // Map tool name to index. ToolsModel registration order per asset type:
     //   image: 0=Cursor, 1=Pencil, 2=Eraser
     //   slice: 0=LandscapePencil
+    //   shape3d: 0=Shape3dPencil
     int index = -1;
-    if (cur->getLayerType() == LayerTypes::BaseLandscape)
+    if (cur->type == AssetTypes::slice)
     {
         if (tool == "landscape_pencil" || tool == "0") index = 0;
+    }
+    else if (cur->type == AssetTypes::shape3d)
+    {
+        if (tool == "shape3d_pencil" || tool == "0") index = 0;
     }
     else
     {
@@ -517,8 +522,10 @@ QByteArray EditorRpcServer::_cmdSetLandscape(const QJsonObject& args)
             static_cast<uint8_t>(entry[2].toInt() ? 1 : 0));
     }
 
+    // Target the layer dictated by the asset (BaseLandscape for slice assets,
+    // RaisedLandscape for shape3d assets) instead of hardcoding one layer.
     const int cells = MapAuthoring::applyLandscapeUpdates(
-        *map->layer(LayerTypes::BaseLandscape), sliceAsset, parsed);
+        *map->layer(asset->getLayerType()), sliceAsset, parsed);
 
     QJsonObject d;
     d["updates_applied"] = static_cast<qint64>(parsed.size());

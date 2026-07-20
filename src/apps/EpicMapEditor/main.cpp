@@ -105,6 +105,7 @@ void registreTypes()
     qmlRegisterType<AssetToolsSelector>("Game", 1, 0, "AssetToolsSelector");
     qmlRegisterType<ImageAsset>("Game", 1, 0, "ImageAsset");
     qmlRegisterType<SliceAsset>("Game", 1, 0, "SliceAsset");
+    qmlRegisterType<Shape3dAsset>("Game", 1, 0, "Shape3dAsset");
 
 
     qmlRegisterType<DiamondIsometryView>("Game", 1, 0, "DiamondIsometryView");

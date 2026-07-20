@@ -26,6 +26,10 @@ void to_json(nlohmann::json& j, const AssetData& obj)
     {
         j["slice"] = *obj.sliceData;
     }
+    if (obj.shape3dData)
+    {
+        j["shape3d"] = *obj.shape3dData;
+    }
 }
 
 void from_json(const nlohmann::json& j, AssetData& obj)
@@ -54,6 +58,10 @@ void from_json(const nlohmann::json& j, AssetData& obj)
     if (j.contains("slice"))
     {
         obj.sliceData = j["slice"].get<SliceAssetData>();
+    }
+    if (j.contains("shape3d"))
+    {
+        obj.shape3dData = j["shape3d"].get<Shape3dAssetData>();
     }
 }
 

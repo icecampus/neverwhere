@@ -373,6 +373,9 @@ static int runSmokeTest(const std::filesystem::path& mapPath, const std::filesys
     for (const auto& t : frame.landscapeTiles) {
         if (!assetIndex.find(t.assetUuid)) missing++;
     }
+    for (const auto& t : frame.raisedTiles) {
+        if (!assetIndex.find(t.assetUuid)) missing++;
+    }
     for (const auto& s : frame.sprites) {
         if (!assetIndex.find(s.assetUuid)) {
             missing++;

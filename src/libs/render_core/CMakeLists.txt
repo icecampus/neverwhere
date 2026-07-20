@@ -1,4 +1,5 @@
 find_package(glm CONFIG REQUIRED)
+find_package(FastNoise2 CONFIG REQUIRED)
 
 # Sokol headers (from vcpkg, header-only)
 find_path(SOKOL_INCLUDE_DIRS "sokol_gfx.h")
@@ -24,6 +25,10 @@ nw_add_lib_sources(
         src/texture_atlas.cpp
         include/render_core/landscape_renderer.h
         src/landscape_renderer.cpp
+        src/raised_geometry.h
+        src/raised_geometry.cpp
+        src/rock_walls.h
+        src/rock_walls.cpp
         include/render_core/sprite_renderer.h
         src/sprite_renderer.cpp
         include/render_core/overlay_renderer.h
@@ -37,6 +42,7 @@ nw_add_lib_sources(
     LIBS
         glm::glm-header-only
         topology_core
+        landscape_core
         game_data
         spdlog::spdlog_header_only
 )
@@ -52,4 +58,7 @@ target_include_directories(render_core
 if(WIN32)
     target_link_libraries(render_core PRIVATE d3d11)
 endif()
+
+# FastNoise2 is used only by the rock-wall builder (src/rock_walls.cpp).
+target_link_libraries(render_core PRIVATE FastNoise2::FastNoise)
 
