@@ -82,6 +82,13 @@ MCP-сервер `neverwhere-debug-macos` (та же `debug_*`-контракт�
 - **`debug_variable_expand(session_id, var_path)`** — раскрытие вложенных структур:
   пути `tile.assetUuid`, `this->layers`, `(*this).map`, `*ptr`; `depth` (1..3),
   `max_children`. Ошибки: `variable_not_found`, `invalid_path`.
+- **Qt pretty-printers** (`tools/debug_mcp/lldb_formatters.py`, категория `neverwhere.Qt`,
+  регистрируется на каждую debug-сессию): `QString`/`QByteArray` — строкой (cap 256),
+  `QList<T>` — `size=N` + synthetic-дети (QStringList — строки), `QVariant` —
+  `QVariant(int, 42)`/`QVariant(QString, ...)` для скаляров и строк, `QPoint(F)/QSize(F)/QRect(F)`,
+  `glm::vec*`/`mat*`, `boost::uuids::uuid` (dashed hex), `std::filesystem::path` (libc++
+  SSO/long layout). При любой ошибке форматтер молча отдаёт fallback на сырое значение.
+  Проверка/регрессия: `smoke_lldb_worker.py --qt-probe`.
 - На Windows (cdb backend) оба инструмента пока возвращают `not_supported`.
 
 ## Базовый flow: поймать краш EpicMapEditor

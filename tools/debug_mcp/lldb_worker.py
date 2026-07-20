@@ -39,6 +39,12 @@ except ImportError:
     sys.path.insert(0, _lldb_python_dir)
     import lldb
 
+# The worker runs as tools/debug_mcp/lldb_worker.py — make the repo root
+# importable so the pretty-printer module resolves (tools.debug_mcp.*).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 PROTOCOL_VERSION = 1
 
 # Contract session states (mirrors the cdb backend's SESSION_STATES).
@@ -148,6 +154,12 @@ class LldbSession:
         # Inferior stdio redirection targets (launch only; None for attach).
         self.stdout_path: Optional[str] = None
         self.stderr_path: Optional[str] = None
+        try:
+            from tools.debug_mcp import lldb_formatters
+
+            lldb_formatters.register_formatters(self.debugger)
+        except Exception as exc:
+            self.diagnostics.append("pretty-printer registration failed: %s" % exc)
 
     # -- helpers -----------------------------------------------------------
 
@@ -853,9 +865,10 @@ def cmd_step(args: Dict[str, Any]) -> Dict[str, Any]:
     thread = session.current_thread()
     err = lldb.SBError()
     if kind == "over":
-        thread.StepOver(err)
+        # lldb-2100 has no StepOver(SBError) overload — RunMode is required.
+        thread.StepOver(lldb.eOnlyDuringStepping, err)
     elif kind == "into":
-        thread.StepInto(err)
+        thread.StepInto(lldb.eOnlyDuringStepping, err)
     elif kind == "out":
         thread.StepOut(err)
     else:

@@ -10,6 +10,9 @@ Scenarios:
   SIGSEGV) and session teardown.
 - ``--real-app``: EpicGameClient — break_on_start, breakpoint on ``main``,
   DWARF file/line visibility in stack frames, teardown.
+- ``--qt-probe``: ``/tmp/qt_probe`` — Qt6/glm/boost/std::filesystem
+  pretty-printers (lldb_formatters) verified on a statically linked Qt6Core
+  probe binary.
 
 Run with the repo venv python: ``tools/debug_mcp/.venv/bin/python``.
 """
@@ -17,6 +20,7 @@ Run with the repo venv python: ``tools/debug_mcp/.venv/bin/python``.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -141,6 +145,19 @@ def scenario_crash_binary() -> bool:
         "variable_expand missing -> variable_not_found",
         not missing.get("ok") and (missing.get("error") or {}).get("kind") == "variable_not_found",
         str((missing.get("error") or {}).get("kind")),
+    )
+
+    # step_over from `return x * 2` lands back in main (regression check for
+    # the lldb-2100 SBThread.StepOver RunMode overload).
+    step = dbg.debug_step_over(session_id, timeout_ms=10000)
+    step_event = (step.get("data") or {}).get("stop_event") or {}
+    step_frame = step_event.get("frame") or {}
+    check(
+        "step_over completes into main",
+        step.get("ok")
+        and step_event.get("reason") == "step_complete"
+        and step_frame.get("function") == "main",
+        f"reason={step_event.get('reason')} fn={step_frame.get('function')}",
     )
 
     run2 = dbg.debug_run_until_stop(session_id, timeout_ms=15000)
@@ -305,12 +322,199 @@ def scenario_real_app() -> bool:
     return all(result[1] for result in _RESULTS)
 
 
+QT_PROBE_SRC = Path("/tmp/qt_probe.cpp")
+QT_PROBE_EXE = Path("/tmp/qt_probe")
+
+QT_PROBE_CODE = r"""#include <QtCore/QString>
+#include <QtCore/QByteArray>
+#include <QtCore/QList>
+#include <QtCore/QStringList>
+#include <QtCore/QVariant>
+#include <QtCore/QPoint>
+#include <QtCore/QSize>
+#include <QtCore/QRect>
+#include <glm/glm.hpp>
+#include <glm/ext/vector_int2.hpp>
+#include <glm/ext/matrix_float4x4.hpp>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <filesystem>
+
+int main() {
+    QString qs = QStringLiteral("hello world");
+    QByteArray qba("bytes");
+    QList<int> qi{1, 2, 3};
+    QStringList qsl{"a", "bb"};
+    QVariant qv = 42;
+    QVariant qvs = QStringLiteral("variant string");
+    QPoint qp(3, 4);
+    QPointF qpf(1.5, 2.5);
+    QSize qsz(640, 480);
+    QRect qr(10, 20, 30, 40);
+    glm::vec3 gv(1.0f, 2.0f, 3.0f);
+    glm::ivec2 giv(5, 6);
+    glm::mat4 gm(1.0f);
+    boost::uuids::uuid uuid = boost::uuids::random_generator()();
+    std::filesystem::path fsp("/tmp/some/dir/file.txt");
+    std::filesystem::path fss("short");
+    volatile int marker = qi.size() + qsl.size() + qv.toInt() + (int)qs.size() + (int)qba.size() + qp.x() + qsz.width() + qr.width() + (int)gv.x + giv.x + (int)fsp.string().size() + (int)fss.string().size() + uuid.data[0] + qpf.x() + (int)gm[0][0];
+    return marker; // BREAK_HERE
+}
+"""
+
+_QT_PROBE_LIBS = (
+    "libQt6Core_debug.a",
+    "libpcre2-16.a",
+    "libdouble-conversion.a",
+    "libb2.a",
+    "libzstd.a",
+    "libicudata.a",
+    "libicui18n.a",
+    "libicuuc.a",
+)
+
+_QT_PROBE_FRAMEWORKS = (
+    "CoreFoundation",
+    "Foundation",
+    "IOKit",
+    "CoreServices",
+    "AppKit",
+    "Security",
+    "UniformTypeIdentifiers",
+)
+
+
+def _compile_qt_probe() -> bool:
+    vcpkg = REPO_ROOT / "_intermediate_64" / "vcpkg_installed" / "arm64-osx"
+    QT_PROBE_SRC.write_text(QT_PROBE_CODE, encoding="utf-8")
+    debug_lib = vcpkg / "debug" / "lib"
+    libs = [str(debug_lib / name) for name in _QT_PROBE_LIBS if (debug_lib / name).is_file()]
+    cmd = [
+        "clang++",
+        "-g",
+        "-O0",
+        "-std=c++20",
+        "-DQT_STATIC",
+        "-DQT_CORE_LIB",
+        str(QT_PROBE_SRC),
+        "-o",
+        str(QT_PROBE_EXE),
+        f"-I{vcpkg / 'include' / 'Qt6'}",
+        f"-I{vcpkg / 'include' / 'Qt6' / 'QtCore'}",
+        f"-I{vcpkg / 'include'}",
+        *libs,
+        "-lz",
+    ]
+    for framework in _QT_PROBE_FRAMEWORKS:
+        cmd += ["-framework", framework]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return check(
+        "compile qt probe (static Qt6Core)",
+        result.returncode == 0,
+        (result.stderr or "")[:400],
+    )
+
+
+def scenario_qt_probe() -> bool:
+    print("--- scenario: qt_probe (Qt6/glm/boost pretty-printers) ---")
+    if not _compile_qt_probe():
+        return False
+
+    break_line = next(
+        i for i, line in enumerate(QT_PROBE_CODE.splitlines(), start=1) if "BREAK_HERE" in line
+    )
+
+    session = dbg.debug_session_start(
+        exe=str(QT_PROBE_EXE), break_on_start=False, startup_timeout_ms=30000
+    )
+    ok = check("session_start qt probe", session.get("ok"), session.get("summary", ""))
+    if not ok:
+        print(session)
+        return False
+    session_id = str(session.get("session_id"))
+    fmt_issues = session.get("diagnostics") or []
+    check("formatters registered", not fmt_issues, "; ".join(fmt_issues))
+
+    bp = dbg.debug_breakpoint_set(session_id, source_file=str(QT_PROBE_SRC), line=break_line)
+    check("breakpoint bound", bp.get("ok"), str(bp["data"].get("resolved_location") if bp.get("ok") else bp.get("error")))
+    run = dbg.debug_run_until_stop(session_id, timeout_ms=30000)
+    stop_event = (run.get("data") or {}).get("stop_event") or {}
+    check("run to probe breakpoint", run.get("ok") and stop_event.get("reason") == "breakpoint", f"reason={stop_event.get('reason')}")
+
+    scopes = dbg.debug_scopes_get(session_id)
+    by_name = {
+        item.get("name"): item
+        for item in (scopes.get("data") or {}).get("locals", [])
+    }
+
+    def summary_of(name: str) -> Any:
+        item = by_name.get(name) or {}
+        return item.get("summary")
+
+    expected_summaries = {
+        "qs": '"hello world"',
+        "qba": '"bytes"',
+        "qi": "size=3",
+        "qsl": "size=2",
+        "qv": "QVariant(int, 42)",
+        "qvs": 'QVariant(QString, "variant string")',
+        "qp": "(3, 4)",
+        "qpf": "(1.5, 2.5)",
+        "qsz": "(640 x 480)",
+        "qr": "(10, 20, 30 x 40)",
+        "gv": "(1, 2, 3)",
+        "giv": "(5, 6)",
+        "gm": "mat4",
+        "fsp": '"/tmp/some/dir/file.txt"',
+        "fss": '"short"',
+    }
+    for name, expected in expected_summaries.items():
+        check(
+            f"summary {name} == {expected}",
+            summary_of(name) == expected,
+            f"got {summary_of(name)!r}",
+        )
+
+    uuid_summary = str(summary_of("uuid"))
+    check(
+        "summary uuid is dashed hex",
+        bool(re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", uuid_summary)),
+        uuid_summary,
+    )
+
+    expand = dbg.debug_variable_expand(session_id, "qi")
+    values = [child.get("value") for child in (expand.get("data") or {}).get("children", [])]
+    check(
+        "expand QList<int> children 1,2,3",
+        expand.get("ok") and values == ["1", "2", "3"],
+        str(values),
+    )
+
+    expand_sl = dbg.debug_variable_expand(session_id, "qsl")
+    sl_summaries = [child.get("summary") for child in (expand_sl.get("data") or {}).get("children", [])]
+    check(
+        'expand QStringList children "a","bb"',
+        expand_sl.get("ok") and sl_summaries == ['"a"', '"bb"'],
+        str(sl_summaries),
+    )
+
+    stop = dbg.debug_session_stop(session_id, kill_process=True)
+    check("session_stop kills probe", stop.get("ok"), stop.get("summary", ""))
+    return all(result[1] for result in _RESULTS)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--real-app", action="store_true", help="run the EpicGameClient scenario")
+    parser.add_argument("--qt-probe", action="store_true", help="run the Qt pretty-printer scenario")
     args = parser.parse_args()
 
-    passed = scenario_real_app() if args.real_app else scenario_crash_binary()
+    if args.real_app:
+        passed = scenario_real_app()
+    elif args.qt_probe:
+        passed = scenario_qt_probe()
+    else:
+        passed = scenario_crash_binary()
     failures = [name for name, ok, _ in _RESULTS if not ok]
     print(f"--- smoke result: {len(_RESULTS) - len(failures)}/{len(_RESULTS)} checks passed ---")
     if failures:
