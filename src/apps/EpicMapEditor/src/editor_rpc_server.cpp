@@ -4,9 +4,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QEventLoop>
+#include <QPixmap>
 #include <QQuickItemGrabResult>
+#include <QQuickWindow>
+#include <QScreen>
 #include <QSharedPointer>
 #include <QTcpSocket>
+#include <QWindow>
 #include <magic_enum/magic_enum.hpp>
 
 #include "editor_scene_registry.h"
@@ -583,21 +587,31 @@ QByteArray EditorRpcServer::_cmdScreenshot(const QJsonObject& args)
     if (!item)
         return _error("no_scene", "no active scene; load_chapter first");
 
-    // QQuickItem::grabToImage is asynchronous (completes after the next
-    // scene-graph frame), so pump a short nested event loop until ready.
-    // The RPC client is strictly request/response, so no re-entrant request
-    // can arrive while we wait.
-    QSharedPointer<QQuickItemGrabResult> grab = item->grabToImage();
-    if (!grab)
-        return _error("render_failed", "grabToImage() failed (item not in a window?)");
+    // Capture what is actually displayed, not QQuickItem::grabToImage():
+    // the grab re-renders the FBO item off the display path and noticeably
+    // degrades the semi-transparent landscape tiles (sparse tufts instead
+    // of the dense cover the window shows). grabWindow + crop to the item
+    // rect gives the true on-screen pixels.
+    QWindow* window = item->window();
+    if (!window || !window->screen())
+        return _error("render_failed", "render item has no window/screen");
 
-    QEventLoop loop;
-    QObject::connect(grab.data(), &QQuickItemGrabResult::ready, &loop, &QEventLoop::quit);
-    loop.exec();
+    const QPixmap pixmap = window->screen()->grabWindow(window->winId());
+    if (pixmap.isNull())
+        return _error("render_failed", "grabWindow() failed");
 
-    const QImage image = grab->image();
+    const qreal dpr = pixmap.devicePixelRatio();
+    const QPointF topLeft = item->mapToScene(QPointF(0, 0));
+    const QRectF sceneRect(topLeft, item->size());
+    const QRect crop(
+        static_cast<int>(sceneRect.x() * dpr),
+        static_cast<int>(sceneRect.y() * dpr),
+        static_cast<int>(sceneRect.width() * dpr),
+        static_cast<int>(sceneRect.height() * dpr));
+
+    const QImage image = pixmap.copy(crop).toImage();
     if (image.isNull())
-        return _error("render_failed", "grabbed image is null");
+        return _error("render_failed", "cropped image is null");
     if (!image.save(path))
         return _error("io_failed", "could not save image to: " + path);
 

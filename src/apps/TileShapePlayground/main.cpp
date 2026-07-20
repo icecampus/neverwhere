@@ -138,6 +138,49 @@ void applyBrushAtMouse() {
 bool g_demoPattern = false;
 bool g_demoNode = false;
 
+// --- Visual debug CLI (headless screenshot comparisons vs the editor) ---
+// --no-ui                      hide the ImGui panel (clean captures)
+// --nodes=x,y;x,y;...          paint these nodes on the raised layer
+// --raised-atlas=grass|flat    atlas for the raised layer (default flat)
+// --zoom=Z                     camera zoom (default: centerCamera's 1.0)
+// --center=cx,cy               camera center in cell coords
+//                              (default: bbox center of --nodes)
+bool g_noUi = false;
+std::vector<glm::ivec2> g_cliNodes;
+bool g_cliRaisedGrassAtlas = false;
+std::optional<float> g_cliZoom;
+std::optional<glm::vec2> g_cliCenter;
+
+std::vector<glm::ivec2> parseNodesArg(const std::string& value) {
+    std::vector<glm::ivec2> out;
+    std::string token;
+    for (size_t i = 0; i <= value.size(); ++i) {
+        const char c = i < value.size() ? value[i] : ';';
+        if (c == ';') {
+            const size_t comma = token.find(',');
+            if (comma != std::string::npos) {
+                out.emplace_back(
+                    std::atoi(token.substr(0, comma).c_str()),
+                    std::atoi(token.substr(comma + 1).c_str()));
+            }
+            token.clear();
+        } else {
+            token += c;
+        }
+    }
+    return out;
+}
+
+std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
+    const size_t comma = value.find(',');
+    if (comma == std::string::npos) {
+        return std::nullopt;
+    }
+    return glm::vec2(
+        std::atof(value.substr(0, comma).c_str()),
+        std::atof(value.substr(comma + 1).c_str()));
+}
+
 // Painted programmatically in --demo mode: one raised blob, one lone raised
 // node, plus grass/yellow flat strokes — used for visual verification.
 void paintDemoPattern() {
@@ -184,9 +227,11 @@ void init() {
         return;
     }
 
-    simgui_desc_t imgui_desc = {};
-    simgui_setup(&imgui_desc);
-    g_state.imgui_ok = true;
+    if (!g_noUi) {
+        simgui_desc_t imgui_desc = {};
+        simgui_setup(&imgui_desc);
+        g_state.imgui_ok = true;
+    }
 
     g_renderer.init();
     for (PaintLayer& layer : g_layers) {
@@ -197,6 +242,12 @@ void init() {
     }
     if (g_demoNode) {
         g_layers[0].brush.setNode({10, 10}, true);
+    }
+    for (const glm::ivec2& node : g_cliNodes) {
+        g_layers[2].brush.setNode(node, true);
+    }
+    if (g_cliRaisedGrassAtlas) {
+        g_layers[2].atlas = AtlasKind::Grass;
     }
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
@@ -228,6 +279,22 @@ void init() {
         g_camera.zoom = 2.0f;
         g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - nodePos.x * g_camera.zoom;
         g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - nodePos.y * g_camera.zoom;
+    }
+    if (g_cliZoom || g_cliCenter || !g_cliNodes.empty()) {
+        // Deterministic framing for screenshot comparisons.
+        glm::vec2 worldCenter;
+        if (g_cliCenter) {
+            worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
+        } else {
+            glm::vec2 acc(0.0f);
+            for (const glm::ivec2& node : g_cliNodes) {
+                acc += g_iso.nodeToField(node);
+            }
+            worldCenter = acc / static_cast<float>(g_cliNodes.size());
+        }
+        g_camera.zoom = g_cliZoom.value_or(1.0f);
+        g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - worldCenter.x * g_camera.zoom;
+        g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - worldCenter.y * g_camera.zoom;
     }
 }
 
@@ -442,14 +509,30 @@ void event(const sapp_event* ev) {
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--smoke") {
+        const std::string arg(argv[i]);
+        if (arg == "--smoke") {
             smoke = true;
         }
-        if (std::string(argv[i]) == "--demo") {
+        if (arg == "--demo") {
             g_demoPattern = true;
         }
-        if (std::string(argv[i]) == "--demo-node") {
+        if (arg == "--demo-node") {
             g_demoNode = true;
+        }
+        if (arg == "--no-ui") {
+            g_noUi = true;
+        }
+        if (arg.rfind("--nodes=", 0) == 0) {
+            g_cliNodes = parseNodesArg(arg.substr(8));
+        }
+        if (arg == "--raised-atlas=grass") {
+            g_cliRaisedGrassAtlas = true;
+        }
+        if (arg.rfind("--zoom=", 0) == 0) {
+            g_cliZoom = static_cast<float>(std::atof(arg.substr(7).c_str()));
+        }
+        if (arg.rfind("--center=", 0) == 0) {
+            g_cliCenter = parseVec2Arg(arg.substr(9));
         }
     }
 
