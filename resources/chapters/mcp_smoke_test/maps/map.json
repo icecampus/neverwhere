@@ -1,0 +1,1371 @@
+{
+    "BaseLandscape": [
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 5,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 4,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 6,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 5,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 6,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 5,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 8
+            },
+            "position": {
+                "x": 7,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 10
+            },
+            "position": {
+                "x": 4,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 6,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 11
+            },
+            "position": {
+                "x": 7,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 4,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 6,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 9,
+                "y": 10
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 7,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 7,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 5,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 9
+            },
+            "position": {
+                "x": 4,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 10,
+                "y": 10
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 10,
+                "y": 11
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 10,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 10
+            },
+            "position": {
+                "x": 9,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 11,
+                "y": 10
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 11
+            },
+            "position": {
+                "x": 11,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 9
+            },
+            "position": {
+                "x": 9,
+                "y": 11
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "f0d051af-833a-4c57-97c9-cc9cac9cd5b3",
+            "landscapeData": {
+                "tileIndex": 8
+            },
+            "position": {
+                "x": 11,
+                "y": 11
+            },
+            "type": 1
+        }
+    ],
+    "Decoration": [],
+    "GameplayInteractive": [
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 2
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 4
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 5
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 6
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 7
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 9
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 10
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 11
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 2,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 3,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 4,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 5,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 6,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 7,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 8,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 9,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 10,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 11,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "8fbb0889-7c48-470e-b32c-3888cd6ae6e6",
+            "position": {
+                "x": 12,
+                "y": 12
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "9813e80b-c6f7-43f9-9f11-f074009bb8f1",
+            "position": {
+                "x": 8,
+                "y": 8
+            },
+            "tile2dData": null,
+            "type": 0
+        },
+        {
+            "assetUuid": "b0ad34d1-1ca6-44f1-9572-5cac1e3bad97",
+            "position": {
+                "x": 3,
+                "y": 3
+            },
+            "tile2dData": null,
+            "type": 0
+        }
+    ]
+}

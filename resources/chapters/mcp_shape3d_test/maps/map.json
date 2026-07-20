@@ -1,0 +1,381 @@
+{
+    "BaseLandscape": [],
+    "Decoration": [],
+    "GameplayInteractive": [],
+    "RaisedLandscape": [
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 6,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 5,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 8,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 9
+            },
+            "position": {
+                "x": 5,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 6,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 10
+            },
+            "position": {
+                "x": 5,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 7,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 6,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 7,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 8,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 8,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 9,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 11
+            },
+            "position": {
+                "x": 9,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 5,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 7,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 9,
+                "y": 7
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 10
+            },
+            "position": {
+                "x": 11,
+                "y": 3
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 6,
+                "y": 8
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 5,
+                "y": 8
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 7,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 7,
+                "y": 8
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 9,
+                "y": 8
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 8,
+                "y": 8
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 6,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 8,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 8
+            },
+            "position": {
+                "x": 9,
+                "y": 9
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 12,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 11,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 12,
+                "y": 3
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 13,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 11
+            },
+            "position": {
+                "x": 13,
+                "y": 3
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 12,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 9
+            },
+            "position": {
+                "x": 11,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "e3576320-f062-4361-9690-08e7c2cb9621",
+            "landscapeData": {
+                "tileIndex": 8
+            },
+            "position": {
+                "x": 13,
+                "y": 5
+            },
+            "type": 1
+        }
+    ]
+}
