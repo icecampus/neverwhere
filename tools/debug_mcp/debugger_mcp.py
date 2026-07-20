@@ -3248,6 +3248,48 @@ def debug_process_terminate(*, process_id: int, expected_name: str) -> dict[str,
     )
 
 
+def debug_variable_expand(
+    session_id: str,
+    var_path: str = "",
+    *,
+    frame: int | None = None,
+    max_children: int = 64,
+    depth: int = 1,
+) -> dict[str, Any]:
+    """Variable drill-down. Only implemented on the macOS LLDB backend."""
+    return _envelope(
+        ok=False,
+        session_id=session_id,
+        state=None,
+        summary="debug_variable_expand is not supported on the Windows cdb backend",
+        error=_error(
+            "not_supported",
+            "debug_variable_expand is implemented by the macOS LLDB backend only",
+            recoverable=False,
+        ),
+    )
+
+
+def debug_crash_report(
+    session_id: str,
+    *,
+    frames_per_thread: int = 32,
+    log_tail_lines: int = 60,
+) -> dict[str, Any]:
+    """One-shot crash snapshot. Only implemented on the macOS LLDB backend."""
+    return _envelope(
+        ok=False,
+        session_id=session_id,
+        state=None,
+        summary="debug_crash_report is not supported on the Windows cdb backend",
+        error=_error(
+            "not_supported",
+            "debug_crash_report is implemented by the macOS LLDB backend only",
+            recoverable=False,
+        ),
+    )
+
+
 def reset_sessions_for_tests() -> None:
     with _SESSION_LOCK:
         for session in list(_SESSIONS.values()):

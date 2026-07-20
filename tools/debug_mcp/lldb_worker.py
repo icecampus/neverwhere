@@ -145,6 +145,9 @@ class LldbSession:
         self.created_at = time.time()
         self.last_activity_at = self.created_at
         self.diagnostics: List[str] = []
+        # Inferior stdio redirection targets (launch only; None for attach).
+        self.stdout_path: Optional[str] = None
+        self.stderr_path: Optional[str] = None
 
     # -- helpers -----------------------------------------------------------
 
@@ -608,6 +611,8 @@ def cmd_session_start(args: Dict[str, Any]) -> Dict[str, Any]:
         stderr_path = os.path.join(session.scratch_dir, "inferior.stderr.log")
         launch_info.AddOpenFileAction(1, stdout_path, False, True)
         launch_info.AddOpenFileAction(2, stderr_path, False, True)
+        session.stdout_path = stdout_path
+        session.stderr_path = stderr_path
         err = lldb.SBError()
         process = target.Launch(launch_info, err)
         if process is None or not process.IsValid() or not err.Success():
@@ -919,10 +924,9 @@ def cmd_frame_select(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def cmd_scopes_get(args: Dict[str, Any]) -> Dict[str, Any]:
-    session = _get_session(args)
-    name_filter = str(args.get("name_filter") or "").strip().casefold()
-    frame = session.current_frame()
+def _frame_variables(frame: "lldb.SBFrame", name_filter: str = "") -> Dict[str, Any]:
+    """Args + locals (+statics) of a frame, shaped like scopes_get items."""
+    name_filter = name_filter.strip().casefold()
 
     def collect(values: "lldb.SBValueList") -> List[Dict[str, Any]]:
         items = []
@@ -939,16 +943,39 @@ def cmd_scopes_get(args: Dict[str, Any]) -> Dict[str, Any]:
 
     arg_values = frame.GetVariables(True, False, False, True)
     local_values = frame.GetVariables(False, True, True, True)
-    args_items = collect(arg_values)
-    locals_items = collect(local_values)
+    return {"args": collect(arg_values), "locals": collect(local_values)}
+
+
+def _registers_list(frame: "lldb.SBFrame") -> List[Dict[str, Any]]:
+    registers = []
+    register_sets = frame.GetRegisters()
+    for i in range(register_sets.GetSize()):
+        register_set = register_sets.GetValueAtIndex(i)
+        set_name = register_set.GetName() or ""
+        for j in range(register_set.GetNumChildren()):
+            reg = register_set.GetChildAtIndex(j)
+            if reg.IsValid():
+                registers.append(
+                    {"set": set_name, "name": reg.GetName() or "", "value": reg.GetValue()}
+                )
+    return registers
+
+
+def cmd_scopes_get(args: Dict[str, Any]) -> Dict[str, Any]:
+    session = _get_session(args)
+    name_filter = str(args.get("name_filter") or "")
+    frame = session.current_frame()
+    variables = _frame_variables(frame, name_filter)
+    args_items = variables["args"]
+    locals_items = variables["locals"]
     return {
         "session_id": session.session_id,
         "state": session.state(),
         "frame": session.selected_frame_index,
         "args": args_items,
         "locals": locals_items,
-        "filter_applied": bool(name_filter),
-        "name_filter": str(args.get("name_filter") or ""),
+        "filter_applied": bool(name_filter.strip()),
+        "name_filter": name_filter,
         "matched_count": len(args_items) + len(locals_items),
     }
 
@@ -1015,17 +1042,7 @@ def cmd_memory_read(args: Dict[str, Any]) -> Dict[str, Any]:
 def cmd_registers_get(args: Dict[str, Any]) -> Dict[str, Any]:
     session = _get_session(args)
     frame = session.current_frame()
-    registers = []
-    register_sets = frame.GetRegisters()
-    for i in range(register_sets.GetSize()):
-        register_set = register_sets.GetValueAtIndex(i)
-        set_name = register_set.GetName() or ""
-        for j in range(register_set.GetNumChildren()):
-            reg = register_set.GetChildAtIndex(j)
-            if reg.IsValid():
-                registers.append(
-                    {"set": set_name, "name": reg.GetName() or "", "value": reg.GetValue()}
-                )
+    registers = _registers_list(frame)
     return {
         "session_id": session.session_id,
         "state": session.state(),
@@ -1147,6 +1164,328 @@ def cmd_watchpoint_set(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Variable drill-down / crash report
+# ---------------------------------------------------------------------------
+
+
+def _deref_value(value: "lldb.SBValue", var_path: str) -> "lldb.SBValue":
+    lldb_type = value.GetType()
+    if lldb_type.IsValid() and lldb_type.IsReferenceType():
+        # lldb resolves references transparently on child access.
+        return value
+    if lldb_type.IsValid() and lldb_type.IsPointerType():
+        deref = value.Dereference()
+        err = deref.GetError() if deref is not None else None
+        if deref is None or not deref.IsValid() or (err is not None and not err.Success()):
+            raise WorkerError(
+                "invalid_path",
+                "Cannot dereference pointer of type '%s' (path '%s')"
+                % (value.GetTypeName(), var_path),
+            )
+        return deref
+    raise WorkerError(
+        "invalid_path",
+        "Value of type '%s' is not a pointer (path '%s')" % (value.GetTypeName(), var_path),
+    )
+
+
+def _next_op_index(text: str) -> int:
+    dot = text.find(".")
+    arrow = text.find("->")
+    if dot < 0:
+        return arrow
+    if arrow < 0:
+        return dot
+    return min(dot, arrow)
+
+
+def _resolve_var_path(frame: "lldb.SBFrame", var_path: str) -> "lldb.SBValue":
+    """Resolve `tile.assetUuid` / `this->layers` / `(*this).map` / `*ptr` paths."""
+    text = var_path.strip()
+    if not text:
+        raise WorkerError("invalid_path", "var_path must be non-empty")
+    deref_first = False
+    if text.startswith("(*"):
+        close = text.find(")")
+        if close < 0:
+            raise WorkerError("invalid_path", "Unbalanced '(' in '%s'" % var_path)
+        first = text[2:close].strip()
+        if not first:
+            raise WorkerError("invalid_path", "Empty dereference in '%s'" % var_path)
+        deref_first = True
+        rest = text[close + 1 :]
+    else:
+        cut = _next_op_index(text)
+        if cut >= 0:
+            first, rest = text[:cut], text[cut:]
+        else:
+            first, rest = text, ""
+        if first.startswith("*"):
+            first = first[1:].strip()
+            deref_first = True
+    if not first:
+        raise WorkerError("invalid_path", "Cannot parse var_path '%s'" % var_path)
+    value = frame.FindVariable(first)
+    if value is None or not value.IsValid():
+        raise WorkerError(
+            "variable_not_found", "Variable '%s' not found in current frame" % first
+        )
+    if deref_first:
+        value = _deref_value(value, var_path)
+    while rest:
+        if rest.startswith("->"):
+            op, rest = "->", rest[2:]
+        elif rest.startswith("."):
+            op, rest = ".", rest[1:]
+        else:
+            raise WorkerError(
+                "invalid_path", "Cannot parse '%s' near '%s'" % (var_path, rest)
+            )
+        cut = _next_op_index(rest)
+        if cut >= 0:
+            seg, rest = rest[:cut], rest[cut:]
+        else:
+            seg, rest = rest, ""
+        seg_deref = seg.endswith("*") and len(seg) > 1
+        if seg_deref:
+            seg = seg[:-1]
+        if not seg:
+            raise WorkerError("invalid_path", "Empty segment in '%s'" % var_path)
+        if op == "->":
+            value = _deref_value(value, var_path)
+        child = value.GetChildMemberWithName(seg)
+        if child is None or not child.IsValid():
+            raise WorkerError(
+                "variable_not_found",
+                "Member '%s' not found (path '%s')" % (seg, var_path),
+            )
+        value = child
+        if seg_deref:
+            value = _deref_value(value, var_path)
+    return value
+
+
+_EXPAND_NODE_BUDGET = 512
+
+
+def _expand_value_dict(
+    value: "lldb.SBValue",
+    levels: int,
+    max_children: int,
+    budget: List[int],
+) -> Any:
+    """Variable dict; `levels` controls how many child levels are included."""
+    item: Dict[str, Any] = {
+        "name": value.GetName() or "",
+        "type": value.GetTypeName() or "",
+        "value": value.GetValue(),
+        "summary": _value_summary(value),
+        "num_children": value.GetNumChildren(),
+        "has_children": value.GetNumChildren() > 0,
+    }
+    if levels <= 0:
+        return item, False
+    truncated = False
+    children = []
+    total = value.GetNumChildren()
+    for i in range(min(total, max_children)):
+        if budget[0] <= 0:
+            truncated = True
+            break
+        budget[0] -= 1
+        child = value.GetChildAtIndex(i)
+        if not child.IsValid():
+            continue
+        child_item, child_truncated = _expand_value_dict(
+            child, levels - 1, max_children, budget
+        )
+        children.append(child_item)
+        truncated = truncated or child_truncated
+    if total > max_children:
+        truncated = True
+    item["children"] = children
+    item["children_total"] = total
+    return item, truncated
+
+
+def cmd_variable_expand(args: Dict[str, Any]) -> Dict[str, Any]:
+    session = _get_session(args)
+    var_path = str(args.get("var_path") or "").strip()
+    if not var_path:
+        raise WorkerError("invalid_path", "var_path must be non-empty")
+    max_children = int(args.get("max_children") or 64)
+    max_children = max(1, min(max_children, 256))
+    depth = int(args.get("depth") or 1)
+    depth = max(1, min(depth, 3))
+    frame_index = args.get("frame")
+    if frame_index is not None:
+        frame_index = int(frame_index)
+        thread = session.current_thread()
+        if frame_index < 0 or frame_index >= thread.GetNumFrames():
+            raise WorkerError(
+                "invalid_input",
+                "Frame index %d out of range (0..%d)"
+                % (frame_index, thread.GetNumFrames() - 1),
+            )
+        session.selected_frame_index = frame_index
+    frame = session.current_frame()
+    value = _resolve_var_path(frame, var_path)
+    expanded, truncated = _expand_value_dict(value, depth, max_children, [_EXPAND_NODE_BUDGET])
+    variable = dict(expanded)
+    children = variable.pop("children", [])
+    children_total = variable.pop("children_total", variable.get("num_children", 0))
+    return {
+        "session_id": session.session_id,
+        "state": session.state(),
+        "var_path": var_path,
+        "frame": session.selected_frame_index,
+        "variable": variable,
+        "children": children,
+        "children_total": children_total,
+        "depth": depth,
+        "max_children": max_children,
+        "truncated": truncated,
+    }
+
+
+def _read_text_tail(path: Optional[str], max_lines: int) -> Optional[Dict[str, Any]]:
+    """Last `max_lines` non-empty lines of a text file; None when absent/empty."""
+    if not path or max_lines <= 0 or not os.path.isfile(path):
+        return None
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            if size > 256 * 1024:
+                handle.seek(-256 * 1024, os.SEEK_END)
+            data = handle.read()
+    except OSError:
+        return None
+    text = data.decode("utf-8", "replace")
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    return {"lines": lines[-max_lines:], "truncated": len(lines) > max_lines}
+
+
+def cmd_crash_report(args: Dict[str, Any]) -> Dict[str, Any]:
+    session = _get_session(args)
+    frames_per_thread = int(args.get("frames_per_thread") or 32)
+    frames_per_thread = max(1, min(frames_per_thread, 128))
+    log_tail_lines = int(args.get("log_tail_lines") or 60)
+    log_tail_lines = max(0, min(log_tail_lines, 1000))
+    process = session.require_process()
+    state = process.GetState()
+    if state not in STOPPED_STATES and state not in TERMINAL_STATES:
+        raise WorkerError(
+            "invalid_state", "Process is not stopped (state=%s)" % _state_name(state)
+        )
+
+    truncated_parts: List[str] = []
+    stop_event = _build_stop_event(session, state)
+
+    threads = []
+    selected_tid = session.selected_thread_id
+    for i in range(process.GetNumThreads()):
+        thread = process.GetThreadAtIndex(i)
+        if not thread.IsValid():
+            continue
+        num_frames = thread.GetNumFrames()
+        frames = []
+        for j in range(min(num_frames, frames_per_thread)):
+            frames.append(_frame_dict(session, thread.GetFrameAtIndex(j), j))
+        if num_frames > frames_per_thread and "threads" not in truncated_parts:
+            truncated_parts.append("threads")
+        threads.append(
+            {
+                "index_id": thread.GetIndexID(),
+                "thread_id": thread.GetThreadID(),
+                "name": thread.GetName() or "",
+                "queue_name": thread.GetQueueName() or "",
+                "stop_reason": _STOP_REASON_NAMES.get(thread.GetStopReason(), "unknown"),
+                "is_selected": thread.GetThreadID() == selected_tid,
+                "frame_count": num_frames,
+                "frames": frames,
+            }
+        )
+
+    # First project frame of the stopped thread: scopes + expanded `this`.
+    project_frame = None
+    registers: List[Dict[str, Any]] = []
+    if state in STOPPED_STATES:
+        try:
+            stopped_thread = session.current_thread()
+        except WorkerError:
+            stopped_thread = None
+        if stopped_thread is not None and stopped_thread.GetNumFrames() > 0:
+            chosen = 0
+            for j in range(stopped_thread.GetNumFrames()):
+                if _frame_dict(session, stopped_thread.GetFrameAtIndex(j), j)["is_project_frame"]:
+                    chosen = j
+                    break
+            frame = stopped_thread.GetFrameAtIndex(chosen)
+            frame_info = _frame_dict(session, frame, chosen)
+            frame_info["scopes"] = _frame_variables(frame)
+            this_value = frame.FindVariable("this")
+            if this_value is not None and this_value.IsValid():
+                target_value = this_value
+                this_type = this_value.GetType()
+                if this_type.IsValid() and this_type.IsPointerType():
+                    deref = this_value.Dereference()
+                    if deref is not None and deref.IsValid():
+                        target_value = deref
+                this_item, _ = _expand_value_dict(target_value, 1, 64, [_EXPAND_NODE_BUDGET])
+                frame_info["this"] = this_item
+            project_frame = frame_info
+            registers = _registers_list(stopped_thread.GetFrameAtIndex(0))
+
+    # Inferior stdout/stderr tail (launch sessions redirect stdio to files).
+    log_tail: Dict[str, Any] = {}
+    for key, path in (("stdout", session.stdout_path), ("stderr", session.stderr_path)):
+        tail = _read_text_tail(path, log_tail_lines)
+        if tail:
+            log_tail[key] = tail["lines"]
+            if tail["truncated"] and "log_tail" not in truncated_parts:
+                truncated_parts.append("log_tail")
+
+    modules = []
+    target = session.target
+    module_count = 0
+    if target is not None and target.IsValid():
+        module_count = target.GetNumModules()
+        for i in range(min(module_count, 256)):
+            module = target.GetModuleAtIndex(i)
+            if not module.IsValid():
+                continue
+            header = module.GetObjectFileHeaderAddress()
+            modules.append(
+                {
+                    "name": module.GetFileSpec().GetFilename() or "",
+                    "load_address": hex(header.GetLoadAddress(target)),
+                }
+            )
+    if module_count > 256:
+        truncated_parts.append("modules")
+
+    result: Dict[str, Any] = {
+        "session_id": session.session_id,
+        "state": session.state(),
+        "stop_event": stop_event,
+        "threads": threads,
+        "thread_count": len(threads),
+        "project_frame": project_frame,
+        "registers": registers,
+        "modules_summary": {"modules": modules, "count": module_count},
+        "truncated": bool(truncated_parts),
+        "truncated_parts": truncated_parts,
+        "frames_per_thread": frames_per_thread,
+        "log_tail_lines": log_tail_lines,
+    }
+    if log_tail:
+        result["log_tail"] = log_tail
+    return result
+
+
 COMMANDS = {
     "ping": cmd_ping,
     "self_check": cmd_self_check,
@@ -1174,6 +1513,8 @@ COMMANDS = {
     "thread_select": cmd_thread_select,
     "modules_get": cmd_modules_get,
     "watchpoint_set": cmd_watchpoint_set,
+    "variable_expand": cmd_variable_expand,
+    "crash_report": cmd_crash_report,
 }
 
 

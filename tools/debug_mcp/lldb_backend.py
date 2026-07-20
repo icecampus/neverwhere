@@ -59,6 +59,8 @@ ERROR_KINDS = frozenset(
         "invalid_input",
         "dump_not_found",
         "not_supported",
+        "variable_not_found",
+        "invalid_path",
     }
 )
 
@@ -79,7 +81,15 @@ STOP_REASONS = frozenset(
 
 # Error kinds where retrying with different input / more time is sensible.
 _RECOVERABLE_KINDS = frozenset(
-    {"timeout", "invalid_input", "invalid_expression", "invalid_state", "process_exited"}
+    {
+        "timeout",
+        "invalid_input",
+        "invalid_expression",
+        "invalid_state",
+        "process_exited",
+        "variable_not_found",
+        "invalid_path",
+    }
 )
 
 _SUGGESTED_NEXT = {
@@ -95,6 +105,14 @@ _SUGGESTED_NEXT = {
         "Use debug_memory_read for raw memory.",
     ],
     "invalid_state": ["Call debug_session_status to inspect the process state."],
+    "variable_not_found": [
+        "Call debug_scopes_get to list variables in the current frame.",
+        "Check the frame index with debug_stack_get / debug_frame_select.",
+    ],
+    "invalid_path": [
+        "Use paths like 'tile.assetUuid', 'this->layers', '(*this).map'.",
+        "Call debug_scopes_get to list top-level variables.",
+    ],
     "launch_failed": [
         "Build the target first (e.g. cmake --build --preset macos-debug --target EpicMapEditor).",
         "Pass exe or exe_target explicitly.",
@@ -586,6 +604,8 @@ def debug_contract_get() -> dict[str, Any]:
                 "debug_crash_dump_analyze",
                 "debug_heap_stat",
                 "debug_watchpoint_set",
+                "debug_variable_expand",
+                "debug_crash_report",
             ],
             "not_supported_tools": [
                 "debug_pdb_resolve",
@@ -1317,6 +1337,41 @@ def debug_scopes_get(session_id: str, *, name_filter: str = "") -> dict[str, Any
     )
 
 
+def debug_variable_expand(
+    session_id: str,
+    var_path: str,
+    *,
+    frame: int | None = None,
+    max_children: int = 64,
+    depth: int = 1,
+) -> dict[str, Any]:
+    if not var_path.strip():
+        return _envelope(
+            ok=False,
+            session_id=session_id,
+            state=None,
+            summary="var_path is required",
+            error=_error(
+                "invalid_path",
+                "var_path must be non-empty",
+                recoverable=True,
+                suggested_next_actions=list(_SUGGESTED_NEXT["invalid_path"]),
+            ),
+        )
+    return _wrap_worker_call(
+        "variable_expand",
+        {
+            "session_id": session_id,
+            "var_path": var_path,
+            "frame": frame,
+            "max_children": max_children,
+            "depth": depth,
+        },
+        "Expanded variable",
+        session_id=session_id,
+    )
+
+
 def debug_expression_eval(
     session_id: str,
     expression: str,
@@ -1405,6 +1460,24 @@ def debug_modules_get(session_id: str, *, filter_text: str = "") -> dict[str, An
         "modules_get",
         {"session_id": session_id, "filter_text": filter_text},
         "Listed modules",
+        session_id=session_id,
+    )
+
+
+def debug_crash_report(
+    session_id: str,
+    *,
+    frames_per_thread: int = 32,
+    log_tail_lines: int = 60,
+) -> dict[str, Any]:
+    return _wrap_worker_call(
+        "crash_report",
+        {
+            "session_id": session_id,
+            "frames_per_thread": frames_per_thread,
+            "log_tail_lines": log_tail_lines,
+        },
+        "Captured crash report",
         session_id=session_id,
     )
 

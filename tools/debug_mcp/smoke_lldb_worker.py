@@ -31,11 +31,13 @@ from tools.debug_mcp import lldb_backend as dbg  # noqa: E402
 CRASH_SRC = Path("/tmp/nw_lldb_crash.cpp")
 CRASH_EXE = Path("/tmp/nw_lldb_crash")
 
-CRASH_CODE = """int compute(int x) { return x * 2; }
+CRASH_CODE = """struct Point { int x; int y; };
+int compute(int x) { return x * 2; }
 int main() {
-    int value = compute(21);
-    volatile int* p = nullptr;
-    return *p + value;
+    Point p{7, 8};
+    int value = compute(p.x * 3);
+    volatile int* p2 = nullptr;
+    return *p2 + value;
 }
 """
 
@@ -122,6 +124,25 @@ def scenario_crash_binary() -> bool:
         str((evaluation.get("data") or {}).get("value")),
     )
 
+    # `p` lives in main's frame (index 1) while we are stopped in compute().
+    expand = dbg.debug_variable_expand(session_id, "p", frame=1)
+    expand_children = {
+        (child.get("name"), child.get("value"))
+        for child in (expand.get("data") or {}).get("children", [])
+    }
+    check(
+        "variable_expand p shows x=7,y=8",
+        expand.get("ok") and ("x", "7") in expand_children and ("y", "8") in expand_children,
+        str(expand_children if expand.get("ok") else expand.get("error")),
+    )
+
+    missing = dbg.debug_variable_expand(session_id, "nonexistent_var")
+    check(
+        "variable_expand missing -> variable_not_found",
+        not missing.get("ok") and (missing.get("error") or {}).get("kind") == "variable_not_found",
+        str((missing.get("error") or {}).get("kind")),
+    )
+
     run2 = dbg.debug_run_until_stop(session_id, timeout_ms=15000)
     stop_event2 = (run2.get("data") or {}).get("stop_event") or {}
     sig = _sig_name(stop_event2)
@@ -139,6 +160,33 @@ def scenario_crash_binary() -> bool:
         "stack_get at crash is non-empty",
         stack2.get("ok") and len(frames2) > 0,
         str([frame.get("function") for frame in frames2]),
+    )
+
+    report = dbg.debug_crash_report(session_id)
+    report_data = report.get("data") or {}
+    report_event = report_data.get("stop_event") or {}
+    report_frame = report_data.get("project_frame") or {}
+    check(
+        "crash_report threads >= 1",
+        report.get("ok") and report_data.get("thread_count", 0) >= 1,
+        f"threads={report_data.get('thread_count')}",
+    )
+    check(
+        "crash_report project_frame has file/line",
+        report.get("ok")
+        and str(report_frame.get("file", "")).endswith("nw_lldb_crash.cpp")
+        and report_frame.get("line", 0) > 0,
+        str({"file": report_frame.get("file"), "line": report_frame.get("line")}),
+    )
+    check(
+        "crash_report registers non-empty",
+        report.get("ok") and len(report_data.get("registers", [])) > 0,
+        f"registers={len(report_data.get('registers', []))}",
+    )
+    check(
+        "crash_report exception signal_equivalent SIGSEGV",
+        report.get("ok") and _sig_name(report_event) == "SIGSEGV",
+        f"reason={report_event.get('reason')} desc={report_event.get('stop_description')}",
     )
 
     stop = dbg.debug_session_stop(session_id, kill_process=True)
@@ -234,6 +282,22 @@ def scenario_real_app() -> bool:
         "first_project_frame under repo root",
         bool(project_frame) and str(REPO_ROOT) in str(project_frame.get("file", "")),
         str(project_frame),
+    )
+
+    report = dbg.debug_crash_report(session_id)
+    report_data = report.get("data") or {}
+    report_frame = report_data.get("project_frame") or {}
+    report_scopes = report_frame.get("scopes") or {}
+    scope_count = len(report_scopes.get("args", [])) + len(report_scopes.get("locals", []))
+    check(
+        "crash_report project_frame is_project_frame",
+        report.get("ok") and report_frame.get("is_project_frame") is True,
+        str({"file": report_frame.get("file"), "line": report_frame.get("line")}),
+    )
+    check(
+        "crash_report project_frame scopes non-empty",
+        report.get("ok") and scope_count > 0,
+        f"scopes={scope_count} threads={report_data.get('thread_count')}",
     )
 
     stop = dbg.debug_session_stop(session_id, kill_process=True)

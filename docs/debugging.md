@@ -72,6 +72,18 @@ MCP-сервер `neverwhere-debug-macos` (та же `debug_*`-контракт�
 - lldb резолвит брейкпоинт на `int main` в первую исполняемую строку (например 403 → 409)
   — это норма, не баг резолвера.
 
+## One-shot слепок и дрилл-даун (обе платформы по контракту, реализация — LLDB)
+
+- **`debug_crash_report(session_id)`** — полный слепок за один вызов вместо серии
+  stack/scopes/eval: stop_event (с `signal_equivalent`), стеки всех потоков
+  (`is_project_frame` помечены), project_frame + его scopes + раскрытый `this`,
+  регистры точки сбоя, хвост stdout/stderr inferior (`log_tail`), сводка модулей.
+  Использовать сразу после `debug_run_until_stop` — дальше докручивать точечно.
+- **`debug_variable_expand(session_id, var_path)`** — раскрытие вложенных структур:
+  пути `tile.assetUuid`, `this->layers`, `(*this).map`, `*ptr`; `depth` (1..3),
+  `max_children`. Ошибки: `variable_not_found`, `invalid_path`.
+- На Windows (cdb backend) оба инструмента пока возвращают `not_supported`.
+
 ## Базовый flow: поймать краш EpicMapEditor
 
 ```

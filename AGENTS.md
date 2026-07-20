@@ -117,7 +117,7 @@ MCP-сервер из `tools/debug_mcp/` — единый `debug_*` контра
 
 **cdb search order (win):** env `CRASH_ANALYSIS_DEBUGGER_PATH` → Windows Kits (`C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe`). В `.mcp.json` путь уже прописан.
 
-**macOS-особенности:** SIGSEGV/SIGABRT приходят как Mach-exception (`EXC_BAD_ACCESS`) — смотри `stop_event.exception.signal_equivalent`; attach только к своим процессам (SIP); DWARF в бинаре, отдельных символов не нужно; smoke backend'а без MCP — `tools/debug_mcp/smoke_lldb_worker.py`. LLDB backend живёт в `lldb_backend.py` + `lldb_worker.py` (worker на системном python3 3.9, т.к. SB API собран под cp39).
+**macOS-особенности:** SIGSEGV/SIGABRT приходят как Mach-exception (`EXC_BAD_ACCESS`) — смотри `stop_event.exception.signal_equivalent`; attach только к своим процессам (SIP); DWARF в бинаре, отдельных символов не нужно; smoke backend'а без MCP — `tools/debug_mcp/smoke_lldb_worker.py`. LLDB backend живёт в `lldb_backend.py` + `lldb_worker.py` (worker на системном python3 3.9, т.к. SB API собран под cp39). Дополнительно: `debug_crash_report` — полный слепок при останове за один вызов (стеки всех потоков, project_frame + scopes + `this`, регистры, хвост лога inferior), `debug_variable_expand` — дрилл-даун по вложенным структурам (`this->layers`, `(*this).map`); на Windows оба пока `not_supported`.
 
 **Post-mortem (.dmp):** `debug_crash_dump_analyze(dump_path)` — анализ готового дампа (Windows). Сейчас в neverwhere нет C++ хука для записи дампов при падении (это отдельный следующий шаг: `MiniDumpWriteDump` в `main.cpp` + `CRASH_DUMP_DIR`).
 

@@ -349,6 +349,24 @@ def debug_scopes_get(session_id: str, name_filter: str = "") -> dict:
 
 
 @mcp.tool()
+def debug_variable_expand(
+    session_id: str,
+    var_path: str,
+    frame: int | None = None,
+    max_children: int = 64,
+    depth: int = 1,
+) -> dict:
+    """Drill down into a variable: children of structs/pointers (e.g. 'tile.assetUuid', 'this->layers')."""
+    return _dbg.debug_variable_expand(
+        session_id,
+        var_path,
+        frame=frame,
+        max_children=max_children,
+        depth=depth,
+    )
+
+
+@mcp.tool()
 def debug_expression_eval(
     session_id: str,
     expression: str,
@@ -391,6 +409,16 @@ def debug_thread_select(session_id: str, thread_id: int) -> dict:
 def debug_modules_get(session_id: str, filter_text: str = "") -> dict:
     """List loaded modules (exe + DLLs), optionally filtered."""
     return _dbg.debug_modules_get(session_id, filter_text=filter_text)
+
+
+@mcp.tool()
+def debug_crash_report(session_id: str, frames_per_thread: int = 32, log_tail_lines: int = 60) -> dict:
+    """One-shot crash snapshot: stop event, all thread stacks, project-frame scopes, registers, log tail."""
+    return _dbg.debug_crash_report(
+        session_id,
+        frames_per_thread=frames_per_thread,
+        log_tail_lines=log_tail_lines,
+    )
 
 
 @mcp.tool()
