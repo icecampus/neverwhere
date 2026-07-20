@@ -62,6 +62,59 @@ float4 main(PSIn inp): SV_Target0 {
 }
 )";
 
+// MSL for the Metal backend (sokol_app on macOS). Vertex attributes map by
+// index ([[attribute(N)]]); sokol's default entry point for Metal is "_main".
+static const char* vs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+};
+
+struct VSIn {
+    float2 pos [[attribute(0)]];
+    float2 uv0 [[attribute(1)]];
+    float4 color0 [[attribute(2)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float2 uv0;
+    float4 color0;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 clip = float2(
+        (in.pos.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (in.pos.y / params.view_size.y) * 2.0
+    );
+    o.pos = float4(clip, 0.0, 1.0);
+    o.uv0 = in.uv0;
+    o.color0 = in.color0;
+    return o;
+}
+)";
+
+static const char* fs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct PSIn {
+    float4 pos [[position]];
+    float2 uv0;
+    float4 color0;
+};
+
+fragment float4 _main(PSIn in [[stage_in]],
+                      texture2d<float> tex0 [[texture(0)]],
+                      sampler smp0 [[sampler(0)]]) {
+    float4 t = tex0.sample(smp0, in.uv0);
+    return t * in.color0;
+}
+)";
+
 void LandscapeRenderer::init(sg_pixel_format depthFormat_) {
     depthFormat = depthFormat_;
     ensurePipeline();
@@ -93,8 +146,9 @@ void LandscapeRenderer::ensurePipeline() {
     if (pip.id != SG_INVALID_ID) return;
 
     sg_shader_desc shd_desc = {};
-    // One render_core binary serves both shells: D3D11 (game client, sokol_app)
-    // and GLCORE (editor, Qt FBO) — pick shader sources by the active backend.
+    // One render_core binary serves all shells: D3D11 (game client, sokol_app on
+    // Windows), METAL (sokol_app on macOS) and GLCORE (editor, Qt FBO) — pick
+    // shader sources by the active backend.
     if (sg_query_backend() == SG_BACKEND_D3D11) {
         shd_desc.vertex_func.source = vs_src_hlsl;
         shd_desc.fragment_func.source = fs_src_hlsl;
@@ -105,6 +159,9 @@ void LandscapeRenderer::ensurePipeline() {
         shd_desc.attrs[1].hlsl_sem_index = 1;
         shd_desc.attrs[2].hlsl_sem_name = "TEXCOORD";
         shd_desc.attrs[2].hlsl_sem_index = 2;
+    } else if (sg_query_backend() == SG_BACKEND_METAL_MACOS) {
+        shd_desc.vertex_func.source = vs_src_msl;
+        shd_desc.fragment_func.source = fs_src_msl;
     } else {
         shd_desc.vertex_func.source = vs_src_glsl;
         shd_desc.fragment_func.source = fs_src_glsl;

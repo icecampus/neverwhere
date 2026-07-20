@@ -10,8 +10,9 @@
     #define SOKOL_GLCORE
     #include <glad/glad.h>
 #elif defined(__APPLE__)
+    // No glad here: sokol_gfx.h (SOKOL_IMPL) pulls in the system <OpenGL/gl3.h>,
+    // which conflicts with glad's gl* macro redefinitions.
     #define SOKOL_GLCORE
-    #include <glad/glad.h>
 #else
     #define SOKOL_GLCORE
     #include <glad/glad.h>

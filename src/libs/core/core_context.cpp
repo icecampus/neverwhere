@@ -6,7 +6,31 @@
 
 namespace fs = std::filesystem;
 
-std::filesystem::path baseDataPath = "d:/campus/neverwhere/resources";
+namespace
+{
+// Walk up from the working directory until a dir with resources/assets and
+// resources/chapters is found (repo root). Works when launched from the repo
+// root, from _intermediate_64 (Xcode scheme working dir) or a build subdir.
+fs::path resolveBaseDataPath()
+{
+    std::error_code ec;
+    fs::path dir = fs::weakly_canonical(fs::current_path(), ec);
+    if (dir.empty()) return fs::path("resources");
+
+    for (int i = 0; i < 16; i++)
+    {
+        if (fs::exists(dir / "resources" / "assets", ec) && fs::exists(dir / "resources" / "chapters", ec))
+            return dir / "resources";
+        if (!dir.has_parent_path()) break;
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return fs::path("resources");
+}
+}
+
+std::filesystem::path baseDataPath = resolveBaseDataPath();
 
 CoreContext::CoreContext(QQmlApplicationEngine& engine_):
     QObject(&engine_),

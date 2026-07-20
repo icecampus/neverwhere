@@ -396,7 +396,11 @@ static int runSmokeTest(const std::filesystem::path& mapPath, const std::filesys
     const topology_core::CellRegion region = iso.visibleCellBounds(glm::vec2(1280.0f, 720.0f), glm::vec2(0.0f, 0.0f));
     check(region.min.x <= region.max.x && region.min.y <= region.max.y, "visibleCellBounds is non-empty");
 
-    spdlog::info(failures == 0 ? "TEST PASS: smoke scenario finished OK" : "TEST FAIL: {} check(s) failed", failures);
+    if (failures == 0) {
+        spdlog::info("TEST PASS: smoke scenario finished OK");
+    } else {
+        spdlog::info("TEST FAIL: {} check(s) failed", failures);
+    }
     return failures == 0 ? 0 : 1;
 }
 

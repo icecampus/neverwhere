@@ -1,13 +1,7 @@
-INTERMEDIATE_PATH="_intermediate_64"  
-
-if [ ! -d "$INTERMEDIATE_PATH" ]; then
-    mkdir -p "$INTERMEDIATE_PATH"
-fi
-
-cd "$INTERMEDIATE_PATH"
-
-cmake -DCMAKE_TOOLCHAIN_FILE=toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake \
-      .. \
-      -G "Xcode" 
-
-cd ..
+#!/bin/sh
+# macOS: конфигурация Xcode-проекта через preset `macos` (vcpkg manifest доустановит
+# зависимости под arm64-osx при первом запуске — это долго, собирается Qt).
+# Сборка: cmake --build --preset macos-debug --target EpicMapEditor
+set -e
+cd "$(dirname "$0")"
+cmake --preset macos

@@ -490,6 +490,262 @@ float4 main(PSIn inp): SV_Target0 {
 }
 )";
 
+// MSL for the Metal backend (sokol_app on macOS). Vertex attributes map by
+// index ([[attribute(N)]]); sokol's default entry point for Metal is "_main".
+// Uniform blocks arrive as constant-struct arguments: field order and alignment
+// must match the C++ VsParams/FsParams structs exactly (float2 is 8-byte
+// aligned, float4 is 16-byte aligned, which mirrors the std140-style layout
+// of the C++ arrays).
+static const char* vs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 output_size;
+    float2 world_center;
+    float2 pan;
+    float zoom;
+    float anchor_y;
+    float2 iso_scale;
+    float height_scale;
+    float _pad0;
+};
+
+struct VSIn {
+    float3 pos [[attribute(0)]];
+    float3 normal0 [[attribute(1)]];
+    float2 uv0 [[attribute(2)]];
+    float4 color0 [[attribute(3)]];
+    float face_kind0 [[attribute(4)]];
+    float cliff_distance0 [[attribute(5)]];
+    float2 wall_detail0 [[attribute(6)]];
+    float2 facet_uv0 [[attribute(7)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float3 world_pos;
+    float3 normal0;
+    float2 uv0;
+    float4 color0;
+    float face_kind0;
+    float cliff_distance0;
+    float2 wall_detail0;
+    float2 facet_uv0;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 centered = float2(in.pos.x - params.world_center.x, in.pos.z - params.world_center.y);
+    float2 screen = float2(
+        params.output_size.x * 0.5 + params.pan.x + (centered.x - centered.y) * params.iso_scale.x * params.zoom,
+        params.anchor_y + params.pan.y + ((centered.x + centered.y) * params.iso_scale.y - in.pos.y * params.height_scale) * params.zoom
+    );
+    float2 clip = float2(
+        (screen.x / params.output_size.x) * 2.0 - 1.0,
+        1.0 - (screen.y / params.output_size.y) * 2.0
+    );
+    o.pos = float4(clip, 0.0, 1.0);
+    o.world_pos = in.pos;
+    o.normal0 = in.normal0;
+    o.uv0 = in.uv0;
+    o.color0 = in.color0;
+    o.face_kind0 = in.face_kind0;
+    o.cliff_distance0 = in.cliff_distance0;
+    o.wall_detail0 = in.wall_detail0;
+    o.facet_uv0 = in.facet_uv0;
+    return o;
+}
+)";
+
+static const char* fs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct FsParams {
+    float4 light_dir;
+    float4 options0;
+    float4 options1;
+    float4 options2;
+    float4 options3;
+    float4 options4;
+    float4 options5;
+};
+
+struct PSIn {
+    float4 pos [[position]];
+    float3 world_pos;
+    float3 normal0;
+    float2 uv0;
+    float4 color0;
+    float face_kind0;
+    float cliff_distance0;
+    float2 wall_detail0;
+    float2 facet_uv0;
+};
+
+float hash21(float2 p) {
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+
+float2 macroWarp(float2 uv, float3 worldPos, constant FsParams& params) {
+    float macroScale = max(0.001, params.options2.x);
+    float macroStrength = params.options2.y;
+    float n0 = hash21(worldPos.xz * macroScale + float2(11.3, 7.1));
+    float n1 = hash21(worldPos.xz * macroScale * 0.73 + float2(3.7, 19.1));
+    return uv + (float2(n0, n1) - 0.5) * macroStrength;
+}
+
+float valueNoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i + float2(0.0, 0.0));
+    float b = hash21(i + float2(1.0, 0.0));
+    float c = hash21(i + float2(0.0, 1.0));
+    float d = hash21(i + float2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(float2 p) {
+    float sum = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 3; i++) {
+        sum += valueNoise(p) * amp;
+        p *= 2.0;
+        amp *= 0.5;
+    }
+    return sum;
+}
+
+// Smooth procedural rock grain sampled in wall-surface UV space (no directional
+// sine fronts, no stretching). grainUv is the wall along/height parameterization.
+float wallGrain(float2 grainUv, float strength) {
+    float fine = fbm(grainUv * 6.5);
+    float macro = fbm(grainUv * 1.7 + float2(13.1, 5.7));
+    float grain = (fine - 0.5) + (macro - 0.5) * 0.6;
+    return 1.0 + grain * strength;
+}
+
+fragment float4 _main(PSIn in [[stage_in]],
+                      constant FsParams& params [[buffer(1)]],
+                      texture2d<float> grass_tex [[texture(0)]],
+                      texture2d<float> rock_tex [[texture(1)]],
+                      sampler material_smp [[sampler(0)]]) {
+    float ambient = params.options0.x;
+    float diffuseStrength = params.options0.y;
+    float wallBrightness = params.options0.z;
+    float textureScale = max(0.001, params.options0.w);
+    float cliffRadius = max(0.001, params.options1.x);
+    float cliffStrength = params.options1.y;
+    float minTopBrightness = params.options1.z;
+    float edgeDarkness = params.options1.w;
+    float debugMode = params.options2.z;
+    float rimStrength = params.options2.w;
+    float sunShadowStrength = params.options4.z;
+    float specularStrength = params.options4.w;
+    float shadowTintStrength = params.options5.x;
+    float shadowAmbientFloor = params.options5.y;
+    float shadowSoftness = max(0.35, params.options5.z);
+    const float rimPower = 2.5;
+    const float shininess = 24.0;
+    const float3 coolShadow = float3(0.28, 0.30, 0.26);
+    const float3 warmSky = float3(0.52, 0.44, 0.32);
+    const float3 lightTint = float3(1.12, 1.04, 0.90);
+    const float3 viewDir = normalize(float3(0.35, 0.55, 0.35));
+
+    bool wall = in.face_kind0 > 0.5;
+    float2 uv = in.uv0 * textureScale;
+    if (!wall) {
+        uv = macroWarp(uv, in.world_pos, params);
+    }
+    float wallGrainStrength = params.options3.w;
+    float4 wallAlbedo = float4(in.color0.rgb * wallGrain(in.uv0, wallGrainStrength), in.color0.a);
+    float4 albedo = wall ? wallAlbedo : grass_tex.sample(material_smp, uv) * in.color0;
+
+    float wallAo = 1.0;
+    if (wall) {
+        float relief = in.wall_detail0.x;
+        float heightFraction = in.wall_detail0.y;
+        float aoStrength = params.options3.x;
+        float wearStrength = params.options3.y;
+        float creviceStrength = params.options3.z;
+
+        // C1: edge wear on protruding ridges - keep subtle so facet relief does not read as zebra stripes.
+        float ridge = smoothstep(0.30, 0.78, relief);
+        float lum = dot(albedo.rgb, float3(0.299, 0.587, 0.114));
+        float3 worn = mix(albedo.rgb, float3(lum), 0.35) + float3(0.06);
+        albedo.rgb = mix(albedo.rgb, worn, ridge * wearStrength);
+
+        // C2: recessed facets collect dirt/moss - darken and tint.
+        float crevice = smoothstep(0.30, 0.78, -relief);
+        float3 mossy = albedo.rgb * float3(0.60, 0.68, 0.52);
+        albedo.rgb = mix(albedo.rgb, mossy, crevice * creviceStrength);
+
+        // C3 hook (reserved): per-quad facet-local coords (in.facet_uv0) and an extra parameter
+        // channel (options4) are plumbed all the way to the fragment shader so a future mask can be
+        // applied here. Intentionally a no-op for now - the naive facet-edge rim read as a brick grid.
+        // float maskParam = params.options4.x;
+        // float2 facetLocal = in.facet_uv0;
+
+        // A3: foot darkening only; crevice tint stays in albedo so facets do not modulate light.
+        float baseAo = mix(1.0 - aoStrength, 1.0, smoothstep(0.0, 0.45, heightFraction));
+        wallAo = baseAo;
+    }
+
+    float3 n = normalize(in.normal0);
+    if (!wall && n.y < 0.0) {
+        n = -n;
+    }
+    float3 l = normalize(params.light_dir.xyz);
+    float lambert = max(0.0, dot(n, l));
+    float cliffProximity = clamp(1.0 - in.cliff_distance0 / cliffRadius, 0.0, 1.0);
+
+    float rawVisibility = clamp(in.facet_uv0.x, 0.0, 1.0);
+    float softenedVisibility =
+        shadowAmbientFloor + (1.0 - shadowAmbientFloor) * pow(max(rawVisibility, 0.0), 1.0 / shadowSoftness);
+    float sunShadow = mix(1.0, softenedVisibility, sunShadowStrength);
+
+    float3 lighting;
+    if (wall) {
+        // Wrap diffuse for stable outwardHint normals: avoids hard lit/shadow bands on displaced facets.
+        float facing = sqrt(clamp(lambert * 0.72 + 0.28, 0.0, 1.0));
+        float3 ambientCol = mix(coolShadow, warmSky, 0.32) * ambient * (0.52 + 0.48 * facing);
+        float3 diffuseCol = lightTint * diffuseStrength * facing;
+        lighting = (ambientCol + diffuseCol) * wallBrightness;
+    } else {
+        float hemi = n.y * 0.5 + 0.5;
+        float3 ambientCol = mix(coolShadow, warmSky, hemi) * ambient;
+        float3 diffuseCol = lightTint * diffuseStrength * lambert;
+        float rim = pow(1.0 - max(dot(n, viewDir), 0.0), rimPower) * rimStrength;
+        float3 halfVec = normalize(l + viewDir);
+        float spec = pow(max(dot(n, halfVec), 0.0), shininess) * specularStrength;
+        lighting = ambientCol + diffuseCol + float3(spec + rim);
+        float topDarkening = max(minTopBrightness, 1.0 - cliffStrength * cliffProximity);
+        lighting *= topDarkening * (1.0 - edgeDarkness * cliffProximity);
+    }
+
+    float3 litRgb = albedo.rgb * lighting * wallAo * sunShadow;
+    litRgb = mix(litRgb, litRgb * coolShadow, (1.0 - sunShadow) * shadowTintStrength);
+    float4 lit = float4(litRgb, albedo.a);
+
+    if (debugMode > 7.5) {
+        return float4(in.facet_uv0.x, in.facet_uv0.x, in.facet_uv0.x, 1.0);
+    } else if (debugMode > 6.5) {
+        return in.color0;
+    } else if (debugMode > 5.5) {
+        return float4(cliffProximity, cliffProximity, cliffProximity, 1.0);
+    } else if (debugMode > 4.5) {
+        return float4(fract(uv), 0.35, 1.0);
+    } else if (debugMode > 1.5) {
+        return float4(n * 0.5 + 0.5, 1.0);
+    } else if (debugMode > 0.5) {
+        return albedo;
+    }
+    return lit;
+}
+)";
+
 std::size_t nextCapacity(std::size_t value) {
     std::size_t capacity = 4096;
     while (capacity < value) {
@@ -841,6 +1097,9 @@ void MeshPreviewRenderer::ensurePipeline() {
         shdDesc.attrs[i].hlsl_sem_name = "TEXCOORD";
         shdDesc.attrs[i].hlsl_sem_index = (std::uint8_t)i;
     }
+#elif defined(SOKOL_METAL)
+    shdDesc.vertex_func.source = vs_src_msl;
+    shdDesc.fragment_func.source = fs_src_msl;
 #else
     shdDesc.vertex_func.source = vs_src_glsl;
     shdDesc.fragment_func.source = fs_src_glsl;

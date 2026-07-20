@@ -91,6 +91,94 @@ float4 main(PSIn inp): SV_Target0 {
     return inp.color;
 }
 )";
+#elif defined(SOKOL_METAL)
+const char* kMeshVsSrc = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float4x4 mvp;
+};
+
+struct VSIn {
+    float3 pos [[attribute(0)]];
+    float3 normal0 [[attribute(1)]];
+    float4 color0 [[attribute(2)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float3 normal0;
+    float4 color;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    o.pos = params.mvp * float4(in.pos, 1.0);
+    o.normal0 = in.normal0;
+    o.color = in.color0;
+    return o;
+}
+)";
+
+const char* kMeshFsSrc = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct PSIn {
+    float4 pos [[position]];
+    float3 normal0;
+    float4 color;
+};
+
+fragment float4 _main(PSIn in [[stage_in]]) {
+    float3 n = normalize(in.normal0);
+    float3 light = normalize(float3(0.35, 0.82, 0.45));
+    float ndotl = max(dot(n, light), 0.0);
+    float shade = 0.55 + 0.45 * ndotl;
+    return float4(in.color.rgb * shade, in.color.a);
+}
+)";
+
+const char* kLineVsSrc = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float4x4 mvp;
+};
+
+struct VSIn {
+    float3 pos [[attribute(0)]];
+    float4 color0 [[attribute(1)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float4 color;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    o.pos = params.mvp * float4(in.pos, 1.0);
+    o.color = in.color0;
+    return o;
+}
+)";
+
+const char* kLineFsSrc = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct PSIn {
+    float4 pos [[position]];
+    float4 color;
+};
+
+fragment float4 _main(PSIn in [[stage_in]]) {
+    return in.color;
+}
+)";
 #else
 const char* kMeshVsSrc = R"(
 #version 330

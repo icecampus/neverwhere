@@ -213,7 +213,7 @@ WorldGridParams computeWorldGridParams(const RockFractureModel& model) {
     constexpr float kPadding = 1.25f;
     constexpr int kMajorEvery = 5;
 
-    auto roundUpToCell = [](float halfExtent, float cellSize) {
+    auto roundUpToCell = [kMinExtent](float halfExtent, float cellSize) {
         return std::max(kMinExtent, std::ceil(halfExtent / cellSize) * cellSize);
     };
 

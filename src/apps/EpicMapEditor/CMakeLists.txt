@@ -46,6 +46,9 @@ target_sources(${AppName} PRIVATE
 # OpenGL/Renderer libraries
 if(MSVC)
     target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
+elseif(APPLE)
+    # GLCORE backend: sokol_gfx impl uses the system OpenGL framework.
+    target_link_libraries(${AppName} PRIVATE "-framework OpenGL")
 endif()
 
 accumulate_files_relative(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} png_resources png)

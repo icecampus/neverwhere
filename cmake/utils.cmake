@@ -249,7 +249,7 @@ function(nw_add_app_sources)
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.nw.${ARG_NAME}"
             MACOSX_BUNDLE_BUNDLE_NAME ${ARG_NAME}
             XCODE_GENERATE_SCHEME TRUE XCODE_SCHEME_WORKING_DIRECTORY "${INT_PATH}"
-            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-"
         )
     elseif(USE_WINDOWS)
         set(RC_FILE "${CMAKE_CURRENT_SOURCE_DIR}/app.rc")
@@ -317,6 +317,25 @@ function(nw_add_qml_app)
     )
 
     set(AppName ${AppName} PARENT_SCOPE)
+endfunction()
+
+# nw_configure_sokol_app
+# Платформенная настройка standalone-приложения на sokol_app:
+# - Windows (MSVC): линковка d3d11/dxgi (SOKOL_D3D11)
+# - macOS: main.cpp компилируется как Objective-C++ (sokol_app требует ObjC для
+#   Metal-бэкенда), линковка Cocoa/QuartzCore/Metal/MetalKit
+function(nw_configure_sokol_app target)
+    if(MSVC)
+        target_link_libraries(${target} PRIVATE d3d11 dxgi)
+    elseif(APPLE)
+        set_source_files_properties(main.cpp PROPERTIES LANGUAGE OBJCXX)
+        target_link_libraries(${target} PRIVATE
+            "-framework Cocoa"
+            "-framework QuartzCore"
+            "-framework Metal"
+            "-framework MetalKit"
+        )
+    endif()
 endfunction()
 
 # nw_add_console_app

@@ -13,7 +13,12 @@
     #endif
 #endif
 
+// glad conflicts with the macOS system <OpenGL/gl3.h> that sokol_gfx.h pulls in
+// under SOKOL_IMPL (glad redefines gl* names as macros). On macOS sokol uses the
+// system GL headers directly, so glad is only needed elsewhere.
+#if !defined(__APPLE__)
 #include <glad/glad.h>
+#endif
 
 // Qt's `slots` macro breaks Sokol internals which use a field with that name.
 #ifdef slots

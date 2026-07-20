@@ -9,7 +9,7 @@ WorldGridParams computeWorldGridParams(const IvtModel& model, const Vec3& center
     constexpr float kMinExtent = 16.0f;
     constexpr float kPadding = 1.25f;
 
-    auto roundUpToCell = [](float halfExtent, float cellSize) {
+    auto roundUpToCell = [kMinExtent](float halfExtent, float cellSize) {
         return std::max(kMinExtent, std::ceil(halfExtent / cellSize) * cellSize);
     };
 

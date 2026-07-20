@@ -1,3 +1,8 @@
+# rttr под macOS в vcpkg не поддерживается (см. корневой CMakeLists.txt)
+if(NOT WIN32)
+    return()
+endif()
+
 nw_add_qml_app(
     GROUP 
         _apps 

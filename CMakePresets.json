@@ -44,12 +44,38 @@
         "VCPKG_INSTALL_OPTIONS": "--x-buildtrees-root=d:/_build",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "macos",
+      "displayName": "macOS (Xcode, arm64-osx)",
+      "binaryDir": "${sourceDir}/_intermediate_64",
+      "generator": "Xcode",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg_overlays/ports"
+      }
+    },
+    {
+      "name": "macos-index",
+      "displayName": "macOS Ninja (IDE indexing only, emits compile_commands.json)",
+      "binaryDir": "${sourceDir}/_intermediate_ide",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg_overlays/ports",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "vs2022", "configuration": "Debug" },
     { "name": "release", "configurePreset": "vs2022", "configuration": "Release" },
     { "name": "emscripten-debug", "configurePreset": "emscripten", "configuration": "Debug" },
-    { "name": "emscripten-release", "configurePreset": "emscripten", "configuration": "Release" }
+    { "name": "emscripten-release", "configurePreset": "emscripten", "configuration": "Release" },
+    { "name": "macos-debug", "configurePreset": "macos", "configuration": "Debug" },
+    { "name": "macos-release", "configurePreset": "macos", "configuration": "Release" }
   ]
 }

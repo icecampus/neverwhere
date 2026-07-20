@@ -37,8 +37,28 @@
   - Solution: `_intermediate_64\Neverwhere.sln`.
   - Без обёртки: `cmake --preset vs2022`.
 - Сборка из CLI: `cmake --build --preset debug --target EpicMapEditor`.
-- Бинарные директории: `_intermediate_64` (Windows), `_b-em` (Emscripten).
+- Бинарные директории: `_intermediate_64` (Windows и macOS), `_b-em` (Emscripten).
 - **Не использовать** `build.sh` для Windows-флоу.
+
+## Сборка (macOS, CMake + vcpkg)
+
+macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`, триплет `arm64-osx`.
+
+- Конфигурация: `./build_mac.sh` (обёртка над `cmake --preset macos`). Первая конфигурация собирает все vcpkg-зависимости (включая Qt) — занимает ~1–2 часа.
+- Сборка из CLI: `cmake --build --preset macos-debug --target EpicMapEditor`.
+- Бинарники: `_intermediate_64/src/apps/<App>/Debug/<App>` (command-line executables, не .app).
+- Smoke-проверки: `EpicGameClient --smoke`, `EpicMapEditor --smoke`; юнит-тесты — `_intermediate_64/src/tests/Debug/neverwhere_tests`.
+- **RttrPlayground на macOS не собирается** (vcpkg-порт rttr не поддерживает osx; его CMakeLists возвращается сразу на не-Windows).
+
+Платформенные особенности порта:
+
+- **Рендер-бэкенды:** редактор и EcsPlayground — принудительный `SOKOL_GLCORE` (Qt OpenGL контекст), standalone-приложения — `SOKOL_METAL` (выбор в `render_core/sokol_config.h` и main.cpp по `__APPLE__`).
+- **Шейдеры:** у `render_core` и playground-рендереров три варианта исходников — GLSL / HLSL / MSL; Metal-ветка выбирается по `sg_query_backend() == SG_BACKEND_METAL_MACOS` (runtime) или `#elif defined(SOKOL_METAL)` (compile-time). Единого `SG_BACKEND_METAL` в sokol нет.
+- **sokol_app на macOS** требует Objective-C++: `main.cpp` standalone-приложений компилируется как ObjC++ через макрос `nw_configure_sokol_app(target)` в `cmake/utils.cmake` (там же линковка `Cocoa/QuartzCore/Metal/MetalKit`; на Windows — `d3d11/dxgi`). Все новые standalone sokol-приложения — через этот макрос.
+- **glad нельзя включать в TU с `SOKOL_IMPL` на macOS** (и вообще вместе с Qt GL-заголовками): sokol_gfx/qopengl тянут системный `<OpenGL/gl3.h>`, который конфликтует с glad-макросами. GLCORE-бэкенд линкуется `-framework OpenGL`.
+- **Ресурсы:** `baseDataPath` в `core_context.cpp` ищется вверх от cwd (repo root, `_intermediate_64` — оба сработают); хардкода абсолютных путей нет.
+- **Код-подпись:** ad-hoc (`CODE_SIGN_IDENTITY "-"` в `nw_add_app_sources`, post-build `codesign -f -s -` у EpicMapEditor) — пустая identity в Xcode невалидна для CLI-таргетов.
+- После обновления Xcode **сбрасывать CMake-кэш** (`cmake -U LIBRESOLV` или чистый `_intermediate_64`): `find_library` кэширует пути внутрь старого SDK.
 
 ### vcpkg и зависимости
 

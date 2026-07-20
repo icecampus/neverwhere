@@ -24,6 +24,4 @@ if(NOT STB_INCLUDE_DIRS)
 endif()
 target_include_directories(${AppName} PRIVATE ${STB_INCLUDE_DIRS})
 
-if(MSVC)
-    target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
-endif()
+nw_configure_sokol_app(${AppName})

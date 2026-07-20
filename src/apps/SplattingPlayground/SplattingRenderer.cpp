@@ -690,6 +690,379 @@ float4 main(PSIn inp): SV_Target0 {
 }
 )";
 
+// =============================================
+// MSL Shaders (Metal)
+// =============================================
+// Entry point "_main" is sokol's default for Metal; vertex attributes map by
+// index ([[attribute(N)]]). Uniform-block field layout must match the C++
+// structs (packed_float3 keeps the VS tail padding at 12 bytes).
+static const char* vs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+    float2 camera_offset;
+    float camera_zoom;
+    packed_float3 _pad0;
+};
+
+struct VSIn {
+    float2 pos [[attribute(0)]];
+    float2 cellCoord [[attribute(1)]];
+    float2 localNorm [[attribute(2)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float2 worldPos;
+    float2 cellCoord;
+    float2 localNorm;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 screen = (in.pos * params.camera_zoom) + params.camera_offset;
+    float2 clip = float2(
+        (screen.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (screen.y / params.view_size.y) * 2.0
+    );
+    o.pos = float4(clip, 0.0, 1.0);
+    o.worldPos = in.pos;
+    o.cellCoord = in.cellCoord;
+    o.localNorm = in.localNorm;
+    return o;
+}
+)";
+
+static const char* fs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct FsParams {
+    float2 cell_size;
+    float2 map_size;
+    float blend_sharpness;
+    float noise_scale;
+    float tile_scale;
+    float macro_scale;
+    float macro_strength;
+    float height_influence;
+    float edge_darkness;
+    float edge_width;
+    float world_uv_scale;
+    float random_uv_strength;
+    int uv_mode;
+    int debug_mode;
+};
+
+struct PSIn {
+    float4 pos [[position]];
+    float2 worldPos;
+    float2 cellCoord;
+    float2 localNorm;
+};
+
+// Pseudo-random hash for per-tile UV randomization
+float hash(float2 p) {
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+
+float2 hash2(float2 p) {
+    return float2(hash(p), hash(p + float2(13.7, 91.1)));
+}
+
+// Get material ID at cell coordinates (clamped)
+float getMaterialId(float2 cellCoord,
+                    constant FsParams& params,
+                    texture2d<float> material_id_map,
+                    sampler nearest_smp) {
+    float2 uv = (cellCoord + 0.5) / params.map_size;
+    uv = clamp(uv, float2(0.0), float2(1.0));
+    return material_id_map.sample(nearest_smp, uv).r * 255.0;
+}
+
+// Convert material ID to texture slot index (0-3)
+int matIdToSlot(float matId) {
+    int id = int(matId + 0.5);
+    if (id == 0) return 0;  // Empty renders as slot 0
+    return clamp(id - 1, 0, 3);
+}
+
+// Sample a material texture by slot
+float4 sampleMaterial(int slot, float2 uv,
+                      texture2d<float> tex0,
+                      texture2d<float> tex1,
+                      texture2d<float> tex2,
+                      texture2d<float> tex3,
+                      sampler linear_smp) {
+    if (slot == 0) return tex0.sample(linear_smp, uv);
+    if (slot == 1) return tex1.sample(linear_smp, uv);
+    if (slot == 2) return tex2.sample(linear_smp, uv);
+    return tex3.sample(linear_smp, uv);
+}
+
+// Get neighbor cell coords for staggered isometry
+// In staggered grid, 4 diagonal neighbors depend on row parity
+float2 getNeighborTL(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x - 1.0 + isOdd, cell.y - 1.0);
+}
+float2 getNeighborTR(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x + isOdd, cell.y - 1.0);
+}
+float2 getNeighborBL(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x - 1.0 + isOdd, cell.y + 1.0);
+}
+float2 getNeighborBR(float2 cell) {
+    float isOdd = fmod(cell.y, 2.0);
+    return float2(cell.x + isOdd, cell.y + 1.0);
+}
+
+// Orthogonal neighbors (at diamond vertices)
+float2 getNeighborTop(float2 cell) {
+    return float2(cell.x, cell.y - 2.0);
+}
+float2 getNeighborBottom(float2 cell) {
+    return float2(cell.x, cell.y + 2.0);
+}
+float2 getNeighborLeft(float2 cell) {
+    return float2(cell.x - 1.0, cell.y);
+}
+float2 getNeighborRight(float2 cell) {
+    return float2(cell.x + 1.0, cell.y);
+}
+
+fragment float4 _main(PSIn in [[stage_in]],
+                      constant FsParams& params [[buffer(1)]],
+                      texture2d<float> tex0 [[texture(0)]],
+                      texture2d<float> tex1 [[texture(1)]],
+                      texture2d<float> tex2 [[texture(2)]],
+                      texture2d<float> tex3 [[texture(3)]],
+                      texture2d<float> noise_tex [[texture(4)]],
+                      texture2d<float> material_id_map [[texture(5)]],
+                      sampler linear_smp [[sampler(0)]],
+                      sampler nearest_smp [[sampler(1)]]) {
+    float2 cellCoord = floor(in.cellCoord + 0.5); // round to nearest int
+    float2 local = in.localNorm;
+
+    // Get material IDs for current cell and 4 diagonal neighbors (staggered)
+    float matC  = getMaterialId(cellCoord, params, material_id_map, nearest_smp);
+    float matTL = getMaterialId(getNeighborTL(cellCoord), params, material_id_map, nearest_smp);
+    float matTR = getMaterialId(getNeighborTR(cellCoord), params, material_id_map, nearest_smp);
+    float matBL = getMaterialId(getNeighborBL(cellCoord), params, material_id_map, nearest_smp);
+    float matBR = getMaterialId(getNeighborBR(cellCoord), params, material_id_map, nearest_smp);
+
+    // Get material IDs for 4 orthogonal neighbors (at diamond vertices)
+    float matTop    = getMaterialId(getNeighborTop(cellCoord), params, material_id_map, nearest_smp);
+    float matBottom = getMaterialId(getNeighborBottom(cellCoord), params, material_id_map, nearest_smp);
+    float matLeft   = getMaterialId(getNeighborLeft(cellCoord), params, material_id_map, nearest_smp);
+    float matRight  = getMaterialId(getNeighborRight(cellCoord), params, material_id_map, nearest_smp);
+
+    // Calculate UV based on mode
+    float2 uv;
+    if (params.uv_mode == 0) {
+        // WorldUV: continuous world-space UV
+        uv = in.worldPos / params.world_uv_scale;
+    } else {
+        // RandomTileUV: per-tile randomized offset
+        float2 rnd = hash2(cellCoord) * 2.0 - 1.0;
+        float2 offset = rnd * params.random_uv_strength;
+        uv = (local + 0.5) + offset;
+    }
+
+    // Apply macro variation (UV warp from noise)
+    float n0 = noise_tex.sample(linear_smp, uv * params.macro_scale).r;
+    float n1 = noise_tex.sample(linear_smp, uv * (params.macro_scale * 0.77) + float2(13.1, 7.7)).r;
+    uv = uv + (float2(n0, n1) - 0.5) * params.macro_strength;
+    uv *= params.tile_scale;
+
+    // Sample noise for blending variation
+    float noiseVal = noise_tex.sample(linear_smp, in.worldPos / params.cell_size.x * params.noise_scale * 0.1).r;
+
+    // Diamond edge distances (boundary is |x|+|y|=0.5)
+    // Distance to each edge (positive inside, 0 at edge)
+    float distTL = 0.5 - (-local.x - local.y);  // top-left edge (toward top vertex)
+    float distTR = 0.5 - ( local.x - local.y);  // top-right edge (toward right vertex)
+    float distBL = 0.5 - (-local.x + local.y);  // bottom-left edge (toward left vertex)
+    float distBR = 0.5 - ( local.x + local.y);  // bottom-right edge (toward bottom vertex)
+
+    // Corner proximity - distance to each diamond vertex
+    float distToTop    = length(local - float2(0.0, -0.5));
+    float distToRight  = length(local - float2(0.5, 0.0));
+    float distToBottom = length(local - float2(0.0, 0.5));
+    float distToLeft   = length(local - float2(-0.5, 0.0));
+
+    // Corner proximity factor (higher near vertices, enables smoother corner blending)
+    float minCornerDist = min(min(distToTop, distToBottom), min(distToLeft, distToRight));
+    float cornerProximity = 1.0 - smoothstep(0.0, 0.5, minCornerDist);
+
+    // Adaptive blend width: wider near corners for smoother transitions
+    float baseBlendWidth = mix(0.35, 0.08, params.blend_sharpness);
+    float edgeBlendWidth = baseBlendWidth * (1.0 + cornerProximity * 0.6);
+
+    // Add noise jitter to blend threshold
+    float noiseJitter = (noiseVal - 0.5) * (1.0 - params.blend_sharpness) * 0.2;
+
+    // Edge blend factors: how much each neighbor should contribute
+    // Using smoothstep for smooth falloff from edge toward center
+    float bTL = 1.0 - smoothstep(0.0, edgeBlendWidth, distTL + noiseJitter);
+    float bTR = 1.0 - smoothstep(0.0, edgeBlendWidth, distTR + noiseJitter);
+    float bBL = 1.0 - smoothstep(0.0, edgeBlendWidth, distBL + noiseJitter);
+    float bBR = 1.0 - smoothstep(0.0, edgeBlendWidth, distBR + noiseJitter);
+
+    // Vertex blend factors: for orthogonal neighbors at diamond vertices
+    // Use slightly wider blend for corners to ensure smooth transitions
+    float cornerBlendWidth = edgeBlendWidth * 1.2;
+    float bTop    = 1.0 - smoothstep(0.0, cornerBlendWidth, distToTop + noiseJitter);
+    float bRight  = 1.0 - smoothstep(0.0, cornerBlendWidth, distToRight + noiseJitter);
+    float bBottom = 1.0 - smoothstep(0.0, cornerBlendWidth, distToBottom + noiseJitter);
+    float bLeft   = 1.0 - smoothstep(0.0, cornerBlendWidth, distToLeft + noiseJitter);
+
+    // Sample materials (diagonal neighbors)
+    int slotC  = matIdToSlot(matC);
+    int slotTL = matIdToSlot(matTL);
+    int slotTR = matIdToSlot(matTR);
+    int slotBL = matIdToSlot(matBL);
+    int slotBR = matIdToSlot(matBR);
+
+    float4 colC  = sampleMaterial(slotC, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colTL = sampleMaterial(slotTL, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colTR = sampleMaterial(slotTR, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colBL = sampleMaterial(slotBL, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colBR = sampleMaterial(slotBR, uv, tex0, tex1, tex2, tex3, linear_smp);
+
+    // Sample materials (orthogonal neighbors - at vertices)
+    int slotTop    = matIdToSlot(matTop);
+    int slotBottom = matIdToSlot(matBottom);
+    int slotLeft   = matIdToSlot(matLeft);
+    int slotRight  = matIdToSlot(matRight);
+
+    float4 colTop    = sampleMaterial(slotTop, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colBottom = sampleMaterial(slotBottom, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colLeft   = sampleMaterial(slotLeft, uv, tex0, tex1, tex2, tex3, linear_smp);
+    float4 colRight  = sampleMaterial(slotRight, uv, tex0, tex1, tex2, tex3, linear_smp);
+
+    // Height proxy from albedo luminance for height-aware blending
+    float hC  = dot(colC.rgb, float3(0.333));
+    float hTL = dot(colTL.rgb, float3(0.333));
+    float hTR = dot(colTR.rgb, float3(0.333));
+    float hBL = dot(colBL.rgb, float3(0.333));
+    float hBR = dot(colBR.rgb, float3(0.333));
+    float hTop    = dot(colTop.rgb, float3(0.333));
+    float hRight  = dot(colRight.rgb, float3(0.333));
+    float hBottom = dot(colBottom.rgb, float3(0.333));
+    float hLeft   = dot(colLeft.rgb, float3(0.333));
+
+    // Height-aware adjustment: boost blend factor for "higher" neighbors
+    // Diagonal neighbors
+    bTL *= 1.0 + (hTL - hC) * params.height_influence;
+    bTR *= 1.0 + (hTR - hC) * params.height_influence;
+    bBL *= 1.0 + (hBL - hC) * params.height_influence;
+    bBR *= 1.0 + (hBR - hC) * params.height_influence;
+    // Orthogonal neighbors
+    bTop    *= 1.0 + (hTop    - hC) * params.height_influence;
+    bRight  *= 1.0 + (hRight  - hC) * params.height_influence;
+    bBottom *= 1.0 + (hBottom - hC) * params.height_influence;
+    bLeft   *= 1.0 + (hLeft   - hC) * params.height_influence;
+
+    // Clamp blend factors
+    bTL = clamp(bTL, 0.0, 1.0);
+    bTR = clamp(bTR, 0.0, 1.0);
+    bBL = clamp(bBL, 0.0, 1.0);
+    bBR = clamp(bBR, 0.0, 1.0);
+    bTop    = clamp(bTop, 0.0, 1.0);
+    bRight  = clamp(bRight, 0.0, 1.0);
+    bBottom = clamp(bBottom, 0.0, 1.0);
+    bLeft   = clamp(bLeft, 0.0, 1.0);
+
+    // MATERIAL PRIORITY: Only blend with neighbors that have HIGHER material ID
+    // This prevents the "mirror" effect at boundaries
+    // Higher ID materials "invade" lower ID materials, not vice versa
+    // e.g., Sand(2) invades Grass(1), Rock(3) invades both
+
+    // Diagonal neighbors
+    if (matTL <= matC) bTL = 0.0;
+    if (matTR <= matC) bTR = 0.0;
+    if (matBL <= matC) bBL = 0.0;
+    if (matBR <= matC) bBR = 0.0;
+
+    // Orthogonal neighbors (at diamond vertices)
+    if (matTop    <= matC) bTop    = 0.0;
+    if (matRight  <= matC) bRight  = 0.0;
+    if (matBottom <= matC) bBottom = 0.0;
+    if (matLeft   <= matC) bLeft   = 0.0;
+
+    // WEIGHTED BLENDING with 8 neighbors
+    // Sum of all neighbor blend factors determines how much we blend away from center
+    float sumNeighborBlend = bTL + bTR + bBL + bBR + bTop + bRight + bBottom + bLeft;
+
+    // Center weight: 1 when no neighbors blend, decreases as neighbors contribute
+    // Clamp sumNeighborBlend to prevent center from going negative
+    float wC = max(0.0, 1.0 - sumNeighborBlend);
+
+    // Neighbor weights are their blend factors
+    float wTL = bTL;
+    float wTR = bTR;
+    float wBL = bBL;
+    float wBR = bBR;
+    float wTop    = bTop;
+    float wRight  = bRight;
+    float wBottom = bBottom;
+    float wLeft   = bLeft;
+
+    // Normalize weights to sum to 1
+    float totalWeight = wC + wTL + wTR + wBL + wBR + wTop + wRight + wBottom + wLeft;
+    if (totalWeight > 0.001) {
+        float invTotal = 1.0 / totalWeight;
+        wC      *= invTotal;
+        wTL     *= invTotal;
+        wTR     *= invTotal;
+        wBL     *= invTotal;
+        wBR     *= invTotal;
+        wTop    *= invTotal;
+        wRight  *= invTotal;
+        wBottom *= invTotal;
+        wLeft   *= invTotal;
+    } else {
+        // Fallback: just use center material
+        wC = 1.0;
+        wTL = wTR = wBL = wBR = 0.0;
+        wTop = wRight = wBottom = wLeft = 0.0;
+    }
+
+    // Final weighted blend of all 9 materials (center + 4 diagonal + 4 orthogonal)
+    float4 col = colC * wC
+               + colTL * wTL + colTR * wTR + colBL * wBL + colBR * wBR
+               + colTop * wTop + colRight * wRight + colBottom * wBottom + colLeft * wLeft;
+
+    // Edge darkening (pseudo-AO at material boundaries)
+    float blendAmount = 1.0 - wC; // How much we're blending with neighbors
+    float edgeFactor = smoothstep(0.0, params.edge_width, blendAmount);
+    col.rgb *= (1.0 - params.edge_darkness * edgeFactor);
+
+    // Debug output modes
+    if (params.debug_mode == 1) {
+        // Material ID visualization (different colors for different materials)
+        return float4(matC / 4.0, float(slotC) / 3.0, 1.0 - matC / 4.0, 1.0);
+    } else if (params.debug_mode == 2) {
+        // UV visualization (RG = fract(uv))
+        return float4(fract(uv), 0.5, 1.0);
+    } else if (params.debug_mode == 3) {
+        // Weight visualization (R=top weights, G=bottom weights, B=center)
+        return float4(wTL + wTR, wBL + wBR, wC, 1.0);
+    } else if (params.debug_mode == 4) {
+        // Center material only (no blending) - tests texture loading
+        return colC;
+    }
+
+    // Normal render
+    return col;
+}
+)";
+
 static sg_image make1x1Rgba8(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) {
     const std::uint8_t px[4] = { r, g, b, a };
     sg_image_desc desc = {};
@@ -1021,6 +1394,9 @@ void SplattingRenderer::ensurePipeline() {
     shd_desc.attrs[1].hlsl_sem_index = 1;
     shd_desc.attrs[2].hlsl_sem_name = "TEXCOORD";
     shd_desc.attrs[2].hlsl_sem_index = 2;
+#elif defined(SOKOL_METAL)
+    shd_desc.vertex_func.source = vs_src_msl;
+    shd_desc.fragment_func.source = fs_src_msl;
 #else
     shd_desc.vertex_func.source = vs_src_glsl;
     shd_desc.fragment_func.source = fs_src_glsl;

@@ -24,7 +24,7 @@ target_include_directories(${AppName} PRIVATE ${SOKOL_INCLUDE_DIRS})
 
 if(MSVC)
     target_compile_definitions(${AppName} PRIVATE _CRT_SECURE_NO_WARNINGS)
-    target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
 endif()
+nw_configure_sokol_app(${AppName})
 
 message(STATUS "aparis69-implicit-volumetric-terrains-ref: IVT viewer + batch OBJ exporter (Paris 2019 TOG)")

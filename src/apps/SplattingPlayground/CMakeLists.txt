@@ -23,8 +23,6 @@ if(NOT STB_INCLUDE_DIRS)
 endif()
 target_include_directories(${AppName} PRIVATE ${STB_INCLUDE_DIRS})
 
-# Sokol backend link requirements (standalone app uses sokol_app + D3D11 on Windows)
-if(MSVC)
-    target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
-endif()
+# Sokol backend link requirements (sokol_app: D3D11 на Windows, Metal на macOS)
+nw_configure_sokol_app(${AppName})
 

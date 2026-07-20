@@ -27,7 +27,9 @@ if(EMSCRIPTEN)
 elseif(MSVC)
     target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
 elseif(APPLE)
-    target_link_libraries(${AppName} PRIVATE "-framework Metal" "-framework Cocoa" "-framework QuartzCore")
+    # GLCORE backend inside the Qt OpenGL context; sokol_gfx impl needs the
+    # system OpenGL framework (Metal frameworks kept for sokol_app-less glue).
+    target_link_libraries(${AppName} PRIVATE "-framework OpenGL" "-framework Metal" "-framework Cocoa" "-framework QuartzCore")
 else()
     find_package(OpenGL REQUIRED)
     target_link_libraries(${AppName} PRIVATE OpenGL::GL)

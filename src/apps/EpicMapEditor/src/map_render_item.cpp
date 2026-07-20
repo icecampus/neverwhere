@@ -1,7 +1,12 @@
 #include "pch.h"
 #include "map_render_item.h"
 
+// On macOS Qt's qopengl.h already pulls in the system <OpenGL/gl3.h>, which
+// conflicts with glad's gl* macro redefinitions. GL constants used here
+// (GL_TEXTURE_2D, GL_NO_ERROR) come from the system header instead.
+#if !defined(__APPLE__)
 #include <glad/glad.h>
+#endif
 
 // Qt's `slots` macro breaks Sokol internals which use a field with that name.
 #ifdef slots

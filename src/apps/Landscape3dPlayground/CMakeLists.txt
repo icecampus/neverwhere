@@ -21,9 +21,9 @@ if(NOT SOKOL_INCLUDE_DIRS)
 endif()
 target_include_directories(${AppName} PRIVATE ${SOKOL_INCLUDE_DIRS})
 
-# Sokol backend link requirements (standalone app uses sokol_app + D3D11 on Windows).
+# Sokol backend link requirements (sokol_app: D3D11 на Windows, Metal на macOS).
+nw_configure_sokol_app(${AppName})
 if(MSVC)
-    target_link_libraries(${AppName} PRIVATE d3d11 dxgi)
     add_custom_command(TARGET ${AppName} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:FastNoise2::FastNoise>

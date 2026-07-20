@@ -144,6 +144,112 @@ float4 main(PSIn inp): SV_Target {
 }
 )";
 
+// MSL shaders (Metal backend, macOS). Entry point "_main" is sokol's default
+// for Metal; vertex attributes map by index ([[attribute(N)]]). VsParams field
+// layout must match the C++ struct — packed_float3 keeps the tail padding at
+// 12 bytes (32 bytes total), float3 would align to 16 and break the layout.
+static const char* kTexVsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+    float2 camera_offset;
+    float camera_zoom;
+    packed_float3 _pad0;
+};
+
+struct VSIn {
+    float2 pos [[attribute(0)]];
+    float2 uv [[attribute(1)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float2 uv;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 screen = (in.pos * params.camera_zoom) + params.camera_offset;
+    float2 clip = float2(
+        (screen.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (screen.y / params.view_size.y) * 2.0
+    );
+    o.pos = float4(clip, 0.0, 1.0);
+    o.uv = in.uv;
+    return o;
+}
+)";
+
+static const char* kTexFsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct PSIn {
+    float4 pos [[position]];
+    float2 uv;
+};
+
+fragment float4 _main(PSIn in [[stage_in]],
+                      texture2d<float> atlas_tex [[texture(0)]],
+                      sampler smp [[sampler(0)]]) {
+    float4 c = atlas_tex.sample(smp, in.uv);
+    if (c.a < 0.05) {
+        discard_fragment();
+    }
+    return c;
+}
+)";
+
+static const char* kColorVsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+    float2 camera_offset;
+    float camera_zoom;
+    packed_float3 _pad0;
+};
+
+struct VSIn {
+    float2 pos [[attribute(0)]];
+    float4 color [[attribute(1)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float4 color;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 screen = (in.pos * params.camera_zoom) + params.camera_offset;
+    float2 clip = float2(
+        (screen.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (screen.y / params.view_size.y) * 2.0
+    );
+    o.pos = float4(clip, 0.0, 1.0);
+    o.color = in.color;
+    return o;
+}
+)";
+
+static const char* kColorFsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct PSIn {
+    float4 pos [[position]];
+    float4 color;
+};
+
+fragment float4 _main(PSIn in [[stage_in]]) {
+    return in.color;
+}
+)";
+
 void fillVsUniformDesc(sg_shader_uniform_block* block) {
     block->stage = SG_SHADERSTAGE_VERTEX;
     block->size = sizeof(AtlasRenderer::VsParams);
@@ -628,6 +734,9 @@ void AtlasRenderer::ensurePipelines() {
         shd.attrs[0].hlsl_sem_index = 0;
         shd.attrs[1].hlsl_sem_name = "TEXCOORD";
         shd.attrs[1].hlsl_sem_index = 1;
+#elif defined(SOKOL_METAL)
+        shd.vertex_func.source = kTexVsMsl;
+        shd.fragment_func.source = kTexFsMsl;
 #else
         shd.vertex_func.source = kTexVsGlsl;
         shd.fragment_func.source = kTexFsGlsl;
@@ -679,6 +788,9 @@ void AtlasRenderer::ensurePipelines() {
         shd.attrs[0].hlsl_sem_index = 0;
         shd.attrs[1].hlsl_sem_name = "TEXCOORD";
         shd.attrs[1].hlsl_sem_index = 1;
+#elif defined(SOKOL_METAL)
+        shd.vertex_func.source = kColorVsMsl;
+        shd.fragment_func.source = kColorFsMsl;
 #else
         shd.vertex_func.source = kColorVsGlsl;
         shd.fragment_func.source = kColorFsGlsl;
