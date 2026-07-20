@@ -22,13 +22,12 @@
       }
     },
     "neverwhere-debug-macos": {
-      "command": "sh",
+      "command": "/bin/sh",
       "args": [
-        "${workspaceFolder}/tools/run_mcp_server.sh"
+        "tools/run_mcp_server.sh"
       ],
-      "cwd": "${workspaceFolder}",
+      "cwd": ".",
       "env": {
-        "NEVERWHERE_REPO_ROOT": "${workspaceFolder}",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1"
       }

@@ -19,6 +19,9 @@ compile_commands.json
 # zcode / debug MCP scratch state (debug sessions, active target, workdirs)
 .zcode/
 
+# Kimi Code local overrides (per-machine MCP config, session state)
+.kimi-code/
+
 # Editor runtime logs (Qt message handler writes EpicMapEditor.log next to exe)
 *.log
 
