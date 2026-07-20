@@ -31,6 +31,34 @@
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1"
       }
+    },
+    "neverwhere-editor": {
+      "command": "/bin/sh",
+      "args": [
+        "tools/run_editor_mcp_server.sh"
+      ],
+      "cwd": ".",
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    "neverwhere-editor-win": {
+      "command": "powershell",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/tools/run_editor_mcp_server.ps1"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "NEVERWHERE_REPO_ROOT": "${workspaceFolder}",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
     }
   }
 }

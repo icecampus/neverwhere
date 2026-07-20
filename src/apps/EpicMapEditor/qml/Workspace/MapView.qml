@@ -12,6 +12,7 @@ Rectangle
     property alias model: mapModel
     property alias isoView: isoView
     property alias toolsSelector: toolsSelector
+    property alias renderItem: mapRenderItem
 
     // Play-test: emitted by the PlayControl overlay; Workspace forwards it
     // up to MainWindow, which opens (or restarts) the game tab.

@@ -19,8 +19,15 @@ class EditorSceneRegistry;
 // may safely touch QObject/QML state directly.
 //
 // Stateful: the server holds the "current" chapter / asset / tool, set
-// via load_chapter / select_asset / select_tool. click(x, y) dispatches
-// to AssetToolsSelector::click on the active scene.
+// via load_chapter / create_chapter / select_asset / select_tool.
+//
+// Two editing styles:
+//  - UI-faithful: click(x, y) dispatches to AssetToolsSelector::click on the
+//    active scene (screen pixels, depends on camera/zoom);
+//  - cell-coordinate authoring: set_tile / erase_tile / fill_rect /
+//    set_landscape write directly into the map model via MapAuthoring
+//    (idempotent, camera-independent). get_map reads the content back,
+//    set_camera + screenshot provide visual verification.
 class EditorRpcServer : public QObject
 {
     Q_OBJECT
@@ -31,7 +38,8 @@ public:
     bool start(const QHostAddress& addr = QHostAddress::LocalHost, quint16 port = 9877);
 
 signals:
-    // Emitted by the load_chapter command; MainWindow.qml opens a Workspace tab.
+    // Emitted by the load_chapter and create_chapter commands; MainWindow.qml
+    // opens a Workspace tab.
     void loadChapterRequested(const QString& name, const QString& uuid);
     // Emitted by the play command; MainWindow.qml opens/restarts a Game tab.
     void playChapterRequested(const QString& name, const QString& uuid);
@@ -52,11 +60,19 @@ private:
     QByteArray _cmdStatus(const QJsonObject& args);
     QByteArray _cmdListChapters(const QJsonObject& args);
     QByteArray _cmdLoadChapter(const QJsonObject& args);
+    QByteArray _cmdCreateChapter(const QJsonObject& args);
     QByteArray _cmdPlay(const QJsonObject& args);
     QByteArray _cmdListAssets(const QJsonObject& args);
     QByteArray _cmdSelectAsset(const QJsonObject& args);
     QByteArray _cmdSelectTool(const QJsonObject& args);
     QByteArray _cmdClick(const QJsonObject& args);
+    QByteArray _cmdSetTile(const QJsonObject& args);
+    QByteArray _cmdEraseTile(const QJsonObject& args);
+    QByteArray _cmdFillRect(const QJsonObject& args);
+    QByteArray _cmdSetLandscape(const QJsonObject& args);
+    QByteArray _cmdGetMap(const QJsonObject& args);
+    QByteArray _cmdSetCamera(const QJsonObject& args);
+    QByteArray _cmdScreenshot(const QJsonObject& args);
     QByteArray _cmdSave(const QJsonObject& args);
     QByteArray _cmdReload(const QJsonObject& args);
 

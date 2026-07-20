@@ -52,7 +52,7 @@ macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`
 
 Платформенные особенности порта:
 
-- **Рендер-бэкенды:** редактор и EcsPlayground — принудительный `SOKOL_GLCORE` (Qt OpenGL контекст), standalone-приложения — `SOKOL_METAL` (выбор в `render_core/sokol_config.h` и main.cpp по `__APPLE__`).
+- **Рендер-бэкенды:** редактор и EcsPlayground — принудительный `SOKOL_GLCORE` (Qt OpenGL контекст), standalone-приложения — `SOKOL_METAL` (выбор в `render_core/sokol_config.h` и main.cpp по `__APPLE__`). Для GLCORE на macOS обязателен core profile: `QSurfaceFormat` 4.1 Core до создания `QApplication` (см. `main.cpp` редактора), иначе Qt даёт legacy 2.1 контекст и sokol падает на `sg_setup()` в Debug.
 - **Шейдеры:** у `render_core` и playground-рендереров три варианта исходников — GLSL / HLSL / MSL; Metal-ветка выбирается по `sg_query_backend() == SG_BACKEND_METAL_MACOS` (runtime) или `#elif defined(SOKOL_METAL)` (compile-time). Единого `SG_BACKEND_METAL` в sokol нет.
 - **sokol_app на macOS** требует Objective-C++: `main.cpp` standalone-приложений компилируется как ObjC++ через макрос `nw_configure_sokol_app(target)` в `cmake/utils.cmake` (там же линковка `Cocoa/QuartzCore/Metal/MetalKit`; на Windows — `d3d11/dxgi`). Все новые standalone sokol-приложения — через этот макрос.
 - **glad нельзя включать в TU с `SOKOL_IMPL` на macOS** (и вообще вместе с Qt GL-заголовками): sokol_gfx/qopengl тянут системный `<OpenGL/gl3.h>`, который конфликтует с glad-макросами. GLCORE-бэкенд линкуется `-framework OpenGL`.
@@ -122,6 +122,20 @@ MCP-сервер из `tools/debug_mcp/` — единый `debug_*` контра
 **Post-mortem (.dmp):** `debug_crash_dump_analyze(dump_path)` — анализ готового дампа (Windows). Сейчас в neverwhere нет C++ хука для записи дампов при падении (это отдельный следующий шаг: `MiniDumpWriteDump` в `main.cpp` + `CRASH_DUMP_DIR`).
 
 Полный список инструментов и контракт — `debug_contract_get`. Детальная методичка (flow, gotchas, first-chance exceptions, чек-лист) — `docs/debugging.md`.
+
+### Автоматизация редактора (editor RPC + MCP)
+
+EpicMapEditor поднимает TCP RPC-сервер на `127.0.0.1:9877` (построчный JSON, команды на GUI-потоке) — `src/apps/EpicMapEditor/src/editor_rpc_server.cpp`. Редактор должен быть запущен.
+
+Операции:
+
+- **Сессия:** `ping`, `status`, `list_chapters`, `load_chapter`, `create_chapter`, `save`, `reload`, `play`.
+- **UI-стиль:** `list_assets`, `select_asset`, `select_tool`, `click` (экранные пиксели, зависит от камеры/зума).
+- **Авторинг в координатах клеток** (идемпотентно, не зависит от камеры): `set_tile` / `erase_tile` / `fill_rect` (image-ассеты), `set_landscape` (bulk-апдейты нод `[[x,y,0|1],...]` на slice-ассете), чтение — `get_map` (опц. `layer`), визуальная проверка — `set_camera` + `screenshot` (PNG).
+
+Имена слоёв для оп: `Decoration` | `BaseLandscape` | `GameplayInteractive` (enum `LayerTypes`). Запись идёт через `MapAuthoring` (`src/libs/core/map/map_authoring.h`), он же покрыт gtest (`src/tests/map/map_authoring_test.cpp`).
+
+MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-editor-win` в `.mcp.json`, код — `tools/editor_mcp/` (тонкий прокси, инструменты `editor_*`; TCP-клиент переиспользован из `tools/debug_mcp/editor_rpc_client.py`, пригоден и для ручных скриптов). Типовой цикл «карта по описанию»: `create_chapter`/`load_chapter` → `list_assets` → `set_landscape` → `fill_rect`/`set_tile` → `set_camera` + `screenshot` → `get_map` → `save` → `play`.
 
 ## Где что искать
 

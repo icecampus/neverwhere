@@ -3,18 +3,24 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QEventLoop>
+#include <QQuickItemGrabResult>
+#include <QSharedPointer>
 #include <QTcpSocket>
 #include <magic_enum/magic_enum.hpp>
 
 #include "editor_scene_registry.h"
 #include "core_context.h"
 #include "assets_library/asset.h"
+#include "assets_library/assets/slice_asset.h"
 #include "assets_library/assets_library_model.h"
 #include "assets_library/assets_pack_model.h"
 #include "assets_library/tools/tools_model.h"
+#include "map/map_authoring.h"
 #include "map/map_model.h"
 #include "models/chapters_model.h"
 #include "topology/diamond_isometry.h"
+#include "map_render_item.h"
 
 EditorRpcServer::EditorRpcServer(CoreContext* core, EditorSceneRegistry* registry, QObject* parent)
     : QObject(parent)
@@ -90,11 +96,19 @@ QByteArray EditorRpcServer::_dispatch(const QJsonObject& req)
     if (op == "status")          return _cmdStatus(args);
     if (op == "list_chapters")   return _cmdListChapters(args);
     if (op == "load_chapter")    return _cmdLoadChapter(args);
+    if (op == "create_chapter")  return _cmdCreateChapter(args);
     if (op == "play")            return _cmdPlay(args);
     if (op == "list_assets")     return _cmdListAssets(args);
     if (op == "select_asset")    return _cmdSelectAsset(args);
     if (op == "select_tool")     return _cmdSelectTool(args);
     if (op == "click")           return _cmdClick(args);
+    if (op == "set_tile")        return _cmdSetTile(args);
+    if (op == "erase_tile")      return _cmdEraseTile(args);
+    if (op == "fill_rect")       return _cmdFillRect(args);
+    if (op == "set_landscape")   return _cmdSetLandscape(args);
+    if (op == "get_map")         return _cmdGetMap(args);
+    if (op == "set_camera")      return _cmdSetCamera(args);
+    if (op == "screenshot")      return _cmdScreenshot(args);
     if (op == "save")            return _cmdSave(args);
     if (op == "reload")          return _cmdReload(args);
     return _error("unknown_op", "unknown op: " + op);
@@ -130,6 +144,16 @@ static Chapter* findChapterByName(ChaptersModel* model, const QString& name)
             return ch;
     }
     return nullptr;
+}
+
+// Resolves the "layer" arg (LayerTypes enum name: Decoration, BaseLandscape,
+// GameplayInteractive) for the cell-coordinate authoring ops.
+static std::optional<LayerTypes::Type> parseLayerType(const QJsonObject& args)
+{
+    const QString layer = args.value("layer").toString().trimmed();
+    if (layer.isEmpty())
+        return std::nullopt;
+    return magic_enum::enum_cast<LayerTypes::Type>(layer.toStdString());
 }
 
 // --- commands ------------------------------------------------------------
@@ -348,6 +372,232 @@ QByteArray EditorRpcServer::_cmdClick(const QJsonObject& args)
     QJsonObject d;
     d["x"] = x;
     d["y"] = y;
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdCreateChapter(const QJsonObject& args)
+{
+    QString name = args.value("name").toString().trimmed();
+    if (name.isEmpty())
+        return _error("invalid_input", "name is required");
+
+    ChaptersModel* model = m_core ? m_core->getChaptersModel() : nullptr;
+    if (!model)
+        return _error("no_chapters_model", "chapters model not available");
+
+    if (findChapterByName(model, name))
+        return _error("duplicate", "chapter already exists: " + name);
+
+    Chapter* ch = model->createChapter(name);
+    if (!ch)
+        return _error("create_failed", "could not create chapter on disk: " + name);
+
+    // Reuse the load flow: MainWindow.qml opens a Workspace tab for it.
+    emit loadChapterRequested(ch->name(), ch->getUuid().toString(QUuid::WithoutBraces));
+
+    QJsonObject d;
+    d["name"] = ch->name();
+    d["uuid"] = ch->getUuid().toString(QUuid::WithoutBraces);
+    d["hint"] = QStringLiteral("poll 'status' until map_loaded=true");
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdSetTile(const QJsonObject& args)
+{
+    const std::optional<LayerTypes::Type> layerType = parseLayerType(args);
+    if (!layerType)
+        return _error("invalid_input", "layer is required (Decoration|BaseLandscape|GameplayInteractive)");
+
+    const QString uuidStr = args.value("asset_uuid").toString().trimmed();
+    const QUuid uuid(uuidStr);
+    if (uuid.isNull())
+        return _error("invalid_input", "valid asset_uuid is required");
+
+    AssetsLibraryModel* lib = m_core ? m_core->getAssetsLibraty() : nullptr;
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!lib || !map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    Asset* asset = lib->getAsset(uuid);
+    if (!asset)
+        return _error("not_found", "asset not found: " + uuidStr);
+
+    const math::ivec2 cell(args.value("x").toInt(), args.value("y").toInt());
+    if (!MapAuthoring::setTile(*map->layer(*layerType), cell, asset))
+        return _error("invalid_input", "set_tile supports image assets only; use set_landscape for slice assets");
+
+    QJsonObject d;
+    d["x"] = cell.x;
+    d["y"] = cell.y;
+    d["asset"] = asset->name();
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdEraseTile(const QJsonObject& args)
+{
+    const std::optional<LayerTypes::Type> layerType = parseLayerType(args);
+    if (!layerType)
+        return _error("invalid_input", "layer is required (Decoration|BaseLandscape|GameplayInteractive)");
+
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    const math::ivec2 cell(args.value("x").toInt(), args.value("y").toInt());
+    const int removed = MapAuthoring::eraseTiles(*map->layer(*layerType), cell);
+
+    QJsonObject d;
+    d["x"] = cell.x;
+    d["y"] = cell.y;
+    d["removed"] = removed;
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdFillRect(const QJsonObject& args)
+{
+    const std::optional<LayerTypes::Type> layerType = parseLayerType(args);
+    if (!layerType)
+        return _error("invalid_input", "layer is required (Decoration|BaseLandscape|GameplayInteractive)");
+
+    const QString uuidStr = args.value("asset_uuid").toString().trimmed();
+    const QUuid uuid(uuidStr);
+    if (uuid.isNull())
+        return _error("invalid_input", "valid asset_uuid is required");
+
+    AssetsLibraryModel* lib = m_core ? m_core->getAssetsLibraty() : nullptr;
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!lib || !map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    Asset* asset = lib->getAsset(uuid);
+    if (!asset)
+        return _error("not_found", "asset not found: " + uuidStr);
+
+    const math::ivec2 from(args.value("x0").toInt(), args.value("y0").toInt());
+    const math::ivec2 to(args.value("x1").toInt(), args.value("y1").toInt());
+    const int written = MapAuthoring::fillRect(*map->layer(*layerType), from, to, asset);
+
+    QJsonObject d;
+    d["written"] = written;
+    d["asset"] = asset->name();
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdSetLandscape(const QJsonObject& args)
+{
+    const QString uuidStr = args.value("asset_uuid").toString().trimmed();
+    const QUuid uuid(uuidStr);
+    if (uuid.isNull())
+        return _error("invalid_input", "valid asset_uuid is required");
+
+    const QJsonArray updates = args.value("updates").toArray();
+    if (updates.isEmpty())
+        return _error("invalid_input", "updates array is required: [[x, y, 0|1], ...]");
+
+    AssetsLibraryModel* lib = m_core ? m_core->getAssetsLibraty() : nullptr;
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!lib || !map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    Asset* asset = lib->getAsset(uuid);
+    if (!asset)
+        return _error("not_found", "asset not found: " + uuidStr);
+    SliceAsset* sliceAsset = dynamic_cast<SliceAsset*>(asset);
+    if (!sliceAsset)
+        return _error("invalid_input", "asset is not a slice (landscape) asset: " + uuidStr);
+
+    std::vector<std::pair<math::ivec2, uint8_t>> parsed;
+    parsed.reserve(static_cast<size_t>(updates.size()));
+    for (const QJsonValue& value : updates)
+    {
+        const QJsonArray entry = value.toArray();
+        if (entry.size() != 3)
+            return _error("invalid_input", "each update must be [x, y, 0|1]");
+        parsed.emplace_back(math::ivec2(entry[0].toInt(), entry[1].toInt()),
+            static_cast<uint8_t>(entry[2].toInt() ? 1 : 0));
+    }
+
+    const int cells = MapAuthoring::applyLandscapeUpdates(
+        *map->layer(LayerTypes::BaseLandscape), sliceAsset, parsed);
+
+    QJsonObject d;
+    d["updates_applied"] = static_cast<qint64>(parsed.size());
+    d["cells_recomputed"] = cells;
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdGetMap(const QJsonObject& args)
+{
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    const QString layer = args.value("layer").toString().trimmed();
+    if (!layer.isEmpty())
+    {
+        const std::optional<LayerTypes::Type> layerType =
+            magic_enum::enum_cast<LayerTypes::Type>(layer.toStdString());
+        if (!layerType)
+            return _error("invalid_input", "unknown layer: " + layer);
+        return _ok(MapAuthoring::dumpLayer(*map->layer(*layerType)));
+    }
+    return _ok(MapAuthoring::dumpMap(*map));
+}
+
+QByteArray EditorRpcServer::_cmdSetCamera(const QJsonObject& args)
+{
+    // The iso view is the camera source of truth (tools, screenToMap, and the
+    // QML binding that forwards it into MapRenderItem all read it).
+    DiamondIsometryView* isoView = m_registry ? m_registry->activeIsometryView() : nullptr;
+    if (!isoView)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    if (args.contains("x"))
+        isoView->setCameraX(static_cast<float>(args.value("x").toDouble()));
+    if (args.contains("y"))
+        isoView->setCameraY(static_cast<float>(args.value("y").toDouble()));
+    if (args.contains("zoom"))
+        isoView->setCameraZoom(static_cast<float>(args.value("zoom").toDouble()));
+
+    QJsonObject d;
+    d["x"] = isoView->getCameraX();
+    d["y"] = isoView->getCameraY();
+    d["zoom"] = isoView->getCameraZoom();
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdScreenshot(const QJsonObject& args)
+{
+    const QString path = args.value("path").toString().trimmed();
+    if (path.isEmpty())
+        return _error("invalid_input", "path is required");
+
+    MapRenderItem* item = m_registry ? m_registry->activeRenderItem() : nullptr;
+    if (!item)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    // QQuickItem::grabToImage is asynchronous (completes after the next
+    // scene-graph frame), so pump a short nested event loop until ready.
+    // The RPC client is strictly request/response, so no re-entrant request
+    // can arrive while we wait.
+    QSharedPointer<QQuickItemGrabResult> grab = item->grabToImage();
+    if (!grab)
+        return _error("render_failed", "grabToImage() failed (item not in a window?)");
+
+    QEventLoop loop;
+    QObject::connect(grab.data(), &QQuickItemGrabResult::ready, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    const QImage image = grab->image();
+    if (image.isNull())
+        return _error("render_failed", "grabbed image is null");
+    if (!image.save(path))
+        return _error("io_failed", "could not save image to: " + path);
+
+    QJsonObject d;
+    d["path"] = path;
+    d["width"] = image.width();
+    d["height"] = image.height();
     return _ok(d);
 }
 

@@ -1,5 +1,6 @@
 #include "landscape_pencil.h"
 #include "game_objects/landscape.h"
+#include "map/map_authoring.h"
 #include "math/lib.h"
 #include "topology/diamond_tiled_landscape.h"
 #include "assets_library/assets/slice_asset.h"
@@ -37,23 +38,7 @@ void LandscapePencil::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
         for (const math::ivec2& curCellPosition : neighbours)
         {
             TileSet::TileType tileType = DiamondTiledLandscape::tileTypeAt(landNodes, curCellPosition);
-            updateLandscapeCell(layerModel, sliceAsset, curCellPosition, tileType);
+            MapAuthoring::updateLandscapeCell(layerModel, sliceAsset, curCellPosition, tileType);
         }
-    }
-}
-
-void LandscapePencil::updateLandscapeCell(LayerModel* layerModel, SliceAsset* sliceAsset, const math::ivec2& cellPosition, TileSet::TileType tileType)
-{
-    // Clean all existing objects in this cell to prevent duplicates and 'ghost' nodes
-    layerModel->removeAll(cellPosition);
-
-    if (tileType != TileSet::Unknown)
-    {
-        std::unique_ptr<Landscape> landObject = std::make_unique<Landscape>(layerModel);
-        landObject->setName(QString("Landscape"));
-        landObject->setPosition(cellPosition);
-        landObject->setAssetUiid(sliceAsset->uuid());
-        landObject->setTileIndex(sliceAsset->subTileIndexByType(tileType));
-        layerModel->addGameObject(std::move(landObject));
     }
 }

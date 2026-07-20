@@ -121,7 +121,15 @@
 - **Чужие GL-ошибки:** контекст общий с Qt, `glGetError` глобален: ошибка из Qt-фазы
   всплывает на следующем `_SG_GL_CHECK_ERROR` (debug-assert) — падало при открытии
   вкладки главы. Дренировать `glGetError()` в начале своего кадра (после
-  `sg_reset_state_cache`); свои ошибки sokol ловит в том же кадре.
+  `sg_reset_state_cache`); свои ошибки sokol ловит в том же кадре. То же и на
+  шаге `sg_setup()`: lazy-init тоже обязан дренировать ДО вызова — первый кадровый
+  дренаж успевает только после setup (macOS, падение на первом открытии вкладки).
+- **Core profile на macOS:** Qt Quick по умолчанию просит legacy OpenGL 2.1
+  контекст, а sokol GLCORE требует core profile. Задать до создания
+  `QApplication`: `QSurfaceFormat` с `setVersion(4, 1)` + `CoreProfile` и
+  `setDefaultFormat(...)` (4.1 — максимум у Apple; см. `main.cpp` редактора).
+  В 2.1-контексте `GL_MAJOR_VERSION`/`GL_MINOR_VERSION` дают `GL_INVALID_ENUM`,
+  что и отравляет `glGetError` перед ассертом `_sg_gl_init_limits`.
 - **Depth/stencil:** если depth не оборачиваем в pass, в pipeline отключать ожидание depth:
   `pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE`.
 - **Коммит кадра:** `sg_commit()` ровно один раз на кадр на верхнем уровне рендера

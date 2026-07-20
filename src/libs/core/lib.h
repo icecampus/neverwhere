@@ -1,6 +1,7 @@
 #pragma once
 #include "map/map.h"
 #include "map/map_model.h"
+#include "map/map_authoring.h"
 #include "game_objects/tile_2d.h"
 #include "game_objects/landscape.h"
 #include "game_objects/resource.h"

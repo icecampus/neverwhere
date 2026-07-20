@@ -17,7 +17,7 @@ import "Workspace"
         chapter = core.chapters.getByUuid(data.chapterUuid)
         mapView.load(chapter.mapPath)
         // Register the active scene so the RPC server can reach it.
-        sceneRegistry.setActiveScene(mapView.model, mapView.isoView, mapView.toolsSelector, chapter)
+        sceneRegistry.setActiveScene(mapView.model, mapView.isoView, mapView.toolsSelector, chapter, mapView.renderItem)
     }
 
     orientation: Qt.Horizontal

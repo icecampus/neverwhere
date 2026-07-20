@@ -45,6 +45,30 @@ struct SokolGlobal {
 
         // The OpenGL context is already active here (Qt render thread).
         // Qt owns the context and the swap chain, so no desc.environment.
+        //
+        // Drain foreign GL errors BEFORE sg_setup: the context is shared with
+        // Qt, whose leftovers trip the glGetError()==0 assert inside
+        // _sg_gl_init_limits (observed: crash on the first chapter tab open —
+        // the per-frame drain in render() runs only after sg_setup). Log the
+        // codes once to help identify the polluter.
+        {
+            auto* glErr = QOpenGLContext::currentContext()->functions();
+            GLenum err = GL_NO_ERROR;
+            while ((err = glErr->glGetError()) != GL_NO_ERROR) {
+                qWarning() << "[render] drained foreign GL error before sg_setup:"
+                           << Qt::hex << static_cast<unsigned>(err) << Qt::dec;
+            }
+        }
+
+        {
+            auto* gl = QOpenGLContext::currentContext()->functions();
+            const GLubyte* ver = gl->glGetString(GL_VERSION);
+            const GLubyte* ren = gl->glGetString(GL_RENDERER);
+            qInfo() << "[render] GL context for sokol:"
+                    << (ver ? reinterpret_cast<const char*>(ver) : "?") << "|"
+                    << (ren ? reinterpret_cast<const char*>(ren) : "?");
+        }
+
         sg_desc desc = {};
         desc.logger.func = slog_func;
         sg_setup(&desc);

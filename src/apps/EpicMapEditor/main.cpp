@@ -10,10 +10,13 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
+#include <QSurfaceFormat>
 #include <QDateTime>
 #include <QFile>
+#include <QJsonObject>
 #include <QTextStream>
 #include <QtGlobal>
+#include <boost/uuid/string_generator.hpp>
 #include <filesystem>
 
 // Qt's `slots` macro breaks Sokol internals which use a field with that name
@@ -253,6 +256,47 @@ static int runSmokeTest()
     }
     check(roundTripOk, "diamond isometry fieldToMap(mapToField(cell)) == cell");
 
+    // Authoring cycle (the editor RPC authoring ops are thin wrappers over
+    // MapAuthoring): write tiles/landscape in cell coordinates on the loaded
+    // map, then round-trip through save/load into a temp file.
+    ImageAsset tileAsset(nullptr);
+    {
+        BaseData::AssetData data;
+        data.uuid = boost::uuids::string_generator()("11111111-2222-3333-4444-555555555555");
+        data.name = "smoke_tile";
+        data.layerType = LayerTypes::Decoration;
+        data.imageData = BaseData::ImageAssetData{};
+        tileAsset.load(data);
+    }
+    SliceAsset sliceAsset(nullptr);
+    {
+        BaseData::AssetData data;
+        data.uuid = boost::uuids::string_generator()("00000000-1111-2222-3333-444444444444");
+        data.name = "smoke_landscape";
+        data.layerType = LayerTypes::BaseLandscape;
+        data.sliceData = BaseData::SliceAssetData{};
+        sliceAsset.load(data);
+    }
+
+    check(MapAuthoring::setTile(*mapModel.layer(LayerTypes::Decoration), math::ivec2(1, 2), &tileAsset),
+        "authoring setTile");
+    check(MapAuthoring::fillRect(*mapModel.layer(LayerTypes::Decoration), math::ivec2(3, 3), math::ivec2(5, 4), &tileAsset) == 6,
+        "authoring fillRect");
+    // 4 raised nodes → dirty-cell union spans (7..9)x(7..9) = 9 cells.
+    const int landCells = MapAuthoring::applyLandscapeUpdates(*mapModel.layer(LayerTypes::BaseLandscape), &sliceAsset,
+        {{math::ivec2(8, 8), 1}, {math::ivec2(9, 8), 1}, {math::ivec2(8, 9), 1}, {math::ivec2(9, 9), 1}});
+    check(landCells == 9, "authoring applyLandscapeUpdates");
+
+    const QJsonObject dump = MapAuthoring::dumpMap(mapModel);
+    check(dump.contains("layers"), "authoring dumpMap");
+
+    const std::filesystem::path tmpMap = std::filesystem::temp_directory_path() / "epic_editor_smoke_map.json";
+    mapModel.save(QString::fromStdString(tmpMap.string()));
+    MapModel reloaded;
+    reloaded.load(QString::fromStdString(tmpMap.string()));
+    check(MapAuthoring::dumpMap(reloaded) == dump, "authoring save/load round-trip");
+    std::filesystem::remove(tmpMap);
+
     qInfo().noquote() << (failures == 0 ? "TEST PASS: smoke scenario finished OK" : "TEST FAIL: smoke scenario failed");
     return failures == 0 ? 0 : 1;
 }
@@ -276,7 +320,17 @@ int main(int argc, char* argv[])
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
-
+#ifdef __APPLE__
+    // Qt Quick's default surface format on macOS requests a legacy OpenGL 2.1
+    // context, but the map is rendered by sokol GLCORE, which needs a core
+    // profile (4.1 is the maximum Apple provides). Without this, sokol's init
+    // queries (GL_MAJOR_VERSION & co, unknown to 2.1) poison glGetError and
+    // the _sg_gl_init_limits assert fires on the first chapter tab open.
+    QSurfaceFormat glFormat;
+    glFormat.setVersion(4, 1);
+    glFormat.setProfile(QSurfaceFormat::CoreProfile);
+    QSurfaceFormat::setDefaultFormat(glFormat);
+#endif
 
     QApplication app(argc, argv);
 
