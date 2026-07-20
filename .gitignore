@@ -24,3 +24,5 @@ compile_commands.json
 
 # Blender autosave backups (covered by LFS too, but shouldn't be committed)
 *.blend1
+# Debug MCP server venv (macOS)
+tools/debug_mcp/.venv/

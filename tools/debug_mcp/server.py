@@ -1,30 +1,39 @@
-"""neverwhere debug MCP server — cdb-backed debugger tools exposed over MCP.
+"""neverwhere debug MCP server — debugger tools exposed over MCP.
 
-Stdio transport. Started by ``tools/run_mcp_server.ps1`` via
-``python -m tools.debug_mcp.server``. Wraps the pure functions in
-``debugger_mcp.py`` (cdb backend) as ``@mcp.tool()`` entries.
+Stdio transport. Started by ``tools/run_mcp_server.ps1`` (Windows) or
+``tools/run_mcp_server.sh`` (macOS) via ``python -m tools.debug_mcp.server``.
+Wraps the pure functions of the platform backend as ``@mcp.tool()`` entries:
+
+- Windows: ``debugger_mcp.py`` (cdb backend)
+- macOS: ``lldb_backend.py`` (LLDB SB API worker backend)
 
 This is the neverwhere counterpart of sandbox's sandbox-dev MCP — without
 any DESC bits. Live-debug C++ targets (EpicMapEditor, playgrounds) under
-cdb; analyze crash dumps written by MiniDumpWriteDump (once neverwhere
-grows its post-mortem hook).
+cdb/lldb; analyze crash dumps written by MiniDumpWriteDump (Windows only).
 """
 
 from __future__ import annotations
+
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
 # Import the backend as a module, not by name: the @mcp.tool() wrappers
 # below reuse the backend function names, and same-named imports would be
 # shadowed by the wrappers, making every tool recurse into itself.
-from tools.debug_mcp import debugger_mcp as _dbg
+if sys.platform == "darwin":
+    from tools.debug_mcp import lldb_backend as _dbg
+else:
+    from tools.debug_mcp import debugger_mcp as _dbg
 from tools.debug_mcp.exe_resolver import (
     debug_overrides_payload,
     write_active_debug_config,
 )
 from tools.debug_mcp.repo_root import repo_root
 
-_INSTRUCTIONS = """neverwhere debug MCP — cdb-backed Windows native debugger.
+_ON_MACOS = sys.platform == "darwin"
+
+_INSTRUCTIONS_WINDOWS = """neverwhere debug MCP — cdb-backed Windows native debugger.
 
 Workflow for a crash / assert / wrong runtime value:
 
@@ -47,6 +56,31 @@ Hints:
 - Prefer MCP tools over hand-running cdb in a terminal — the backend keeps
   long-lived cdb sessions with marker-delimited command/response framing.
 """
+
+_INSTRUCTIONS_MACOS = """neverwhere debug MCP — LLDB-backed macOS native debugger (SB API worker).
+
+Workflow for a crash / assert / wrong runtime value:
+
+1. ``debug_self_check`` — confirm lldb + the lldb worker + the default exe.
+2. ``debug_session_start`` (exe_target='EpicMapEditor') to launch, or
+   ``debug_process_find`` + ``debug_session_start`` (process_id=...) to attach.
+3. ``debug_run_until_stop`` to let the inferior run (SIGSEGV surfaces as a
+   Mach ``exception`` stop — EXC_BAD_ACCESS — with signal_equivalent SIGSEGV).
+4. ``debug_stack_get`` / ``debug_scopes_get`` / ``debug_expression_eval`` to
+   inspect the fault. The first *project* frame (is_project_frame=true, under
+   the repo root) is the real crash site.
+5. ``debug_session_stop`` to clean up.
+
+Hints:
+- exe_target resolution: ``_intermediate_64/src/apps/<target>/<config>/<target>``
+  (also tries ``src/refs`` and ``src/tests`` layouts).
+- The backend spawns one ``lldb_worker.py`` process under /usr/bin/python3
+  (Xcode's lldb SB module is cp39-only); the worker is restarted on failure.
+- ``debug_pdb_resolve`` / ``debug_crash_dump_analyze`` / ``debug_heap_stat``
+  are Windows-only and return not_supported here.
+"""
+
+_INSTRUCTIONS = _INSTRUCTIONS_MACOS if _ON_MACOS else _INSTRUCTIONS_WINDOWS
 
 mcp = FastMCP("neverwhere-debug", instructions=_INSTRUCTIONS)
 

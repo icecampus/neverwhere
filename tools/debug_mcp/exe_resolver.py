@@ -1,13 +1,18 @@
-"""Resolve a neverwhere exe (e.g. EpicMapEditor) for cdb debug sessions.
+"""Resolve a neverwhere exe (e.g. EpicMapEditor) for debug sessions.
 
 This is the neverwhere counterpart of sandbox's ``debug_desc_exe`` — without
-any DESC bits. Build layout: ``_intermediate_64/{Debug|Release}/{target}.exe``.
+any DESC bits. Build layouts:
+
+- Windows: ``_intermediate_64/{Debug|Release}/{target}.exe``
+- macOS:   ``_intermediate_64/src/apps/{target}/{Debug|Release}/{target}``
+  (fallbacks: ``src/refs/{target}/...`` and ``src/tests/{config}/{target}``)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -69,8 +74,18 @@ def _normalize_path(root: Path, value: str) -> Path:
 
 
 def product_exe_path(root: Path, target: str, config: str = DEFAULT_BUILD_CONFIG) -> Path:
-    """neverwhere cmake layout: ``_intermediate_64/<config>/<target>.exe``."""
+    """neverwhere cmake layout; platform-specific (see module docstring)."""
     build_config = mcp_build_config(config)
+    if sys.platform == "darwin":
+        candidates = [
+            root / "_intermediate_64" / "src" / "apps" / target / build_config / target,
+            root / "_intermediate_64" / "src" / "refs" / target / build_config / target,
+            root / "_intermediate_64" / "src" / "tests" / build_config / target,
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return candidates[0]
     return root / "_intermediate_64" / build_config / f"{target}.exe"
 
 
@@ -128,8 +143,11 @@ def default_symbol_paths(root: Path, exe: Path) -> list[str]:
     """Symbol search paths for cdb (``.sympath``).
 
     For neverwhere the PDBs live next to the exes (in the build dir) and in
-    the intermediate build root.
+    the intermediate build root. On macOS DWARF is embedded in the binary,
+    so no symbol paths are needed.
     """
+    if sys.platform == "darwin":
+        return []
     build_config = mcp_build_config()
     parts = [
         str(exe.parent),

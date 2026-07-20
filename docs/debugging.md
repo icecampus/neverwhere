@@ -1,21 +1,22 @@
-# Отладка падений и рантайм-значений через cdb-MCP
+# Отладка падений и рантайм-значений через debug-MCP
 
 Эта методичка описывает, как расследовать краши, ассерты и неверные рантайм-значения
-в neverwhere (C++/Qt/QML) через **cdb** (Windows native debugger), подключённый как
-MCP-сервер `neverwhere-debug`. Рассчитана на coding-агентов и людей — что звонить,
+в neverwhere (C++/Qt/QML) через **нативный отладчик**, подключённый как
+MCP-сервер `neverwhere-debug`: на Windows — **cdb** (WinDbg), на macOS — **LLDB**
+(сервер `neverwhere-debug-macos`). Рассчитана на coding-агентов и людей — что звонить,
 в каком порядке, и каких граблей избегать.
 
-## Принцип cdb-first
+## Принцип debugger-first (cdb-first на Windows)
 
 **При падении/ассерте/неверном рантайм-значении сначала доказательство через MCP
 (`debug_*`), не фикс по стектрейсу из лога.** Лог только маршрутизирует к гипотезе;
 доказывает root cause — инспекция под отладчиком: первый проектный фрейм + локали +
 значения выражений в точке сбоя.
 
-Исключения — когда cdb физически недоступен (W: waiver), например compile/link/parse
+Исключения — когда отладчик физически недоступен (W: waiver), например compile/link/parse
 ошибка **до** запуска inferior. Тогда чиним по тексту ошибки компилятора.
 
-## Окружение
+## Окружение (Windows)
 
 MCP-сервер `neverwhere-debug`:
 - **Бэкенд:** `tools/debug_mcp/` (Python, `mcp>=1.0`, см. `tools/debug_mcp/requirements.txt`)
@@ -35,6 +36,41 @@ cdb search order (см. `find_cdb` в `tools/debug_mcp/debugger_mcp.py`):
   `NEVERWHERE_DEBUG_EXE_TARGET`/`_CONFIG` → `.zcode/debug_active.json`
   (пин через `debug_set_active`) → дефолт.
 - Узнать текущее разрешение: `debug_overrides()`.
+
+## Окружение (macOS)
+
+MCP-сервер `neverwhere-debug-macos` (та же `debug_*`-контрактная поверхность, backend — LLDB):
+- **Архитектура:** MCP-сервер (venv на Homebrew Python 3.14, `mcp>=1.0`) →
+  `lldb_worker.py` (системный `/usr/bin/python3` 3.9 + LLDB SB API). Worker нужен потому,
+  что `_lldb.cpython-39-darwin.so` из Xcode собран только под cp39, а MCP SDK требует ≥3.10.
+  Backend держит один worker-процесс и гоняет JSON-команды по stdio (аналог long-lived cdb).
+- **Файлы:** `tools/debug_mcp/lldb_backend.py` (функции `debug_*`, те же имена/envelope,
+  что у cdb backend), `tools/debug_mcp/lldb_worker.py` (SB API: SBDebugger/SBTarget/SBProcess).
+- **Лаунчер:** `tools/run_mcp_server.sh` — при первом запуске создаёт `tools/debug_mcp/.venv`
+  и ставит `requirements.txt`.
+- **Подключение:** `.mcp.json`, отдельная запись `neverwhere-debug-macos` (windows-запись
+  на mac просто не стартует — и наоборот; клиент молча пропускает нерабочую).
+- **LLDB:** из Xcode (`xcrun lldb`), SB API path — `xcrun lldb -P`. Отдельной установки
+  не требуется; `debug_self_check` проверяет всё сам.
+- **Символы:** DWARF встроен в Debug-бинарники, PDB/dSYM-манипуляции не нужны.
+- **Разрешение exe-таргета:** тот же precedence, layout —
+  `_intermediate_64/src/{apps,refs}/<target>/<config>/<target>`
+  (тесты — `_intermediate_64/src/tests/<config>/neverwhere_tests`).
+- **Smoke backend'а (без MCP):** `tools/debug_mcp/.venv/bin/python tools/debug_mcp/smoke_lldb_worker.py`
+  (краш-бинарь с SIGSEGV) и `... --real-app` (EpicGameClient под lldb, DWARF file:line).
+
+Отличия macOS-флоу от Windows, о которых надо помнить:
+- **SIGSEGV/SIGABRT приходят как Mach-exception** (`EXC_BAD_ACCESS`, `EXC_CRASH`), не как
+  сигнал: `stop_reason = exception`, но worker раскрывает
+  `stop_event.exception.signal_equivalent` ("SIGSEGV" и т.п.) — проверяй его.
+- **Attach** к своим процессам работает из коробки; к чужим/SIP-защищённым — нет
+  (ограничение платформы; GUI другого пользователя — `DevToolsSecurity`).
+- **First-chance/second-chance** дихотомии нет: Mach-исключение сразу стопорит inferior.
+- `debug_pdb_resolve` / `debug_crash_dump_analyze` / `debug_heap_stat` — `not_supported`
+  (на mac символы — DWARF в бинаре; постмортем — `.ips`/core, отдельная задача).
+- `debug_session_wait_ready` — фактически no-op (launch/attach в worker синхронны).
+- lldb резолвит брейкпоинт на `int main` в первую исполняемую строку (например 403 → 409)
+  — это норма, не баг резолвера.
 
 ## Базовый flow: поймать краш EpicMapEditor
 
@@ -169,14 +205,15 @@ debug_breakpoint_set(session_id, symbol="AssetToolsSelector::click", condition="
 Manage: `debug_breakpoint_list`, `debug_breakpoint_enable`/`disable`/`remove`,
 bulk-вариант `debug_breakpoint_set_bulk`.
 
-## Постмортем (когда допилим minidump-хук)
+## Постмортем (когда допилим dump-хук)
 
-Сейчас в neverwhere **нет** C++ хука записи `.dmp` при SEH (`MiniDumpWriteDump` в main.cpp).
+Сейчас в neverwhere **нет** C++ хука записи дампа при падении (на Windows —
+`MiniDumpWriteDump` в main.cpp при SEH; на macOS аналог — свой `.ips`/core handler).
 Когда добавим — `debug_crash_dump_analyze(dump_path="...crash_....dmp")` проанализирует
-готовый дамп без live-repro. Дампы будут лежать в `CRASH_DUMP_DIR` (env, дефолт — рядом с exe
-в `CrashDumps/`).
+готовый дамп без live-repro (Windows; на mac инструмент пока `not_supported`).
+Дампы будут лежать в `CRASH_DUMP_DIR` (env, дефолт — рядом с exe в `CrashDumps/`).
 
-До этого момента — только live-debug (запуск под cdb).
+До этого момента — только live-debug (запуск под отладчиком).
 
 ## Чек-лист «приложение падает»
 
@@ -192,9 +229,12 @@ bulk-вариант `debug_breakpoint_set_bulk`.
 
 ## Ссылки по коду
 
-- `tools/debug_mcp/debugger_mcp.py` — ядро cdb-обёртки, все `debug_*` функции
-- `tools/debug_mcp/exe_resolver.py` — резолв exe-таргета и символов
-- `tools/debug_mcp/server.py` — FastMCP-обёртки `@mcp.tool()`
-- `tools/run_mcp_server.ps1` — лаунчер
-- `.mcp.json` — конфигурация MCP-сервера в IDE
+- `tools/debug_mcp/debugger_mcp.py` — cdb backend (Windows), все `debug_*` функции
+- `tools/debug_mcp/lldb_backend.py` — LLDB backend (macOS), тот же контракт
+- `tools/debug_mcp/lldb_worker.py` — SB API worker (системный python3 3.9)
+- `tools/debug_mcp/exe_resolver.py` — резолв exe-таргета и символов (обе ОС)
+- `tools/debug_mcp/server.py` — FastMCP-обёртки `@mcp.tool()`, выбор backend по платформе
+- `tools/debug_mcp/smoke_lldb_worker.py` — smoke LLDB backend'а без MCP
+- `tools/run_mcp_server.ps1` — лаунчер (Windows), `tools/run_mcp_server.sh` — лаунчер (macOS)
+- `.mcp.json` — конфигурация MCP-серверов (`neverwhere-debug` win, `neverwhere-debug-macos` mac)
 - `AGENTS.md` — краткая выжимка этого документа
