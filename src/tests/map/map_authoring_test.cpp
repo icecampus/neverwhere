@@ -167,6 +167,36 @@ TEST(MapAuthoringTest, LowerLandscapeNodeRemovesTile)
     EXPECT_EQ(land->getTileIndex(), slice->subTileIndexByType(TileSet::DownLack));
 }
 
+TEST(MapAuthoringTest, ReloadReplacesContent)
+{
+    MapModel map;
+    auto grass = makeImageAsset(kGrassUuid, "grass");
+
+    ASSERT_TRUE(MapAuthoring::setTile(*map.layer(LayerTypes::Decoration), math::ivec2(2, 3), grass.get()));
+
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_reload_test.json";
+    const QString path = QString::fromStdString(tmpPath.string());
+    map.save(path);
+
+    MapModel loaded;
+    loaded.load(path);
+    const QJsonObject once = MapAuthoring::dumpMap(loaded);
+
+    // Loading again into the same non-empty model must replace, not append.
+    loaded.load(path);
+    const QJsonObject twice = MapAuthoring::dumpMap(loaded);
+
+    EXPECT_EQ(QJsonDocument(once).toJson(QJsonDocument::Compact),
+              QJsonDocument(twice).toJson(QJsonDocument::Compact));
+
+    int total = 0;
+    loaded.layer(LayerTypes::Decoration)->iterate([&total](GameObject&) { ++total; });
+    EXPECT_EQ(total, 1);
+
+    std::filesystem::remove(tmpPath);
+}
+
 TEST(MapAuthoringTest, DumpSaveLoadRoundTrip)
 {
     MapModel map;

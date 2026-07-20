@@ -1,4 +1,4 @@
-﻿#include "map_model.h"
+#include "map_model.h"
 #include <QRandomGenerator>
 
 #include "game_objects/tile_2d.h"
@@ -17,6 +17,10 @@ LayerModel::LayerModel(QObject* parent):
 
 void LayerModel::load(const BaseData::Layer& layer)
 {
+    // Load replaces the layer content — a reload on a non-empty model must
+    // not duplicate objects.
+    clear();
+
     for (const BaseData::GameObject& gameObject : layer)
     {
         if (gameObject.tile2dData)
