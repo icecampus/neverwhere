@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -42,7 +43,10 @@ public:
     void ensureAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows);
 
     // Provide a raised atlas + its presentation params for an assetUuid.
-    void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params);
+    // topTexturePath (optional): a tiled ground texture for the raised top —
+    // when given, the top is drawn as mask-shaped ground-textured triangles
+    // instead of the atlas tiles.
+    void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {});
 
     void render(
         const std::vector<LandscapeTile>& tiles,
@@ -83,12 +87,13 @@ private:
     struct RaisedAtlasGpu {
         AtlasGpu gpu;
         RaisedParams params;
+        TextureAtlas topTex; // optional tiled ground texture for the raised top
     };
 
     // Per-texture vertex range inside the single merged frame update
     // (sokol allows only one sg_update_buffer per buffer per frame).
     struct DrawGroup {
-        const AtlasGpu* atlas;
+        const TextureAtlas* texture;
         int baseVertex;
         int vertexCount;
     };
@@ -125,6 +130,19 @@ private:
         const topology_core::Camera2D& camera,
         const glm::ivec2& cell,
         std::size_t tileIndex,
+        float yOffset) const;
+
+    // Raised top as mask-shaped triangles textured by a tiled ground texture
+    // (world-space UV, so the pattern is continuous across cells). The shape
+    // follows the same "axis-parallel corner" contour rule as the cliff walls:
+    // full quadrant for an edge with both nodes on, half-quadrant at the on
+    // corner of a transition edge. yOffset lifts the top in world pixels.
+    void appendTexturedTop(
+        std::vector<Vertex>& out,
+        const topology_core::DiamondIsometry& iso,
+        const topology_core::Camera2D& camera,
+        const glm::ivec2& cell,
+        const std::array<bool, 4>& mask,
         float yOffset) const;
 
     void ensurePipeline();

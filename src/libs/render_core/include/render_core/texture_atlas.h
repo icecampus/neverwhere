@@ -17,7 +17,14 @@ class TextureAtlas {
 public:
     bool valid() const { return image.id != SG_INVALID_ID && view.id != SG_INVALID_ID; }
 
-    void createFromFile(const std::filesystem::path& atlasPath, int cols, int rows);
+    // filter/wrap default to the atlas convention (nearest, clamp); a tiled
+    // ground texture wants linear + repeat instead.
+    void createFromFile(
+        const std::filesystem::path& atlasPath,
+        int cols,
+        int rows,
+        sg_filter filter = SG_FILTER_NEAREST,
+        sg_wrap wrap = SG_WRAP_CLAMP_TO_EDGE);
     void destroy();
 
     TileUV tileUv(std::size_t tileIndex) const;

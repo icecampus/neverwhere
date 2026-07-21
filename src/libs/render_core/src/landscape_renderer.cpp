@@ -356,6 +356,7 @@ void LandscapeRenderer::shutdown() {
     atlases.clear();
     for (auto& [_, a] : raisedAtlases) {
         a.gpu.atlas.destroy();
+        a.topTex.destroy();
     }
     raisedAtlases.clear();
 
@@ -534,10 +535,13 @@ void LandscapeRenderer::ensureAtlas(const std::string& assetUuid, const std::fil
     atlases[assetUuid] = createAtlasGpu(atlasPath, cols, rows);
 }
 
-void LandscapeRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params) {
+void LandscapeRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath) {
     auto it = raisedAtlases.find(assetUuid);
     if (it != raisedAtlases.end()) {
         it->second.params = params; // cheap: presentation can be tweaked at runtime
+        if (!topTexturePath.empty() && !it->second.topTex.valid()) {
+            it->second.topTex.createFromFile(topTexturePath, 1, 1, SG_FILTER_LINEAR, SG_WRAP_REPEAT);
+        }
         if (it->second.gpu.atlas.valid()) {
             return;
         }
@@ -546,6 +550,9 @@ void LandscapeRenderer::ensureRaisedAtlas(const std::string& assetUuid, const st
     RaisedAtlasGpu raised;
     raised.gpu = createAtlasGpu(atlasPath, cols, rows);
     raised.params = params;
+    if (!topTexturePath.empty()) {
+        raised.topTex.createFromFile(topTexturePath, 1, 1, SG_FILTER_LINEAR, SG_WRAP_REPEAT);
+    }
     raisedAtlases[assetUuid] = std::move(raised);
 }
 
@@ -579,6 +586,54 @@ void LandscapeRenderer::appendAtlasQuad(
     out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
     out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
     out.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {r, g, b, a}});
+}
+
+void LandscapeRenderer::appendTexturedTop(
+    std::vector<Vertex>& out,
+    const topology_core::DiamondIsometry& iso,
+    const topology_core::Camera2D& camera,
+    const glm::ivec2& cell,
+    const std::array<bool, 4>& mask,
+    float yOffset) const {
+
+    // World-space UV tiling: one texture repeat per 256 world pixels (2 cells),
+    // continuous across cells (same convention as MeshGenerationPlayground's
+    // production preview ground UVs).
+    constexpr float kTopUvPerWorldPx = 1.0f / 256.0f;
+
+    const auto corners = iso.cellDiamondCorners(cell); // [Left, Up, Right, Down]
+    const glm::vec2 center = iso.mapToField(cell);
+    const glm::vec2 lift{0.0f, yOffset};
+
+    const auto emit = [&](const glm::vec2& a, const glm::vec2& b, const glm::vec2& c) {
+        const glm::vec2 sa = camera.worldToScreen(a + lift);
+        const glm::vec2 sb = camera.worldToScreen(b + lift);
+        const glm::vec2 sc = camera.worldToScreen(c + lift);
+        out.push_back({{sa.x, sa.y}, {a.x * kTopUvPerWorldPx, a.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+        out.push_back({{sb.x, sb.y}, {b.x * kTopUvPerWorldPx, b.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+        out.push_back({{sc.x, sc.y}, {c.x * kTopUvPerWorldPx, c.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+    };
+
+    // Diamond edges as index pairs into the [Left, Up, Right, Down] mask —
+    // same table as cellContourSegments, so the top matches the wall contour.
+    static constexpr int kEdges[4][2] = {
+        {0, 1}, // Left-Up
+        {1, 2}, // Up-Right
+        {2, 3}, // Right-Down
+        {3, 0}, // Down-Left
+    };
+
+    for (const auto& edge : kEdges) {
+        const int a = edge[0];
+        const int b = edge[1];
+        if (mask[a] && mask[b]) {
+            emit(center, corners[a], corners[b]); // full quadrant
+        } else if (mask[a]) {
+            emit(center, corners[a], (corners[a] + corners[b]) * 0.5f); // half at corner a
+        } else if (mask[b]) {
+            emit(center, (corners[a] + corners[b]) * 0.5f, corners[b]); // half at corner b
+        }
+    }
 }
 
 void LandscapeRenderer::render(
@@ -624,7 +679,7 @@ void LandscapeRenderer::render(
             appendAtlasQuad(scratchVerts, atlas, iso, camera, t->cell, t->tileIndex, 0.0f);
         }
 
-        scratchDraws.push_back({&atlas, baseVertex, (int)scratchVerts.size() - baseVertex});
+        scratchDraws.push_back({&atlas.atlas, baseVertex, (int)scratchVerts.size() - baseVertex});
     }
 
     if (scratchVerts.empty()) return;
@@ -638,8 +693,8 @@ void LandscapeRenderer::render(
     sg_apply_uniforms(0, &uniform_range);
 
     for (const DrawGroup& draw : scratchDraws) {
-        bind.views[0] = draw.atlas->atlas.sgView();
-        bind.samplers[0] = draw.atlas->atlas.sgSampler();
+        bind.views[0] = draw.texture->sgView();
+        bind.samplers[0] = draw.texture->sgSampler();
         sg_apply_bindings(&bind);
 
         sg_draw(draw.baseVertex, draw.vertexCount, 1);
@@ -690,6 +745,20 @@ void LandscapeRenderer::renderRaised(
         }
     }
 
+    // Per-cell corner-node masks (aligned with `cells`), shared by the wall
+    // contour and the raised-top shape so they always match.
+    std::vector<std::array<bool, 4>> cellMasks;
+    cellMasks.reserve(cells.size());
+    for (const LandscapeTile* t : cells) {
+        const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t->cell);
+        cellMasks.push_back(std::array<bool, 4>{
+            onNodes.find(nodeKey(corners[0])) != onNodes.end(),
+            onNodes.find(nodeKey(corners[1])) != onNodes.end(),
+            onNodes.find(nodeKey(corners[2])) != onNodes.end(),
+            onNodes.find(nodeKey(corners[3])) != onNodes.end(),
+        });
+    }
+
     // Walls in world space: simple per-cell quads, or the global rock-wall
     // chains collected per asset (a chain must span the whole landmass, so
     // rock segments of all cells of one asset go into a single build).
@@ -697,14 +766,9 @@ void LandscapeRenderer::renderRaised(
     worldWalls.reserve(cells.size() * 12);
     std::unordered_map<std::string, std::vector<RockContourSegment>> rockSegments;
 
-    for (const LandscapeTile* t : cells) {
-        const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t->cell);
-        const std::array<bool, 4> mask{
-            onNodes.find(nodeKey(corners[0])) != onNodes.end(),
-            onNodes.find(nodeKey(corners[1])) != onNodes.end(),
-            onNodes.find(nodeKey(corners[2])) != onNodes.end(),
-            onNodes.find(nodeKey(corners[3])) != onNodes.end(),
-        };
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const LandscapeTile* t = cells[i];
+        const std::array<bool, 4>& mask = cellMasks[i];
         const RaisedParams& params = raisedAtlases.find(t->assetUuid)->second.params;
         if (params.rockWalls) {
             std::vector<RockContourSegment> segs = cellRockContourSegments(t->cell, mask);
@@ -731,10 +795,11 @@ void LandscapeRenderer::renderRaised(
         worldWalls.resize((kWallVbufVertices / 6) * 6); // cut at a quad boundary
     }
 
-    // Raised tops: the same atlas quads as the flat pass, lifted by
-    // params.height, so they match the flat tiles pixel-exact. Grouped per
-    // atlas (one texture binding per group); cells stay in back-to-front
-    // order inside each group.
+    // Raised tops: cells of an asset with a topTexture are drawn as
+    // mask-shaped ground-textured triangles; otherwise the same atlas quads as
+    // the flat pass, lifted by params.height, so they match the flat tiles
+    // pixel-exact. Grouped per asset (one texture binding per group); cells
+    // stay in back-to-front order inside each group.
     scratchRaisedVerts.clear();
     scratchRaisedDraws.clear();
     {
@@ -743,21 +808,32 @@ void LandscapeRenderer::renderRaised(
         for (const LandscapeTile* t : cells) {
             groups[t->assetUuid].push_back(t);
         }
+        // Mask lookup aligned with `cells` (built above).
+        std::unordered_map<const LandscapeTile*, const std::array<bool, 4>*> maskByTile;
+        maskByTile.reserve(cells.size());
+        for (std::size_t i = 0; i < cells.size(); ++i) {
+            maskByTile.emplace(cells[i], &cellMasks[i]);
+        }
 
         bool topsTruncated = false;
         for (auto& [uuid, group] : groups) {
             const RaisedAtlasGpu& raised = raisedAtlases.find(uuid)->second;
+            const bool texturedTop = raised.topTex.valid();
             const int baseVertex = (int)scratchRaisedVerts.size();
             for (const LandscapeTile* t : group) {
-                if (scratchRaisedVerts.size() + 6 > kRaisedVbufVertices) {
+                if (scratchRaisedVerts.size() + 12 > kRaisedVbufVertices) {
                     topsTruncated = true;
                     break;
                 }
-                appendAtlasQuad(scratchRaisedVerts, raised.gpu, iso, camera, t->cell, t->tileIndex, -raised.params.height);
+                if (texturedTop) {
+                    appendTexturedTop(scratchRaisedVerts, iso, camera, t->cell, *maskByTile[t], -raised.params.height);
+                } else {
+                    appendAtlasQuad(scratchRaisedVerts, raised.gpu, iso, camera, t->cell, t->tileIndex, -raised.params.height);
+                }
             }
             const int vertexCount = (int)scratchRaisedVerts.size() - baseVertex;
             if (vertexCount > 0) {
-                scratchRaisedDraws.push_back({&raised.gpu, baseVertex, vertexCount});
+                scratchRaisedDraws.push_back({texturedTop ? &raised.topTex : &raised.gpu.atlas, baseVertex, vertexCount});
             }
         }
         if (topsTruncated) {
@@ -796,8 +872,8 @@ void LandscapeRenderer::renderRaised(
         sg_apply_uniforms(0, &uniform_range);
 
         for (const DrawGroup& draw : scratchRaisedDraws) {
-            raisedBind.views[0] = draw.atlas->atlas.sgView();
-            raisedBind.samplers[0] = draw.atlas->atlas.sgSampler();
+            raisedBind.views[0] = draw.texture->sgView();
+            raisedBind.samplers[0] = draw.texture->sgSampler();
             sg_apply_bindings(&raisedBind);
             sg_draw(draw.baseVertex, draw.vertexCount, 1);
         }

@@ -64,7 +64,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
             params.rockWalls = entry->rockWalls;
             params.amplitude = entry->rockAmplitude;
             params.bevel = entry->rockBevel;
-            renderer.ensureRaisedAtlas(uuid, entry->atlasPath, entry->cols, entry->rows, params);
+            renderer.ensureRaisedAtlas(uuid, entry->atlasPath, entry->cols, entry->rows, params, entry->topTexturePath);
         } else if (entry->isSlice()) {
             renderer.ensureLandscapeAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
         }

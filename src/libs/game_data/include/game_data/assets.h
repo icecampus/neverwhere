@@ -26,6 +26,7 @@ struct ImageAssetData {
 struct Shape3dAssetData {
     std::string thumbnail;
     std::string atlas;
+    std::string topTexture; // optional: tiled ground texture for the raised top
     float raisedHeight = 32.0f;
     bool rockWalls = true;
     float rockAmplitude = 0.28f;
@@ -53,6 +54,7 @@ inline void from_json(const nlohmann::json& j, SliceAssetData& d) {
 inline void from_json(const nlohmann::json& j, Shape3dAssetData& d) {
     j.at("thumbnail").get_to(d.thumbnail);
     j.at("atlas").get_to(d.atlas);
+    if (j.contains("topTexture")) j.at("topTexture").get_to(d.topTexture);
     if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
     if (j.contains("rockWalls")) j.at("rockWalls").get_to(d.rockWalls);
     if (j.contains("rockAmplitude")) j.at("rockAmplitude").get_to(d.rockAmplitude);
@@ -113,6 +115,7 @@ struct AssetIndexEntry {
     bool rockWalls = true;
     float rockAmplitude = 0.28f;
     float rockBevel = 0.3f;
+    std::filesystem::path topTexturePath; // optional tiled texture for the raised top
 
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }

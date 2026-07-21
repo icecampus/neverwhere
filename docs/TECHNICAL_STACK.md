@@ -211,12 +211,16 @@ FBO редактора — NONE).
 
 **Поднятая 3D-земля (порт TileShapePlayground) `[есть]`:** ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
-`raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`) рисуются инструментом
+`raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —
+тайлящаяся текстура верха) рисуются инструментом
 `Shape3dPencil` (наследник `LandscapePencil`) на отдельном слое `RaisedLandscape`
 — своя vertex-сетка нод, независимая от плоского `BaseLandscape`. Данные — те же
 `Landscape`-объекты (tileIndex); «3D» — презентация в `LandscapeRenderer`:
 стены (простые запечённые или RockWalls на FastNoise2) + верх со сдвигом
-`-raisedHeight`, painter's order без depth-buffer. Кадр: `WorldFrame.raisedTiles`
+`-raisedHeight`, painter's order без depth-buffer. Верх: при заданном
+`topTexture` — треугольники по маске нод (тот же contour-рул, что у стен) с
+world-space UV (репит каждые 256 px, LINEAR+REPEAT), иначе — атласные квады.
+Кадр: `WorldFrame.raisedTiles`
 (редактор — `ModelFrameSource`, клиент/play-таб — `world_frame_builder`).
 Ограничение: спрайты и поднятые клетки не z-сортируются между собой (дерево на
 поднятой клетке визуально «тонет») — отдельная задача.

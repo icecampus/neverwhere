@@ -7,7 +7,7 @@
 namespace render_core {
 namespace fs = std::filesystem;
 
-void TextureAtlas::createFromFile(const fs::path& atlasPath, int cols_, int rows_) {
+void TextureAtlas::createFromFile(const fs::path& atlasPath, int cols_, int rows_, sg_filter filter, sg_wrap wrap) {
     destroy();
 
     cols = (cols_ > 0) ? cols_ : 1;
@@ -39,10 +39,10 @@ void TextureAtlas::createFromFile(const fs::path& atlasPath, int cols_, int rows
     }
 
     sg_sampler_desc smp_desc = {};
-    smp_desc.min_filter = SG_FILTER_NEAREST;
-    smp_desc.mag_filter = SG_FILTER_NEAREST;
-    smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
-    smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+    smp_desc.min_filter = filter;
+    smp_desc.mag_filter = filter;
+    smp_desc.wrap_u = wrap;
+    smp_desc.wrap_v = wrap;
     smp_desc.label = "atlas-sampler";
     sampler = sg_make_sampler(&smp_desc);
 }

@@ -42,13 +42,14 @@ namespace BaseData
     {
         std::string thumbnail;
         std::string atlas;
+        std::string topTexture; // optional: tiled ground texture for the raised top
         float raisedHeight{32.0f};
         bool rockWalls{true};
         float rockAmplitude{0.28f};
         float rockBevel{0.3f};
 
         NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Shape3dAssetData,
-            thumbnail, atlas, raisedHeight, rockWalls, rockAmplitude, rockBevel);
+            thumbnail, atlas, topTexture, raisedHeight, rockWalls, rockAmplitude, rockBevel);
     };
 
     //Asset

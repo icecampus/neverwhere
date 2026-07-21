@@ -53,6 +53,9 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
             idx.rockWalls = asset.shape3d->rockWalls;
             idx.rockAmplitude = asset.shape3d->rockAmplitude;
             idx.rockBevel = asset.shape3d->rockBevel;
+            if (!asset.shape3d->topTexture.empty()) {
+                idx.topTexturePath = asset.root() / asset.shape3d->topTexture;
+            }
         }
 
         if (asset.image) {

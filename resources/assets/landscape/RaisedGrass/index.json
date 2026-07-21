@@ -8,7 +8,8 @@
   "shape3d": {
     "thumbnail": "thumbnail.png",
     "atlas": "atlas.png",
-    "raisedHeight": 32.0,
+    "topTexture": "top.png",
+    "raisedHeight": 96.0,
     "rockWalls": true,
     "rockAmplitude": 0.28,
     "rockBevel": 0.3

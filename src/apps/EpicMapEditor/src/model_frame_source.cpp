@@ -90,7 +90,10 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
             params.rockWalls = data.shape3dData->rockWalls;
             params.amplitude = data.shape3dData->rockAmplitude;
             params.bevel = data.shape3dData->rockBevel;
-            renderer.ensureRaisedAtlas(uuid, data.root() / data.shape3dData->atlas, 4, 6, params);
+            const std::filesystem::path topTexturePath = data.shape3dData->topTexture.empty()
+                ? std::filesystem::path{}
+                : data.root() / data.shape3dData->topTexture;
+            renderer.ensureRaisedAtlas(uuid, data.root() / data.shape3dData->atlas, 4, 6, params, topTexturePath);
         }
         if (data.sliceData) {
             // Editor convention: landscape atlases are split into 4x6 tiles.

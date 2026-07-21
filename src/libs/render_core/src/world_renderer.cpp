@@ -20,8 +20,8 @@ void WorldRenderer::ensureLandscapeAtlas(const std::string& assetUuid, const std
     landscapeRenderer.ensureAtlas(assetUuid, atlasPath, cols, rows);
 }
 
-void WorldRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params) {
-    landscapeRenderer.ensureRaisedAtlas(assetUuid, atlasPath, cols, rows, params);
+void WorldRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath) {
+    landscapeRenderer.ensureRaisedAtlas(assetUuid, atlasPath, cols, rows, params, topTexturePath);
 }
 
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
