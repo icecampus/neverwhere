@@ -29,4 +29,14 @@ std::vector<ContourSegment> cellContourSegments(
     const glm::ivec2& cell,
     const std::array<bool, 4>& mask);
 
+// Signed area of a closed polygon (shoelace; positive = counter-clockwise in
+// the coordinate system handedness — in y-down field space positive reads as
+// visually clockwise). Used to classify boundary chains (outer vs hole).
+float polygonSignedArea(const std::vector<glm::vec2>& polygon);
+
+// Ear-clipping triangulation of a simple closed polygon (no holes, no
+// self-intersections). Returns triangle vertex triples (3 per triangle) or an
+// empty vector for degenerate input / when no ear could be clipped.
+std::vector<glm::vec2> triangulateSimplePolygon(const std::vector<glm::vec2>& polygon);
+
 } // namespace render_core

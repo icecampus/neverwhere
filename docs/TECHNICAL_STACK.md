@@ -218,8 +218,12 @@ FBO редактора — NONE).
 `Landscape`-объекты (tileIndex); «3D» — презентация в `LandscapeRenderer`:
 стены (простые запечённые или RockWalls на FastNoise2) + верх со сдвигом
 `-raisedHeight`, painter's order без depth-buffer. Верх: при заданном
-`topTexture` — треугольники по маске нод (тот же contour-рул, что у стен) с
-world-space UV (репит каждые 256 px, LINEAR+REPEAT), иначе — атласные квады.
+`topTexture` — ear-clipping триангуляция **верхнего контура стен** (фаскованные
+boundary-цепочки `RockWallBuild.topChains` — на верхней кромке нойз-смещение
+нулевое, так что верх и стены совпадают по построению, без эффекта «крышки»),
+world-space UV (репит каждые 256 px, LINEAR+REPEAT); fallback — треугольники
+по маске нод per-cell (контур с дырками, не-rock стены), без `topTexture` —
+атласные квады.
 Кадр: `WorldFrame.raisedTiles`
 (редактор — `ModelFrameSource`, клиент/play-таб — `world_frame_builder`).
 Ограничение: спрайты и поднятые клетки не z-сортируются между собой (дерево на

@@ -39,6 +39,11 @@ struct RockContourSegment {
 
 struct RockWallBuild {
     std::vector<RockWallVertex> verts;
+    // Closed boundary polylines of the beveled wall top edge, in chain order
+    // (field space, NOT lifted by heightPx). The wall top edge has zero noise
+    // offset (seam envelope), so these polylines are exactly the walls' upper
+    // contour — the raised top surface is triangulated from them.
+    std::vector<std::vector<glm::vec2>> topChains;
     float maxAbsOffset = 0.0f;
     int quadCount = 0;
 };

@@ -165,6 +165,7 @@ BeveledBoundary bevelChain(const std::vector<MapSeg>& segs, const Chain& chain, 
         lens[i] = glm::length(s.b - s.a);
     }
 
+    // Corner classification + trims (convex corners get a 45-degree chamfer).
     for (int i = 0; i < n; ++i) {
         const int prev = (i + n - 1) % n;
         if (!chain.closed && i == 0) {
@@ -179,25 +180,13 @@ BeveledBoundary bevelChain(const std::vector<MapSeg>& segs, const Chain& chain, 
         if (turn <= 1e-4f) {
             continue; // straight or concave — no chamfer
         }
-        // convex corner between seg prev and seg i (or at chain wrap point)
-        const float tPrev = std::min(cornerBevel, lens[prev] * 0.45f);
-        const float tNext = std::min(cornerBevel, lens[i] * 0.45f);
-        trimEnd[prev] = tPrev;
-        trimStart[i] = tNext;
-
-        WallPiece bevel;
-        const MapSeg& sp = segs[chain.segs[prev]];
-        const MapSeg& si = segs[chain.segs[i]];
-        bevel.a = sp.b - dirs[prev] * tPrev;
-        bevel.b = si.a + dirs[i] * tNext;
-        bevel.na = sp.outward;
-        bevel.nb = si.outward;
-        bevel.length = glm::length(bevel.b - bevel.a);
-        if (bevel.length > 1e-5f) {
-            out.pieces.push_back(bevel);
-        }
+        trimEnd[prev] = std::min(cornerBevel, lens[prev] * 0.45f);
+        trimStart[i] = std::min(cornerBevel, lens[i] * 0.45f);
     }
 
+    // Ordered emission along the chain: main piece, then the chamfer to the
+    // next piece. Consecutive pieces share endpoints, so the piece list
+    // doubles as the wall top boundary polyline.
     for (int i = 0; i < n; ++i) {
         const MapSeg& s = segs[chain.segs[i]];
         WallPiece piece;
@@ -208,6 +197,24 @@ BeveledBoundary bevelChain(const std::vector<MapSeg>& segs, const Chain& chain, 
         piece.length = glm::length(piece.b - piece.a);
         if (piece.length > 1e-5f) {
             out.pieces.push_back(piece);
+        }
+
+        const int next = (i + 1) % n;
+        if (!chain.closed && next == 0) {
+            continue;
+        }
+        if (trimEnd[i] <= 0.0f && trimStart[next] <= 0.0f) {
+            continue; // no convex corner between pieces i and next
+        }
+        const MapSeg& sn = segs[chain.segs[next]];
+        WallPiece bevel;
+        bevel.a = s.b - dirs[i] * trimEnd[i];
+        bevel.b = sn.a + dirs[next] * trimStart[next];
+        bevel.na = s.outward;
+        bevel.nb = sn.outward;
+        bevel.length = glm::length(bevel.b - bevel.a);
+        if (bevel.length > 1e-5f) {
+            out.pieces.push_back(bevel);
         }
     }
     return out;
@@ -322,6 +329,16 @@ RockWallBuild buildRockWalls(
     std::vector<WallPiece> pieces;
     for (const Chain& chain : chains) {
         BeveledBoundary beveled = bevelChain(segs, chain, params.cornerBevel);
+        // Wall top boundary polyline (field space, unlifted): ordered piece
+        // start points of the closed chain — exactly the walls' upper contour.
+        if (chain.closed && beveled.pieces.size() >= 3) {
+            std::vector<glm::vec2> polyline;
+            polyline.reserve(beveled.pieces.size());
+            for (const WallPiece& piece : beveled.pieces) {
+                polyline.push_back(mapToFieldPx(iso, piece.a));
+            }
+            build.topChains.push_back(std::move(polyline));
+        }
         pieces.insert(pieces.end(), beveled.pieces.begin(), beveled.pieces.end());
     }
     if (pieces.empty()) {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <unordered_set>
 #include <utility>
@@ -225,6 +226,11 @@ namespace {
 // per frame, so a frame must fit into a single upload).
 constexpr std::size_t kRaisedVbufVertices = 6 * 65536;
 constexpr std::size_t kWallVbufVertices = 8 * 65536;
+
+// World-space UV tiling of the raised-top ground texture: one texture repeat
+// per 256 world pixels (2 cells), continuous across cells (same convention as
+// MeshGenerationPlayground's production preview ground UVs).
+constexpr float kTopUvPerWorldPx = 1.0f / 256.0f;
 
 // Same packing as DiamondIsometry::zOffset.
 std::uint64_t nodeKey(const glm::ivec2& node) {
@@ -596,11 +602,6 @@ void LandscapeRenderer::appendTexturedTop(
     const std::array<bool, 4>& mask,
     float yOffset) const {
 
-    // World-space UV tiling: one texture repeat per 256 world pixels (2 cells),
-    // continuous across cells (same convention as MeshGenerationPlayground's
-    // production preview ground UVs).
-    constexpr float kTopUvPerWorldPx = 1.0f / 256.0f;
-
     const auto corners = iso.cellDiamondCorners(cell); // [Left, Up, Right, Down]
     const glm::vec2 center = iso.mapToField(cell);
     const glm::vec2 lift{0.0f, yOffset};
@@ -765,6 +766,7 @@ void LandscapeRenderer::renderRaised(
     std::vector<RockWallVertex> worldWalls;
     worldWalls.reserve(cells.size() * 12);
     std::unordered_map<std::string, std::vector<RockContourSegment>> rockSegments;
+    std::unordered_map<std::string, std::vector<std::vector<glm::vec2>>> topChainsByAsset;
 
     for (std::size_t i = 0; i < cells.size(); ++i) {
         const LandscapeTile* t = cells[i];
@@ -786,6 +788,9 @@ void LandscapeRenderer::renderRaised(
         rockParams.amplitude = params.amplitude;
         RockWallBuild rockBuild = buildRockWalls(segments, params.height, rockParams, iso);
         worldWalls.insert(worldWalls.end(), rockBuild.verts.begin(), rockBuild.verts.end());
+        // Beveled wall-top boundary chains -> the raised top surface is formed
+        // from the walls' upper contour (triangulated below).
+        topChainsByAsset[uuid] = std::move(rockBuild.topChains);
     }
 
     if (worldWalls.size() > kWallVbufVertices) {
@@ -796,10 +801,15 @@ void LandscapeRenderer::renderRaised(
     }
 
     // Raised tops: cells of an asset with a topTexture are drawn as
-    // mask-shaped ground-textured triangles; otherwise the same atlas quads as
-    // the flat pass, lifted by params.height, so they match the flat tiles
-    // pixel-exact. Grouped per asset (one texture binding per group); cells
-    // stay in back-to-front order inside each group.
+    // ground-textured triangles; otherwise the same atlas quads as the flat
+    // pass, lifted by params.height, so they match the flat tiles pixel-exact.
+    // The textured top is formed from the walls' upper contour (the beveled
+    // boundary chains exported by the rock-wall build, ear-clipped into
+    // triangles), so the top surface and the wall tops match exactly — no
+    // "lid" overhang at chamfered corners. Contours with holes (mixed chain
+    // winding), non-rock walls or missing chains fall back to per-cell
+    // mask-shaped triangles. Grouped per asset (one texture binding per
+    // group); cells stay in back-to-front order inside each group.
     scratchRaisedVerts.clear();
     scratchRaisedDraws.clear();
     {
@@ -815,20 +825,79 @@ void LandscapeRenderer::renderRaised(
             maskByTile.emplace(cells[i], &cellMasks[i]);
         }
 
+        // Ear-clipped top triangles per asset (field space, unlifted), empty
+        // when the contour construction is not applicable -> per-cell fallback.
+        std::unordered_map<std::string, std::vector<glm::vec2>> chainTopTris;
+        for (const auto& [uuid, chains] : topChainsByAsset) {
+            const RaisedAtlasGpu& raised = raisedAtlases.find(uuid)->second;
+            if (!raised.topTex.valid() || chains.empty()) {
+                continue;
+            }
+            // Hole detection: all chains of one landmass are walked with land
+            // on the left, so outer chains share the winding of the
+            // largest-area chain; an opposite winding means a hole.
+            float refArea = 0.0f;
+            for (const auto& poly : chains) {
+                const float area = polygonSignedArea(poly);
+                if (std::abs(area) > std::abs(refArea)) {
+                    refArea = area;
+                }
+            }
+            bool hasHole = false;
+            for (const auto& poly : chains) {
+                if (polygonSignedArea(poly) * refArea < 0.0f) {
+                    hasHole = true;
+                    break;
+                }
+            }
+            if (hasHole) {
+                continue;
+            }
+            std::vector<glm::vec2> tris;
+            bool ok = true;
+            for (const auto& poly : chains) {
+                std::vector<glm::vec2> part = triangulateSimplePolygon(poly);
+                if (part.empty()) {
+                    ok = false;
+                    break;
+                }
+                tris.insert(tris.end(), part.begin(), part.end());
+            }
+            if (ok) {
+                chainTopTris[uuid] = std::move(tris);
+            }
+        }
+
         bool topsTruncated = false;
         for (auto& [uuid, group] : groups) {
             const RaisedAtlasGpu& raised = raisedAtlases.find(uuid)->second;
             const bool texturedTop = raised.topTex.valid();
             const int baseVertex = (int)scratchRaisedVerts.size();
-            for (const LandscapeTile* t : group) {
-                if (scratchRaisedVerts.size() + 12 > kRaisedVbufVertices) {
+
+            auto chainIt = chainTopTris.find(uuid);
+            if (chainIt != chainTopTris.end()) {
+                // Contour-formed top: lift and bake to screen space, world UVs.
+                const std::vector<glm::vec2>& tris = chainIt->second;
+                if (scratchRaisedVerts.size() + tris.size() > kRaisedVbufVertices) {
                     topsTruncated = true;
-                    break;
-                }
-                if (texturedTop) {
-                    appendTexturedTop(scratchRaisedVerts, iso, camera, t->cell, *maskByTile[t], -raised.params.height);
                 } else {
-                    appendAtlasQuad(scratchRaisedVerts, raised.gpu, iso, camera, t->cell, t->tileIndex, -raised.params.height);
+                    const glm::vec2 lift{0.0f, -raised.params.height};
+                    for (const glm::vec2& p : tris) {
+                        const glm::vec2 s = camera.worldToScreen(p + lift);
+                        scratchRaisedVerts.push_back({{s.x, s.y}, {p.x * kTopUvPerWorldPx, p.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+                    }
+                }
+            } else {
+                for (const LandscapeTile* t : group) {
+                    if (scratchRaisedVerts.size() + 12 > kRaisedVbufVertices) {
+                        topsTruncated = true;
+                        break;
+                    }
+                    if (texturedTop) {
+                        appendTexturedTop(scratchRaisedVerts, iso, camera, t->cell, *maskByTile[t], -raised.params.height);
+                    } else {
+                        appendAtlasQuad(scratchRaisedVerts, raised.gpu, iso, camera, t->cell, t->tileIndex, -raised.params.height);
+                    }
                 }
             }
             const int vertexCount = (int)scratchRaisedVerts.size() - baseVertex;
