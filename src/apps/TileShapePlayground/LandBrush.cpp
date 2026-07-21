@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "DiamondIso.h"
+#include <topology_core/diamond_isometry.h>
 
 void LandBrush::reset(int width, int height) {
     m_width = std::clamp(width, 4, 96);
@@ -56,7 +56,7 @@ std::array<bool, 4> LandBrush::nodeMaskAt(glm::ivec2 cell) const {
         return {};
     }
 
-    const auto corners = DiamondIso::cellCornerNodes(cell);
+    const auto corners = topology_core::DiamondIsometry::cellCornerNodes(cell);
     return {
         nodeIsOn(corners[0]), // Left
         nodeIsOn(corners[1]), // Up
@@ -66,7 +66,7 @@ std::array<bool, 4> LandBrush::nodeMaskAt(glm::ivec2 cell) const {
 }
 
 std::array<glm::ivec2, 4> LandBrush::affectedCells(glm::ivec2 node) const {
-    return DiamondIso::nodeNeighbourCells(node);
+    return topology_core::DiamondIsometry::nodeNeighbourCells(node);
 }
 
 int LandBrush::atlasIndexByType(landscape_core::LandscapeTileType type) {

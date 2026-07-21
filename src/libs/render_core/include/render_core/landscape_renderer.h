@@ -133,18 +133,6 @@ private:
         std::size_t tileIndex,
         float yOffset) const;
 
-    // Raised top as mask-shaped triangles in FIELD space (3 verts per
-    // triangle), world-space UVs. The shape follows the same "axis-parallel
-    // corner" contour rule as the cliff walls: full quadrant for an edge with
-    // both nodes on, half-quadrant at the on corner of a transition edge.
-    // yOffset lifts the top in world pixels.
-    void appendTexturedTop(
-        std::vector<Vertex>& out,
-        const topology_core::DiamondIsometry& iso,
-        const glm::ivec2& cell,
-        const std::array<bool, 4>& mask,
-        float yOffset) const;
-
     void ensurePipeline();
     void destroyPipeline();
     void ensureWallPipeline();

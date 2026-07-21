@@ -1,9 +1,8 @@
-#include "raised_geometry.h"
+#include "pch.h"
 
-#include <algorithm>
-#include <limits>
+#include "highground_core/inspect.h"
 
-namespace render_core {
+namespace highground {
 
 std::vector<ContourSegment> cellContourSegments(
     const topology_core::DiamondIsometry& iso,
@@ -43,9 +42,44 @@ std::vector<ContourSegment> cellContourSegments(
     return out;
 }
 
-} // namespace render_core
+std::vector<RockContourSegment> cellRockContourSegments(
+    const glm::ivec2& cell,
+    const std::array<bool, 4>& mask) {
 
-namespace render_core {
+    static constexpr int kEdges[4][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}};
+    const auto nodes = topology_core::DiamondIsometry::cellCornerNodes(cell);
+    const glm::vec2 corners[4] = {
+        glm::vec2(nodes[0]), // Left
+        glm::vec2(nodes[1]), // Up
+        glm::vec2(nodes[2]), // Right
+        glm::vec2(nodes[3]), // Down
+    };
+    const glm::vec2 center(static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f);
+
+    std::vector<RockContourSegment> out;
+    out.reserve(4);
+    for (int e = 0; e < 4; ++e) {
+        const int a = kEdges[e][0];
+        const int b = kEdges[e][1];
+        if (mask[a] == mask[b]) {
+            continue; // both on (interior) or both off (no land) — no contour
+        }
+        const glm::vec2 mid = (corners[a] + corners[b]) * 0.5f;
+        const glm::vec2 onCorner = mask[a] ? corners[a] : corners[b];
+        const glm::vec2 quadCenter = (center + onCorner) * 0.5f;
+        const glm::vec2 segDir = center - mid;
+        glm::vec2 n(-segDir.y, segDir.x);
+        if (glm::dot(n, mid - quadCenter) < 0.0f) {
+            n = -n;
+        }
+        RockContourSegment seg;
+        seg.a = mid;
+        seg.b = center;
+        seg.outward = glm::normalize(n);
+        out.push_back(seg);
+    }
+    return out;
+}
 
 float polygonSignedArea(const std::vector<glm::vec2>& polygon) {
     float area = 0.0f;
@@ -94,6 +128,15 @@ std::vector<glm::vec2> triangulateSimplePolygon(const std::vector<glm::vec2>& po
         const float d2 = cross(a - c, p - c);
         return d0 > kEps && d1 > kEps && d2 > kEps;
     };
+    // Proper (interior-to-interior) segment intersection: shared endpoints and
+    // collinear touches do not count.
+    const auto segProperIntersect = [&](const glm::vec2& p1, const glm::vec2& q1, const glm::vec2& p2, const glm::vec2& q2) {
+        const float o1 = cross(q1 - p1, p2 - p1);
+        const float o2 = cross(q1 - p1, q2 - p1);
+        const float o3 = cross(q2 - p2, p1 - p2);
+        const float o4 = cross(q2 - p2, q1 - p2);
+        return o1 * o2 < -kEps * kEps && o3 * o4 < -kEps * kEps;
+    };
 
     std::vector<glm::vec2> triangles;
     triangles.reserve((poly.size() - 2) * 3);
@@ -120,6 +163,14 @@ std::vector<glm::vec2> triangulateSimplePolygon(const std::vector<glm::vec2>& po
                 if (pointInTriangle(poly[j], a, b, c)) {
                     ear = false;
                     break;
+                }
+            }
+            // Spike guard: the new cut edge prev->next must not properly cross
+            // any polygon edge — otherwise a vertex lying exactly on a polygon
+            // edge can let the ear leak outside the polygon.
+            for (std::size_t e = 0; ear && e < poly.size(); ++e) {
+                if (segProperIntersect(a, c, poly[e], poly[(e + 1) % poly.size()])) {
+                    ear = false;
                 }
             }
             if (!ear) {
@@ -220,4 +271,4 @@ std::vector<glm::vec2> mergeHoleIntoOuter(
     return merged;
 }
 
-} // namespace render_core
+} // namespace highground

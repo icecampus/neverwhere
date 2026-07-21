@@ -7,14 +7,14 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
+#include <highground_core/highground.h>
 #include <topology_core/camera2d.h>
+#include <topology_core/diamond_isometry.h>
 
 #include "AtlasRenderer.h"
-#include "DiamondIso.h"
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
 #include "PlaygroundSmokeTest.h"
-#include "RockWalls.h"
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -60,7 +60,7 @@ struct AppState {
 };
 
 AppState g_state;
-DiamondIso g_iso;
+topology_core::DiamondIsometry g_iso;
 topology_core::Camera2D g_camera;
 AtlasRenderer g_renderer;
 std::filesystem::path g_dataRoot;
@@ -82,9 +82,9 @@ PaintLayer g_layers[3] = {
     {{}, AtlasKind::Flat, true, "Raised 3D"},
 };
 int g_activeLayer = 0;
-float g_raisedHeight = 32.0f;
-bool g_rockWalls = true;
-RockWallParams g_rockParams;
+// Raised (3D) generation params for highground_core::generate — height, wall
+// style and noise shaping all live here.
+highground::Params g_raisedParams;
 
 LandBrush& activeBrush() {
     return g_layers[g_activeLayer].brush;
@@ -273,6 +273,24 @@ void init() {
         spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
     }
 
+    // Tiled ground textures for the raised top (world-UV repeat): real grass
+    // for the Grass kind, a generated solid tile for the Flat kind.
+    const auto grassTopPath =
+        g_dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
+    if (!g_renderer.loadTopTextureFromFile(AtlasKind::Grass, grassTopPath.string())) {
+        spdlog::warn("TileShapePlayground: raised-top grass texture missing at {}", grassTopPath.string());
+    }
+    {
+        // Solid ochre 2x2 (matches the FlatAtlasGenerator fill color).
+        const std::uint8_t solid[] = {
+            210, 170, 90, 255, 210, 170, 90, 255,
+            210, 170, 90, 255, 210, 170, 90, 255,
+        };
+        if (!g_renderer.loadTopTextureFromRgba(AtlasKind::Flat, solid, 2, 2)) {
+            spdlog::error("TileShapePlayground: failed to upload solid raised-top texture");
+        }
+    }
+
     centerCamera(sapp_width(), sapp_height());
     if (g_demoNode) {
         const glm::vec2 nodePos = g_iso.nodeToField({10, 10});
@@ -318,11 +336,11 @@ void drawImGui(int w, int h) {
         ImGui::RadioButton(g_layers[i].name, &g_activeLayer, i);
     }
     if (g_layers[g_activeLayer].raised) {
-        ImGui::SliderFloat("Raised height", &g_raisedHeight, 4.0f, 96.0f, "%.0f px");
-        ImGui::Checkbox("Rock walls", &g_rockWalls);
-        if (g_rockWalls) {
-            ImGui::SliderFloat("Rock amplitude", &g_rockParams.amplitude, 0.0f, 0.6f, "%.2f");
-            ImGui::SliderFloat("Corner bevel", &g_rockParams.cornerBevel, 0.0f, 0.45f, "%.2f");
+        ImGui::SliderFloat("Raised height", &g_raisedParams.height, 4.0f, 128.0f, "%.0f px");
+        ImGui::Checkbox("Rock walls", &g_raisedParams.rockWalls);
+        if (g_raisedParams.rockWalls) {
+            ImGui::SliderFloat("Rock amplitude", &g_raisedParams.amplitude, 0.0f, 0.6f, "%.2f");
+            ImGui::SliderFloat("Corner bevel", &g_raisedParams.bevel, 0.0f, 0.45f, "%.2f");
         }
     }
     ImGui::Separator();
@@ -406,9 +424,8 @@ void frame() {
         h,
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
-        g_raisedHeight,
         g_layers[g_activeLayer].raised,
-        g_rockWalls ? &g_rockParams : nullptr);
+        &g_raisedParams);
 
     if (g_state.imgui_ok) {
         simgui_render();

@@ -1,5 +1,4 @@
 find_package(imgui CONFIG REQUIRED)
-find_package(FastNoise2 CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
@@ -9,7 +8,7 @@ nw_add_console_app(
         imgui::imgui
         topology_core
         landscape_core
-        FastNoise2::FastNoise
+        highground_core
 )
 
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")

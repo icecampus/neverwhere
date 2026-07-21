@@ -6,9 +6,6 @@
 
 #include <spdlog/spdlog.h>
 
-#include "RaisedGeometry.h"
-#include "RockWalls.h"
-
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -290,6 +287,15 @@ void AtlasRenderer::init() {
     smp.label = "tileshape-atlas-smp";
     m_sampler = sg_make_sampler(&smp);
 
+    // Tiled ground texture of the raised top: world-UVs outside [0,1].
+    sg_sampler_desc topSmp = {};
+    topSmp.min_filter = SG_FILTER_LINEAR;
+    topSmp.mag_filter = SG_FILTER_LINEAR;
+    topSmp.wrap_u = SG_WRAP_REPEAT;
+    topSmp.wrap_v = SG_WRAP_REPEAT;
+    topSmp.label = "tileshape-top-smp";
+    m_topSampler = sg_make_sampler(&topSmp);
+
     m_ready = true;
 }
 
@@ -307,8 +313,14 @@ void AtlasRenderer::shutdown() {
         sg_destroy_sampler(m_sampler);
         m_sampler = {};
     }
+    if (m_topSampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(m_topSampler);
+        m_topSampler = {};
+    }
     destroySlot(m_slots[0]);
     destroySlot(m_slots[1]);
+    destroySlot(m_topSlots[0]);
+    destroySlot(m_topSlots[1]);
     m_ready = false;
 }
 
@@ -408,6 +420,36 @@ bool AtlasRenderer::loadAtlasFromRgba(
     return ok;
 }
 
+bool AtlasRenderer::loadTopTextureFromFile(AtlasKind kind, const std::string& path) {
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+    if (!pixels || w <= 0 || h <= 0) {
+        spdlog::error("AtlasRenderer: failed to load top texture '{}': {}", path, stbi_failure_reason());
+        if (pixels) {
+            stbi_image_free(pixels);
+        }
+        return false;
+    }
+
+    const bool ok = uploadSlot(m_topSlots[static_cast<int>(kind)], pixels, w, h, "raised-top-tex");
+    stbi_image_free(pixels);
+    if (ok) {
+        spdlog::info("AtlasRenderer: loaded raised-top texture {} into slot {} ({}x{})",
+            path,
+            static_cast<int>(kind),
+            w,
+            h);
+    }
+    return ok;
+}
+
+bool AtlasRenderer::loadTopTextureFromRgba(AtlasKind kind, const std::uint8_t* rgba, int width, int height) {
+    if (!rgba || width <= 0 || height <= 0) {
+        return false;
+    }
+    return uploadSlot(m_topSlots[static_cast<int>(kind)], rgba, width, height, "raised-top-rgba");
+}
+
 glm::vec4 AtlasRenderer::atlasUvRect(int tileIndex) const {
     if (tileIndex < 0) {
         return {};
@@ -423,7 +465,7 @@ glm::vec4 AtlasRenderer::atlasUvRect(int tileIndex) const {
 
 void AtlasRenderer::appendTileQuad(
     std::vector<TexVertex>& out,
-    const DiamondIso& iso,
+    const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
     int tileIndex,
     float yOffset) {
@@ -457,7 +499,7 @@ void AtlasRenderer::appendTileQuad(
 
 void AtlasRenderer::appendDiamondOutline(
     std::vector<ColorVertex>& out,
-    const DiamondIso& iso,
+    const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
     glm::vec4 color) {
 
@@ -472,7 +514,7 @@ void AtlasRenderer::appendDiamondOutline(
 
 void AtlasRenderer::appendNodeMarker(
     std::vector<ColorVertex>& out,
-    const DiamondIso& iso,
+    const topology_core::DiamondIsometry& iso,
     glm::ivec2 node,
     glm::vec4 color,
     float yOffset) {
@@ -491,50 +533,17 @@ void AtlasRenderer::appendNodeMarker(
     }
 }
 
-void AtlasRenderer::appendWallTriangles(
-    std::vector<ColorVertex>& out,
-    const DiamondIso& iso,
-    glm::ivec2 cell,
-    const std::array<bool, 4>& mask,
-    float height) {
-
-    // Vertical cliff under each contour segment: top edge follows the land
-    // contour lifted by `height`, bottom edge is the same segment at ground.
-    // Two brightness levels by grid axis fake iso lighting; bottom is darker.
-    const auto segments = cellContourSegments(iso, cell, mask);
-    for (const ContourSegment& seg : segments) {
-        const glm::vec3 base = (seg.axis == 0)
-            ? glm::vec3(0.62f, 0.45f, 0.22f)
-            : glm::vec3(0.45f, 0.32f, 0.16f);
-        const glm::vec4 top{base, 1.0f};
-        const glm::vec4 bottom{base * 0.7f, 1.0f};
-
-        const ColorVertex t0{seg.edgeMid.x, seg.edgeMid.y - height, top.r, top.g, top.b, top.a};
-        const ColorVertex t1{seg.center.x, seg.center.y - height, top.r, top.g, top.b, top.a};
-        const ColorVertex b0{seg.edgeMid.x, seg.edgeMid.y, bottom.r, bottom.g, bottom.b, bottom.a};
-        const ColorVertex b1{seg.center.x, seg.center.y, bottom.r, bottom.g, bottom.b, bottom.a};
-
-        out.push_back(t0);
-        out.push_back(b0);
-        out.push_back(b1);
-        out.push_back(t0);
-        out.push_back(b1);
-        out.push_back(t1);
-    }
-}
-
 void AtlasRenderer::render(
     const PaintLayerView* layers,
     int layerCount,
-    const DiamondIso& iso,
+    const topology_core::DiamondIsometry& iso,
     const topology_core::Camera2D& camera,
     int viewW,
     int viewH,
     glm::ivec2 hoverNode,
     bool hasHover,
-    float raisedHeight,
     bool hoverRaised,
-    const RockWallParams* rockWalls) {
+    const highground::Params* raisedParams) {
 
     if (!m_ready || m_texPip.id == SG_INVALID_ID || !layers || layerCount <= 0 || !layers[0].brush) {
         return;
@@ -554,16 +563,14 @@ void AtlasRenderer::render(
         return a.first < b.first;
     });
 
-    // Every palette layer paints into the shared buffers; textured ranges are
-    // drawn with the layer's own atlas. Raised tops reuse the same atlas quads
-    // with a -height offset, so their contour matches the flat tiles exactly.
+    // Flat palette layers paint into the shared textured buffer; each range
+    // is drawn with the layer's own atlas.
     struct TexRange {
         int base = 0;
         int count = 0;
         AtlasKind atlas = AtlasKind::Grass;
     };
     std::vector<TexRange> flatRanges;
-    std::vector<TexRange> topRanges;
     std::vector<TexVertex> texVerts;
     texVerts.reserve(static_cast<std::size_t>(mapW * mapH * 6 * layerCount));
 
@@ -595,44 +602,64 @@ void AtlasRenderer::render(
         }
     }
 
+    // Raised layers: geometry from highground_core (walls + top surface from
+    // the vertex-node grid). Primitives arrive depth-sorted (walls and tops
+    // interleaved) and are emitted as batches that switch pipeline/texture
+    // only on change. The top surface is textured with the tiled ground
+    // texture matching the layer's atlas kind.
+    struct RaisedBatch {
+        bool wall = false;
+        int base = 0;
+        int count = 0;
+        AtlasKind atlas = AtlasKind::Grass;
+    };
+    std::vector<RaisedBatch> raisedBatches;
+
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
         if (!layer.brush || !layer.raised) {
             continue;
         }
-        if (rockWalls) {
-            // Production-style rock cliffs: global contour chains with bevels,
-            // noise-displaced terraces and baked colors.
-            RockWallBuild wb = buildRockWalls(*layer.brush, raisedHeight, *rockWalls);
-            wallVerts.insert(wallVerts.end(), wb.verts.begin(), wb.verts.end());
-        } else {
-            for (const auto& [z, cell] : drawOrder) {
-                (void)z;
-                const auto type = layer.brush->cellTypeAt(cell);
-                if (!landscape_core::tileTypeHasSurface(type)) {
-                    continue;
-                }
-                appendWallTriangles(wallVerts, iso, cell, layer.brush->nodeMaskAt(cell), raisedHeight);
-            }
-        }
 
-        TexRange range;
-        range.base = static_cast<int>(texVerts.size());
-        range.atlas = layer.atlas;
+        std::vector<glm::ivec2> onNodes;
         for (const auto& [z, cell] : drawOrder) {
             (void)z;
-            const auto type = layer.brush->cellTypeAt(cell);
-            if (!landscape_core::tileTypeHasSurface(type)) {
-                continue;
-            }
-            const int idx = LandBrush::atlasIndexByType(type);
-            if (idx >= 0) {
-                appendTileQuad(texVerts, iso, cell, idx, -raisedHeight);
+            const auto mask = layer.brush->nodeMaskAt(cell);
+            const auto corners = topology_core::DiamondIsometry::cellCornerNodes(cell);
+            for (int i = 0; i < 4; ++i) {
+                if (mask[i]) {
+                    onNodes.push_back(corners[i]);
+                }
             }
         }
-        range.count = static_cast<int>(texVerts.size()) - range.base;
-        if (range.count > 0) {
-            topRanges.push_back(range);
+        if (onNodes.empty()) {
+            continue;
+        }
+
+        const highground::Params gp = raisedParams ? *raisedParams : highground::Params{};
+        const highground::Mesh mesh = highground::generate(
+            highground::makeGrid(onNodes.data(), onNodes.size()), gp);
+
+        for (const highground::Primitive& prim : mesh.primitives) {
+            if (prim.material == highground::Material::Wall) {
+                if (raisedBatches.empty() || !raisedBatches.back().wall) {
+                    raisedBatches.push_back({true, static_cast<int>(wallVerts.size()), 0, layer.atlas});
+                }
+                for (std::uint32_t k = 0; k < prim.count; ++k) {
+                    const highground::Vertex& v = mesh.vertices[prim.first + k];
+                    wallVerts.push_back({v.pos.x, v.pos.y, v.color.r, v.color.g, v.color.b, v.color.a});
+                }
+                raisedBatches.back().count += static_cast<int>(prim.count);
+            } else {
+                if (raisedBatches.empty() || raisedBatches.back().wall || raisedBatches.back().atlas != layer.atlas) {
+                    raisedBatches.push_back({false, static_cast<int>(texVerts.size()), 0, layer.atlas});
+                }
+                for (std::uint32_t k = 0; k < prim.count; ++k) {
+                    const highground::Vertex& v = mesh.vertices[prim.first + k];
+                    texVerts.push_back({v.pos.x, v.pos.y, v.uv.x, v.uv.y});
+                }
+                raisedBatches.back().count += static_cast<int>(prim.count);
+            }
         }
     }
 
@@ -647,12 +674,13 @@ void AtlasRenderer::render(
     }
 
     if (hasHover) {
+        const float hoverLift = raisedParams ? raisedParams->height : 32.0f;
         appendNodeMarker(
             lineVerts,
             iso,
             hoverNode,
             {1.0f, 0.25f, 0.2f, 1.0f},
-            hoverRaised ? -raisedHeight : 0.0f);
+            hoverRaised ? -hoverLift : 0.0f);
     }
 
     VsParams vsParams{};
@@ -666,8 +694,9 @@ void AtlasRenderer::render(
         sg_update_buffer(m_texVbuf, sg_range{texVerts.data(), texVerts.size() * sizeof(TexVertex)});
     }
 
-    // Painter order: flat ground layers, then cliff walls, then raised tops.
-    const auto drawTexRange = [&](const TexRange& range) {
+    // Painter order: flat ground layers, then the depth-sorted raised batches
+    // (walls and tops interleaved by the generator), then the grid lines.
+    const auto drawAtlasRange = [&](const TexRange& range) {
         const AtlasSlot& slot = m_slots[static_cast<int>(range.atlas)];
         if (slot.view.id == SG_INVALID_ID) {
             return;
@@ -682,9 +711,24 @@ void AtlasRenderer::render(
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
         sg_draw(range.base, range.count, 1);
     };
+    const auto drawTopRange = [&](const RaisedBatch& batch) {
+        const AtlasSlot& slot = m_topSlots[static_cast<int>(batch.atlas)];
+        if (slot.view.id == SG_INVALID_ID) {
+            return;
+        }
+        sg_bindings bind{};
+        bind.vertex_buffers[0] = m_texVbuf;
+        bind.views[0] = slot.view;
+        bind.samplers[0] = m_topSampler;
+
+        sg_apply_pipeline(m_texPip);
+        sg_apply_bindings(&bind);
+        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+        sg_draw(batch.base, batch.count, 1);
+    };
 
     for (const TexRange& range : flatRanges) {
-        drawTexRange(range);
+        drawAtlasRange(range);
     }
 
     std::vector<ColorVertex> colorVerts;
@@ -695,18 +739,18 @@ void AtlasRenderer::render(
         sg_update_buffer(m_colorVbuf, sg_range{colorVerts.data(), colorVerts.size() * sizeof(ColorVertex)});
     }
 
-    if (!wallVerts.empty()) {
-        sg_bindings bind{};
-        bind.vertex_buffers[0] = m_colorVbuf;
+    for (const RaisedBatch& batch : raisedBatches) {
+        if (batch.wall) {
+            sg_bindings bind{};
+            bind.vertex_buffers[0] = m_colorVbuf;
 
-        sg_apply_pipeline(m_wallPip);
-        sg_apply_bindings(&bind);
-        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-        sg_draw(0, static_cast<int>(wallVerts.size()), 1);
-    }
-
-    for (const TexRange& range : topRanges) {
-        drawTexRange(range);
+            sg_apply_pipeline(m_wallPip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+            sg_draw(batch.base, batch.count, 1);
+        } else {
+            drawTopRange(batch);
+        }
     }
 
     if (!lineVerts.empty()) {

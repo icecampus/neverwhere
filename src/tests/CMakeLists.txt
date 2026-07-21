@@ -20,6 +20,8 @@ target_link_libraries(neverwhere_tests PRIVATE
     base_data
     landscape_core
     landscape_mesh
+    highground_core
+    topology_core
     utils
     Qt6::Core
     Qt6::Quick

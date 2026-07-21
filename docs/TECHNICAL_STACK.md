@@ -209,14 +209,21 @@ FBO редактора — NONE).
 математики, включая vertex-ноды `cellCornerNodes`/`nodeNeighbourCells`);
 `StaggeredIsometry` остаётся только для playground'ов.
 
-**Поднятая 3D-земля (порт TileShapePlayground) `[есть]`:** ассеты `shape3d`
+**Поднятая 3D-земля `[есть]`:** генерация геометрии живёт в отдельной no-Qt/no-GPU
+библиотеке **`highground_core`** (`src/libs/highground_core`, чистый конвейер
+`Grid нод + Params -> generate() -> Mesh` с примитивами `Top`/`Wall`,
+depth-отсортированными; контракт — `include/highground_core/highground.h`,
+инспекция — `inspect.h`). Общая для редактора/клиента (`render_core` — только
+GPU и материалы) и TileShapePlayground (отладка алгоритма без редактора).
+Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
 `raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —
 тайлящаяся текстура верха) рисуются инструментом
 `Shape3dPencil` (наследник `LandscapePencil`) на отдельном слое `RaisedLandscape`
 — своя vertex-сетка нод, независимая от плоского `BaseLandscape`. Данные — те же
-`Landscape`-объекты (tileIndex); «3D» — презентация в `LandscapeRenderer`:
-стены (простые запечённые или RockWalls на FastNoise2) + верх со сдвигом
+`Landscape`-объекты (tileIndex); реконструкция нод из tileIndex — конвенция
+атласов на стороне render_core, либа о ней не знает.
+Геометрия: стены (простые запечённые или RockWalls на FastNoise2) + верх со сдвигом
 `-raisedHeight`, без depth-buffer — стены и верх рисуются **общей
 depth-сортировкой примитивов** по ground-y (iso painter's algorithm; на равных
 глубинах стены раньше верха), иначе рукав формы, стоящий перед стенами другого

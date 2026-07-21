@@ -6,11 +6,43 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
-#include "DiamondIso.h"
+#include <highground_core/highground.h>
+#include <highground_core/inspect.h>
+#include <topology_core/diamond_isometry.h>
+
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
-#include "RaisedGeometry.h"
-#include "RockWalls.h"
+
+namespace {
+
+// Collect the "on" nodes of a brush into a highground grid.
+highground::Grid brushGrid(const LandBrush& brush) {
+    std::vector<glm::ivec2> onNodes;
+    for (int y = 0; y < brush.height(); ++y) {
+        for (int x = 0; x < brush.width(); ++x) {
+            const auto mask = brush.nodeMaskAt({x, y});
+            const auto corners = topology_core::DiamondIsometry::cellCornerNodes({x, y});
+            for (int i = 0; i < 4; ++i) {
+                if (mask[i]) {
+                    onNodes.push_back(corners[i]);
+                }
+            }
+        }
+    }
+    return highground::makeGrid(onNodes.data(), onNodes.size());
+}
+
+std::size_t primCount(const highground::Mesh& mesh, highground::Material material) {
+    std::size_t n = 0;
+    for (const highground::Primitive& prim : mesh.primitives) {
+        if (prim.material == material) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+} // namespace
 
 bool runTileShapeSmokeTest() {
     LandBrush brush;
@@ -107,15 +139,16 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
-    // --- Raised (3D) contour geometry: axis-parallel segments meeting at the
-    // cell center ("corner built from edge-parallel lines", not a diagonal).
-    DiamondIso iso;
+    // --- Raised (3D) contour geometry (highground_core): axis-parallel
+    // segments meeting at the cell center ("corner built from edge-parallel
+    // lines", not a diagonal).
+    topology_core::DiamondIsometry iso;
     const glm::ivec2 cell{2, 2};
     const glm::vec2 center = iso.mapToField(cell);
     const auto near2 = [](const glm::vec2& a, const glm::vec2& b) {
         return std::abs(a.x - b.x) < 1e-3f && std::abs(a.y - b.y) < 1e-3f;
     };
-    const auto axisParallelOk = [](const ContourSegment& seg) {
+    const auto axisParallelOk = [](const highground::ContourSegment& seg) {
         const glm::vec2 dir = seg.center - seg.edgeMid;
         const glm::vec2 axisDir = (seg.axis == 0) ? glm::vec2(64.0f, 32.0f) : glm::vec2(-64.0f, 32.0f);
         const float cross = dir.x * axisDir.y - dir.y * axisDir.x;
@@ -123,23 +156,24 @@ bool runTileShapeSmokeTest() {
     };
 
     using T = landscape_core::LandscapeTileType;
-    const auto fullSegs = cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::Full));
+    const auto fullSegs = highground::cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::Full));
     if (!fullSegs.empty()) {
         spdlog::error("TEST FAIL TileShape: Full cell must have no contour segments");
         return false;
     }
-    const auto emptySegs = cellContourSegments(iso, cell, {false, false, false, false});
+    const auto emptySegs = highground::cellContourSegments(iso, cell, {false, false, false, false});
     if (!emptySegs.empty()) {
         spdlog::error("TEST FAIL TileShape: empty cell must have no contour segments");
         return false;
     }
 
-    const auto cornerSegs = cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::LeftCorner));
+    const auto cornerSegs =
+        highground::cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::LeftCorner));
     if (cornerSegs.size() != 2) {
         spdlog::error("TEST FAIL TileShape: LeftCorner must have 2 contour segments, got {}", cornerSegs.size());
         return false;
     }
-    for (const ContourSegment& seg : cornerSegs) {
+    for (const highground::ContourSegment& seg : cornerSegs) {
         if (!near2(seg.center, center)) {
             spdlog::error("TEST FAIL TileShape: contour segment does not end at cell center");
             return false;
@@ -154,13 +188,16 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
-    const auto lineSegs = cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::RightUpLine));
+    const auto lineSegs =
+        highground::cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::RightUpLine));
     if (lineSegs.size() != 2) {
         spdlog::error("TEST FAIL TileShape: RightUpLine must have 2 contour segments, got {}", lineSegs.size());
         return false;
     }
-    const auto saddleSegs =
-        cellContourSegments(iso, cell, landscape_core::tileTypeToNodeMask(T::LeftRightCorners));
+    const auto saddleSegs = highground::cellContourSegments(
+        iso,
+        cell,
+        landscape_core::tileTypeToNodeMask(T::LeftRightCorners));
     if (saddleSegs.size() != 4) {
         spdlog::error(
             "TEST FAIL TileShape: LeftRightCorners must have 4 contour segments, got {}",
@@ -179,89 +216,53 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
-    // --- Rock walls: boundary chains ---
+    // --- highground_core::generate: content, determinism, sort order ---
     {
         LandBrush b;
         b.reset(8, 8);
         b.setNode({4, 4}, true);
-        const auto chains = analyzeRockBoundaries(b);
-        // The tuft boundary is the 1x1 square around the node: 8 segments
-        // (2 per adjacent cell), 4 convex corners at cell centers; chain
-        // passes straight (180 deg) through edge midpoints.
-        if (chains.size() != 1 || !chains[0].closed || chains[0].segments != 8 ||
-            chains[0].convexCorners != 4 || chains[0].concaveCorners != 0) {
-            spdlog::error(
-                "TEST FAIL TileShape: single node chain (n={}, closed={}, segs={}, convex={}, concave={})",
-                chains.size(),
-                chains.empty() ? -1 : (int)chains[0].closed,
-                chains.empty() ? -1 : chains[0].segments,
-                chains.empty() ? -1 : chains[0].convexCorners,
-                chains.empty() ? -1 : chains[0].concaveCorners);
+        const highground::Params params;
+        const highground::Mesh m1 = highground::generate(brushGrid(b), params);
+        const highground::Mesh m2 = highground::generate(brushGrid(b), params);
+        if (m1.vertices.empty() || primCount(m1, highground::Material::Wall) == 0 ||
+            primCount(m1, highground::Material::Top) == 0) {
+            spdlog::error("TEST FAIL TileShape: single node mesh is empty or incomplete");
             return false;
         }
-    }
-    {
-        LandBrush b;
-        b.reset(8, 8);
-        for (int y = 3; y <= 4; ++y) {
-            for (int x = 3; x <= 4; ++x) {
-                b.setNode({x, y}, true);
+        if (m1.vertices.size() != m2.vertices.size() || m1.primitives.size() != m2.primitives.size() ||
+            std::memcmp(
+                m1.vertices.data(),
+                m2.vertices.data(),
+                m1.vertices.size() * sizeof(highground::Vertex)) != 0) {
+            spdlog::error("TEST FAIL TileShape: highground generation is not deterministic");
+            return false;
+        }
+        for (std::size_t i = 1; i < m1.primitives.size(); ++i) {
+            if (m1.primitives[i].depth < m1.primitives[i - 1].depth) {
+                spdlog::error("TEST FAIL TileShape: primitives are not sorted back-to-front");
+                return false;
             }
         }
-        const auto chains = analyzeRockBoundaries(b);
-        if (chains.size() != 1 || !chains[0].closed || chains[0].convexCorners != 4 ||
-            chains[0].concaveCorners != 0) {
-            spdlog::error(
-                "TEST FAIL TileShape: 2x2 block chain (n={}, closed={}, convex={}, concave={})",
-                chains.size(),
-                chains.empty() ? -1 : (int)chains[0].closed,
-                chains.empty() ? -1 : chains[0].convexCorners,
-                chains.empty() ? -1 : chains[0].concaveCorners);
-            return false;
-        }
     }
     {
+        // Diagonal saddle + a diagonal-neck bridge: contour loops and the top
+        // triangulation must hold (regression for the "square lids" bug).
         LandBrush b;
-        b.reset(8, 8);
+        b.reset(12, 12);
         b.setNode({3, 4}, true);
-        b.setNode({4, 3}, true); // diagonal saddle at cell (3,3)
-        const auto chains = analyzeRockBoundaries(b);
-        int joins = 0;
-        for (const RockChainInfo& c : chains) {
-            joins += c.diagonalJoins;
-        }
-        if (joins < 1) {
-            spdlog::error("TEST FAIL TileShape: saddle diagonal join not found");
-            return false;
-        }
-    }
-    {
-        LandBrush b;
-        b.reset(8, 8);
-        b.setNode({4, 4}, true);
-        const RockWallParams params;
-        const RockWallBuild w1 = buildRockWalls(b, 32.0f, params);
-        const RockWallBuild w2 = buildRockWalls(b, 32.0f, params);
-        if (w1.verts.empty() || w1.quadCount == 0) {
-            spdlog::error("TEST FAIL TileShape: rock walls are empty");
-            return false;
-        }
-        if (w1.verts.size() != w2.verts.size() ||
-            std::memcmp(w1.verts.data(), w2.verts.data(), w1.verts.size() * sizeof(ColorVertex)) != 0) {
-            spdlog::error("TEST FAIL TileShape: rock walls are not deterministic");
-            return false;
-        }
-        if (!(w1.maxAbsOffset > 0.0f && w1.maxAbsOffset <= params.amplitude + 1e-4f)) {
-            spdlog::error("TEST FAIL TileShape: displacement clamp ({})", w1.maxAbsOffset);
-            return false;
-        }
-        if (std::abs(rockWallOffset(params, 4.5f, 4.0f, 1.0f)) > 1e-6f ||
-            std::abs(rockWallOffset(params, 4.5f, 4.0f, 0.0f)) > 1e-6f) {
-            spdlog::error("TEST FAIL TileShape: seam envelope is not zero at edges");
+        b.setNode({4, 3}, true);
+        b.setNode({7, 7}, true);
+        b.setNode({8, 7}, true);
+        b.setNode({7, 8}, true);
+        b.setNode({8, 8}, true);
+        b.setNode({9, 9}, true);
+        const highground::Mesh m = highground::generate(brushGrid(b), highground::Params{});
+        if (m.vertices.empty() || primCount(m, highground::Material::Top) == 0) {
+            spdlog::error("TEST FAIL TileShape: saddle/bridge shapes produce no geometry");
             return false;
         }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + raised contour + rock walls");
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + highground_core generation");
     return true;
 }

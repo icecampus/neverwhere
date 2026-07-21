@@ -21,9 +21,11 @@
 
 #include <sokol_gfx.h>
 
-#include "DiamondIso.h"
-#include "LandBrush.h"
+#include <highground_core/highground.h>
 #include <topology_core/camera2d.h>
+#include <topology_core/diamond_isometry.h>
+
+#include "LandBrush.h"
 
 enum class AtlasKind : int {
     Grass = 0,
@@ -34,8 +36,6 @@ struct ColorVertex {
     float x, y;
     float r, g, b, a;
 };
-
-struct RockWallParams;
 
 // One paint layer on the shared canvas: its own node grid, a top texture and
 // either flat (2D) or raised (3D, extruded with cliff walls) presentation.
@@ -66,18 +66,22 @@ public:
         int cols = 4,
         int rows = 6);
 
+    // Tiled ground texture for the raised top (world-UV, repeat) — one per
+    // AtlasKind so a raised layer picks the variant matching its atlas kind.
+    bool loadTopTextureFromFile(AtlasKind kind, const std::string& path);
+    bool loadTopTextureFromRgba(AtlasKind kind, const std::uint8_t* rgba, int width, int height);
+
     void render(
         const PaintLayerView* layers,
         int layerCount,
-        const DiamondIso& iso,
+        const topology_core::DiamondIsometry& iso,
         const topology_core::Camera2D& camera,
         int viewW,
         int viewH,
         glm::ivec2 hoverNode,
         bool hasHover,
-        float raisedHeight,
         bool hoverRaised,
-        const RockWallParams* rockWalls = nullptr);
+        const highground::Params* raisedParams);
 
 private:
     struct AtlasSlot {
@@ -102,20 +106,18 @@ private:
     glm::vec4 atlasUvRect(int tileIndex) const;
     void appendTileQuad(
         std::vector<TexVertex>& out,
-        const DiamondIso& iso,
+        const topology_core::DiamondIsometry& iso,
         glm::ivec2 cell,
         int tileIndex,
         float yOffset = 0.0f);
-    void appendWallTriangles(
+    void appendDiamondOutline(
         std::vector<ColorVertex>& out,
-        const DiamondIso& iso,
+        const topology_core::DiamondIsometry& iso,
         glm::ivec2 cell,
-        const std::array<bool, 4>& mask,
-        float height);
-    void appendDiamondOutline(std::vector<ColorVertex>& out, const DiamondIso& iso, glm::ivec2 cell, glm::vec4 color);
+        glm::vec4 color);
     void appendNodeMarker(
         std::vector<ColorVertex>& out,
-        const DiamondIso& iso,
+        const topology_core::DiamondIsometry& iso,
         glm::ivec2 node,
         glm::vec4 color,
         float yOffset = 0.0f);
@@ -128,8 +130,10 @@ private:
     sg_buffer m_texVbuf{};
     sg_buffer m_colorVbuf{};
     sg_sampler m_sampler{};
+    sg_sampler m_topSampler{};
 
     AtlasSlot m_slots[2]{};
+    AtlasSlot m_topSlots[2]{};
 
     int m_atlasCols = 4;
     int m_atlasRows = 6;

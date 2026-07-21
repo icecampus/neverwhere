@@ -7,9 +7,9 @@
 
 #include "topology_core/diamond_isometry.h"
 
-namespace render_core {
+namespace highground {
 
-// Contour of the raised land inside one cell (TileShapePlayground port).
+// Contour of the raised land inside one cell.
 //
 // Built with the "axis-parallel corner" rule (same as the flat tiles): for
 // each diamond edge with exactly one endpoint node "on", the contour goes from
@@ -26,6 +26,17 @@ struct ContourSegment {
 // Down] — the slot order of DiamondIsometry::cellCornerNodes.
 std::vector<ContourSegment> cellContourSegments(
     const topology_core::DiamondIsometry& iso,
+    const glm::ivec2& cell,
+    const std::array<bool, 4>& mask);
+
+// One contour segment in map space (cell = 1 unit) with its outward normal —
+// same contour rule as above, plus normals for displacement.
+struct RockContourSegment {
+    glm::vec2 a{}, b{};
+    glm::vec2 outward{}; // unit outward normal (axial), map space
+};
+
+std::vector<RockContourSegment> cellRockContourSegments(
     const glm::ivec2& cell,
     const std::array<bool, 4>& mask);
 
@@ -50,4 +61,4 @@ std::vector<glm::vec2> mergeHoleIntoOuter(
     const std::vector<glm::vec2>& outer,
     const std::vector<glm::vec2>& hole);
 
-} // namespace render_core
+} // namespace highground
