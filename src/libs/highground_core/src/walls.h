@@ -13,12 +13,10 @@
 namespace highground {
 
 // Result of the wall construction: baked wall triangles (final field space,
-// height applied) with one iso depth key per quad (6 vertices), plus the
-// wall-top boundary loops (field space, NOT lifted) for the top surface.
+// height applied) with one iso depth key per quad (6 vertices).
 struct WallBuild {
-    std::vector<Vertex> verts;                    // triangles
-    std::vector<float> depths;                    // one per 6 verts (quad)
-    std::vector<std::vector<glm::vec2>> topChains; // simple loops, unlifted
+    std::vector<Vertex> verts;   // triangles
+    std::vector<float> depths;   // one per 6 verts (quad)
 };
 
 // Rock cliff walls: production wall rules (block-cliff) on the tile contour

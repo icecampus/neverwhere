@@ -8,11 +8,11 @@
 namespace highground {
 namespace {
 
-// Per-cell raised top as mask-shaped triangles (used for non-rock walls and
-// as the fallback when contour triangulation does not apply): full quadrant
-// for an edge with both nodes on, half-quadrant at the on corner of a
-// transition edge — the same "axis-parallel corner" contour rule as the
-// walls, so the top matches the wall contour.
+// Per-cell raised top as mask-shaped triangles: full quadrant for an edge
+// with both nodes on, half-quadrant at the on corner of a transition edge —
+// the same "axis-parallel corner" contour rule as the walls, so the top
+// matches the wall contour. Single-corner cells get their convex corner at
+// the cell center chamfered exactly like the wall bevel.
 void appendPerCellTop(
     std::vector<Vertex>& verts,
     std::vector<float>& depths,
@@ -39,6 +39,25 @@ void appendPerCellTop(
         depths.push_back(std::max({a.y, b.y, c.y}));
     };
 
+    const int onCount = (mask[0] ? 1 : 0) + (mask[1] ? 1 : 0) + (mask[2] ? 1 : 0) + (mask[3] ? 1 : 0);
+    if (onCount == 1) {
+        // Single-corner wedge (the cell's only on-node at slot k): pentagon
+        // midA -> corner -> midB -> pB -> pA with the center corner chamfered
+        // exactly like the wall bevel (trim = min(bevel, len*0.45) along the
+        // mid->center segments, len = 0.5 cell) — no "lid" overhang.
+        const int k = mask[0] ? 0 : (mask[1] ? 1 : (mask[2] ? 2 : 3));
+        const glm::vec2& corner = corners[k];
+        const glm::vec2 midA = (corner + corners[(k + 3) % 4]) * 0.5f;
+        const glm::vec2 midB = (corner + corners[(k + 1) % 4]) * 0.5f;
+        const float f = std::min(2.0f * params.bevel, 0.45f);
+        const glm::vec2 pA = center + (midA - center) * f;
+        const glm::vec2 pB = center + (midB - center) * f;
+        emit(midA, corner, midB);
+        emit(midA, midB, pB);
+        emit(midA, pB, pA);
+        return;
+    }
+
     // Diamond edges as index pairs into the [Left, Up, Right, Down] mask —
     // same table as cellContourSegments, so the top matches the wall contour.
     static constexpr int kEdges[4][2] = {
@@ -59,88 +78,6 @@ void appendPerCellTop(
             emit(center, (corners[a] + corners[b]) * 0.5f, corners[b]); // half at corner b
         }
     }
-}
-
-// Contour-formed top: triangulate the wall-top boundary loops (outers with
-// holes bridged into them). Returns false when the construction does not
-// apply (the caller then falls back to per-cell tops).
-bool appendContourTop(
-    std::vector<Vertex>& verts,
-    std::vector<float>& depths,
-    const std::vector<std::vector<glm::vec2>>& chains,
-    const Params& params) {
-
-    if (chains.empty()) {
-        return false;
-    }
-
-    // All chains of one landmass are walked with land on the left, so outer
-    // chains share the winding of the largest-area chain; an opposite winding
-    // means a hole.
-    float refArea = 0.0f;
-    for (const auto& poly : chains) {
-        const float area = polygonSignedArea(poly);
-        if (std::abs(area) > std::abs(refArea)) {
-            refArea = area;
-        }
-    }
-    std::vector<const std::vector<glm::vec2>*> outers;
-    std::vector<const std::vector<glm::vec2>*> holes;
-    for (const auto& poly : chains) {
-        if (polygonSignedArea(poly) * refArea > 0.0f) {
-            outers.push_back(&poly);
-        } else {
-            holes.push_back(&poly);
-        }
-    }
-
-    std::vector<std::vector<glm::vec2>> mergedPolys;
-    mergedPolys.reserve(outers.size());
-    std::vector<char> paired(holes.size(), 0);
-    for (const auto* outer : outers) {
-        std::vector<glm::vec2> merged = *outer;
-        for (std::size_t h = 0; h < holes.size(); ++h) {
-            if (pointInPolygon(*outer, holes[h]->front())) {
-                merged = mergeHoleIntoOuter(merged, *holes[h]);
-                if (merged.empty()) {
-                    return false;
-                }
-                paired[h] = 1;
-            }
-        }
-        mergedPolys.push_back(std::move(merged));
-    }
-    // Every hole must land inside some outer chain.
-    for (const char p : paired) {
-        if (!p) {
-            return false;
-        }
-    }
-
-    const float lift = params.height;
-    for (const auto& poly : mergedPolys) {
-        std::vector<glm::vec2> tris = triangulateSimplePolygon(poly);
-        if (tris.empty()) {
-            return false;
-        }
-        for (std::size_t v = 0; v + 2 < tris.size(); v += 3) {
-            const glm::vec2& a = tris[v];
-            const glm::vec2& b = tris[v + 1];
-            const glm::vec2& c = tris[v + 2];
-            const auto emit = [&](const glm::vec2& p) {
-                Vertex out;
-                out.pos = {p.x, p.y - lift};
-                out.uv = {p.x * params.topUvPerWorldPx, p.y * params.topUvPerWorldPx};
-                out.color = params.topTint;
-                return out;
-            };
-            verts.push_back(emit(a));
-            verts.push_back(emit(b));
-            verts.push_back(emit(c));
-            depths.push_back(std::max({a.y, b.y, c.y}));
-        }
-    }
-    return true;
 }
 
 } // namespace
@@ -205,7 +142,6 @@ Mesh generate(const Grid& grid, const Params& params) {
     // Walls.
     std::vector<Vertex> wallVerts;
     std::vector<float> wallDepths;
-    std::vector<std::vector<glm::vec2>> topChains;
     if (params.rockWalls) {
         std::vector<RockContourSegment> segments;
         segments.reserve(cells.size() * 2);
@@ -216,20 +152,18 @@ Mesh generate(const Grid& grid, const Params& params) {
         WallBuild build = buildRockWalls(segments, params, iso);
         wallVerts = std::move(build.verts);
         wallDepths = std::move(build.depths);
-        topChains = std::move(build.topChains);
     } else {
         for (std::size_t i = 0; i < cells.size(); ++i) {
             appendFlatWalls(wallVerts, wallDepths, iso, cells[i], masks[i], params.height);
         }
     }
 
-    // Tops: contour-formed from the wall-top loops, per-cell fallback.
+    // Tops: per-cell mask-shaped triangles, single-corner cells chamfered at
+    // the center to match the wall bevel.
     std::vector<Vertex> topVerts;
     std::vector<float> topDepths;
-    if (!params.rockWalls || !appendContourTop(topVerts, topDepths, topChains, params)) {
-        for (std::size_t i = 0; i < cells.size(); ++i) {
-            appendPerCellTop(topVerts, topDepths, iso, cells[i], masks[i], params);
-        }
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        appendPerCellTop(topVerts, topDepths, iso, cells[i], masks[i], params);
     }
 
     // Assemble the mesh: one vertex array, primitives referencing it.

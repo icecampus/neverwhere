@@ -116,42 +116,6 @@ TEST(HighgroundContourTest, SegmentsAreAxisParallelAndEndAtCenter)
     }
 }
 
-TEST(HighgroundTriangulationTest, SquareAndConcaveAndCollinear)
-{
-    using highground::polygonSignedArea;
-    using highground::triangulateSimplePolygon;
-
-    const std::vector<glm::vec2> square{{0, 0}, {10, 0}, {10, 10}, {0, 10}};
-    const auto sq = triangulateSimplePolygon(square);
-    ASSERT_EQ(sq.size(), 6u);
-
-    // Concave (L-shape): area of triangles == polygon area.
-    const std::vector<glm::vec2> lshape{{0, 0}, {10, 0}, {10, 5}, {5, 5}, {5, 10}, {0, 10}};
-    const auto lt = triangulateSimplePolygon(lshape);
-    ASSERT_FALSE(lt.empty());
-    double area = 0.0;
-    for (std::size_t v = 0; v + 2 < lt.size(); v += 3) {
-        area += std::abs(
-            (lt[v + 1].x - lt[v].x) * (lt[v + 2].y - lt[v].y) -
-            (lt[v + 2].x - lt[v].x) * (lt[v + 1].y - lt[v].y)) * 0.5;
-    }
-    EXPECT_NEAR(area, std::abs(polygonSignedArea(lshape)), 1e-3);
-
-    // Collinear runs (contour-style): straight strip with intermediate points.
-    // Exact coverage matters, not the triangle count (degenerate remainder
-    // slivers are dropped).
-    const std::vector<glm::vec2> strip{{0, 0}, {5, 0}, {10, 0}, {10, 4}, {5, 4}, {0, 4}};
-    const auto st = triangulateSimplePolygon(strip);
-    ASSERT_FALSE(st.empty());
-    double stripArea = 0.0;
-    for (std::size_t v = 0; v + 2 < st.size(); v += 3) {
-        stripArea += std::abs(
-            (st[v + 1].x - st[v].x) * (st[v + 2].y - st[v].y) -
-            (st[v + 2].x - st[v].x) * (st[v + 1].y - st[v].y)) * 0.5;
-    }
-    EXPECT_NEAR(stripArea, std::abs(polygonSignedArea(strip)), 1e-3);
-}
-
 TEST(HighgroundGenerateTest, EmptyAndSingleNode)
 {
     EXPECT_TRUE(highground::generate(Grid{}, Params{}).vertices.empty());
@@ -263,6 +227,35 @@ TEST(HighgroundGenerateTest, DiagonalStripeTopStaysInsideContour)
     }
     EXPECT_GT(topMinX, -120.0f) << "top leaks past the beveled contour (fallback per-cell tops?)";
     EXPECT_LT(topMaxX, 120.0f) << "top leaks past the beveled contour (fallback per-cell tops?)";
+}
+
+TEST(HighgroundGenerateTest, BootShapeBeveledTop)
+{
+    // Regression (found by the fuzz detector): stripe + a diagonal nub —
+    // the single-corner cell centers must be chamfered (not covered), while
+    // all on-nodes stay covered.
+    const Mesh mesh = highground::generate(
+        gridOf({{5, 4}, {5, 5}, {4, 6}, {5, 6}}),
+        Params{});
+    ASSERT_FALSE(mesh.vertices.empty());
+    for (const glm::ivec2& n : {glm::ivec2{5, 4}, {5, 5}, {4, 6}, {5, 6}}) {
+        EXPECT_TRUE(coveredByTop(mesh, g_iso.nodeToField(n))) << "node (" << n.x << "," << n.y << ") not covered";
+    }
+}
+
+TEST(HighgroundGenerateTest, SingleCornerCentersAreChamfered)
+{
+    // The "square lid" detector: a single on-node raises the 4 cells around
+    // it, each being a single-corner cell; their convex corners at the cell
+    // centers must be chamfered like the wall bevel — so the cell centers are
+    // NOT covered by the top.
+    const Mesh mesh = highground::generate(gridOf({{5, 5}}), Params{});
+    ASSERT_FALSE(mesh.vertices.empty());
+    EXPECT_TRUE(coveredByTop(mesh, g_iso.nodeToField({5, 5})));
+    for (const glm::ivec2& cell : {glm::ivec2{5, 5}, {4, 5}, {5, 4}, {4, 4}}) {
+        EXPECT_FALSE(coveredByTop(mesh, g_iso.mapToField(cell)))
+            << "cell (" << cell.x << "," << cell.y << ") center covered — lid, not chamfer";
+    }
 }
 
 TEST(HighgroundGridTest, SparseWindow)

@@ -315,44 +315,6 @@ WallBuild buildRockWalls(
     std::vector<WallPiece> pieces;
     for (const Chain& chain : chains) {
         BeveledBoundary beveled = bevelChain(segs, chain, params.bevel);
-        // Wall top boundary polyline(s) in field space (unlifted) — exactly the
-        // walls' upper contour. At diagonal joins the chain walk crosses the
-        // pinch point twice (figure-eight), which a plain ear clipper cannot
-        // digest, so the polyline is split into simple loops at repeated
-        // vertices: the union of the loops is exactly the bounded region.
-        if (chain.closed && beveled.pieces.size() >= 3) {
-            std::vector<glm::vec2> stack;     // map space
-            std::vector<glm::ivec2> stackKeys; // half-grid keys of `stack`
-            const auto flushLoop = [&](std::size_t from) {
-                if (stack.size() - from < 3) {
-                    return;
-                }
-                std::vector<glm::vec2> loop;
-                loop.reserve(stack.size() - from);
-                for (std::size_t i = from; i < stack.size(); ++i) {
-                    loop.push_back(mapToFieldPx(iso, stack[i]));
-                }
-                build.topChains.push_back(std::move(loop));
-            };
-            for (const WallPiece& piece : beveled.pieces) {
-                const glm::vec2& p = piece.a;
-                const glm::ivec2 key = keyOf(p);
-                const auto it = std::find(stackKeys.begin(), stackKeys.end(), key);
-                if (it != stackKeys.end()) {
-                    // Second visit of a pinch point: the walk since its first
-                    // visit forms a closed simple loop — extract it and
-                    // continue the outer walk from the pinch point.
-                    const std::size_t idx = static_cast<std::size_t>(it - stackKeys.begin());
-                    flushLoop(idx);
-                    stack.resize(idx + 1);
-                    stackKeys.resize(idx + 1);
-                } else {
-                    stack.push_back(p);
-                    stackKeys.push_back(key);
-                }
-            }
-            flushLoop(0);
-        }
         pieces.insert(pieces.end(), beveled.pieces.begin(), beveled.pieces.end());
     }
     if (pieces.empty()) {
