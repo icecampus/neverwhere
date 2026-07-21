@@ -98,19 +98,37 @@ std::vector<Chain> buildChains(std::vector<MapSeg>& segs) {
             const glm::vec2 dirIn = glm::normalize(segs[current].b - segs[current].a);
             int next = -1;
             float best = -2.0f;
+            int nextInconsistent = -1;
+            float bestInconsistent = -2.0f;
             for (const int cand : it->second) {
                 if (segs[cand].visited) {
                     continue;
                 }
-                // direction the candidate would travel when leaving `at`
-                glm::vec2 dirA = segs[cand].b - segs[cand].a;
-                glm::vec2 dirB = segs[cand].a - segs[cand].b;
-                const glm::vec2 dirOut = (glm::dot(dirA, dirIn) >= glm::dot(dirB, dirIn)) ? dirA : dirB;
+                // direction the candidate travels when LEAVING `at`
+                const glm::vec2 dirOut = (segs[cand].aKey == at)
+                    ? (segs[cand].b - segs[cand].a)
+                    : (segs[cand].a - segs[cand].b);
                 const float score = glm::dot(glm::normalize(dirOut), dirIn);
-                if (score > best) {
-                    best = score;
-                    next = cand;
+                // Land-on-left consistency: the segment's outward normal must
+                // sit on the right of travel. At a 4-way (diagonal) join the
+                // straightest continuation crosses the pinch into the
+                // neighbouring loop and walks it BACKWARDS (mixed winding);
+                // prefer consistent candidates, keep the old greedy as a
+                // degenerate fallback.
+                const glm::vec2 rightOfTravel(dirOut.y, -dirOut.x);
+                const bool consistent = glm::dot(rightOfTravel, segs[cand].outward) > 0.0f;
+                if (consistent) {
+                    if (score > best) {
+                        best = score;
+                        next = cand;
+                    }
+                } else if (score > bestInconsistent) {
+                    bestInconsistent = score;
+                    nextInconsistent = cand;
                 }
+            }
+            if (next < 0) {
+                next = nextInconsistent;
             }
             if (next < 0) {
                 break; // dead end (should not happen on a closed contour)
@@ -329,15 +347,43 @@ RockWallBuild buildRockWalls(
     std::vector<WallPiece> pieces;
     for (const Chain& chain : chains) {
         BeveledBoundary beveled = bevelChain(segs, chain, params.cornerBevel);
-        // Wall top boundary polyline (field space, unlifted): ordered piece
-        // start points of the closed chain — exactly the walls' upper contour.
+        // Wall top boundary polyline(s) in field space (unlifted) — exactly the
+        // walls' upper contour. At diagonal joins the chain walk crosses the
+        // pinch point twice (figure-eight), which a plain ear clipper cannot
+        // digest, so the polyline is split into simple loops at repeated
+        // vertices: the union of the loops is exactly the bounded region.
         if (chain.closed && beveled.pieces.size() >= 3) {
-            std::vector<glm::vec2> polyline;
-            polyline.reserve(beveled.pieces.size());
+            std::vector<glm::vec2> stack;     // map space
+            std::vector<glm::ivec2> stackKeys; // half-grid keys of `stack`
+            const auto flushLoop = [&](std::size_t from) {
+                if (stack.size() - from < 3) {
+                    return;
+                }
+                std::vector<glm::vec2> loop;
+                loop.reserve(stack.size() - from);
+                for (std::size_t i = from; i < stack.size(); ++i) {
+                    loop.push_back(mapToFieldPx(iso, stack[i]));
+                }
+                build.topChains.push_back(std::move(loop));
+            };
             for (const WallPiece& piece : beveled.pieces) {
-                polyline.push_back(mapToFieldPx(iso, piece.a));
+                const glm::vec2& p = piece.a;
+                const glm::ivec2 key = keyOf(p);
+                const auto it = std::find(stackKeys.begin(), stackKeys.end(), key);
+                if (it != stackKeys.end()) {
+                    // Second visit of a pinch point: the walk since its first
+                    // visit forms a closed simple loop — extract it and
+                    // continue the outer walk from the pinch point.
+                    const std::size_t idx = static_cast<std::size_t>(it - stackKeys.begin());
+                    flushLoop(idx);
+                    stack.resize(idx + 1);
+                    stackKeys.resize(idx + 1);
+                } else {
+                    stack.push_back(p);
+                    stackKeys.push_back(key);
+                }
             }
-            build.topChains.push_back(std::move(polyline));
+            flushLoop(0);
         }
         pieces.insert(pieces.end(), beveled.pieces.begin(), beveled.pieces.end());
     }

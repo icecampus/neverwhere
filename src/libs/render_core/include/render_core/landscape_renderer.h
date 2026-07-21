@@ -56,8 +56,10 @@ public:
         int viewHeight);
 
     // Raised landscape: per-cell cliff walls (rock or simple flat) plus the
-    // same atlas tops as the flat pass, lifted by RaisedParams::height.
-    // Painter order inside the pass: all walls, then the lifted tops.
+    // lifted tops. Walls and tops are depth-sorted together per primitive
+    // (iso painter's algorithm by ground y; walls before tops at equal
+    // depth) — a plain "all walls, then all tops" order breaks on shapes
+    // where one arm of the landmass stands in front of another arm's walls.
     void renderRaised(
         const std::vector<LandscapeTile>& tiles,
         const topology_core::DiamondIsometry& iso,
@@ -116,31 +118,29 @@ private:
     std::vector<Vertex> scratchVerts;
     std::vector<DrawGroup> scratchDraws;
     std::vector<Vertex> scratchRaisedVerts;
-    std::vector<DrawGroup> scratchRaisedDraws;
     std::vector<WallVertex> scratchWallVerts;
 
     static AtlasGpu createAtlasGpu(const std::filesystem::path& atlasPath, int cols, int rows);
 
-    // One atlas tile quad in screen space; yOffset shifts the quad in world
-    // pixels before the camera transform (raised tops pass -height).
+    // One atlas tile quad in FIELD space (6 verts); yOffset shifts the quad in
+    // world pixels (raised tops pass -height). Screen transform happens at
+    // batch emission after the depth sort.
     void appendAtlasQuad(
         std::vector<Vertex>& out,
         const AtlasGpu& atlas,
         const topology_core::DiamondIsometry& iso,
-        const topology_core::Camera2D& camera,
         const glm::ivec2& cell,
         std::size_t tileIndex,
         float yOffset) const;
 
-    // Raised top as mask-shaped triangles textured by a tiled ground texture
-    // (world-space UV, so the pattern is continuous across cells). The shape
-    // follows the same "axis-parallel corner" contour rule as the cliff walls:
-    // full quadrant for an edge with both nodes on, half-quadrant at the on
-    // corner of a transition edge. yOffset lifts the top in world pixels.
+    // Raised top as mask-shaped triangles in FIELD space (3 verts per
+    // triangle), world-space UVs. The shape follows the same "axis-parallel
+    // corner" contour rule as the cliff walls: full quadrant for an edge with
+    // both nodes on, half-quadrant at the on corner of a transition edge.
+    // yOffset lifts the top in world pixels.
     void appendTexturedTop(
         std::vector<Vertex>& out,
         const topology_core::DiamondIsometry& iso,
-        const topology_core::Camera2D& camera,
         const glm::ivec2& cell,
         const std::array<bool, 4>& mask,
         float yOffset) const;

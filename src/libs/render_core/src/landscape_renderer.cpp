@@ -566,19 +566,15 @@ void LandscapeRenderer::appendAtlasQuad(
     std::vector<Vertex>& out,
     const AtlasGpu& atlas,
     const topology_core::DiamondIsometry& iso,
-    const topology_core::Camera2D& camera,
     const glm::ivec2& cell,
     std::size_t tileIndex,
     float yOffset) const {
 
-    const glm::vec2 fieldPos = iso.mapToField(cell) + glm::vec2(0.0f, yOffset);
-    const glm::vec2 screenCenter = camera.worldToScreen(fieldPos);
-
-    // Editor parity: the QML Scale transform scales tile size together
-    // with positions, so the quad must grow/shrink with camera zoom.
-    const glm::vec2 size = atlas.tileSize * camera.zoom;
-    const glm::vec2 tl = screenCenter - size * 0.5f;
-    const glm::vec2 br = screenCenter + size * 0.5f;
+    // Field-space quad centered on the cell; the camera transform (zoom scales
+    // positions and sizes together) happens at emission into the frame buffer.
+    const glm::vec2 center = iso.mapToField(cell) + glm::vec2(0.0f, yOffset);
+    const glm::vec2 tl = center - atlas.tileSize * 0.5f;
+    const glm::vec2 br = center + atlas.tileSize * 0.5f;
 
     const TileUV uv = atlas.atlas.tileUv(tileIndex);
 
@@ -597,7 +593,6 @@ void LandscapeRenderer::appendAtlasQuad(
 void LandscapeRenderer::appendTexturedTop(
     std::vector<Vertex>& out,
     const topology_core::DiamondIsometry& iso,
-    const topology_core::Camera2D& camera,
     const glm::ivec2& cell,
     const std::array<bool, 4>& mask,
     float yOffset) const {
@@ -606,13 +601,12 @@ void LandscapeRenderer::appendTexturedTop(
     const glm::vec2 center = iso.mapToField(cell);
     const glm::vec2 lift{0.0f, yOffset};
 
+    // Field space (screen transform happens at batch emission); UVs come from
+    // the un-lifted field position, so the ground pattern stays continuous.
     const auto emit = [&](const glm::vec2& a, const glm::vec2& b, const glm::vec2& c) {
-        const glm::vec2 sa = camera.worldToScreen(a + lift);
-        const glm::vec2 sb = camera.worldToScreen(b + lift);
-        const glm::vec2 sc = camera.worldToScreen(c + lift);
-        out.push_back({{sa.x, sa.y}, {a.x * kTopUvPerWorldPx, a.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
-        out.push_back({{sb.x, sb.y}, {b.x * kTopUvPerWorldPx, b.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
-        out.push_back({{sc.x, sc.y}, {c.x * kTopUvPerWorldPx, c.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+        out.push_back({{a.x + lift.x, a.y + lift.y}, {a.x * kTopUvPerWorldPx, a.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+        out.push_back({{b.x + lift.x, b.y + lift.y}, {b.x * kTopUvPerWorldPx, b.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+        out.push_back({{c.x + lift.x, c.y + lift.y}, {c.x * kTopUvPerWorldPx, c.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
     };
 
     // Diamond edges as index pairs into the [Left, Up, Right, Down] mask —
@@ -677,13 +671,20 @@ void LandscapeRenderer::render(
         const int baseVertex = (int)scratchVerts.size();
 
         for (const LandscapeTile* t : group) {
-            appendAtlasQuad(scratchVerts, atlas, iso, camera, t->cell, t->tileIndex, 0.0f);
+            appendAtlasQuad(scratchVerts, atlas, iso, t->cell, t->tileIndex, 0.0f);
         }
 
         scratchDraws.push_back({&atlas.atlas, baseVertex, (int)scratchVerts.size() - baseVertex});
     }
 
     if (scratchVerts.empty()) return;
+
+    // Field -> screen (camera zoom scales positions and quad sizes together).
+    for (Vertex& v : scratchVerts) {
+        const glm::vec2 s = camera.worldToScreen({v.pos[0], v.pos[1]});
+        v.pos[0] = s.x;
+        v.pos[1] = s.y;
+    }
 
     sg_range range = { scratchVerts.data(), scratchVerts.size() * sizeof(Vertex) };
     sg_update_buffer(vbuf, &range);
@@ -760,13 +761,26 @@ void LandscapeRenderer::renderRaised(
         });
     }
 
-    // Walls in world space: simple per-cell quads, or the global rock-wall
-    // chains collected per asset (a chain must span the whole landmass, so
-    // rock segments of all cells of one asset go into a single build).
+    // Walls in world (field) space: simple per-cell quads, or the global
+    // rock-wall chains collected per asset (a chain must span the whole
+    // landmass, so rock segments of all cells of one asset go into a single
+    // build). wallDepths holds one iso depth key per wall QUAD (6 verts):
+    // the ground y of its bottom edge — the painter's-algorithm sort key.
     std::vector<RockWallVertex> worldWalls;
     worldWalls.reserve(cells.size() * 12);
+    std::vector<float> wallDepths;
+    wallDepths.reserve(cells.size() * 2);
     std::unordered_map<std::string, std::vector<RockContourSegment>> rockSegments;
     std::unordered_map<std::string, std::vector<std::vector<glm::vec2>>> topChainsByAsset;
+
+    const auto quadGroundY = [&](std::size_t quadIndex) {
+        const std::size_t base = quadIndex * 6;
+        float y = worldWalls[base].y;
+        for (std::size_t k = 1; k < 6; ++k) {
+            y = std::max(y, worldWalls[base + k].y);
+        }
+        return y;
+    };
 
     for (std::size_t i = 0; i < cells.size(); ++i) {
         const LandscapeTile* t = cells[i];
@@ -777,7 +791,11 @@ void LandscapeRenderer::renderRaised(
             std::vector<RockContourSegment>& bucket = rockSegments[t->assetUuid];
             bucket.insert(bucket.end(), segs.begin(), segs.end());
         } else {
+            const std::size_t firstQuad = worldWalls.size() / 6;
             appendWallTriangles(worldWalls, iso, t->cell, mask, params.height);
+            for (std::size_t q = firstQuad; q < worldWalls.size() / 6; ++q) {
+                wallDepths.push_back(quadGroundY(q));
+            }
         }
     }
 
@@ -786,8 +804,12 @@ void LandscapeRenderer::renderRaised(
         RockWallParams rockParams;
         rockParams.cornerBevel = params.bevel;
         rockParams.amplitude = params.amplitude;
+        const std::size_t firstQuad = worldWalls.size() / 6;
         RockWallBuild rockBuild = buildRockWalls(segments, params.height, rockParams, iso);
         worldWalls.insert(worldWalls.end(), rockBuild.verts.begin(), rockBuild.verts.end());
+        for (std::size_t q = firstQuad; q < worldWalls.size() / 6; ++q) {
+            wallDepths.push_back(quadGroundY(q));
+        }
         // Beveled wall-top boundary chains -> the raised top surface is formed
         // from the walls' upper contour (triangulated below).
         topChainsByAsset[uuid] = std::move(rockBuild.topChains);
@@ -798,20 +820,26 @@ void LandscapeRenderer::renderRaised(
             worldWalls.size(),
             kWallVbufVertices);
         worldWalls.resize((kWallVbufVertices / 6) * 6); // cut at a quad boundary
+        wallDepths.resize(worldWalls.size() / 6);
     }
 
-    // Raised tops: cells of an asset with a topTexture are drawn as
-    // ground-textured triangles; otherwise the same atlas quads as the flat
-    // pass, lifted by params.height, so they match the flat tiles pixel-exact.
-    // The textured top is formed from the walls' upper contour (the beveled
-    // boundary chains exported by the rock-wall build, ear-clipped into
-    // triangles), so the top surface and the wall tops match exactly — no
-    // "lid" overhang at chamfered corners. Contours with holes (mixed chain
-    // winding), non-rock walls or missing chains fall back to per-cell
-    // mask-shaped triangles. Grouped per asset (one texture binding per
-    // group); cells stay in back-to-front order inside each group.
-    scratchRaisedVerts.clear();
-    scratchRaisedDraws.clear();
+    // Raised tops, built as field-space primitives with iso depth keys.
+    // Cells of an asset with a topTexture are drawn as ground-textured
+    // triangles; otherwise the same atlas quads as the flat pass, lifted by
+    // params.height. The textured top is formed from the walls' upper contour
+    // (the beveled boundary chains exported by the rock-wall build,
+    // ear-clipped into triangles), so the top surface and the wall tops match
+    // exactly — no "lid" overhang at chamfered corners. Contours with holes
+    // (mixed chain winding), non-rock walls or missing chains fall back to
+    // per-cell mask-shaped triangles.
+    std::vector<Vertex> topFieldVerts;
+    struct TopPrim {
+        float depth = 0.0f;          // ground y of the primitive's lowest vertex
+        const TextureAtlas* tex = nullptr;
+        int first = 0;               // into topFieldVerts
+        int count = 0;
+    };
+    std::vector<TopPrim> topPrims;
     {
         std::unordered_map<std::string, std::vector<const LandscapeTile*>> groups;
         groups.reserve(raisedAtlases.size() + 4);
@@ -827,15 +855,18 @@ void LandscapeRenderer::renderRaised(
 
         // Ear-clipped top triangles per asset (field space, unlifted), empty
         // when the contour construction is not applicable -> per-cell fallback.
+        // Hole chains (opposite winding to the largest-area chain) are merged
+        // into their containing outer chain with a zero-width bridge, so the
+        // top surface keeps the pit open without falling back to per-cell tops.
         std::unordered_map<std::string, std::vector<glm::vec2>> chainTopTris;
         for (const auto& [uuid, chains] : topChainsByAsset) {
             const RaisedAtlasGpu& raised = raisedAtlases.find(uuid)->second;
             if (!raised.topTex.valid() || chains.empty()) {
                 continue;
             }
-            // Hole detection: all chains of one landmass are walked with land
-            // on the left, so outer chains share the winding of the
-            // largest-area chain; an opposite winding means a hole.
+            // All chains of one landmass are walked with land on the left, so
+            // outer chains share the winding of the largest-area chain; an
+            // opposite winding means a hole.
             float refArea = 0.0f;
             for (const auto& poly : chains) {
                 const float area = polygonSignedArea(poly);
@@ -843,25 +874,51 @@ void LandscapeRenderer::renderRaised(
                     refArea = area;
                 }
             }
-            bool hasHole = false;
+            std::vector<const std::vector<glm::vec2>*> outers;
+            std::vector<const std::vector<glm::vec2>*> holes;
             for (const auto& poly : chains) {
-                if (polygonSignedArea(poly) * refArea < 0.0f) {
-                    hasHole = true;
-                    break;
+                if (polygonSignedArea(poly) * refArea > 0.0f) {
+                    outers.push_back(&poly);
+                } else {
+                    holes.push_back(&poly);
                 }
             }
-            if (hasHole) {
-                continue;
-            }
+
             std::vector<glm::vec2> tris;
             bool ok = true;
-            for (const auto& poly : chains) {
-                std::vector<glm::vec2> part = triangulateSimplePolygon(poly);
+            for (const auto* outer : outers) {
+                std::vector<glm::vec2> merged = *outer;
+                for (const auto* hole : holes) {
+                    if (pointInPolygon(*outer, hole->front())) {
+                        merged = mergeHoleIntoOuter(merged, *hole);
+                        if (merged.empty()) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if (!ok) {
+                    break;
+                }
+                std::vector<glm::vec2> part = triangulateSimplePolygon(merged);
                 if (part.empty()) {
                     ok = false;
                     break;
                 }
                 tris.insert(tris.end(), part.begin(), part.end());
+            }
+            // Every hole must land inside some outer chain.
+            for (const auto* hole : holes) {
+                bool paired = false;
+                for (const auto* outer : outers) {
+                    if (pointInPolygon(*outer, hole->front())) {
+                        paired = true;
+                        break;
+                    }
+                }
+                if (!paired) {
+                    ok = false;
+                }
             }
             if (ok) {
                 chainTopTris[uuid] = std::move(tris);
@@ -872,37 +929,57 @@ void LandscapeRenderer::renderRaised(
         for (auto& [uuid, group] : groups) {
             const RaisedAtlasGpu& raised = raisedAtlases.find(uuid)->second;
             const bool texturedTop = raised.topTex.valid();
-            const int baseVertex = (int)scratchRaisedVerts.size();
+            const float yOffset = -raised.params.height;
+            const TextureAtlas* tex = texturedTop ? &raised.topTex : &raised.gpu.atlas;
+
+            // Emit helpers: append field-space verts and register one prim per
+            // primitive (3 verts per textured triangle, 6 per atlas quad).
+            const auto pushPrims = [&](std::size_t firstVert, int vertsPerPrim) {
+                for (std::size_t base = firstVert; base < topFieldVerts.size(); base += vertsPerPrim) {
+                    float depth = topFieldVerts[base].pos[1];
+                    for (int k = 1; k < vertsPerPrim; ++k) {
+                        depth = std::max(depth, topFieldVerts[base + k].pos[1]);
+                    }
+                    topPrims.push_back({depth - yOffset, tex, (int)base, vertsPerPrim});
+                }
+            };
 
             auto chainIt = chainTopTris.find(uuid);
             if (chainIt != chainTopTris.end()) {
-                // Contour-formed top: lift and bake to screen space, world UVs.
+                // Contour-formed top: world UVs, depth from ground positions.
                 const std::vector<glm::vec2>& tris = chainIt->second;
-                if (scratchRaisedVerts.size() + tris.size() > kRaisedVbufVertices) {
+                if (topFieldVerts.size() + tris.size() > kRaisedVbufVertices) {
                     topsTruncated = true;
                 } else {
-                    const glm::vec2 lift{0.0f, -raised.params.height};
+                    const glm::vec2 lift{0.0f, yOffset};
                     for (const glm::vec2& p : tris) {
-                        const glm::vec2 s = camera.worldToScreen(p + lift);
-                        scratchRaisedVerts.push_back({{s.x, s.y}, {p.x * kTopUvPerWorldPx, p.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+                        topFieldVerts.push_back({{p.x + lift.x, p.y + lift.y}, {p.x * kTopUvPerWorldPx, p.y * kTopUvPerWorldPx}, {1.0f, 1.0f, 1.0f, 1.0f}});
+                    }
+                    // Re-derive ground-space depths: the lift only shifts y.
+                    const std::size_t firstVert = topFieldVerts.size() - tris.size();
+                    for (std::size_t v = firstVert; v < topFieldVerts.size(); v += 3) {
+                        const glm::vec2& a = tris[v - firstVert];
+                        const glm::vec2& b = tris[v - firstVert + 1];
+                        const glm::vec2& c = tris[v - firstVert + 2];
+                        topPrims.push_back({std::max({a.y, b.y, c.y}), tex, (int)v, 3});
                     }
                 }
-            } else {
-                for (const LandscapeTile* t : group) {
-                    if (scratchRaisedVerts.size() + 12 > kRaisedVbufVertices) {
-                        topsTruncated = true;
-                        break;
-                    }
-                    if (texturedTop) {
-                        appendTexturedTop(scratchRaisedVerts, iso, camera, t->cell, *maskByTile[t], -raised.params.height);
-                    } else {
-                        appendAtlasQuad(scratchRaisedVerts, raised.gpu, iso, camera, t->cell, t->tileIndex, -raised.params.height);
-                    }
-                }
+                continue;
             }
-            const int vertexCount = (int)scratchRaisedVerts.size() - baseVertex;
-            if (vertexCount > 0) {
-                scratchRaisedDraws.push_back({texturedTop ? &raised.topTex : &raised.gpu.atlas, baseVertex, vertexCount});
+
+            for (const LandscapeTile* t : group) {
+                if (topFieldVerts.size() + 12 > kRaisedVbufVertices) {
+                    topsTruncated = true;
+                    break;
+                }
+                const std::size_t firstVert = topFieldVerts.size();
+                if (texturedTop) {
+                    appendTexturedTop(topFieldVerts, iso, t->cell, *maskByTile[t], yOffset);
+                    pushPrims(firstVert, 3);
+                } else {
+                    appendAtlasQuad(topFieldVerts, raised.gpu, iso, t->cell, t->tileIndex, yOffset);
+                    pushPrims(firstVert, 6);
+                }
             }
         }
         if (topsTruncated) {
@@ -910,42 +987,104 @@ void LandscapeRenderer::renderRaised(
         }
     }
 
-    // World-space walls -> screen-space GPU scratch (the pipelines take
-    // screen pixels, same as the flat pass).
+    // ------------------------------------------------------------------
+    // Depth-sorted emission: walls and tops merge into one painter's-algorithm
+    // sequence by ground y (walls first on ties), so an arm of a landmass
+    // standing in front of another arm's walls (L-shapes, diagonal joins,
+    // separate islands) occludes correctly. Batches switch pipeline/texture
+    // only when it changes between consecutive primitives.
+    // ------------------------------------------------------------------
+    struct PrimRef {
+        float depth;
+        bool isWall;
+        std::uint32_t index;
+    };
+    std::vector<PrimRef> order;
+    order.reserve(wallDepths.size() + topPrims.size());
+    for (std::uint32_t i = 0; i < wallDepths.size(); ++i) {
+        order.push_back({wallDepths[i], true, i});
+    }
+    for (std::uint32_t i = 0; i < topPrims.size(); ++i) {
+        order.push_back({topPrims[i].depth, false, i});
+    }
+    std::stable_sort(order.begin(), order.end(), [](const PrimRef& a, const PrimRef& b) {
+        if (a.depth != b.depth) return a.depth < b.depth;
+        return a.isWall > b.isWall; // walls before tops at equal depth
+    });
+
+    struct Batch {
+        bool wall;
+        const TextureAtlas* tex;
+        int base;
+        int count;
+    };
+    std::vector<Batch> batches;
     scratchWallVerts.clear();
-    scratchWallVerts.reserve(worldWalls.size());
-    for (const RockWallVertex& v : worldWalls) {
-        const glm::vec2 p = camera.worldToScreen({v.x, v.y});
-        scratchWallVerts.push_back({{p.x, p.y}, {v.r, v.g, v.b, v.a}});
+    scratchRaisedVerts.clear();
+
+    bool emitTruncated = false;
+    for (const PrimRef& ref : order) {
+        if (ref.isWall) {
+            if (scratchWallVerts.size() + 6 > kWallVbufVertices) {
+                emitTruncated = true;
+                continue;
+            }
+            if (batches.empty() || !batches.back().wall) {
+                batches.push_back({true, nullptr, (int)scratchWallVerts.size(), 0});
+            }
+            const std::size_t q = static_cast<std::size_t>(ref.index) * 6;
+            for (std::size_t k = 0; k < 6; ++k) {
+                const RockWallVertex& v = worldWalls[q + k];
+                const glm::vec2 p = camera.worldToScreen({v.x, v.y});
+                scratchWallVerts.push_back({{p.x, p.y}, {v.r, v.g, v.b, v.a}});
+            }
+            batches.back().count += 6;
+        } else {
+            const TopPrim& tp = topPrims[ref.index];
+            if (scratchRaisedVerts.size() + tp.count > kRaisedVbufVertices) {
+                emitTruncated = true;
+                continue;
+            }
+            if (batches.empty() || batches.back().wall || batches.back().tex != tp.tex) {
+                batches.push_back({false, tp.tex, (int)scratchRaisedVerts.size(), 0});
+            }
+            for (int k = 0; k < tp.count; ++k) {
+                const Vertex& v = topFieldVerts[static_cast<std::size_t>(tp.first) + k];
+                const glm::vec2 p = camera.worldToScreen({v.pos[0], v.pos[1]});
+                scratchRaisedVerts.push_back({{p.x, p.y}, {v.uv[0], v.uv[1]}, {v.color[0], v.color[1], v.color[2], v.color[3]}});
+            }
+            batches.back().count += tp.count;
+        }
+    }
+    if (emitTruncated) {
+        spdlog::error("LandscapeRenderer::renderRaised: vertex overflow during depth-sorted emission, geometry truncated");
     }
 
     float vs_params[2] = {(float)viewWidth, (float)viewHeight};
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
 
-    // Painter order: all cliff walls, then the lifted tops over them.
     if (!scratchWallVerts.empty()) {
         sg_range range = { scratchWallVerts.data(), scratchWallVerts.size() * sizeof(WallVertex) };
         sg_update_buffer(wallVbuf, &range);
-
-        sg_apply_pipeline(wallPip);
-        sg_apply_uniforms(0, &uniform_range);
-        sg_apply_bindings(&wallBind);
-        sg_draw(0, (int)scratchWallVerts.size(), 1);
     }
-
     if (!scratchRaisedVerts.empty()) {
         sg_range range = { scratchRaisedVerts.data(), scratchRaisedVerts.size() * sizeof(Vertex) };
         sg_update_buffer(raisedVbuf, &range);
+    }
 
-        sg_apply_pipeline(pip);
-        sg_apply_uniforms(0, &uniform_range);
-
-        for (const DrawGroup& draw : scratchRaisedDraws) {
-            raisedBind.views[0] = draw.texture->sgView();
-            raisedBind.samplers[0] = draw.texture->sgSampler();
+    for (const Batch& batch : batches) {
+        if (batch.wall) {
+            sg_apply_pipeline(wallPip);
+            sg_apply_uniforms(0, &uniform_range);
+            sg_apply_bindings(&wallBind);
+        } else {
+            sg_apply_pipeline(pip);
+            sg_apply_uniforms(0, &uniform_range);
+            raisedBind.views[0] = batch.tex->sgView();
+            raisedBind.samplers[0] = batch.tex->sgSampler();
             sg_apply_bindings(&raisedBind);
-            sg_draw(draw.baseVertex, draw.vertexCount, 1);
         }
+        sg_draw(batch.base, batch.count, 1);
     }
 }
 

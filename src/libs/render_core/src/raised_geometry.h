@@ -39,4 +39,15 @@ float polygonSignedArea(const std::vector<glm::vec2>& polygon);
 // empty vector for degenerate input / when no ear could be clipped.
 std::vector<glm::vec2> triangulateSimplePolygon(const std::vector<glm::vec2>& polygon);
 
+// Standard even-odd point-in-polygon test (ray cast in +x).
+bool pointInPolygon(const std::vector<glm::vec2>& polygon, const glm::vec2& point);
+
+// Merge a hole loop into its containing outer polygon with a zero-width
+// bridge channel (from the hole's rightmost vertex along +x to the nearest
+// outer edge). The result is a weakly simple polygon suitable for
+// triangulateSimplePolygon. Empty vector when no bridge could be placed.
+std::vector<glm::vec2> mergeHoleIntoOuter(
+    const std::vector<glm::vec2>& outer,
+    const std::vector<glm::vec2>& hole);
+
 } // namespace render_core

@@ -1,6 +1,7 @@
 #include "raised_geometry.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace render_core {
 
@@ -141,6 +142,82 @@ std::vector<glm::vec2> triangulateSimplePolygon(const std::vector<glm::vec2>& po
         triangles.push_back(poly[2]);
     }
     return triangles;
+}
+
+bool pointInPolygon(const std::vector<glm::vec2>& polygon, const glm::vec2& point) {
+    bool inside = false;
+    for (std::size_t i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
+        const glm::vec2& a = polygon[i];
+        const glm::vec2& b = polygon[j];
+        if ((a.y > point.y) != (b.y > point.y) &&
+            point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+std::vector<glm::vec2> mergeHoleIntoOuter(
+    const std::vector<glm::vec2>& outer,
+    const std::vector<glm::vec2>& hole) {
+
+    if (outer.size() < 3 || hole.size() < 3) {
+        return {};
+    }
+
+    // Rightmost hole vertex (max x, ties by max y).
+    std::size_t m = 0;
+    for (std::size_t i = 1; i < hole.size(); ++i) {
+        if (hole[i].x > hole[m].x || (hole[i].x == hole[m].x && hole[i].y > hole[m].y)) {
+            m = i;
+        }
+    }
+    const glm::vec2 start = hole[m];
+
+    // Closest +x ray hit over the outer polygon's edges.
+    float bestX = std::numeric_limits<float>::max();
+    std::size_t bestEdge = 0;
+    glm::vec2 hit{};
+    for (std::size_t e = 0; e < outer.size(); ++e) {
+        const glm::vec2& a = outer[e];
+        const glm::vec2& b = outer[(e + 1) % outer.size()];
+        const float dy = b.y - a.y;
+        if (std::abs(dy) < 1e-9f) {
+            continue;
+        }
+        const float s = (start.y - a.y) / dy;
+        if (s < 0.0f || s >= 1.0f) {
+            continue;
+        }
+        const float x = a.x + s * (b.x - a.x);
+        if (x > start.x + 1e-6f && x < bestX) {
+            bestX = x;
+            bestEdge = e;
+            hit = {x, start.y};
+        }
+    }
+    if (bestX == std::numeric_limits<float>::max()) {
+        return {};
+    }
+
+    // Merged walk: outer up to the hit edge, bridge to the hole, full hole
+    // loop back to the start vertex, bridge back, rest of the outer.
+    std::vector<glm::vec2> merged;
+    merged.reserve(outer.size() + hole.size() + 4);
+    for (std::size_t i = 0; i <= bestEdge; ++i) {
+        merged.push_back(outer[i]);
+    }
+    merged.push_back(hit);
+    merged.push_back(start);
+    for (std::size_t k = 1; k < hole.size(); ++k) {
+        merged.push_back(hole[(m + k) % hole.size()]);
+    }
+    merged.push_back(start);
+    merged.push_back(hit);
+    for (std::size_t i = bestEdge + 1; i < outer.size(); ++i) {
+        merged.push_back(outer[i]);
+    }
+    return merged;
 }
 
 } // namespace render_core
