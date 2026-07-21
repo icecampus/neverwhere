@@ -56,6 +56,15 @@ struct Params {
     glm::vec4 topTint{1.0f, 1.0f, 1.0f, 1.0f};
 
     bool sortPrimitives = true; // false: emit unsorted (e.g. for a GPU depth buffer)
+
+    // Chaikin corner-cutting iterations applied to the region loops (CGAL
+    // generator only) before both the walls and the top consume them, so the
+    // wall/top junction stays exact by construction. 0 = off (legacy
+    // orthogonal contour); each iteration doubles the loop vertices. When
+    // smoothing is on, the wall bevel is suppressed (effective bevel 0):
+    // the contour is already smooth, and a second chamfer on every Chaikin
+    // mini-corner would eat the top at the corner nodes.
+    int smoothIterations = 0;
 };
 
 enum class Material : std::uint8_t {
@@ -67,7 +76,17 @@ struct Vertex {
     glm::vec2 pos;   // field space, final (lift/height already applied)
     glm::vec2 uv;    // Top: world-tiled UV; Wall: reserved (0,0)
     glm::vec4 color; // Wall: baked shade (tint multiplier); Top: topTint
+    // Field y BEFORE the lift was applied (wall bottom: pos.y; wall top /
+    // plateau top: pos.y + height). Monotonic with depth along the iso view
+    // ray (0,+1,+1), so callers with a GPU depth buffer can use it as z.
+    float groundY = 0.0f;
+    // Wall: unit outward contour normal in MAP space (for triplanar blend
+    // weights). Top: (0,0).
+    glm::vec2 normal{0.0f, 0.0f};
 };
+// Tests compare meshes byte-for-byte (memcmp) — the struct must stay free of
+// unnamed padding (glm defaults give alignof 4 here, so 11 floats pack tight).
+static_assert(sizeof(Vertex) == sizeof(float) * 11, "Vertex grew padding: the memcmp determinism contract breaks");
 
 struct Primitive {
     Material material = Material::Top;
@@ -83,5 +102,21 @@ struct Mesh {
 
 // Deterministic: same input -> byte-identical output (seed is in Params).
 Mesh generate(const Grid& grid, const Params& params);
+
+// CGAL-based generator (desktop builds only): the land region is computed as
+// a boolean union of per-node unit squares (map space), the top surface is a
+// constrained Delaunay triangulation of the exact region boundary (holes
+// respected — no per-cell stitching, no "square lid" artifacts), the walls
+// are extruded from the same region loops. Returns an empty mesh when the
+// library was built without CGAL — check cgalAvailable().
+bool cgalAvailable();
+Mesh generateCgal(const Grid& grid, const Params& params);
+
+// Boundary of the land as strictly-simple closed loops in field space
+// (unlifted, y-down): contour chains walked with land on the left, split at
+// pinch points (figure-eight joins), collinear points dropped. The
+// boundary-first contract: loops are safe to extrude into walls and to fill
+// as the top surface.
+std::vector<std::vector<glm::vec2>> boundaryLoops(const Grid& grid, float cellWidth, float cellHeight);
 
 } // namespace highground

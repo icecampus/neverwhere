@@ -20,6 +20,7 @@
     "entt",
     {"name": "rttr",              "platform": "windows"},
     "fastnoise2",
+    {"name": "cgal", "platform": "!emscripten"},
     "libnoise",
     "gtest",
     "sokol",

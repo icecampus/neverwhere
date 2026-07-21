@@ -2,154 +2,19 @@
 
 #include "walls.h"
 
-#include <map>
 #include <utility>
 
 #include <FastNoise/FastNoise.h>
 
+#include "boundary.h"
+
 namespace highground {
 namespace {
 
+using MapSeg = ContourMapSeg;
+using Chain = ContourChain;
+
 constexpr float kPi = 3.14159265358979323846f;
-
-// Field projection for fractional map coordinates — the same affine as
-// DiamondIsometry::nodeToField (contour endpoints sit on half-integer coords).
-glm::vec2 mapToFieldPx(const topology_core::DiamondIsometry& iso, const glm::vec2& map) {
-    const glm::vec2 cellSz = iso.dims.cellSize();
-    const float halfW = cellSz.x * 0.5f;
-    const float halfH = cellSz.y * 0.5f;
-    return {(map.x - map.y) * halfW + halfW, (map.x + map.y) * halfH};
-}
-
-// ---------------------------------------------------------------------------
-// Chains: closed polylines over shared endpoints, walked with land on the
-// left (outward normals on the right of travel).
-// ---------------------------------------------------------------------------
-
-struct MapSeg {
-    glm::ivec2 aKey{}, bKey{}; // half-grid endpoint keys (2 * map)
-    glm::vec2 a{}, b{};        // map space endpoints (travel order)
-    glm::vec2 outward{};       // unit outward normal (axial), map space
-    bool visited = false;
-};
-
-glm::ivec2 keyOf(const glm::vec2& p) {
-    return {static_cast<int>(std::lround(p.x * 2.0f)), static_cast<int>(std::lround(p.y * 2.0f))};
-}
-
-struct KeyLess {
-    bool operator()(const glm::ivec2& a, const glm::ivec2& b) const {
-        return a.y != b.y ? a.y < b.y : a.x < b.x;
-    }
-};
-
-using Adjacency = std::map<glm::ivec2, std::vector<int>, KeyLess>;
-
-Adjacency buildAdjacency(const std::vector<MapSeg>& segs) {
-    Adjacency adj;
-    for (int i = 0; i < static_cast<int>(segs.size()); ++i) {
-        adj[segs[i].aKey].push_back(i);
-        adj[segs[i].bKey].push_back(i);
-    }
-    return adj;
-}
-
-// Flip travel direction if needed so the outward normal sits on the right.
-void orientForTravel(MapSeg& seg) {
-    const glm::vec2 dir = seg.b - seg.a;
-    const glm::vec2 right(dir.y, -dir.x);
-    if (glm::dot(right, seg.outward) < 0.0f) {
-        std::swap(seg.a, seg.b);
-        std::swap(seg.aKey, seg.bKey);
-    }
-}
-
-struct Chain {
-    std::vector<int> segs; // indices into the shared segment array, travel order
-    bool closed = false;
-    int diagonalJoins = 0;
-};
-
-std::vector<Chain> buildChains(std::vector<MapSeg>& segs) {
-    const Adjacency adj = buildAdjacency(segs);
-    std::vector<Chain> chains;
-
-    for (int start = 0; start < static_cast<int>(segs.size()); ++start) {
-        if (segs[start].visited) {
-            continue;
-        }
-        Chain chain;
-        orientForTravel(segs[start]);
-        segs[start].visited = true;
-        chain.segs.push_back(start);
-        const glm::ivec2 startKey = segs[start].aKey;
-
-        int current = start;
-        for (int guard = 0; guard < 100000; ++guard) {
-            const glm::ivec2 at = segs[current].bKey;
-            if (at == startKey) {
-                chain.closed = true;
-                break;
-            }
-            auto it = adj.find(at);
-            if (it == adj.end()) {
-                break;
-            }
-            const glm::vec2 dirIn = glm::normalize(segs[current].b - segs[current].a);
-            int next = -1;
-            float best = -2.0f;
-            int nextInconsistent = -1;
-            float bestInconsistent = -2.0f;
-            for (const int cand : it->second) {
-                if (segs[cand].visited) {
-                    continue;
-                }
-                // direction the candidate travels when LEAVING `at`
-                const glm::vec2 dirOut = (segs[cand].aKey == at)
-                    ? (segs[cand].b - segs[cand].a)
-                    : (segs[cand].a - segs[cand].b);
-                const float score = glm::dot(glm::normalize(dirOut), dirIn);
-                // Land-on-left consistency: the segment's outward normal must
-                // sit on the right of travel. At a 4-way (diagonal) join the
-                // straightest continuation crosses the pinch into the
-                // neighbouring loop and walks it BACKWARDS (mixed winding);
-                // prefer consistent candidates, keep the old greedy as a
-                // degenerate fallback.
-                const glm::vec2 rightOfTravel(dirOut.y, -dirOut.x);
-                const bool consistent = glm::dot(rightOfTravel, segs[cand].outward) > 0.0f;
-                if (consistent) {
-                    if (score > best) {
-                        best = score;
-                        next = cand;
-                    }
-                } else if (score > bestInconsistent) {
-                    bestInconsistent = score;
-                    nextInconsistent = cand;
-                }
-            }
-            if (next < 0) {
-                next = nextInconsistent;
-            }
-            if (next < 0) {
-                break; // dead end (should not happen on a closed contour)
-            }
-            if (it->second.size() >= 4) {
-                chain.diagonalJoins++;
-            }
-            // make travel leave `at`; on a consistent contour this also puts
-            // the outward normal on the right of travel automatically.
-            if (segs[next].aKey != at) {
-                std::swap(segs[next].a, segs[next].b);
-                std::swap(segs[next].aKey, segs[next].bKey);
-            }
-            segs[next].visited = true;
-            chain.segs.push_back(next);
-            current = next;
-        }
-        chains.push_back(std::move(chain));
-    }
-    return chains;
-}
 
 // ---------------------------------------------------------------------------
 // Bevel: trim convex corners, insert 45-degree chamfer pieces.
@@ -299,18 +164,7 @@ WallBuild buildRockWalls(
     WallBuild build;
 
     std::vector<MapSeg> segs;
-    segs.reserve(segments.size());
-    for (const RockContourSegment& seg : segments) {
-        MapSeg mapSeg;
-        mapSeg.aKey = keyOf(seg.a);
-        mapSeg.bKey = keyOf(seg.b);
-        mapSeg.a = seg.a;
-        mapSeg.b = seg.b;
-        mapSeg.outward = seg.outward;
-        segs.push_back(mapSeg);
-    }
-
-    std::vector<Chain> chains = buildChains(segs);
+    const std::vector<Chain> chains = buildContourChains(segments, segs);
 
     std::vector<WallPiece> pieces;
     for (const Chain& chain : chains) {
@@ -420,7 +274,10 @@ WallBuild buildRockWalls(
                     const glm::vec2 f = mapToFieldPx(iso, displaced[idx]);
                     const float z = samples[idx].heightT * heightPx;
                     depth = std::max(depth, f.y - z);
-                    build.verts.push_back(wallVertex({f.x, f.y - z}, color));
+                    Vertex v = wallVertex({f.x, f.y - z}, color);
+                    v.groundY = f.y; // field y before the lift (z = heightT * height)
+                    v.normal = samples[idx].normal; // unit outward, map space
+                    build.verts.push_back(v);
                 };
                 emit(i00);
                 emit(i10);
@@ -443,25 +300,34 @@ void appendFlatWalls(
     const std::array<bool, 4>& mask,
     float heightPx) {
 
-    const auto segments = cellContourSegments(iso, cell, mask);
-    for (const ContourSegment& seg : segments) {
-        const glm::vec3 base = (seg.axis == 0)
+    // Map-space contour segments carry the unit outward normal (triplanar
+    // blend weights); field positions come from the same map points.
+    const auto segments = cellRockContourSegments(cell, mask);
+    for (const RockContourSegment& seg : segments) {
+        const glm::vec2 edgeMid = mapToFieldPx(iso, seg.a);
+        const glm::vec2 center = mapToFieldPx(iso, seg.b);
+        // Same two-level axis shading as before: segment direction in map
+        // space picks the brightness level (axis 0: parallel to grid X).
+        const glm::vec2 d = seg.b - seg.a;
+        const glm::vec3 base = std::abs(d.x) >= std::abs(d.y)
             ? glm::vec3(0.62f, 0.45f, 0.22f)
             : glm::vec3(0.45f, 0.32f, 0.16f);
         const glm::vec4 top{base, 1.0f};
         const glm::vec4 bottom{base * 0.7f, 1.0f};
 
-        const auto v = [](const glm::vec2& p, float lift, const glm::vec4& c) {
+        const auto v = [&](const glm::vec2& p, float lift, const glm::vec4& c) {
             Vertex out;
             out.pos = {p.x, p.y - lift};
             out.uv = {0.0f, 0.0f};
             out.color = c;
+            out.groundY = p.y;
+            out.normal = seg.outward;
             return out;
         };
-        const Vertex t0 = v(seg.edgeMid, heightPx, top);
-        const Vertex t1 = v(seg.center, heightPx, top);
-        const Vertex b0 = v(seg.edgeMid, 0.0f, bottom);
-        const Vertex b1 = v(seg.center, 0.0f, bottom);
+        const Vertex t0 = v(edgeMid, heightPx, top);
+        const Vertex t1 = v(center, heightPx, top);
+        const Vertex b0 = v(edgeMid, 0.0f, bottom);
+        const Vertex b1 = v(center, 0.0f, bottom);
 
         verts.push_back(t0);
         verts.push_back(b0);
@@ -470,8 +336,38 @@ void appendFlatWalls(
         verts.push_back(b1);
         verts.push_back(t1);
 
-        depths.push_back(std::max(seg.edgeMid.y, seg.center.y));
+        depths.push_back(std::max(edgeMid.y, center.y));
     }
+}
+
+std::vector<std::vector<glm::vec2>> beveledLoops(
+    const std::vector<RockContourSegment>& segments,
+    float cornerBevel) {
+
+    std::vector<std::vector<glm::vec2>> loops;
+    std::vector<MapSeg> segs;
+    const std::vector<Chain> chains = buildContourChains(segments, segs);
+    for (const Chain& chain : chains) {
+        // Same bevel pass as the wall builder: consecutive pieces share
+        // endpoints, so the piece list doubles as the wall top boundary
+        // polyline — collect the piece starts into a closed loop.
+        const BeveledBoundary beveled = bevelChain(segs, chain, cornerBevel);
+        if (beveled.pieces.empty()) {
+            continue;
+        }
+        std::vector<glm::vec2> loop;
+        loop.reserve(beveled.pieces.size() + 1);
+        for (const WallPiece& piece : beveled.pieces) {
+            loop.push_back(piece.a);
+        }
+        if (!chain.closed) {
+            loop.push_back(beveled.pieces.back().b);
+        }
+        if (loop.size() >= 3) {
+            loops.push_back(std::move(loop));
+        }
+    }
+    return loops;
 }
 
 } // namespace highground

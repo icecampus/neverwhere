@@ -31,6 +31,7 @@ void appendPerCellTop(
             out.pos = {p.x, p.y - lift};
             out.uv = {p.x * params.topUvPerWorldPx, p.y * params.topUvPerWorldPx};
             out.color = params.topTint;
+            out.groundY = p.y;
             return out;
         };
         verts.push_back(v(a));

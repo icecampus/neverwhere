@@ -41,4 +41,16 @@ void appendFlatWalls(
     const std::array<bool, 4>& mask,
     float heightPx);
 
+// The beveled contour the wall tops follow: the same contour chains as
+// buildRockWalls, with convex corners trimmed by cornerBevel along the edges
+// and 45-degree chamfer pieces inserted — returned as closed loops in map
+// space (cell = 1 unit). Triangulating the top surface over these loops
+// makes it end flush with the walls' top edge. With cornerBevel == 0 the
+// source contour is returned unchanged (loops may be shorter than 3 points
+// only for degenerate input; callers should treat an empty result as "no
+// land").
+std::vector<std::vector<glm::vec2>> beveledLoops(
+    const std::vector<RockContourSegment>& segments,
+    float cornerBevel);
+
 } // namespace highground
