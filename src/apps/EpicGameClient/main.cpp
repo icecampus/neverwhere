@@ -228,6 +228,10 @@ static void frame(void) {
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
     action.colors[0].clear_value = { 0.07f, 0.08f, 0.10f, 1.0f };
+    // The swapchain has a depth-stencil attachment: clear it every frame for
+    // the z-buffered raised landscape pass.
+    action.depth.load_action = SG_LOADACTION_CLEAR;
+    action.depth.clear_value = 1.0f;
 
     sg_pass pass = {};
     pass.action = action;

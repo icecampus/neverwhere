@@ -46,7 +46,10 @@ public:
     // topTexturePath (optional): a tiled ground texture for the raised top —
     // when given, the top is drawn as mask-shaped ground-textured triangles
     // instead of the atlas tiles.
-    void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {});
+    // wallTexturePath (optional): a tiling rock texture for the triplanar
+    // walls (world-space projections, no UV seams) multiplied by the baked
+    // shade; when empty, walls keep the plain baked-color look.
+    void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {}, const std::filesystem::path& wallTexturePath = {});
 
     void render(
         const std::vector<LandscapeTile>& tiles,
@@ -56,10 +59,15 @@ public:
         int viewHeight);
 
     // Raised landscape: per-cell cliff walls (rock or simple flat) plus the
-    // lifted tops. Walls and tops are depth-sorted together per primitive
-    // (iso painter's algorithm by ground y; walls before tops at equal
-    // depth) — a plain "all walls, then all tops" order breaks on shapes
-    // where one arm of the landmass stands in front of another arm's walls.
+    // lifted tops. With a depth attachment (depthFormat != NONE at init) the
+    // pass runs through the z-buffer pipelines: vertices carry
+    // highground::Vertex::groundY as z and internal overlaps resolve via the
+    // depth buffer (batches merge by texture only). Without depth it falls
+    // back to the CPU painter's algorithm: walls and tops depth-sorted
+    // together per primitive (iso painter's algorithm by ground y; walls
+    // before tops at equal depth) — a plain "all walls, then all tops" order
+    // breaks on shapes where one arm of the landmass stands in front of
+    // another arm's walls.
     void renderRaised(
         const std::vector<LandscapeTile>& tiles,
         const topology_core::DiamondIsometry& iso,
@@ -80,6 +88,37 @@ private:
         float color[4];
     };
 
+    // Z-buffered raised pass: pos.xy is screen space, pos.z is the raw
+    // ground y (un-lifted field y); the vertex shader normalizes it into
+    // clip z via the z_range uniform.
+    struct DepthVertex {
+        float pos[3];
+        float uv[2];
+        float color[4];
+    };
+
+    struct DepthWallVertex {
+        float pos[3];
+        float color[4];
+    };
+
+    // Triplanar walls: tcoord = undeformed map coordinates in world px + lift;
+    // the fragment shader blends the (mapY,lift) and (mapX,lift) projections
+    // of a tiling rock texture by the contour normal — no UVs, no seams.
+    struct TriWallVertex {
+        float pos[2];
+        float color[4];
+        float tcoord[3];
+        float normal[2];
+    };
+
+    struct TriDepthWallVertex {
+        float pos[3];
+        float color[4];
+        float tcoord[3];
+        float normal[2];
+    };
+
     struct AtlasGpu {
         TextureAtlas atlas;
         float scale = 1.0f;      // scale from atlas tile pixels to world pixels
@@ -89,7 +128,8 @@ private:
     struct RaisedAtlasGpu {
         AtlasGpu gpu;
         RaisedParams params;
-        TextureAtlas topTex; // optional tiled ground texture for the raised top
+        TextureAtlas topTex;  // optional tiled ground texture for the raised top
+        TextureAtlas wallTex; // optional tiling rock texture for the triplanar walls
     };
 
     // Per-texture vertex range inside the single merged frame update
@@ -112,6 +152,23 @@ private:
     sg_bindings raisedBind{};
     sg_bindings wallBind{};
 
+    // Z-buffer variants for the raised pass (created only when init got a
+    // real depth format; the editor's depth-less Qt FBO stays on painter).
+    // The depth vertex streams reuse raisedVbuf/wallVbuf (byte buffers).
+    sg_pipeline depthPip{SG_INVALID_ID};
+    sg_shader depthTexShd{SG_INVALID_ID};
+    sg_pipeline depthWallPip{SG_INVALID_ID};
+    sg_shader depthWallShd{SG_INVALID_ID};
+
+    // Triplanar wall pipelines (painter + z-buffer variant). The triplanar
+    // vertex streams share triWallVbuf (painter/depth modes are mutually
+    // exclusive per renderer instance).
+    sg_pipeline triWallPip{SG_INVALID_ID};
+    sg_shader triWallShd{SG_INVALID_ID};
+    sg_pipeline triDepthWallPip{SG_INVALID_ID};
+    sg_shader triDepthWallShd{SG_INVALID_ID};
+    sg_buffer triWallVbuf{SG_INVALID_ID};
+
     std::unordered_map<std::string, AtlasGpu> atlases;
     std::unordered_map<std::string, RaisedAtlasGpu> raisedAtlases;
 
@@ -119,6 +176,10 @@ private:
     std::vector<DrawGroup> scratchDraws;
     std::vector<Vertex> scratchRaisedVerts;
     std::vector<WallVertex> scratchWallVerts;
+    std::vector<DepthVertex> scratchDepthVerts;
+    std::vector<DepthWallVertex> scratchDepthWallVerts;
+    std::vector<TriWallVertex> scratchTriWallVerts;
+    std::vector<TriDepthWallVertex> scratchTriDepthWallVerts;
 
     static AtlasGpu createAtlasGpu(const std::filesystem::path& atlasPath, int cols, int rows);
 
@@ -137,6 +198,10 @@ private:
     void destroyPipeline();
     void ensureWallPipeline();
     void destroyWallPipeline();
+    void ensureDepthPipelines();
+    void destroyDepthPipelines();
+    void ensureTriWallPipelines();
+    void destroyTriWallPipelines();
 };
 
 } // namespace render_core

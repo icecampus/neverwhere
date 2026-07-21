@@ -92,6 +92,8 @@ public:
 
         if (m_colorAttView.id != SG_INVALID_ID) sg_destroy_view(m_colorAttView);
         if (m_passImg.id != SG_INVALID_ID) sg_destroy_image(m_passImg);
+        if (m_depthAttView.id != SG_INVALID_ID) sg_destroy_view(m_depthAttView);
+        if (m_depthImg.id != SG_INVALID_ID) sg_destroy_image(m_depthImg);
         if (m_worldInit) {
             m_water.shutdown();
             m_worldRenderer.shutdown();
@@ -129,10 +131,12 @@ public:
         }
 
         if (!m_worldInit) {
-            // The Qt FBO depth attachment is not wrapped into the sokol pass
-            // (EcsPlayground battle rules), so pipelines must expect no depth.
-            m_worldRenderer.init(SG_PIXELFORMAT_NONE);
-            m_water.init(SG_PIXELFORMAT_NONE);
+            // The pass wraps the Qt FBO color texture plus our own sokol
+            // depth-stencil image (updatePass), so pipelines see a real
+            // depth format and the raised landscape resolves overlaps via
+            // the GPU depth buffer.
+            m_worldRenderer.init(SG_PIXELFORMAT_DEPTH_STENCIL);
+            m_water.init(SG_PIXELFORMAT_DEPTH_STENCIL);
             m_time.start();
             m_worldInit = true;
         }
@@ -158,7 +162,7 @@ public:
                     || fbo->texture() != m_wrappedTexture || m_colorAttView.id == SG_INVALID_ID)) {
             updatePass(fbo);
         }
-        if (m_colorAttView.id == SG_INVALID_ID) {
+        if (m_colorAttView.id == SG_INVALID_ID || m_depthAttView.id == SG_INVALID_ID) {
             return;
         }
 
@@ -173,10 +177,14 @@ public:
         action.colors[0].load_action = SG_LOADACTION_CLEAR;
         // Same background as the MapView.qml Rectangle it replaces.
         action.colors[0].clear_value = {1.0f, 1.0f, 1.0f, 1.0f};
+        // Depth is cleared every frame for the z-buffered raised landscape.
+        action.depth.load_action = SG_LOADACTION_CLEAR;
+        action.depth.clear_value = 1.0f;
 
         sg_pass pass = {};
         pass.action = action;
         pass.attachments.colors[0] = m_colorAttView;
+        pass.attachments.depth_stencil = m_depthAttView;
         sg_begin_pass(&pass);
 
         // Render in LOGICAL coordinates (QML space): the FBO itself is physical
@@ -225,6 +233,14 @@ private:
             sg_destroy_image(m_passImg);
             m_passImg.id = SG_INVALID_ID;
         }
+        if (m_depthAttView.id != SG_INVALID_ID) {
+            sg_destroy_view(m_depthAttView);
+            m_depthAttView.id = SG_INVALID_ID;
+        }
+        if (m_depthImg.id != SG_INVALID_ID) {
+            sg_destroy_image(m_depthImg);
+            m_depthImg.id = SG_INVALID_ID;
+        }
 
         m_width = fbo->size().width();
         m_height = fbo->size().height();
@@ -244,6 +260,23 @@ private:
         sg_view_desc view_desc = {};
         view_desc.color_attachment.image = m_passImg;
         m_colorAttView = sg_make_view(&view_desc);
+
+        // The Qt FBO depth attachment is a renderbuffer and cannot be wrapped,
+        // so the pass gets its own sokol depth-stencil image instead: sokol's
+        // GL backend assembles a framebuffer from the wrapped color texture +
+        // this depth texture. The raised landscape z-buffers against it.
+        sg_image_desc depth_desc = {};
+        depth_desc.usage.depth_stencil_attachment = true;
+        depth_desc.width = m_width;
+        depth_desc.height = m_height;
+        depth_desc.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+        depth_desc.sample_count = 1;
+        depth_desc.label = "map-render-depth";
+        m_depthImg = sg_make_image(&depth_desc);
+
+        sg_view_desc depth_view_desc = {};
+        depth_view_desc.depth_stencil_attachment.image = m_depthImg;
+        m_depthAttView = sg_make_view(&depth_view_desc);
     }
 
     int m_width = 0;
@@ -251,6 +284,8 @@ private:
     GLuint m_wrappedTexture = 0;
     sg_image m_passImg{SG_INVALID_ID};
     sg_view m_colorAttView{SG_INVALID_ID};
+    sg_image m_depthImg{SG_INVALID_ID};
+    sg_view m_depthAttView{SG_INVALID_ID};
 
     bool m_worldInit = false;
     render_core::WorldRenderer m_worldRenderer;
