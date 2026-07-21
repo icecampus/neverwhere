@@ -138,8 +138,18 @@ TEST(HighgroundTriangulationTest, SquareAndConcaveAndCollinear)
     EXPECT_NEAR(area, std::abs(polygonSignedArea(lshape)), 1e-3);
 
     // Collinear runs (contour-style): straight strip with intermediate points.
+    // Exact coverage matters, not the triangle count (degenerate remainder
+    // slivers are dropped).
     const std::vector<glm::vec2> strip{{0, 0}, {5, 0}, {10, 0}, {10, 4}, {5, 4}, {0, 4}};
-    EXPECT_EQ(triangulateSimplePolygon(strip).size(), 12u);
+    const auto st = triangulateSimplePolygon(strip);
+    ASSERT_FALSE(st.empty());
+    double stripArea = 0.0;
+    for (std::size_t v = 0; v + 2 < st.size(); v += 3) {
+        stripArea += std::abs(
+            (st[v + 1].x - st[v].x) * (st[v + 2].y - st[v].y) -
+            (st[v + 2].x - st[v].x) * (st[v + 1].y - st[v].y)) * 0.5;
+    }
+    EXPECT_NEAR(stripArea, std::abs(polygonSignedArea(strip)), 1e-3);
 }
 
 TEST(HighgroundGenerateTest, EmptyAndSingleNode)
@@ -215,6 +225,44 @@ TEST(HighgroundGenerateTest, RingKeepsHoleOpen)
 
     // Sanity on the top area: between the full 5x5-minus-pit bounds.
     EXPECT_GT(topArea(mesh), 0.0);
+}
+
+TEST(HighgroundGenerateTest, DiagonalStripeTopStaysInsideContour)
+{
+    // Three nodes in a row along one iso axis: a 1-node-wide stripe. The top
+    // must cover the stripe but NOT the area outside its wall contour.
+    const Mesh mesh = highground::generate(
+        gridOf({{10, 10}, {10, 11}, {10, 12}}),
+        Params{});
+    ASSERT_FALSE(mesh.vertices.empty());
+
+    // Stripe nodes are covered.
+    EXPECT_TRUE(coveredByTop(mesh, g_iso.nodeToField({10, 10})));
+    EXPECT_TRUE(coveredByTop(mesh, g_iso.nodeToField({10, 11})));
+    EXPECT_TRUE(coveredByTop(mesh, g_iso.nodeToField({10, 12})));
+
+    // Points outside the stripe must not be covered: one full cell to the
+    // left/right of the stripe spine.
+    EXPECT_FALSE(coveredByTop(mesh, g_iso.mapToField({8, 11})));
+    EXPECT_FALSE(coveredByTop(mesh, g_iso.mapToField({11, 10})));
+    EXPECT_FALSE(coveredByTop(mesh, g_iso.mapToField({12, 12})));
+
+    // The top must be formed from the (beveled) wall contour, not the raw
+    // per-cell node-mask shape: for this stadium-shaped contour the beveled
+    // caps cut the extreme x at ~113.6, while unbeveled per-cell tops would
+    // reach the diamond corners at +-128 (the "square lid" look).
+    float topMinX = 1e30f, topMaxX = -1e30f;
+    for (const Primitive& prim : mesh.primitives) {
+        if (prim.material != Material::Top) {
+            continue;
+        }
+        for (std::uint32_t v = prim.first; v < prim.first + prim.count; ++v) {
+            topMinX = std::min(topMinX, mesh.vertices[v].pos.x);
+            topMaxX = std::max(topMaxX, mesh.vertices[v].pos.x);
+        }
+    }
+    EXPECT_GT(topMinX, -120.0f) << "top leaks past the beveled contour (fallback per-cell tops?)";
+    EXPECT_LT(topMaxX, 120.0f) << "top leaks past the beveled contour (fallback per-cell tops?)";
 }
 
 TEST(HighgroundGridTest, SparseWindow)

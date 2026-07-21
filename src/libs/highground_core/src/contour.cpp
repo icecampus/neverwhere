@@ -184,10 +184,16 @@ std::vector<glm::vec2> triangulateSimplePolygon(const std::vector<glm::vec2>& po
             break;
         }
         if (!clipped) {
-            return {}; // no ear found — degenerate/self-intersecting input
+            // No ear found. When the remainder has degenerated to a collinear
+            // / zero-area sliver, the clipped triangles already cover the
+            // polygon — return them instead of failing.
+            if (std::abs(polygonSignedArea(poly)) <= 1.0f) {
+                break;
+            }
+            return {}; // genuine failure — degenerate/self-intersecting input
         }
     }
-    if (poly.size() == 3) {
+    if (poly.size() == 3 && std::abs(polygonSignedArea(poly)) > 1.0f) {
         triangles.push_back(poly[0]);
         triangles.push_back(poly[1]);
         triangles.push_back(poly[2]);
