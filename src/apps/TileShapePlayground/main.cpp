@@ -67,24 +67,37 @@ std::filesystem::path g_dataRoot;
 std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
-// Brush palette: three independent layers sharing one canvas. Each keeps its
-// own node grid and presentation (2D grass / 2D yellow / raised 3D).
+// Brush palette: independent layers sharing one canvas. Each keeps its
+// own node grid and presentation (2D grass / 2D yellow / raised 3D / prism
+// boundary-first demo). `cgal` toggles the raised layer between the per-cell
+// generator and the CGAL exact-region one.
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
     bool raised;
+    bool prism;
+    bool cgal;
     const char* name;
 };
 
-PaintLayer g_layers[3] = {
-    {{}, AtlasKind::Grass, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, "Yellow 2D"},
-    {{}, AtlasKind::Flat, true, "Raised 3D"},
+PaintLayer g_layers[4] = {
+    {{}, AtlasKind::Grass, false, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::Flat, true, false, false, "Raised 3D"},
+    {{}, AtlasKind::Flat, false, true, false, "Prism 3D"},
 };
 int g_activeLayer = 0;
-// Raised (3D) generation params for highground_core::generate — height, wall
-// style and noise shaping all live here.
+// Raised (3D) generation params for highground_core (generate/generateCgal) —
+// height, wall style and noise shaping all live here.
 highground::Params g_raisedParams;
+// Z-buffer mode for the raised layer (GPU depth buffer vs the CPU painter
+// sort); the UI checkbox toggles it for A/B, --painter forces painter mode.
+bool g_zbuf = true;
+// Triplanar walls: the walls sample a tiling rock texture in world-space
+// projections (no UV seams) multiplied by the baked shade; --no-triplanar
+// forces the plain baked-color path.
+bool g_triplanarWalls = true;
+float g_wallTexScale = 1.0f / 256.0f;
 
 LandBrush& activeBrush() {
     return g_layers[g_activeLayer].brush;
@@ -142,6 +155,10 @@ bool g_demoNode = false;
 // --no-ui                      hide the ImGui panel (clean captures)
 // --nodes=x,y;x,y;...          paint these nodes on the raised layer
 // --raised-atlas=grass|flat    atlas for the raised layer (default flat)
+// --painter                    CPU painter sort instead of the z-buffer
+// --no-triplanar               baked-color walls instead of triplanar rock
+// --smooth=N                   Chaikin contour smoothing iterations (0..3,
+//                              default 2; CGAL raised tops only)
 // --zoom=Z                     camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy               camera center in cell coords
 //                              (default: bbox center of --nodes)
@@ -237,6 +254,16 @@ void init() {
     for (PaintLayer& layer : g_layers) {
         layer.brush.reset(24, 24);
     }
+    // CGAL region is the default raised-top generator when the library was
+    // built with CGAL; the UI checkbox can switch back to per-cell tops.
+    g_layers[2].cgal = highground::cgalAvailable();
+    // Prism demo figure (boundary-first, hardcoded for now): 2x2 block, a
+    // boot shape and a diagonal pair in the Prism 3D layer.
+    for (const glm::ivec2& n : {glm::ivec2{3, 3}, {4, 3}, {3, 4}, {4, 4},
+                                glm::ivec2{7, 4}, {7, 5}, {6, 6}, {7, 6},
+                                glm::ivec2{10, 3}, {11, 4}}) {
+        g_layers[3].brush.setNode(n, true);
+    }
     if (g_demoPattern) {
         paintDemoPattern();
     }
@@ -291,6 +318,13 @@ void init() {
         }
     }
 
+    // Tiling rock texture for the triplanar walls (world-space projections).
+    const auto wallRockPath =
+        g_dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "rock.png";
+    if (!g_renderer.loadWallTextureFromFile(wallRockPath.string())) {
+        spdlog::warn("TileShapePlayground: wall rock texture missing at {}", wallRockPath.string());
+    }
+
     centerCamera(sapp_width(), sapp_height());
     if (g_demoNode) {
         const glm::vec2 nodePos = g_iso.nodeToField({10, 10});
@@ -329,7 +363,7 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     ImGui::Text("Brush palette:");
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (i > 0) {
             ImGui::SameLine();
         }
@@ -341,6 +375,26 @@ void drawImGui(int w, int h) {
         if (g_raisedParams.rockWalls) {
             ImGui::SliderFloat("Rock amplitude", &g_raisedParams.amplitude, 0.0f, 0.6f, "%.2f");
             ImGui::SliderFloat("Corner bevel", &g_raisedParams.bevel, 0.0f, 0.45f, "%.2f");
+        }
+        // Chaikin corner-cutting on the region contour (CGAL tops only).
+        ImGui::SliderInt("Contour smooth", &g_raisedParams.smoothIterations, 0, 3);
+        if (highground::cgalAvailable()) {
+            ImGui::Checkbox("CGAL region", &g_layers[g_activeLayer].cgal);
+        } else {
+            // Built without CGAL: show the toggle disabled, generate() stays.
+            ImGui::BeginDisabled();
+            bool cgalOff = false;
+            ImGui::Checkbox("CGAL region", &cgalOff);
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::TextDisabled("(not built)");
+        }
+        // GPU depth buffer vs CPU painter sort for the raised layer (A/B).
+        ImGui::Checkbox("Z-buffer", &g_zbuf);
+        // Triplanar rock texture on the walls vs plain baked colors (A/B).
+        ImGui::Checkbox("Triplanar walls", &g_triplanarWalls);
+        if (g_triplanarWalls) {
+            ImGui::SliderFloat("Wall tex scale", &g_wallTexScale, 0.0005f, 0.02f, "%.4f");
         }
     }
     ImGui::Separator();
@@ -360,13 +414,15 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d",
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d",
         g_layers[0].name,
         g_layers[0].brush.onNodeCount(),
         g_layers[1].name,
         g_layers[1].brush.onNodeCount(),
         g_layers[2].name,
-        g_layers[2].brush.onNodeCount());
+        g_layers[2].brush.onNodeCount(),
+        g_layers[3].name,
+        g_layers[3].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -405,19 +461,23 @@ void frame() {
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
     action.colors[0].clear_value = {0.12f, 0.14f, 0.16f, 1.0f};
+    // The swapchain has a depth-stencil attachment: clear it every frame for
+    // the z-buffered raised pass.
+    action.depth.load_action = SG_LOADACTION_CLEAR;
+    action.depth.clear_value = 1.0f;
 
     sg_pass pass = {};
     pass.action = action;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
-    PaintLayerView views[3];
-    for (int i = 0; i < 3; ++i) {
-        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].raised};
+    PaintLayerView views[4];
+    for (int i = 0; i < 4; ++i) {
+        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].raised, g_layers[i].prism, g_layers[i].cgal, g_zbuf};
     }
     g_renderer.render(
         views,
-        3,
+        4,
         g_iso,
         g_camera,
         w,
@@ -425,7 +485,9 @@ void frame() {
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
         g_layers[g_activeLayer].raised,
-        &g_raisedParams);
+        &g_raisedParams,
+        g_triplanarWalls,
+        g_wallTexScale);
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -525,6 +587,8 @@ void event(const sapp_event* ev) {
 
 int main(int argc, char* argv[]) {
     bool smoke = false;
+    // Playground default: smoothed raised contours (overridable via --smooth).
+    g_raisedParams.smoothIterations = 2;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--smoke") {
@@ -544,6 +608,15 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--raised-atlas=grass") {
             g_cliRaisedGrassAtlas = true;
+        }
+        if (arg == "--painter") {
+            g_zbuf = false;
+        }
+        if (arg == "--no-triplanar") {
+            g_triplanarWalls = false;
+        }
+        if (arg.rfind("--smooth=", 0) == 0) {
+            g_raisedParams.smoothIterations = std::atoi(arg.substr(9).c_str());
         }
         if (arg.rfind("--zoom=", 0) == 0) {
             g_cliZoom = static_cast<float>(std::atof(arg.substr(7).c_str()));
