@@ -6,6 +6,7 @@ nw_add_console_app(
     LIBS
         spdlog::spdlog_header_only
         imgui::imgui
+        highground_core
 )
 
 # Sokol is header-only in this project (via vcpkg overlay).

@@ -231,6 +231,22 @@ TileShapePlayground — чекбокс «CGAL region» на raised-слое (A/B
 генератором), покрытие фаззером `highground_cgal_test.cpp`. Ограничение:
 верх строится по нефаскованному контуру, а стены фасят выпуклые углы
 (`bevel`) — на углах возможны мелкие щели до введения фаски на петлях.
+
+**Cliff-field (scalar field + surface nets) `[прототип]`:** альтернативный
+конвейер поднятой земли из CliffFieldPlayground перенесён в `highground_core`
+(`include/highground_core/cliff_field.h`, `surface_nets.h`): бинарная сетка
+нод (инжектится в конструктор `CliffField`, регион — прямоугольный bbox нод)
+→ размытый scalar field (плато + omphalos-борозды + band-limited fbm) →
+`regularizeSigns` (разрешение checkerboard-сёдел) → naive surface nets →
+watertight-mesh с запечённым groove-атрибутом. Чистый C++/glm, без Qt/GPU.
+В TileShapePlayground живёт как кисть «Cliff 3D» (кэш меша с debounce 0.3 с,
+z-buffer с той же формулой глубины, что у raised-прохода, per-pixel шейдер
+палитры из CliffFieldPlayground — GLSL/HLSL/MSL). Стоимость полного ребилда —
+секунды на поле ~1 млн вокселов (Debug), поэтому только debounced-ребилд.
+Покрытие: `src/tests/highground/cliff_field_test.cpp` + cliff-сценарий в
+smoke плейграунда. Известное ограничение: эвристика регуляризации сёдел
+итеративная и не гарантирует сходимость на произвольных формах (статус
+watertight виден в UI). Порт в редактор (ассет/слой) — отдельный шаг.
 Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
 `raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —

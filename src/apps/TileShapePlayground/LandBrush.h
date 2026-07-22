@@ -31,6 +31,10 @@ public:
     int onNodeCount() const;
     int cellTypeCount(landscape_core::LandscapeTileType type) const;
 
+    // Monotonic content version: bumped by setNode/clear/reset — cheap change
+    // detection for cached derivatives (e.g. the cliff-field mesh cache).
+    std::uint64_t version() const { return m_version; }
+
 private:
     bool nodeInBounds(glm::ivec2 node) const;
     bool cellInBounds(glm::ivec2 cell) const;
@@ -41,6 +45,7 @@ private:
 
     int m_width = 0;
     int m_height = 0;
+    std::uint64_t m_version = 0;
     std::vector<std::uint8_t> m_nodes;
     std::vector<landscape_core::LandscapeTileType> m_cellTypes;
 };

@@ -140,6 +140,11 @@
   полуплоскостей `max(fA,fB) − R·k³/6`, gradient warp с triplanar-весами —
   идеи переносимы, сам SDF/MC-пайплайн — нет (3D-поле, минуты на сцену,
   несовместимо с painter-рендером).
+  NB: вердикт писался про Paris-2020. Позже в CliffFieldPlayground появился
+  свой scalar-field + surface nets конвейер (~1.6 с на поле, watertight,
+  z-buffer вместо painter) — другая весовая категория; сейчас он живёт в
+  `highground_core` (`cliff_field.h`/`surface_nets.h`) и как кисть «Cliff 3D»
+  в TileShapePlayground, см. `docs/TECHNICAL_STACK.md`.
 
 ### Текстурирование стен
 

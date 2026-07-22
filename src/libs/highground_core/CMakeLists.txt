@@ -9,10 +9,14 @@ nw_add_lib_sources(
         pch.h
         include/highground_core/highground.h
         include/highground_core/inspect.h
+        include/highground_core/cliff_field.h
+        include/highground_core/surface_nets.h
         src/boundary.h
         src/boundary.cpp
         src/cgal_generate.cpp
+        src/cliff_field.cpp
         src/contour.cpp
+        src/surface_nets.cpp
         src/walls.h
         src/walls.cpp
         src/highground.cpp

@@ -3,7 +3,7 @@
 // Watertight by construction as long as the field is positive on the grid border.
 #pragma once
 
-#include "CliffField.h"
+#include "cliff_field.h"
 
 #include <cstdint>
 #include <vector>
@@ -57,10 +57,5 @@ struct WatertightReport {
 };
 
 WatertightReport checkWatertight(const Mesh& mesh);
-
-// Logs up to maxCount bad edges of each kind with half-edge counts, vertex
-// positions and the shared voxel face diagnostics (corner signs, center value).
-void debugDumpBadEdges(const CliffField& field, const std::vector<float>& samples,
-    const Mesh& mesh, int maxCount);
 
 } // namespace cliff

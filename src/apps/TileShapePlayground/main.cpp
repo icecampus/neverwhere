@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -69,27 +71,49 @@ bool g_ctrlDown = false;
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
 // own node grid and presentation (2D grass / 2D yellow / raised 3D / prism
-// boundary-first demo). `cgal` toggles the raised layer between the per-cell
-// generator and the CGAL exact-region one.
+// boundary-first demo / cliff scalar-field). `cgal` toggles the raised layer
+// between the per-cell generator and the CGAL exact-region one.
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
     bool raised;
     bool prism;
     bool cgal;
+    bool cliff;
     const char* name;
 };
 
-PaintLayer g_layers[4] = {
-    {{}, AtlasKind::Grass, false, false, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, false, false, "Yellow 2D"},
-    {{}, AtlasKind::Flat, true, false, false, "Raised 3D"},
-    {{}, AtlasKind::Flat, false, true, false, "Prism 3D"},
+PaintLayer g_layers[5] = {
+    {{}, AtlasKind::Grass, false, false, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::Flat, true, false, false, false, "Raised 3D"},
+    {{}, AtlasKind::Flat, false, true, false, false, "Prism 3D"},
+    {{}, AtlasKind::Flat, false, false, false, true, "Cliff 3D"},
 };
 int g_activeLayer = 0;
 // Raised (3D) generation params for highground_core (generate/generateCgal) —
-// height, wall style and noise shaping all live here.
+// height, wall style and noise shaping all live here. `height` also scales the
+// cliff layer lift (field px per 1.0 plateau height).
 highground::Params g_raisedParams;
+// Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
+// shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
+cliff::FieldParams g_cliffParams;
+struct ShadingParams {
+    float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
+    float lightElevation = 0.85f; // radians
+    float darkColor[3] = {0.38f, 0.38f, 0.42f};
+    float goldColor[3] = {0.75f, 0.62f, 0.5f};
+    float grassA[3] = {0.4f, 0.62f, 0.35f};
+    float grassB[3] = {0.6f, 0.65f, 0.4f};
+    float veinThreshold = 0.8f;
+    float ambient = 0.35f;
+    float diffuse = 0.75f;
+    float backLight = 0.1f;
+    float specStrength = 0.5f;
+    float specPower = 24.0f;
+    float gamma = 0.85f;
+};
+ShadingParams g_cliffShading;
 // Z-buffer mode for the raised layer (GPU depth buffer vs the CPU painter
 // sort); the UI checkbox toggles it for A/B, --painter forces painter mode.
 bool g_zbuf = true;
@@ -154,6 +178,7 @@ bool g_demoNode = false;
 // --- Visual debug CLI (headless screenshot comparisons vs the editor) ---
 // --no-ui                      hide the ImGui panel (clean captures)
 // --nodes=x,y;x,y;...          paint these nodes on the raised layer
+// --cliff-nodes=x,y;x,y;...    paint these nodes on the cliff layer
 // --raised-atlas=grass|flat    atlas for the raised layer (default flat)
 // --painter                    CPU painter sort instead of the z-buffer
 // --no-triplanar               baked-color walls instead of triplanar rock
@@ -164,6 +189,7 @@ bool g_demoNode = false;
 //                              (default: bbox center of --nodes)
 bool g_noUi = false;
 std::vector<glm::ivec2> g_cliNodes;
+std::vector<glm::ivec2> g_cliCliffNodes;
 bool g_cliRaisedGrassAtlas = false;
 std::optional<float> g_cliZoom;
 std::optional<glm::vec2> g_cliCenter;
@@ -199,7 +225,8 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 }
 
 // Painted programmatically in --demo mode: one raised blob, one lone raised
-// node, plus grass/yellow flat strokes — used for visual verification.
+// node, a cliff blob, plus grass/yellow flat strokes — used for visual
+// verification.
 void paintDemoPattern() {
     for (int y = 9; y <= 12; ++y) {
         for (int x = 9; x <= 12; ++x) {
@@ -207,6 +234,12 @@ void paintDemoPattern() {
         }
     }
     g_layers[2].brush.setNode({16, 10}, true);
+    for (int y = 14; y <= 17; ++y) {
+        for (int x = 15; x <= 18; ++x) {
+            g_layers[4].brush.setNode({x, y}, true);
+        }
+    }
+    g_layers[4].brush.setNode({14, 15}, true);
     for (int y = 15; y <= 18; ++y) {
         for (int x = 6; x <= 9; ++x) {
             g_layers[0].brush.setNode({x, y}, true);
@@ -273,6 +306,9 @@ void init() {
     for (const glm::ivec2& node : g_cliNodes) {
         g_layers[2].brush.setNode(node, true);
     }
+    for (const glm::ivec2& node : g_cliCliffNodes) {
+        g_layers[4].brush.setNode(node, true);
+    }
     if (g_cliRaisedGrassAtlas) {
         g_layers[2].atlas = AtlasKind::Grass;
     }
@@ -332,17 +368,19 @@ void init() {
         g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - nodePos.x * g_camera.zoom;
         g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - nodePos.y * g_camera.zoom;
     }
-    if (g_cliZoom || g_cliCenter || !g_cliNodes.empty()) {
+    if (g_cliZoom || g_cliCenter || !g_cliNodes.empty() || !g_cliCliffNodes.empty()) {
         // Deterministic framing for screenshot comparisons.
+        const std::vector<glm::ivec2>& framingNodes =
+            !g_cliNodes.empty() ? g_cliNodes : g_cliCliffNodes;
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
         } else {
             glm::vec2 acc(0.0f);
-            for (const glm::ivec2& node : g_cliNodes) {
+            for (const glm::ivec2& node : framingNodes) {
                 acc += g_iso.nodeToField(node);
             }
-            worldCenter = acc / static_cast<float>(g_cliNodes.size());
+            worldCenter = acc / static_cast<float>(framingNodes.size());
         }
         g_camera.zoom = g_cliZoom.value_or(1.0f);
         g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - worldCenter.x * g_camera.zoom;
@@ -363,7 +401,7 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     ImGui::Text("Brush palette:");
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         if (i > 0) {
             ImGui::SameLine();
         }
@@ -397,6 +435,53 @@ void drawImGui(int w, int h) {
             ImGui::SliderFloat("Wall tex scale", &g_wallTexScale, 0.0005f, 0.02f, "%.4f");
         }
     }
+    if (g_layers[g_activeLayer].cliff) {
+        // Scalar-field surface nets: edits are debounced (0.3 s) into a full
+        // field rebuild — continuous slider drags just keep postponing it.
+        cliff::FieldParams& p = g_cliffParams;
+        ShadingParams& sh = g_cliffShading;
+        ImGui::SliderFloat("Raised height", &g_raisedParams.height, 4.0f, 128.0f, "%.0f px");
+        if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::SliderFloat("Cell size", &p.cellSize, 0.03f, 0.07f, "%.3f");
+            ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
+            ImGui::SliderFloat("Plateau height", &p.plateauHeight, 0.4f, 2.0f);
+            ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 6);
+            ImGui::SliderFloat("Edge radius", &p.edgeRadius, 0.0f, 0.12f);
+            ImGui::SliderFloat("Fbm amplitude", &p.fbmAmplitude, 0.0f, 0.08f);
+            ImGui::SliderFloat("Fbm frequency", &p.fbmFrequency, 2.0f, 10.0f);
+            ImGui::SliderInt("Fbm octaves", &p.fbmOctaves, 1, 3);
+        }
+        if (ImGui::CollapsingHeader("Grooves", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::SliderFloat("Period", &p.groovePeriod, 0.2f, 0.8f);
+            ImGui::SliderFloat("Depth", &p.grooveDepthMax, 0.02f, 0.2f);
+            ImGui::SliderFloat("Mask width", &p.grooveMaskWidth, 0.05f, 0.6f);
+            ImGui::SliderFloat("Fade K", &p.grooveFadeK, 0.2f, 2.0f);
+            ImGui::SliderFloat("Rim fade", &p.grooveRimFade, 0.0f, 0.4f);
+            ImGui::SliderFloat("Smooth radius", &p.grooveSmooth, 0.005f, 0.06f);
+            ImGui::SliderFloat("Phase", &p.groovePhase, 0.0f, 0.8f);
+        }
+        if (ImGui::CollapsingHeader("Shading", ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Uniform-only: instant, no mesh rebuild.
+            ImGui::SliderFloat("Vein threshold", &sh.veinThreshold, 0.6f, 0.95f);
+            ImGui::ColorEdit3("Dark color", sh.darkColor);
+            ImGui::ColorEdit3("Gold color", sh.goldColor);
+            ImGui::ColorEdit3("Grass A", sh.grassA);
+            ImGui::ColorEdit3("Grass B", sh.grassB);
+            ImGui::SliderFloat("Ambient", &sh.ambient, 0.05f, 0.8f);
+            ImGui::SliderFloat("Diffuse", &sh.diffuse, 0.0f, 1.2f);
+            ImGui::SliderFloat("Spec strength", &sh.specStrength, 0.0f, 1.5f);
+            ImGui::SliderFloat("Spec power", &sh.specPower, 4.0f, 64.0f);
+            ImGui::SliderAngle("Light azimuth", &sh.lightAzimuth, -180.0f, 180.0f);
+            ImGui::SliderAngle("Light elevation", &sh.lightElevation, 0.0f, 90.0f);
+        }
+        const CliffStats& st = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
+        ImGui::Text("Cliff mesh: %d verts, %d tris", st.vertexCount, st.triangleCount);
+        ImGui::Text("Watertight: %s", st.watertight ? "yes" : "NO");
+        ImGui::Text("Rebuild: %.0f ms (%d voxels)", st.rebuildMs, st.voxelCount);
+        if (st.pending) {
+            ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
+        }
+    }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);
@@ -414,7 +499,7 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d",
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d, %s %d",
         g_layers[0].name,
         g_layers[0].brush.onNodeCount(),
         g_layers[1].name,
@@ -422,7 +507,9 @@ void drawImGui(int w, int h) {
         g_layers[2].name,
         g_layers[2].brush.onNodeCount(),
         g_layers[3].name,
-        g_layers[3].brush.onNodeCount());
+        g_layers[3].brush.onNodeCount(),
+        g_layers[4].name,
+        g_layers[4].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -471,23 +558,54 @@ void frame() {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
-    PaintLayerView views[4];
-    for (int i = 0; i < 4; ++i) {
-        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].raised, g_layers[i].prism, g_layers[i].cgal, g_zbuf};
+    PaintLayerView views[5];
+    for (int i = 0; i < 5; ++i) {
+        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].raised, g_layers[i].prism,
+            g_layers[i].cgal, g_zbuf, g_layers[i].cliff, &g_cliffParams, g_raisedParams.height};
     }
+
+    // Cliff shading uniforms: palette/light from the UI state; the view
+    // direction is constant for the iso camera (viewer -> scene, mirrors
+    // CliffFieldPlayground's rd = normalize(p - camPos)).
+    const ShadingParams& s = g_cliffShading;
+    CliffFsParams cliffFs{};
+    const float lightCe = std::cos(s.lightElevation);
+    cliffFs.lightDir[0] = lightCe * std::sin(s.lightAzimuth);
+    cliffFs.lightDir[1] = std::sin(s.lightElevation);
+    cliffFs.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
+    const float halfH = g_iso.dims.cellSize().y * 0.5f;
+    const float viewY = 2.0f * halfH / std::max(g_raisedParams.height, 1.0f);
+    const float viewLen = std::sqrt(2.0f + viewY * viewY);
+    cliffFs.viewDir[0] = -1.0f / viewLen;
+    cliffFs.viewDir[1] = -viewY / viewLen;
+    cliffFs.viewDir[2] = -1.0f / viewLen;
+    std::memcpy(cliffFs.darkColor, s.darkColor, sizeof(s.darkColor));
+    std::memcpy(cliffFs.goldColor, s.goldColor, sizeof(s.goldColor));
+    std::memcpy(cliffFs.grassA, s.grassA, sizeof(s.grassA));
+    std::memcpy(cliffFs.grassB, s.grassB, sizeof(s.grassB));
+    cliffFs.params0[0] = s.veinThreshold;
+    cliffFs.params0[1] = s.ambient;
+    cliffFs.params0[2] = s.diffuse;
+    cliffFs.params0[3] = s.specStrength;
+    cliffFs.params1[0] = s.specPower;
+    cliffFs.params1[1] = s.gamma;
+    cliffFs.params1[2] = s.backLight;
+
     g_renderer.render(
         views,
-        4,
+        5,
         g_iso,
         g_camera,
         w,
         h,
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
-        g_layers[g_activeLayer].raised,
+        g_layers[g_activeLayer].raised || g_layers[g_activeLayer].cliff,
         &g_raisedParams,
         g_triplanarWalls,
-        g_wallTexScale);
+        g_wallTexScale,
+        &cliffFs,
+        stm_sec(stm_now()));
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -605,6 +723,9 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--nodes=", 0) == 0) {
             g_cliNodes = parseNodesArg(arg.substr(8));
+        }
+        if (arg.rfind("--cliff-nodes=", 0) == 0) {
+            g_cliCliffNodes = parseNodesArg(arg.substr(14));
         }
         if (arg == "--raised-atlas=grass") {
             g_cliRaisedGrassAtlas = true;

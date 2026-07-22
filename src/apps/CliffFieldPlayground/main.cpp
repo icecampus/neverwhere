@@ -6,9 +6,11 @@
 
 #include "pch.h"
 
-#include "CliffField.h"
+#include "DebugDump.h"
 #include "MiniMath.h"
-#include "SurfaceNets.h"
+
+#include <highground_core/cliff_field.h>
+#include <highground_core/surface_nets.h>
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -37,6 +39,22 @@
 #include <util/sokol_imgui.h>
 
 namespace {
+
+// 7x7 height nodes (1 = high), rows are z, columns are x — the demo shape of
+// this playground. Main blob with a bay notch at (3,3), a NE lobe and a south
+// peninsula with a widened tip, so several marching-squares cell types appear
+// in the outline. All border rows/columns stay low: high border nodes would
+// extend the blurred outline past the region and the solid would be clipped
+// by the field grid.
+const std::uint8_t kHeightNodes[7][7] = {
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 1, 1, 1, 0, 0},
+    {0, 1, 1, 1, 1, 1, 0},
+    {0, 1, 1, 0, 1, 1, 0},
+    {0, 1, 1, 1, 0, 0, 0},
+    {0, 0, 1, 1, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0},
+};
 
 struct VsParams {
     float mvp[16];
@@ -373,7 +391,7 @@ bool runTestScenario() {
     bool ok = true;
 
     const auto t0 = Clock::now();
-    cliff::CliffField field(g_state.fieldParams);
+    cliff::CliffField field(g_state.fieldParams, &kHeightNodes[0][0], 7, 7);
     std::vector<float> samples;
     field.sample(samples);
     const auto t1 = Clock::now();
@@ -508,7 +526,7 @@ void uploadMeshBuffers() {
 void rebuildMesh() {
     using Clock = std::chrono::steady_clock;
     const auto t0 = Clock::now();
-    cliff::CliffField field(g_state.fieldParams);
+    cliff::CliffField field(g_state.fieldParams, &kHeightNodes[0][0], 7, 7);
     std::vector<float> samples;
     field.sample(samples);
     cliff::RegularizeStats regStats;

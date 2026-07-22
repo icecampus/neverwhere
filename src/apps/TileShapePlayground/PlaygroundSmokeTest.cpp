@@ -1,13 +1,17 @@
 #include "PlaygroundSmokeTest.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include <highground_core/cliff_field.h>
 #include <highground_core/highground.h>
 #include <highground_core/inspect.h>
+#include <highground_core/surface_nets.h>
 #include <topology_core/diamond_isometry.h>
 
 #include "FlatAtlasGenerator.h"
@@ -263,6 +267,82 @@ bool runTileShapeSmokeTest() {
         }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + highground_core generation");
+    // --- Cliff layer pipeline (cliff::CliffField + surface nets): brush
+    // nodes -> bbox grid (1-cell margin) -> sampled field -> watertight mesh
+    // with the groove attribute. Coarser cellSize keeps the smoke fast.
+    {
+        LandBrush b;
+        b.reset(24, 24);
+        for (int y = 14; y <= 17; ++y) {
+            for (int x = 14; x <= 17; ++x) {
+                b.setNode({x, y}, true);
+            }
+        }
+        std::vector<glm::ivec2> onNodes;
+        for (int y = 0; y <= b.height(); ++y) {
+            for (int x = 0; x <= b.width(); ++x) {
+                if (b.nodeIsOn({x, y})) {
+                    onNodes.emplace_back(x, y);
+                }
+            }
+        }
+        if (onNodes.empty()) {
+            spdlog::error("TEST FAIL TileShape: cliff brush has no on nodes");
+            return false;
+        }
+        int minX = onNodes[0].x, minY = onNodes[0].y;
+        int maxX = onNodes[0].x, maxY = onNodes[0].y;
+        for (const glm::ivec2& n : onNodes) {
+            minX = std::min(minX, n.x);
+            minY = std::min(minY, n.y);
+            maxX = std::max(maxX, n.x);
+            maxY = std::max(maxY, n.y);
+        }
+        minX -= 1;
+        minY -= 1;
+        maxX += 1;
+        maxY += 1;
+        const int nodesX = maxX - minX + 1;
+        const int nodesY = maxY - minY + 1;
+        std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
+        for (const glm::ivec2& n : onNodes) {
+            nodes[static_cast<std::size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
+        }
+
+        cliff::FieldParams fp;
+        fp.cellSize = 0.09f; // ~8x fewer voxels than the UI default: smoke speed
+        cliff::CliffField field(fp, nodes.data(), nodesX, nodesY);
+        std::vector<float> samples;
+        field.sample(samples);
+        cliff::RegularizeStats regStats;
+        cliff::regularizeSigns(field, samples, &regStats);
+        const cliff::Mesh mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+        if (regStats.remaining != 0) {
+            spdlog::error("TEST FAIL TileShape: cliff sign regularization left {} saddles",
+                regStats.remaining);
+            return false;
+        }
+        if (mesh.vertices.empty() || mesh.indices.empty()) {
+            spdlog::error("TEST FAIL TileShape: cliff mesh is empty");
+            return false;
+        }
+        const cliff::WatertightReport report = cliff::checkWatertight(mesh);
+        if (!report.ok()) {
+            spdlog::error("TEST FAIL TileShape: cliff mesh not watertight ({} bad of {} edges)",
+                report.badEdges, report.undirectedEdges);
+            return false;
+        }
+        float gMax = -1e9f;
+        for (const cliff::MeshVertex& v : mesh.vertices) {
+            gMax = std::max(gMax, v.groove);
+        }
+        if (gMax <= 0.02f) {
+            spdlog::error("TEST FAIL TileShape: cliff groove attribute range max {:.4f} — no carve",
+                gMax);
+            return false;
+        }
+    }
+
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + highground_core generation + cliff field pipeline");
     return true;
 }

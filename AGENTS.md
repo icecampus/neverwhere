@@ -17,7 +17,7 @@
 - **Основной стек:** C++20 для логики, Qt 6 / QML для UI редактора, Dear ImGui для UI рантайма.
 - Не вводить тяжёлые зависимости без согласования.
 - `src/libs/core` — бизнес-логика ядра; `src/apps/EpicMapEditor` — UI/приложение редактора.
-- `src/libs/highground_core` — генерация геометрии поднятой 3D-земли (стены + верх) по vertex-нодам; чистый конвейер `Grid + Params -> generate() -> Mesh`, без Qt/GPU. Общая для редактора/клиента (через `render_core`) и TileShapePlayground — отлаживать алгоритм удобнее в плейграунде.
+- `src/libs/highground_core` — генерация геометрии поднятой 3D-земли (стены + верх) по vertex-нодам; чистый конвейер `Grid + Params -> generate() -> Mesh`, без Qt/GPU. Там же (см. `cliff_field.h`/`surface_nets.h`) живёт cliff-field конвейер: сетка нод -> scalar field (плато + omphalos-борозды) -> surface nets -> watertight-mesh (используется кистью «Cliff 3D» в TileShapePlayground и CliffFieldPlayground). Общая для редактора/клиента (через `render_core`) и TileShapePlayground — отлаживать алгоритм удобнее в плейграунде.
 - QML и C++-логику держать разделёнными; связывать через Qt properties/signals/slots.
 - Чистые сериализуемые данные — в `game_data` (без Qt); `QObject`-обёртки — только для view-логики в редакторе.
 - Перед архитектурными или продуктовыми решениями сверяться с `docs/ROADMAP_VISION.md` и `docs/TECHNICAL_STACK.md`.

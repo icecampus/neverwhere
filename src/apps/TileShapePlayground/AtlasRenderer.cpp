@@ -1,8 +1,10 @@
 #include "AtlasRenderer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 #include <spdlog/spdlog.h>
 
@@ -671,6 +673,387 @@ fragment float4 _main(PSIn in [[stage_in]],
 }
 )";
 
+// ---------------------------------------------------------------------------
+// Cliff pass (scalar-field surface nets): depth-baked vertices with a
+// field-space normal, groove attribute and world position; the fragment
+// shader is the CliffFieldPlayground omphalos palette (dark grooves, gold
+// shell + veins, grassy tops, lambert + wrap + spec), with the perspective
+// camera ray replaced by the constant iso view direction.
+// ---------------------------------------------------------------------------
+
+static const char* kCliffVsGlsl = R"(
+#version 330
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 normal;
+layout(location=2) in float groove;
+layout(location=3) in vec3 world;
+out vec3 v_normal;
+out float v_groove;
+out vec3 v_world;
+uniform vec2 view_size;
+uniform vec2 camera_offset;
+uniform float camera_zoom;
+void main() {
+    vec2 screen = (pos.xy * camera_zoom) + camera_offset;
+    vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
+    gl_Position = vec4(clip, pos.z, 1.0);
+    v_normal = normal;
+    v_groove = groove;
+    v_world = world;
+}
+)";
+
+static const char* kCliffFsGlsl = R"(
+#version 330
+in vec3 v_normal;
+in float v_groove;
+in vec3 v_world;
+out vec4 frag_color;
+uniform vec4 light_dir;
+uniform vec4 view_dir;
+uniform vec4 dark_color;
+uniform vec4 gold_color;
+uniform vec4 grass_a;
+uniform vec4 grass_b;
+uniform vec4 params0;
+uniform vec4 params1;
+
+vec4 hashv4v3(vec3 p) {
+    vec3 chash = vec3(37.0, 39.0, 41.0);
+    return fract(sin(vec4(dot(p, chash), dot(p + vec3(1.0, 0.0, 0.0), chash),
+        dot(p + vec3(0.0, 1.0, 0.0), chash), dot(p + vec3(0.0, 0.0, 1.0), chash))) * 43758.54);
+}
+
+float noisefv3(vec3 p) {
+    vec3 ip = floor(p);
+    vec3 fp = fract(p);
+    fp *= fp * (3.0 - 2.0 * fp);
+    vec4 t = mix(hashv4v3(ip), hashv4v3(ip + vec3(0.0, 0.0, 1.0)), fp.z);
+    return mix(mix(t.x, t.y, fp.x), mix(t.z, t.w, fp.x), fp.y);
+}
+
+float fbm3(vec3 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int i = 0; i < 5; i++) {
+        f += a * noisefv3(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+vec2 hashv2v2(vec2 p) {
+    vec2 chash = vec2(37.0, 39.0);
+    return fract(sin(vec2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(vec2 p) {
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(0.0, 1.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(vec2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; j++) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+void main() {
+    vec3 n = normalize(v_normal);
+    vec3 p = v_world;
+    // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
+    float f = fbm3(32.0 * p);
+    float shell = 1.0 - smoothstep(0.005, 0.05, v_groove);
+    vec3 gold = gold_color.rgb + vec3(1.0, 0.9, 0.4) * step(params0.x, f);
+    vec3 rock = mix(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
+    // Grassy flat tops (omphalos idObj==2 style).
+    float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
+    vec3 grass = mix(grass_a.rgb, grass_b.rgb, gm);
+    float topMask = smoothstep(0.7, 0.9, n.y);
+    vec3 base = mix(rock, grass, topMask);
+    // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
+    vec3 l = normalize(light_dir.xyz);
+    vec3 rd = view_dir.xyz;
+    float ndl = dot(n, l);
+    vec3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
+        params0.z * max(ndl, 0.0));
+    float specAmt = mix(0.05, params0.w, shell) * (1.0 - topMask);
+    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
+    frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(params1.y)), 1.0);
+}
+)";
+
+static const char* kCliffVsHlsl = R"(
+cbuffer vs_params: register(b0) {
+    float2 view_size;
+    float2 camera_offset;
+    float camera_zoom;
+    float3 _pad0;
+};
+struct VSIn {
+    float3 pos: TEXCOORD0;
+    float3 normal: TEXCOORD1;
+    float groove: TEXCOORD2;
+    float3 world: TEXCOORD3;
+};
+struct VSOut {
+    float4 pos: SV_Position;
+    float3 normal: TEXCOORD0;
+    float groove: TEXCOORD1;
+    float3 world: TEXCOORD2;
+};
+VSOut main(VSIn inp) {
+    VSOut o;
+    float2 screen = (inp.pos.xy * camera_zoom) + camera_offset;
+    float2 clip;
+    clip.x = (screen.x / view_size.x) * 2.0 - 1.0;
+    clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
+    o.pos = float4(clip, inp.pos.z, 1.0);
+    o.normal = inp.normal;
+    o.groove = inp.groove;
+    o.world = inp.world;
+    return o;
+}
+)";
+
+static const char* kCliffFsHlsl = R"(
+cbuffer fs_params: register(b0) {
+    float4 light_dir;
+    float4 view_dir;
+    float4 dark_color;
+    float4 gold_color;
+    float4 grass_a;
+    float4 grass_b;
+    float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+};
+
+float4 hashv4v3(float3 p) {
+    float3 chash = float3(37.0, 39.0, 41.0);
+    return frac(sin(float4(dot(p, chash), dot(p + float3(1.0, 0.0, 0.0), chash),
+        dot(p + float3(0.0, 1.0, 0.0), chash), dot(p + float3(0.0, 0.0, 1.0), chash))) * 43758.54);
+}
+
+float noisefv3(float3 p) {
+    float3 ip = floor(p);
+    float3 fp = frac(p);
+    fp *= fp * (3.0 - 2.0 * fp);
+    float4 t = lerp(hashv4v3(ip), hashv4v3(ip + float3(0.0, 0.0, 1.0)), fp.z);
+    return lerp(lerp(t.x, t.y, fp.x), lerp(t.z, t.w, fp.x), fp.y);
+}
+
+float fbm3(float3 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int i = 0; i < 5; i++) {
+        f += a * noisefv3(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+float2 hashv2v2(float2 p) {
+    float2 chash = float2(37.0, 39.0);
+    return frac(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = frac(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(0.0, 1.0)), fp.y);
+    return lerp(t.x, t.y, fp.x);
+}
+
+float fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; j++) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+struct PSIn {
+    float4 pos: SV_Position;
+    float3 normal: TEXCOORD0;
+    float groove: TEXCOORD1;
+    float3 world: TEXCOORD2;
+};
+
+float4 main(PSIn inp): SV_Target {
+    float3 n = normalize(inp.normal);
+    float3 p = inp.world;
+    // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
+    float f = fbm3(32.0 * p);
+    float shell = 1.0 - smoothstep(0.005, 0.05, inp.groove);
+    float3 gold = gold_color.rgb + float3(1.0, 0.9, 0.4) * step(params0.x, f);
+    float3 rock = lerp(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
+    // Grassy flat tops (omphalos idObj==2 style).
+    float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
+    float3 grass = lerp(grass_a.rgb, grass_b.rgb, gm);
+    float topMask = smoothstep(0.7, 0.9, n.y);
+    float3 base = lerp(rock, grass, topMask);
+    // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
+    float3 l = normalize(light_dir.xyz);
+    float3 rd = view_dir.xyz;
+    float ndl = dot(n, l);
+    float3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
+        params0.z * max(ndl, 0.0));
+    float specAmt = lerp(0.05, params0.w, shell) * (1.0 - topMask);
+    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
+    return float4(pow(clamp(col, 0.0, 1.0), (float3)params1.y), 1.0);
+}
+)";
+
+static const char* kCliffVsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+    float2 camera_offset;
+    float camera_zoom;
+    packed_float3 _pad0;
+};
+
+struct VSIn {
+    float3 pos [[attribute(0)]];
+    float3 normal [[attribute(1)]];
+    float groove [[attribute(2)]];
+    float3 world [[attribute(3)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float3 normal;
+    float groove;
+    float3 world;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 screen = (in.pos.xy * params.camera_zoom) + params.camera_offset;
+    float2 clip = float2(
+        (screen.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (screen.y / params.view_size.y) * 2.0
+    );
+    o.pos = float4(clip, in.pos.z, 1.0);
+    o.normal = in.normal;
+    o.groove = in.groove;
+    o.world = in.world;
+    return o;
+}
+)";
+
+static const char* kCliffFsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct FsParams {
+    float4 light_dir;
+    float4 view_dir;
+    float4 dark_color;
+    float4 gold_color;
+    float4 grass_a;
+    float4 grass_b;
+    float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+};
+
+float4 hashv4v3(float3 p) {
+    float3 chash = float3(37.0, 39.0, 41.0);
+    return fract(sin(float4(dot(p, chash), dot(p + float3(1.0, 0.0, 0.0), chash),
+        dot(p + float3(0.0, 1.0, 0.0), chash), dot(p + float3(0.0, 0.0, 1.0), chash))) * 43758.54);
+}
+
+float noisefv3(float3 p) {
+    float3 ip = floor(p);
+    float3 fp = fract(p);
+    fp *= fp * (3.0 - 2.0 * fp);
+    float4 t = mix(hashv4v3(ip), hashv4v3(ip + float3(0.0, 0.0, 1.0)), fp.z);
+    return mix(mix(t.x, t.y, fp.x), mix(t.z, t.w, fp.x), fp.y);
+}
+
+float fbm3(float3 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int i = 0; i < 5; i++) {
+        f += a * noisefv3(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+float2 hashv2v2(float2 p) {
+    float2 chash = float2(37.0, 39.0);
+    return fract(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(0.0, 1.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; j++) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+struct PSIn {
+    float4 pos [[position]];
+    float3 normal;
+    float groove;
+    float3 world;
+};
+
+fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]]) {
+    float3 n = normalize(in.normal);
+    float3 p = in.world;
+    // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
+    float f = fbm3(32.0 * p);
+    float shell = 1.0 - smoothstep(0.005, 0.05, in.groove);
+    float3 gold = fs.gold_color.rgb + float3(1.0, 0.9, 0.4) * step(fs.params0.x, f);
+    float3 rock = mix(fs.dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
+    // Grassy flat tops (omphalos idObj==2 style).
+    float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
+    float3 grass = mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
+    float topMask = smoothstep(0.7, 0.9, n.y);
+    float3 base = mix(rock, grass, topMask);
+    // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
+    float3 l = normalize(fs.light_dir.xyz);
+    float3 rd = fs.view_dir.xyz;
+    float ndl = dot(n, l);
+    float3 col = base * (fs.params0.y + fs.params1.z * max(-ndl, 0.0) +
+        fs.params0.z * max(ndl, 0.0));
+    float specAmt = mix(0.05, fs.params0.w, shell) * (1.0 - topMask);
+    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params1.x);
+    return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), 1.0);
+}
+)";
+
 void fillVsUniformDesc(sg_shader_uniform_block* block) {
     block->stage = SG_SHADERSTAGE_VERTEX;
     block->size = sizeof(AtlasRenderer::VsParams);
@@ -692,6 +1075,22 @@ void fillTriVsUniformDesc(sg_shader_uniform_block* block) {
     fillVsUniformDesc(block);
     block->glsl_uniforms[3].glsl_name = "tex_scale";
     block->glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT;
+}
+
+// Cliff fragment block (palette/light): slot 1, after the vertex block.
+void fillCliffFsUniformDesc(sg_shader_uniform_block* block) {
+    block->stage = SG_SHADERSTAGE_FRAGMENT;
+    block->size = sizeof(CliffFsParams);
+    block->hlsl_register_b_n = 0;
+    block->msl_buffer_n = 1;
+    block->wgsl_group0_binding_n = 1;
+    block->spirv_set0_binding_n = 1;
+    const char* names[8] = {"light_dir", "view_dir", "dark_color", "gold_color",
+        "grass_a", "grass_b", "params0", "params1"};
+    for (int i = 0; i < 8; ++i) {
+        block->glsl_uniforms[i].glsl_name = names[i];
+        block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
+    }
 }
 
 void fillTextureSlotDesc(sg_shader_desc* shd, const char* glslName) {
@@ -780,6 +1179,13 @@ void AtlasRenderer::init() {
 
 void AtlasRenderer::shutdown() {
     destroyPipelines();
+    for (CliffCache& cache : m_cliffCaches) {
+        if (cache.vbuf.id != SG_INVALID_ID) {
+            sg_destroy_buffer(cache.vbuf);
+            cache.vbuf = {};
+        }
+    }
+    m_cliffCaches.clear();
     if (m_texVbuf.id != SG_INVALID_ID) {
         sg_destroy_buffer(m_texVbuf);
         m_texVbuf = {};
@@ -1056,7 +1462,9 @@ void AtlasRenderer::render(
     bool hoverRaised,
     const highground::Params* raisedParams,
     bool triplanarWalls,
-    float wallTexScale) {
+    float wallTexScale,
+    const CliffFsParams* cliffShading,
+    double nowSec) {
 
     if (!m_ready || m_texPip.id == SG_INVALID_ID || !layers || layerCount <= 0 || !layers[0].brush) {
         return;
@@ -1475,6 +1883,70 @@ void AtlasRenderer::render(
         }
     }
 
+    // Cliff layers: scalar-field surface nets from the same nodes, drawn with
+    // the z-buffer (depth baked exactly like the raised pass) and per-pixel
+    // shading. The mesh is cached per brush; the heavy field rebuild runs at
+    // most once per edit burst (0.3 s debounce), a heightScale edit only
+    // re-projects the cached mesh.
+    for (int li = 0; li < layerCount; ++li) {
+        const PaintLayerView& layer = layers[li];
+        if (!layer.brush || !layer.cliff || !layer.cliffParams) {
+            continue;
+        }
+        CliffCache& cache = cliffCacheFor(layer.brush);
+        const bool contentChanged = !cache.contentValid ||
+            cache.brushVersion != layer.brush->version() ||
+            std::memcmp(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams)) != 0;
+        const bool scaleChanged = cache.heightScale != layer.cliffHeightScale;
+        if (contentChanged || scaleChanged) {
+            cache.brushVersion = layer.brush->version();
+            std::memcpy(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams));
+            cache.heightScale = layer.cliffHeightScale;
+            cache.contentValid = true;
+            cache.lastEditSec = nowSec;
+            cache.meshDirty = cache.meshDirty || contentChanged;
+            cache.streamDirty = true;
+            cache.stats.pending = true;
+        }
+        if ((cache.meshDirty || cache.streamDirty) && (nowSec - cache.lastEditSec) > 0.3) {
+            rebuildCliffCache(cache, iso, zFar, zScale);
+            cache.meshDirty = false;
+            cache.streamDirty = false;
+            cache.gpuDirty = true;
+            cache.stats.pending = false;
+        }
+        if (cache.gpuDirty) {
+            const size_t bytes = cache.stream.size() * sizeof(CliffVertex);
+            if (bytes > 0) {
+                if (cache.vbufSize < bytes) {
+                    if (cache.vbuf.id != SG_INVALID_ID) {
+                        sg_destroy_buffer(cache.vbuf);
+                    }
+                    sg_buffer_desc bufDesc = {};
+                    bufDesc.size = ((bytes / (size_t{1} << 20)) + 1) * (size_t{1} << 20);
+                    bufDesc.usage.dynamic_update = true;
+                    bufDesc.label = "tileshape-cliff-vbuf";
+                    cache.vbuf = sg_make_buffer(&bufDesc);
+                    cache.vbufSize = bufDesc.size;
+                }
+                if (cache.vbuf.id != SG_INVALID_ID) {
+                    sg_update_buffer(cache.vbuf, sg_range{cache.stream.data(), bytes});
+                }
+            }
+            cache.gpuDirty = false;
+        }
+        if (!cache.stream.empty() && cache.vbuf.id != SG_INVALID_ID && cliffShading != nullptr) {
+            sg_bindings bind{};
+            bind.vertex_buffers[0] = cache.vbuf;
+
+            sg_apply_pipeline(m_cliffPip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+            sg_apply_uniforms(1, sg_range{cliffShading, sizeof(CliffFsParams)});
+            sg_draw(0, static_cast<int>(cache.stream.size()), 1);
+        }
+    }
+
     if (!lineVerts.empty()) {
         sg_bindings bind{};
         bind.vertex_buffers[0] = m_colorVbuf;
@@ -1484,6 +1956,120 @@ void AtlasRenderer::render(
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
         sg_draw(static_cast<int>(wallVerts.size()), static_cast<int>(lineVerts.size()), 1);
     }
+}
+
+AtlasRenderer::CliffCache& AtlasRenderer::cliffCacheFor(const LandBrush* brush) {
+    for (CliffCache& cache : m_cliffCaches) {
+        if (cache.brush == brush) {
+            return cache;
+        }
+    }
+    m_cliffCaches.push_back({});
+    m_cliffCaches.back().brush = brush;
+    return m_cliffCaches.back();
+}
+
+const CliffStats& AtlasRenderer::cliffStatsFor(const LandBrush* brush) const {
+    static const CliffStats kEmpty{};
+    for (const CliffCache& cache : m_cliffCaches) {
+        if (cache.brush == brush) {
+            return cache.stats;
+        }
+    }
+    return kEmpty;
+}
+
+void AtlasRenderer::rebuildCliffCache(
+    CliffCache& cache,
+    const topology_core::DiamondIsometry& iso,
+    float zFar,
+    float zScale) {
+
+    using Clock = std::chrono::steady_clock;
+    const auto t0 = Clock::now();
+
+    if (cache.meshDirty) {
+        // Full path: brush nodes -> bbox grid -> scalar field -> surface nets.
+        const LandBrush& brush = *cache.brush;
+        std::vector<glm::ivec2> onNodes;
+        for (int y = 0; y <= brush.height(); ++y) {
+            for (int x = 0; x <= brush.width(); ++x) {
+                if (brush.nodeIsOn({x, y})) {
+                    onNodes.emplace_back(x, y);
+                }
+            }
+        }
+
+        if (onNodes.empty()) {
+            cache.mesh = {};
+            cache.stats.voxelCount = 0;
+            cache.stats.vertexCount = 0;
+            cache.stats.triangleCount = 0;
+            cache.stats.watertight = true;
+        } else {
+            int minX = onNodes[0].x;
+            int minY = onNodes[0].y;
+            int maxX = onNodes[0].x;
+            int maxY = onNodes[0].y;
+            for (const glm::ivec2& n : onNodes) {
+                minX = std::min(minX, n.x);
+                minY = std::min(minY, n.y);
+                maxX = std::max(maxX, n.x);
+                maxY = std::max(maxY, n.y);
+            }
+            // One-cell margin (the blurred outline must not cross the field
+            // border, same contract as the demo shape's zero border rows).
+            minX -= 1;
+            minY -= 1;
+            maxX += 1;
+            maxY += 1;
+            const int nodesX = maxX - minX + 1;
+            const int nodesY = maxY - minY + 1;
+            std::vector<std::uint8_t> nodes(static_cast<size_t>(nodesX) * nodesY, 0);
+            for (const glm::ivec2& n : onNodes) {
+                nodes[static_cast<size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
+            }
+
+            cliff::CliffField field(cache.params, nodes.data(), nodesX, nodesY);
+            std::vector<float> samples;
+            field.sample(samples);
+            cliff::RegularizeStats regStats;
+            cliff::regularizeSigns(field, samples, &regStats);
+            cache.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+            const cliff::WatertightReport report = cliff::checkWatertight(cache.mesh);
+            cache.stats.watertight = report.ok();
+            cache.stats.voxelCount = field.sizeX() * field.sizeY() * field.sizeZ();
+            cache.stats.vertexCount = static_cast<int>(cache.mesh.vertices.size());
+            cache.stats.triangleCount = static_cast<int>(cache.mesh.indices.size() / 3);
+            cache.origin = {minX, minY};
+            if (!report.ok()) {
+                spdlog::warn("AtlasRenderer: cliff mesh not watertight ({} bad of {} edges, {} saddles left)",
+                    report.badEdges, report.undirectedEdges, regStats.remaining);
+            }
+        }
+    }
+
+    // Projection path (also after a full rebuild): mesh -> projected stream.
+    // Placement matches DiamondIsometry::nodeToField (no +halfH on y), so the
+    // blob stays registered with the node markers of the other layers.
+    cache.stream.clear();
+    cache.stream.reserve(cache.mesh.indices.size());
+    const glm::vec2 cellSz = iso.dims.cellSize();
+    const float halfW = cellSz.x * 0.5f;
+    const float halfH = cellSz.y * 0.5f;
+    for (const std::uint32_t index : cache.mesh.indices) {
+        const cliff::MeshVertex& v = cache.mesh.vertices[index];
+        const float mapX = static_cast<float>(cache.origin.x) + v.px;
+        const float mapZ = static_cast<float>(cache.origin.y) + v.pz;
+        const float fieldX = (mapX - mapZ) * halfW + halfW;
+        const float fieldY = (mapX + mapZ) * halfH;
+        const float z = (zFar - fieldY) * zScale;
+        cache.stream.push_back(CliffVertex{
+            fieldX, fieldY - v.py * cache.heightScale, z,
+            v.nx, v.ny, v.nz, v.groove,
+            mapX, v.py, mapZ});
+    }
+    cache.stats.rebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
 
 void AtlasRenderer::ensurePipelines() {
@@ -1739,6 +2325,41 @@ void AtlasRenderer::ensurePipelines() {
         pip.label = "tileshape-tri-depth-wall-pip";
         m_triDepthWallPip = sg_make_pipeline(&pip);
     }
+
+    // Cliff pass (scalar-field surface nets): baked depth + field-space
+    // normal/groove/world attributes, per-pixel omphalos palette.
+    {
+        sg_shader_desc shd = {};
+#if defined(SOKOL_D3D11)
+        shd.vertex_func.source = kCliffVsHlsl;
+        shd.fragment_func.source = kCliffFsHlsl;
+#elif defined(SOKOL_METAL)
+        shd.vertex_func.source = kCliffVsMsl;
+        shd.fragment_func.source = kCliffFsMsl;
+#else
+        shd.vertex_func.source = kCliffVsGlsl;
+        shd.fragment_func.source = kCliffFsGlsl;
+#endif
+        for (int i = 0; i < 4; ++i) {
+            shd.attrs[i].hlsl_sem_name = "TEXCOORD";
+            shd.attrs[i].hlsl_sem_index = i;
+        }
+        fillVsUniformDesc(&shd.uniform_blocks[0]);
+        fillCliffFsUniformDesc(&shd.uniform_blocks[1]);
+        m_cliffShd = sg_make_shader(&shd);
+
+        sg_pipeline_desc pip = {};
+        pip.shader = m_cliffShd;
+        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+        pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3;
+        pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT;
+        pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT3;
+        pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+        pip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip.depth.write_enabled = true;
+        pip.label = "tileshape-cliff-pip";
+        m_cliffPip = sg_make_pipeline(&pip);
+    }
 }
 
 void AtlasRenderer::destroyPipelines() {
@@ -1770,6 +2391,10 @@ void AtlasRenderer::destroyPipelines() {
         sg_destroy_pipeline(m_triDepthWallPip);
         m_triDepthWallPip = {};
     }
+    if (m_cliffPip.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(m_cliffPip);
+        m_cliffPip = {};
+    }
     if (m_texShd.id != SG_INVALID_ID) {
         sg_destroy_shader(m_texShd);
         m_texShd = {};
@@ -1793,5 +2418,9 @@ void AtlasRenderer::destroyPipelines() {
     if (m_triDepthWallShd.id != SG_INVALID_ID) {
         sg_destroy_shader(m_triDepthWallShd);
         m_triDepthWallShd = {};
+    }
+    if (m_cliffShd.id != SG_INVALID_ID) {
+        sg_destroy_shader(m_cliffShd);
+        m_cliffShd = {};
     }
 }

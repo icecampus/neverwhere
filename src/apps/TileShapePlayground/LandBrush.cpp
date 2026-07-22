@@ -11,11 +11,13 @@ void LandBrush::reset(int width, int height) {
     m_cellTypes.assign(
         static_cast<std::size_t>(m_width) * static_cast<std::size_t>(m_height),
         landscape_core::LandscapeTileType::Unknown);
+    ++m_version;
 }
 
 void LandBrush::clear() {
     std::fill(m_nodes.begin(), m_nodes.end(), 0);
     refreshAllCells();
+    ++m_version;
 }
 
 bool LandBrush::isNodeEditable(glm::ivec2 node) const {
@@ -41,6 +43,7 @@ bool LandBrush::setNode(glm::ivec2 node, bool on) {
     for (const glm::ivec2 cell : affectedCells(node)) {
         refreshCell(cell);
     }
+    ++m_version;
     return true;
 }
 
