@@ -1,6 +1,6 @@
 // CliffFieldPlayground — standalone sokol prototype of a cliff/highground mesh:
 // scalar field (blurred height nodes + omphalos-style grooves) -> naive surface
-// nets -> watertight mesh with vertex-baked groove depth. Metal/MSL only.
+// nets -> watertight mesh with vertex-baked groove depth. MSL (macOS) + HLSL (Windows).
 // Groove idea and stone palette follow "Omphalos" by dr2 (CC BY-NC-SA 3.0),
 // https://www.shadertoy.com/view/ttXXDN — for study only.
 
@@ -104,7 +104,7 @@ sg_bindings g_bindings{};
 cliff::Mesh g_mesh;
 
 // ---------------------------------------------------------------------------
-// MSL shaders (Metal is the only backend for this prototype)
+// MSL shaders
 // ---------------------------------------------------------------------------
 
 static const char* vs_src_msl = R"(
@@ -232,6 +232,135 @@ fragment float4 _main(VsOut in [[stage_in]], constant FsParams& fs [[buffer(0)]]
     float specAmt = mix(0.05, fs.params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params1.x);
     return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), 1.0);
+}
+)";
+
+// ---------------------------------------------------------------------------
+// HLSL (ручной порт MSL-версий; mix -> lerp, fract -> frac,
+// splat-конструкторы floatN(scalar) -> cast, entry-функции — main)
+// ---------------------------------------------------------------------------
+
+static const char* vs_src_hlsl = R"(
+cbuffer vs_params: register(b0) {
+    // sokol собирает с D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR — layout совпадает
+    // с C++ float mvp[16] (column-major), как и у MSL float4x4.
+    float4x4 mvp;
+};
+
+struct VsIn {
+    float3 pos: TEXCOORD0;
+    float3 normal: TEXCOORD1;
+    float groove: TEXCOORD2;
+};
+
+struct VsOut {
+    float4 pos: SV_Position;
+    float3 world_pos: TEXCOORD0;
+    float3 normal: TEXCOORD1;
+    float groove: TEXCOORD2;
+};
+
+VsOut main(VsIn inp) {
+    VsOut o;
+    o.pos = mul(mvp, float4(inp.pos, 1.0));
+    o.world_pos = inp.pos;
+    o.normal = inp.normal;
+    o.groove = inp.groove;
+    return o;
+}
+)";
+
+static const char* fs_src_hlsl = R"(
+cbuffer fs_params: register(b0) {
+    float4 light_dir;
+    float4 cam_pos;
+    float4 dark_color;
+    float4 gold_color;
+    float4 grass_a;
+    float4 grass_b;
+    float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+};
+
+float4 Hashv4v3(float3 p) {
+    float3 cHashVA3 = float3(37.0, 39.0, 41.0);
+    return frac(sin(float4(dot(p, cHashVA3), dot(p + float3(1.0, 0.0, 0.0), cHashVA3),
+        dot(p + float3(0.0, 1.0, 0.0), cHashVA3), dot(p + float3(0.0, 0.0, 1.0), cHashVA3))) * 43758.54);
+}
+
+float Noisefv3(float3 p) {
+    float4 t;
+    float3 ip = floor(p);
+    float3 fp = frac(p);
+    fp *= fp * (3.0 - 2.0 * fp);
+    t = lerp(Hashv4v3(ip), Hashv4v3(ip + float3(0.0, 0.0, 1.0)), fp.z);
+    return lerp(lerp(t.x, t.y, fp.x), lerp(t.z, t.w, fp.x), fp.y);
+}
+
+float Fbm3(float3 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int i = 0; i < 5; i++) {
+        f += a * Noisefv3(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+float2 Hashv2v2(float2 p) {
+    float2 cHashVA2 = float2(37.0, 39.0);
+    return frac(sin(float2(dot(p, cHashVA2), dot(p + float2(1.0, 0.0), cHashVA2))) * 43758.54);
+}
+
+float Noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = frac(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = lerp(Hashv2v2(ip), Hashv2v2(ip + float2(0.0, 1.0)), fp.y);
+    return lerp(t.x, t.y, fp.x);
+}
+
+float Fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; j++) {
+        f += a * Noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+struct VsOut {
+    float4 pos: SV_Position;
+    float3 world_pos: TEXCOORD0;
+    float3 normal: TEXCOORD1;
+    float groove: TEXCOORD2;
+};
+
+float4 main(VsOut inp): SV_Target {
+    float3 n = normalize(inp.normal);
+    float3 p = inp.world_pos;
+    // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
+    float f = Fbm3(32.0 * p);
+    float shell = 1.0 - smoothstep(0.005, 0.05, inp.groove);
+    float3 gold = gold_color.rgb + float3(1.0, 0.9, 0.4) * step(params0.x, f);
+    float3 rock = lerp(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
+    // Grassy flat tops (omphalos idObj==2 style).
+    float gm = smoothstep(0.4, 0.6, Fbm2(2.0 * p.xz));
+    float3 grass = lerp(grass_a.rgb, grass_b.rgb, gm);
+    float topMask = smoothstep(0.7, 0.9, n.y);
+    float3 base = lerp(rock, grass, topMask);
+    // Cheap sun lambert + wrap ambient + spec.
+    float3 l = normalize(light_dir.xyz);
+    float3 rd = normalize(p - cam_pos.xyz);
+    float ndl = dot(n, l);
+    float3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
+        params0.z * max(ndl, 0.0));
+    float specAmt = lerp(0.05, params0.w, shell) * (1.0 - topMask);
+    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
+    return float4(pow(clamp(col, 0.0, 1.0), (float3)params1.y), 1.0);
 }
 )";
 
@@ -517,15 +646,26 @@ void init() {
 
     uploadMeshBuffers();
 
-    // Metal only: GLSL/HLSL variants intentionally not provided.
+    // Compile-time выбор исходника под активный бэкенд (как в render_core).
     sg_shader_desc shdDesc{};
+#if defined(SOKOL_D3D11)
+    shdDesc.vertex_func.source = vs_src_hlsl;
+    shdDesc.fragment_func.source = fs_src_hlsl;
+    for (int i = 0; i < 3; i++) {
+        shdDesc.attrs[i].hlsl_sem_name = "TEXCOORD";
+        shdDesc.attrs[i].hlsl_sem_index = (std::uint8_t)i;
+    }
+#else
     shdDesc.vertex_func.source = vs_src_msl;
     shdDesc.fragment_func.source = fs_src_msl;
+#endif
     shdDesc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
     shdDesc.uniform_blocks[0].size = sizeof(VsParams);
+    shdDesc.uniform_blocks[0].hlsl_register_b_n = 0;
     shdDesc.uniform_blocks[0].msl_buffer_n = 0;
     shdDesc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
     shdDesc.uniform_blocks[1].size = sizeof(FsParams);
+    shdDesc.uniform_blocks[1].hlsl_register_b_n = 0;
     shdDesc.uniform_blocks[1].msl_buffer_n = 0;
     shdDesc.label = "cliff-shader";
     sg_shader shader = sg_make_shader(&shdDesc);
