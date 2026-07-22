@@ -27,11 +27,14 @@
 
 #include <spdlog/spdlog.h>
 
+#include <imgui.h>
+
 #include <sokol_app.h>
 #include <sokol_gfx.h>
 #include <sokol_glue.h>
 #include <sokol_log.h>
 #include <sokol_time.h>
+#include <util/sokol_imgui.h>
 
 namespace {
 
@@ -39,9 +42,33 @@ struct VsParams {
     float mvp[16];
 };
 
+// Fragment-shader uniforms, 16-byte blocks in MSL order.
 struct FsParams {
-    float lightDir[4]; // xyz: direction towards the sun
-    float camPos[4];   // xyz: camera world position
+    float lightDir[4];   // xyz: direction towards the sun
+    float camPos[4];     // xyz: camera world position
+    float darkColor[4];  // rgb: groove floors
+    float goldColor[4];  // rgb: outer shell
+    float grassA[4];     // rgb
+    float grassB[4];     // rgb
+    float params0[4];    // vein threshold, ambient, diffuse, spec strength
+    float params1[4];    // spec power, gamma, wrap backlight, unused
+};
+
+// Live-tunable shading (palette/light); applied via uniforms, no mesh rebuild.
+struct ShadingParams {
+    float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
+    float lightElevation = 0.85f; // radians
+    float darkColor[3] = {0.38f, 0.38f, 0.42f};
+    float goldColor[3] = {0.75f, 0.62f, 0.5f};
+    float grassA[3] = {0.4f, 0.62f, 0.35f};
+    float grassB[3] = {0.6f, 0.65f, 0.4f};
+    float veinThreshold = 0.8f;
+    float ambient = 0.35f;
+    float diffuse = 0.75f;
+    float backLight = 0.1f;
+    float specStrength = 0.5f;
+    float specPower = 24.0f;
+    float gamma = 0.85f;
 };
 
 struct AppState {
@@ -51,6 +78,7 @@ struct AppState {
     bool smokeMode = false;
     bool scenarioOk = true;
     int smokeFrames = 0;
+    bool imguiReady = false;
     // Orbit camera.
     float azimuth = 0.7f;
     float elevation = 0.55f;
@@ -60,6 +88,14 @@ struct AppState {
     float lastMouseX = 0.0f;
     float lastMouseY = 0.0f;
     int indexCount = 0;
+    // Live parameters and the debounced mesh rebuild.
+    cliff::FieldParams fieldParams;
+    ShadingParams shading;
+    bool rebuildPending = false; // edits happened, waiting out the debounce
+    bool rebuilding = false;     // overlay visible, rebuild runs next frame
+    double lastEditTime = 0.0;   // stm seconds of the last field edit
+    double lastRebuildMs = 0.0;
+    bool lastRebuildWatertight = true;
 };
 
 AppState g_state;
@@ -109,6 +145,12 @@ using namespace metal;
 struct FsParams {
     float4 light_dir;
     float4 cam_pos;
+    float4 dark_color;
+    float4 gold_color;
+    float4 grass_a;
+    float4 grass_b;
+    float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
 };
 
 float4 Hashv4v3(float3 p) {
@@ -171,24 +213,25 @@ struct VsOut {
 fragment float4 _main(VsOut in [[stage_in]], constant FsParams& fs [[buffer(0)]]) {
     float3 n = normalize(in.normal);
     float3 p = in.world_pos;
-    // Omphalos stone palette: dark grey at groove floors, gold + veins on the shell.
+    // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
     float f = Fbm3(32.0 * p);
     float shell = 1.0 - smoothstep(0.005, 0.05, in.groove);
-    float3 gold = float3(0.75, 0.62, 0.5) + float3(1.0, 0.9, 0.4) * step(0.8, f);
-    float3 rock = mix(float3(0.38, 0.38, 0.42), gold, shell) * (1.0 - 0.3 * f);
+    float3 gold = fs.gold_color.rgb + float3(1.0, 0.9, 0.4) * step(fs.params0.x, f);
+    float3 rock = mix(fs.dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
     // Grassy flat tops (omphalos idObj==2 style).
     float gm = smoothstep(0.4, 0.6, Fbm2(2.0 * p.xz));
-    float3 grass = mix(float3(0.4, 0.62, 0.35), float3(0.6, 0.65, 0.4), gm);
+    float3 grass = mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
     float topMask = smoothstep(0.7, 0.9, n.y);
     float3 base = mix(rock, grass, topMask);
     // Cheap sun lambert + wrap ambient + spec.
     float3 l = normalize(fs.light_dir.xyz);
     float3 rd = normalize(p - fs.cam_pos.xyz);
     float ndl = dot(n, l);
-    float3 col = base * (0.35 + 0.1 * max(-ndl, 0.0) + 0.75 * max(ndl, 0.0));
-    float specAmt = mix(0.05, 0.5, shell) * (1.0 - topMask);
-    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), 24.0);
-    return float4(pow(clamp(col, 0.0, 1.0), float3(0.85)), 1.0);
+    float3 col = base * (fs.params0.y + fs.params1.z * max(-ndl, 0.0) +
+        fs.params0.z * max(ndl, 0.0));
+    float specAmt = mix(0.05, fs.params0.w, shell) * (1.0 - topMask);
+    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params1.x);
+    return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), 1.0);
 }
 )";
 
@@ -200,9 +243,8 @@ bool runTestScenario() {
     using Clock = std::chrono::steady_clock;
     bool ok = true;
 
-    cliff::FieldParams params;
     const auto t0 = Clock::now();
-    cliff::CliffField field(params);
+    cliff::CliffField field(g_state.fieldParams);
     std::vector<float> samples;
     field.sample(samples);
     const auto t1 = Clock::now();
@@ -301,6 +343,148 @@ bool runTestScenario() {
 // Sokol app
 // ---------------------------------------------------------------------------
 
+// (Re)creates the GPU buffers from g_mesh; safe to call after every rebuild.
+void uploadMeshBuffers() {
+    if (g_bindings.vertex_buffers[0].id != SG_INVALID_ID) {
+        sg_destroy_buffer(g_bindings.vertex_buffers[0]);
+        g_bindings.vertex_buffers[0].id = SG_INVALID_ID;
+    }
+    if (g_bindings.index_buffer.id != SG_INVALID_ID) {
+        sg_destroy_buffer(g_bindings.index_buffer);
+        g_bindings.index_buffer.id = SG_INVALID_ID;
+    }
+    if (g_mesh.vertices.empty() || g_mesh.indices.empty()) {
+        return;
+    }
+    sg_buffer_desc vbufDesc{};
+    vbufDesc.size = g_mesh.vertices.size() * sizeof(cliff::MeshVertex);
+    vbufDesc.usage.vertex_buffer = true;
+    vbufDesc.usage.immutable = true;
+    vbufDesc.data.ptr = g_mesh.vertices.data();
+    vbufDesc.data.size = vbufDesc.size;
+    vbufDesc.label = "cliff-vertices";
+    g_bindings.vertex_buffers[0] = sg_make_buffer(&vbufDesc);
+
+    sg_buffer_desc ibufDesc{};
+    ibufDesc.size = g_mesh.indices.size() * sizeof(std::uint32_t);
+    ibufDesc.usage.index_buffer = true;
+    ibufDesc.usage.immutable = true;
+    ibufDesc.data.ptr = g_mesh.indices.data();
+    ibufDesc.data.size = ibufDesc.size;
+    ibufDesc.label = "cliff-indices";
+    g_bindings.index_buffer = sg_make_buffer(&ibufDesc);
+}
+
+// Rebuilds the mesh from g_state.fieldParams and re-uploads it (GUI edits).
+void rebuildMesh() {
+    using Clock = std::chrono::steady_clock;
+    const auto t0 = Clock::now();
+    cliff::CliffField field(g_state.fieldParams);
+    std::vector<float> samples;
+    field.sample(samples);
+    cliff::RegularizeStats regStats;
+    cliff::regularizeSigns(field, samples, &regStats);
+    g_mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+    const cliff::WatertightReport report = cliff::checkWatertight(g_mesh);
+    g_state.lastRebuildWatertight = report.ok();
+    if (!report.ok()) {
+        spdlog::warn("rebuild: mesh not watertight ({} bad of {} edges, {} saddles left)",
+            report.badEdges, report.undirectedEdges, regStats.remaining);
+    }
+    g_state.indexCount = static_cast<int>(g_mesh.indices.size());
+    uploadMeshBuffers();
+    g_state.lastRebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+    spdlog::info("rebuild: {} vertices, {} triangles, watertight={}, {:.0f} ms",
+        g_mesh.vertices.size(), g_mesh.indices.size() / 3,
+        g_state.lastRebuildWatertight, g_state.lastRebuildMs);
+}
+
+void markFieldEdited() {
+    g_state.rebuildPending = true;
+    g_state.rebuilding = false;
+    g_state.lastEditTime = stm_sec(stm_since(g_state.startTime));
+}
+
+// Left-side control panel; the mesh renders full-screen behind it.
+void drawUi() {
+    cliff::FieldParams& p = g_state.fieldParams;
+    ShadingParams& s = g_state.shading;
+
+    ImGui::SetNextWindowPos({0.0f, 0.0f}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({360.0f, static_cast<float>(sapp_height())}, ImGuiCond_Always);
+    ImGui::Begin("Cliff Field", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+
+    if (ImGui::CollapsingHeader("Grid", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Expensive: applied on mouse release, not on every drag tick.
+        ImGui::SliderFloat("Cell size", &p.cellSize, 0.03f, 0.07f, "%.3f");
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            markFieldEdited();
+        }
+        ImGui::TextDisabled("(applied on release)");
+    }
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Shape", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::SliderFloat("Plateau height", &p.plateauHeight, 0.4f, 2.0f)) markFieldEdited();
+        if (ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 6)) markFieldEdited();
+        if (ImGui::SliderFloat("Edge radius", &p.edgeRadius, 0.0f, 0.12f)) markFieldEdited();
+        if (ImGui::SliderFloat("Fbm amplitude", &p.fbmAmplitude, 0.0f, 0.08f)) markFieldEdited();
+        if (ImGui::SliderFloat("Fbm frequency", &p.fbmFrequency, 2.0f, 10.0f)) markFieldEdited();
+        if (ImGui::SliderInt("Fbm octaves", &p.fbmOctaves, 1, 3)) markFieldEdited();
+    }
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Grooves", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::SliderFloat("Period", &p.groovePeriod, 0.2f, 0.8f)) markFieldEdited();
+        if (ImGui::SliderFloat("Depth", &p.grooveDepthMax, 0.02f, 0.2f)) markFieldEdited();
+        if (ImGui::SliderFloat("Mask width", &p.grooveMaskWidth, 0.05f, 0.6f)) markFieldEdited();
+        if (ImGui::SliderFloat("Fade K", &p.grooveFadeK, 0.2f, 2.0f)) markFieldEdited();
+        if (ImGui::SliderFloat("Rim fade", &p.grooveRimFade, 0.0f, 0.4f)) markFieldEdited();
+        if (ImGui::SliderFloat("Smooth radius", &p.grooveSmooth, 0.005f, 0.06f)) markFieldEdited();
+        if (ImGui::SliderFloat("Phase", &p.groovePhase, 0.0f, 0.8f)) markFieldEdited();
+        if (ImGui::TreeNode("Frame angles")) {
+            if (ImGui::SliderAngle("F1 xy", &p.grooveAngles[0][0], -180.0f, 180.0f)) markFieldEdited();
+            if (ImGui::SliderAngle("F2 xz", &p.grooveAngles[1][0], -180.0f, 180.0f)) markFieldEdited();
+            if (ImGui::SliderAngle("F2 xy", &p.grooveAngles[1][1], -180.0f, 180.0f)) markFieldEdited();
+            if (ImGui::SliderAngle("F3 xz", &p.grooveAngles[2][0], -180.0f, 180.0f)) markFieldEdited();
+            if (ImGui::SliderAngle("F3 xy", &p.grooveAngles[2][1], -180.0f, 180.0f)) markFieldEdited();
+            ImGui::TreePop();
+        }
+    }
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Shading", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Uniform-only: instant, no mesh rebuild.
+        ImGui::SliderFloat("Vein threshold", &s.veinThreshold, 0.6f, 0.95f);
+        ImGui::ColorEdit3("Dark color", s.darkColor);
+        ImGui::ColorEdit3("Gold color", s.goldColor);
+        ImGui::ColorEdit3("Grass A", s.grassA);
+        ImGui::ColorEdit3("Grass B", s.grassB);
+        ImGui::SliderFloat("Ambient", &s.ambient, 0.05f, 0.8f);
+        ImGui::SliderFloat("Diffuse", &s.diffuse, 0.0f, 1.2f);
+        ImGui::SliderFloat("Spec strength", &s.specStrength, 0.0f, 1.5f);
+        ImGui::SliderFloat("Spec power", &s.specPower, 4.0f, 64.0f);
+        ImGui::SliderAngle("Light azimuth", &s.lightAzimuth, -180.0f, 180.0f);
+        ImGui::SliderAngle("Light elevation", &s.lightElevation, 0.0f, 90.0f);
+    }
+    ImGui::Separator();
+
+    if (ImGui::Button("Reset to defaults")) {
+        p = cliff::FieldParams{};
+        s = ShadingParams{};
+        markFieldEdited();
+    }
+    ImGui::Separator();
+
+    ImGui::Text("Mesh: %zu verts, %zu tris", g_mesh.vertices.size(), g_mesh.indices.size() / 3);
+    ImGui::Text("Watertight: %s", g_state.lastRebuildWatertight ? "yes" : "NO");
+    ImGui::Text("Last rebuild: %.0f ms", g_state.lastRebuildMs);
+    if (g_state.rebuilding || g_state.rebuildPending) {
+        ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
+    }
+    ImGui::End();
+}
+
 const char* backendName() {
     switch (sg_query_backend()) {
         case SG_BACKEND_METAL_MACOS: return "Metal";
@@ -331,23 +515,7 @@ void init() {
         return;
     }
 
-    sg_buffer_desc vbufDesc{};
-    vbufDesc.size = g_mesh.vertices.size() * sizeof(cliff::MeshVertex);
-    vbufDesc.usage.vertex_buffer = true;
-    vbufDesc.usage.immutable = true;
-    vbufDesc.data.ptr = g_mesh.vertices.data();
-    vbufDesc.data.size = vbufDesc.size;
-    vbufDesc.label = "cliff-vertices";
-    g_bindings.vertex_buffers[0] = sg_make_buffer(&vbufDesc);
-
-    sg_buffer_desc ibufDesc{};
-    ibufDesc.size = g_mesh.indices.size() * sizeof(std::uint32_t);
-    ibufDesc.usage.index_buffer = true;
-    ibufDesc.usage.immutable = true;
-    ibufDesc.data.ptr = g_mesh.indices.data();
-    ibufDesc.data.size = ibufDesc.size;
-    ibufDesc.label = "cliff-indices";
-    g_bindings.index_buffer = sg_make_buffer(&ibufDesc);
+    uploadMeshBuffers();
 
     // Metal only: GLSL/HLSL variants intentionally not provided.
     sg_shader_desc shdDesc{};
@@ -389,6 +557,13 @@ void init() {
     } else {
         spdlog::error("TEST FAIL: cliff pipeline invalid (backend: {})", backendName());
     }
+
+    if (!g_state.smokeMode) {
+        simgui_desc_t imguiDesc{};
+        imguiDesc.logger.func = slog_func;
+        simgui_setup(&imguiDesc);
+        g_state.imguiReady = true;
+    }
 }
 
 void frame() {
@@ -399,7 +574,36 @@ void frame() {
         return;
     }
 
+    // Deferred rebuild: the edit debounce elapsed last frame, the "Rebuilding..."
+    // overlay is on screen now, so do the heavy work at the start of this frame.
+    if (g_state.rebuilding) {
+        rebuildMesh();
+        g_state.rebuilding = false;
+        g_state.rebuildPending = false;
+    } else if (g_state.rebuildPending &&
+        (stm_sec(stm_since(g_state.startTime)) - g_state.lastEditTime) > 0.3) {
+        g_state.rebuilding = true;
+    }
+
     const float t = static_cast<float>(stm_sec(stm_since(g_state.startTime)));
+    // Debug hook: exercises the debounced rebuild path without UI input.
+    static bool testRebuildDone = false;
+    if (!testRebuildDone && t > 3.0f && std::getenv("CLIFF_TEST_REBUILD") != nullptr) {
+        testRebuildDone = true;
+        g_state.fieldParams.cellSize = 0.055f;
+        markFieldEdited();
+        spdlog::info("CLIFF_TEST_REBUILD: forced cellSize=0.055 rebuild");
+    }
+    if (g_state.imguiReady) {
+        simgui_frame_desc_t imguiFrame{};
+        imguiFrame.width = sapp_width();
+        imguiFrame.height = sapp_height();
+        imguiFrame.delta_time = sapp_frame_duration();
+        imguiFrame.dpi_scale = sapp_dpi_scale();
+        simgui_new_frame(&imguiFrame);
+        drawUi();
+    }
+
     if (!g_state.userOrbited) {
         // Auto-orbit (omphalos style): slow azimuth spin + elevation sway.
         g_state.azimuth = 0.7f + 0.25f * t;
@@ -415,18 +619,31 @@ void frame() {
     const cfm::Mat4 proj = cfm::Mat4::perspective(50.0f * 3.14159265f / 180.0f, aspect, 0.1f, 80.0f);
     const cfm::Mat4 mvp = proj * view;
 
+    const ShadingParams& s = g_state.shading;
     VsParams vsParams{};
     std::memcpy(vsParams.mvp, mvp.m, sizeof(vsParams.mvp));
     FsParams fsParams{};
-    const cfm::Vec3 sun = cfm::normalize(cfm::Vec3(0.9f, 1.3f, -0.7f));
-    fsParams.lightDir[0] = sun.x;
-    fsParams.lightDir[1] = sun.y;
-    fsParams.lightDir[2] = sun.z;
+    const float lightCe = std::cos(s.lightElevation);
+    fsParams.lightDir[0] = lightCe * std::sin(s.lightAzimuth);
+    fsParams.lightDir[1] = std::sin(s.lightElevation);
+    fsParams.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
     fsParams.lightDir[3] = 0.0f;
     fsParams.camPos[0] = eye.x;
     fsParams.camPos[1] = eye.y;
     fsParams.camPos[2] = eye.z;
     fsParams.camPos[3] = 0.0f;
+    std::memcpy(fsParams.darkColor, s.darkColor, sizeof(s.darkColor));
+    std::memcpy(fsParams.goldColor, s.goldColor, sizeof(s.goldColor));
+    std::memcpy(fsParams.grassA, s.grassA, sizeof(s.grassA));
+    std::memcpy(fsParams.grassB, s.grassB, sizeof(s.grassB));
+    fsParams.params0[0] = s.veinThreshold;
+    fsParams.params0[1] = s.ambient;
+    fsParams.params0[2] = s.diffuse;
+    fsParams.params0[3] = s.specStrength;
+    fsParams.params1[0] = s.specPower;
+    fsParams.params1[1] = s.gamma;
+    fsParams.params1[2] = s.backLight;
+    fsParams.params1[3] = 0.0f;
 
     sg_pass_action action{};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -441,7 +658,12 @@ void frame() {
     sg_apply_bindings(&g_bindings);
     sg_apply_uniforms(0, SG_RANGE(vsParams));
     sg_apply_uniforms(1, SG_RANGE(fsParams));
-    sg_draw(0, g_state.indexCount, 1);
+    if (g_state.indexCount > 0) {
+        sg_draw(0, g_state.indexCount, 1);
+    }
+    if (g_state.imguiReady) {
+        simgui_render();
+    }
     sg_end_pass();
     sg_commit();
 
@@ -457,6 +679,10 @@ void frame() {
 
 void cleanup() {
     spdlog::info("CliffFieldPlayground: cleanup");
+    if (g_state.imguiReady) {
+        simgui_shutdown();
+        g_state.imguiReady = false;
+    }
     if (g_pipeline.id != SG_INVALID_ID) {
         sg_destroy_pipeline(g_pipeline);
         g_pipeline.id = SG_INVALID_ID;
@@ -485,6 +711,18 @@ void cleanup() {
 }
 
 void event(const sapp_event* ev) {
+    if (g_state.imguiReady) {
+        simgui_handle_event(ev);
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.WantCaptureMouse) {
+            // Keep releasing a camera drag, but don't start orbit/zoom over UI.
+            if (ev->type == SAPP_EVENTTYPE_MOUSE_UP &&
+                ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+                g_state.dragging = false;
+            }
+            return;
+        }
+    }
     switch (ev->type) {
         case SAPP_EVENTTYPE_MOUSE_DOWN:
             if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {

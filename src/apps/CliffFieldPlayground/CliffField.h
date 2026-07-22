@@ -29,6 +29,18 @@ struct FieldParams {
     float groundDepth = 0.3f;      // ground slab thickness (y in [-groundDepth, 0])
     float groundMargin = 0.35f;    // ground slab extent beyond the region
     float groundRounding = 0.1f;   // ground slab edge rounding
+    // Groove wave: abs(gmod(y + phase, period) - period/2) - (period/2 - depthMax).
+    float groovePeriod = 0.4f;     // gmod period along the groove axis
+    float groovePhase = 0.1f;      // phase shift
+    float grooveDepthMax = 0.1f;   // carve amplitude of the wave
+    float grooveSmooth = 0.02f;    // SmoothMax radius
+    // Rotation angles (radians) of the three groove frames, omphalos defaults:
+    // frame1 rotates xy; frame2 xz then xy; frame3 xz then xy.
+    float grooveAngles[3][2] = {
+        {0.6283185f, 0.0f},       // pi/5
+        {2.1991149f, 0.5654867f}, // 2.1*pi/3, 0.9*pi/5
+        {-2.1467550f, 0.6911504f} // -2.05*pi/3, 1.1*pi/5
+    };
 };
 
 class CliffField {
@@ -56,6 +68,9 @@ public:
 private:
     float heightAt(float x, float z) const; // blurred 2D node field, bilinear lookup
     float evalBase(const cfm::Vec3& p, float& outD2) const;
+    float grooveWave(float y) const;           // parametrized omphalos wave
+    float grooveMask(float d2, float y) const; // wall band mask with rim fade
+    float applyGrooves(float f, const cfm::Vec3& p, float mask) const;
 
     FieldParams m_params;
     cfm::Vec3 m_origin;
@@ -69,7 +84,6 @@ private:
 
 // Omphalos-style helpers.
 float gmod(float x, float m);
-float grooveWave(float y); // abs(gmod(y + 0.1, 0.4) - 0.2) - 0.1
 float fbm3(const cfm::Vec3& p);  // full 5-octave fbm (fragment-shader richness)
 float fbm(const cfm::Vec3& p, int octaves);
 float smoothMin(float a, float b, float r);

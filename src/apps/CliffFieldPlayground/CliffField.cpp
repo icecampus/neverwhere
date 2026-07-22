@@ -8,8 +8,6 @@ namespace cliff {
 
 namespace {
 
-constexpr float kPi = 3.14159265358979f;
-
 // 7x7 height nodes (1 = high), rows are z, columns are x.
 // Main blob with a bay notch at (3,3), a NE lobe and a south peninsula with a
 // widened tip, so several marching-squares cell types appear in the outline.
@@ -69,7 +67,45 @@ void rot2d(float& a, float& b, float angle) {
 
 float gmod(float x, float m) { return x - m * std::floor(x / m); }
 
-float grooveWave(float y) { return std::fabs(gmod(y + 0.1f, 0.4f) - 0.2f) - 0.1f; }
+float CliffField::grooveWave(float y) const {
+    const float period = m_params.groovePeriod;
+    const float half = 0.5f * period;
+    return std::fabs(gmod(y + m_params.groovePhase, period) - half) -
+        (half - m_params.grooveDepthMax);
+}
+
+float CliffField::grooveMask(float d2, float y) const {
+    float mask = cfm::smoothstep(m_params.grooveMaskWidth, 0.0f, std::fabs(d2));
+    if (m_params.grooveRimFade > 0.0f) {
+        // Fade the carve out approaching the top rim so the edge stays solid.
+        const float rim = m_params.plateauHeight - m_params.grooveRimFade;
+        mask *= 1.0f - cfm::smoothstep(rim, m_params.plateauHeight, y);
+    }
+    return mask;
+}
+
+float CliffField::applyGrooves(float f, const cfm::Vec3& p, float mask) const {
+    const float fade = (1.0f - mask) * m_params.grooveFadeK;
+    const float r = m_params.grooveSmooth;
+    float gx = p.x;
+    float gy = p.y;
+    float gz = p.z;
+    rot2d(gx, gy, m_params.grooveAngles[0][0]);
+    f = smoothMax(f, grooveWave(gy) - fade, r);
+    gx = p.x;
+    gy = p.y;
+    gz = p.z;
+    rot2d(gx, gz, m_params.grooveAngles[1][0]);
+    rot2d(gx, gy, m_params.grooveAngles[1][1]);
+    f = smoothMax(f, grooveWave(gy) - fade, r);
+    gx = p.x;
+    gy = p.y;
+    gz = p.z;
+    rot2d(gx, gz, m_params.grooveAngles[2][0]);
+    rot2d(gx, gy, m_params.grooveAngles[2][1]);
+    f = smoothMax(f, grooveWave(gy) - fade, r);
+    return f;
+}
 
 float fbm(const cfm::Vec3& p, int octaves) {
     float f = 0.0f;
@@ -212,29 +248,9 @@ float CliffField::evalBase(const cfm::Vec3& p) const {
 float CliffField::eval(const cfm::Vec3& p) const {
     float d2 = 0.0f;
     float f = evalBase(p, d2);
-    // Grooves hug the wall band: mask fades with |d2|, the K-term limits how
-    // deep the carve can reach into the solid (no through-holes). Rim ramp
-    // keeps the top edge solid (no "lace" erosion where wall meets top).
-    float mask = cfm::smoothstep(m_params.grooveMaskWidth, 0.0f, std::fabs(d2));
-    mask *= cfm::smoothstep(m_params.plateauHeight, m_params.plateauHeight - m_params.grooveRimFade, p.y);
-    const float fade = (1.0f - mask) * m_params.grooveFadeK;
-    float gx = p.x;
-    float gy = p.y;
-    float gz = p.z;
-    rot2d(gx, gy, kPi / 5.0f);
-    f = smoothMax(f, grooveWave(gy) - fade, 0.02f);
-    gx = p.x;
-    gy = p.y;
-    gz = p.z;
-    rot2d(gx, gz, 2.1f * kPi / 3.0f);
-    rot2d(gx, gy, 0.9f * kPi / 5.0f);
-    f = smoothMax(f, grooveWave(gy) - fade, 0.02f);
-    gx = p.x;
-    gy = p.y;
-    gz = p.z;
-    rot2d(gx, gz, -2.05f * kPi / 3.0f);
-    rot2d(gx, gy, 1.1f * kPi / 5.0f);
-    f = smoothMax(f, grooveWave(gy) - fade, 0.02f);
+    // Grooves hug the wall band: the mask fades with |d2| (and near the top
+    // rim when rim fade is on), the K-term limits the carve depth.
+    f = applyGrooves(f, p, grooveMask(d2, p.y));
     // Gentle fbm displacement of the whole shape for a natural rock feel.
     // Band-limited (fbmOctaves): finer octaves alias on the sampling grid and
     // produce saddle faces -> non-manifold surface nets.
@@ -248,30 +264,11 @@ float CliffField::grooveDepth(const cfm::Vec3& p) const {
     // the base shape. 0 on the untouched surface, > 0 towards groove floors.
     float d2 = 0.0f;
     const float base = evalBase(p, d2);
-    float mask = cfm::smoothstep(m_params.grooveMaskWidth, 0.0f, std::fabs(d2));
-    mask *= cfm::smoothstep(m_params.plateauHeight, m_params.plateauHeight - m_params.grooveRimFade, p.y);
+    const float mask = grooveMask(d2, p.y);
     if (mask <= 0.0f) {
         return 0.0f;
     }
-    const float fade = (1.0f - mask) * m_params.grooveFadeK;
-    float f = base;
-    float gx = p.x;
-    float gy = p.y;
-    float gz = p.z;
-    rot2d(gx, gy, kPi / 5.0f);
-    f = smoothMax(f, grooveWave(gy) - fade, 0.02f);
-    gx = p.x;
-    gy = p.y;
-    gz = p.z;
-    rot2d(gx, gz, 2.1f * kPi / 3.0f);
-    rot2d(gx, gy, 0.9f * kPi / 5.0f);
-    f = smoothMax(f, grooveWave(gy) - fade, 0.02f);
-    gx = p.x;
-    gy = p.y;
-    gz = p.z;
-    rot2d(gx, gz, -2.05f * kPi / 3.0f);
-    rot2d(gx, gy, 1.1f * kPi / 5.0f);
-    f = smoothMax(f, grooveWave(gy) - fade, 0.02f);
+    const float f = applyGrooves(base, p, mask);
     return cfm::clamp(f - base, 0.0f, 0.2f);
 }
 
