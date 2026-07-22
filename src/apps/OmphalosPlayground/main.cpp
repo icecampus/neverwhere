@@ -1,7 +1,7 @@
 // OmphalosPlayground — standalone sokol-плейграунд с raymarching-демкой
 // "Omphalos" by dr2 (2019), https://www.shadertoy.com/view/ttXXDN
 // License оригинального шейдера: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported.
-// Код шейдера портирован вручную на MSL (единственный поддерживаемый вариант), только для изучения.
+// Код шейдера портирован вручную на MSL (macOS) и HLSL (Windows), только для изучения.
 
 #include "pch.h"
 
@@ -411,6 +411,363 @@ fragment float4 _main(VSOut in [[stage_in]], constant FsParams& fs [[buffer(0)]]
 )";
 
 // ---------------------------------------------------------------------------
+// HLSL (ручной порт MSL-версии; mix -> lerp, fract -> frac,
+// thread& -> inout, матричные литералы — через transpose(), см. ниже)
+// ---------------------------------------------------------------------------
+
+static const char* vs_src_hlsl = R"(
+struct VSOut {
+    float4 pos: SV_Position;
+    float2 uv: TEXCOORD0;
+};
+
+VSOut main(uint vid: SV_VertexID) {
+    VSOut o;
+    float2 pos = float2(vid == 1 ? 3.0 : -1.0, vid == 2 ? 3.0 : -1.0);
+    o.pos = float4(pos, 0.0, 1.0);
+    o.uv = pos * 0.5 + 0.5;
+    return o;
+}
+)";
+
+static const char* fs_src_hlsl = R"(
+cbuffer fs_params: register(b0) {
+    float2 resolution;
+    float time_sec;
+    float pad0;
+    float4 mouse;
+};
+
+// Глобалы dr2-шейдера (ltDir/elAx/tCur/dstFar/idObj) — mutable program-scope
+// состояние недоступно и в HLSL, поэтому состояние живёт в контексте.
+struct SceneCtx {
+    float3 ltDir;
+    float3 elAx;
+    float tCur;
+    float dstFar;
+    int idObj;
+};
+
+// GLSL-семантика mod (floor-based), у fmod она trunc-based.
+float gmod(float x, float y) { return x - y * floor(x / y); }
+float2 gmod(float2 x, float y) { return x - y * floor(x / y); }
+
+float PrBoxDf(float3 p, float3 b);
+float PrEllipsDf(float3 p, float3 r);
+float SmoothMin(float a, float b, float r);
+float SmoothMax(float a, float b, float r);
+float2 Rot2D(float2 q, float a);
+float Fbm2(float2 p);
+float Fbm3(float3 p);
+float3 VaryNf(float3 p, float3 n, float f);
+
+static const float pi = 3.14159;
+
+#define DMIN(ctx, id) if (d < dMin) { dMin = d;  ctx.idObj = id; }
+
+float ObjDf(inout SceneCtx ctx, float3 p)
+{
+  float3 q;
+  float dMin, d;
+  dMin = ctx.dstFar;
+  q = p;
+  d = PrEllipsDf(q, ctx.elAx + float3(0.05, 0., 0.05));
+  q = p;
+  q.xy = Rot2D(q.xy, pi / 5.);
+  d = SmoothMax(d, abs(gmod(q.y + 0.1, 0.4) - 0.2) - 0.1, 0.02);
+  q = p;
+  q.xz = Rot2D(q.xz, 2.1 * pi / 3.);
+  q.xy = Rot2D(q.xy, 0.9 * pi / 5.);
+  d = SmoothMax(d, abs(gmod(q.y + 0.1, 0.4) - 0.2) - 0.1, 0.02);
+  q = p;
+  q.xz = Rot2D(q.xz, -2.05 * pi / 3.);
+  q.xy = Rot2D(q.xy, 1.1 * pi / 5.);
+  d = SmoothMax(d, abs(gmod(q.y + 0.1, 0.4) - 0.2) - 0.1, 0.02);
+  q = p;
+  d = SmoothMin(d, PrEllipsDf(q, ctx.elAx), 0.1);
+  d = max(d, -p.y);
+  DMIN(ctx, 1);
+  q = p;
+  q -= float3(2.1, -0.05, 0.);
+  d = PrBoxDf(q, float3(3.4, 0.05, 1.3));
+  DMIN(ctx, 2);
+  q = p;
+  q -= float3(4.2, 1., 0.);
+  d = PrBoxDf(q, float3(1., 1., 1.));
+  // Спиральные борозды как у омфалоса, но в локальных координатах куба;
+  // SmoothMin с внутренним кубом — аналог внутреннего эллипсоида: борозды
+  // режут только оболочку, ядро остаётся целым.
+  float3 qc;
+  qc = q;
+  qc.xy = Rot2D(qc.xy, pi / 5.);
+  d = SmoothMax(d, abs(gmod(qc.y + 0.1, 0.4) - 0.2) - 0.1, 0.02);
+  qc = q;
+  qc.xz = Rot2D(qc.xz, 2.1 * pi / 3.);
+  qc.xy = Rot2D(qc.xy, 0.9 * pi / 5.);
+  d = SmoothMax(d, abs(gmod(qc.y + 0.1, 0.4) - 0.2) - 0.1, 0.02);
+  qc = q;
+  qc.xz = Rot2D(qc.xz, -2.05 * pi / 3.);
+  qc.xy = Rot2D(qc.xy, 1.1 * pi / 5.);
+  d = SmoothMax(d, abs(gmod(qc.y + 0.1, 0.4) - 0.2) - 0.1, 0.02);
+  d = SmoothMin(d, PrBoxDf(q, float3(0.82, 0.82, 0.82)), 0.1);
+  DMIN(ctx, 3);
+  return dMin;
+}
+
+float ObjRay(inout SceneCtx ctx, float3 ro, float3 rd)
+{
+  float dHit, d;
+  dHit = 0.;
+  for (int j = 0; j < 120; j++) {
+    d = ObjDf(ctx, ro + dHit * rd);
+    if (d < 0.0005 || dHit > ctx.dstFar) break;
+    dHit += d;
+  }
+  return dHit;
+}
+
+float3 ObjNf(inout SceneCtx ctx, float3 p)
+{
+  float4 v;
+  float2 e = float2(0.0002, -0.0002);
+  v = float4(-ObjDf(ctx, p + e.xxx), ObjDf(ctx, p + e.xyy), ObjDf(ctx, p + e.yxy), ObjDf(ctx, p + e.yyx));
+  // NB: fxc не принимает splat-конструктор floatN(scalar) — только cast.
+  return normalize(2. * v.yzw - dot(v, (float4)1.));
+}
+
+float ObjSShadow(inout SceneCtx ctx, float3 ro, float3 rd)
+{
+  float sh, d, h;
+  sh = 1.;
+  d = 0.02;
+  for (int j = 0; j < 30; j++) {
+    h = ObjDf(ctx, ro + d * rd);
+    sh = min(sh, smoothstep(0., 0.01 * d, h));
+    d += 0.02;
+    if (sh < 0.05) break;
+  }
+  return 0.5 + 0.5 * sh;
+}
+
+float3 ShowScene(inout SceneCtx ctx, float3 ro, float3 rd)
+{
+  float4 col4;
+  float3 col, vn;
+  float dstObj, sh, f;
+  ctx.elAx = float3(1., 3., 1.);
+  dstObj = ObjRay(ctx, ro, rd);
+  if (dstObj < ctx.dstFar) {
+    ro += dstObj * rd;
+    vn = ObjNf(ctx, ro);
+    if (ctx.idObj == 1) {
+      vn = VaryNf(16. * ro, vn, 4.);
+      f = Fbm3(32. * ro);
+      col4 = lerp(float4(0.4, 0.4, 0.45, 0.05), float4(0.6, 0.5, 0.5, 0.3) +
+         float4(1., 1., 0.5, 0.5) * step(0.8, f),
+         smoothstep(1.005, 1.01, length(ro / ctx.elAx))) * (1. - 0.3 * f);
+    } else if (ctx.idObj == 3) {
+      // Тот же камень, но градиент от локального центра куба:
+      // дно борозд (внутренний куб, ~0.82-0.9) -> тёмно-серое,
+      // грани/рёбра (>=0.95) -> золотистые.
+      vn = VaryNf(16. * ro, vn, 4.);
+      f = Fbm3(32. * ro);
+      col4 = lerp(float4(0.4, 0.4, 0.45, 0.05), float4(0.6, 0.5, 0.5, 0.3) +
+         float4(1., 1., 0.5, 0.5) * step(0.8, f),
+         smoothstep(0.87, 0.95, length(ro - float3(4.2, 1., 0.)))) * (1. - 0.3 * f);
+    } else if (ctx.idObj == 2) {
+      col4 = lerp(float4(0.6, 0.7, 0.6, 0.2), float4(0.65, 0.6, 0.6, 0.2),
+         smoothstep(0.4, 0.6, Fbm2(2. * ro.xz))) * (0.5 +
+         0.5 * smoothstep(1., 1.1, length(ro.xz))) * (0.5 + 0.5 * step(0.99, vn.y));
+    }
+    sh = ObjSShadow(ctx, ro, ctx.ltDir);
+    col = col4.rgb * (0.2 + 0.1 * max(-dot(vn, ctx.ltDir), 0.) +
+       0.8 * sh * max(dot(vn, ctx.ltDir), 0.)) +
+       col4.a * step(0.95, sh) * pow(max(dot(normalize(ctx.ltDir - rd), vn), 0.), 16.);
+  } else {
+    col = float3(0.05, 0.05, 0.08);
+  }
+  return clamp(col, 0., 1.);
+}
+
+#define AA  1   // optional antialiasing
+
+float4 mainImage(inout SceneCtx ctx, float2 fragCoord)
+{
+  float3x3 vuMat;
+  float4 mPtr;
+  float3 ro, rd, col;
+  float2 canvas, uv, ori, ca, sa;
+  float el, az, zmFac, sr;
+  canvas = resolution;
+  uv = 2. * fragCoord / canvas - 1.;
+  uv.x *= canvas.x / canvas.y;
+  ctx.tCur = time_sec;
+  mPtr = mouse;
+  mPtr.xy = mPtr.xy / canvas - 0.5;
+  az = 0.;
+  el = -0.1 * pi;
+  if (mPtr.z > 0.) {
+    az += 2. * pi * mPtr.x;
+    el += pi * mPtr.y;
+  } else {
+    az -= 0.03 * pi * ctx.tCur;
+    el -= 0.05 * pi * sin(0.02 * pi * ctx.tCur);
+  }
+  el = clamp(el, -0.4 * pi, 0.01 * pi);
+  ori = float2(el, az);
+  ca = cos(ori);
+  sa = sin(ori);
+  // Скалярный конструктор матрицы в MSL заполняет столбцы, в HLSL — строки;
+  // transpose() сохраняет литералы идентичными MSL-версии. `*` для матриц
+  // в HLSL покомпонентный, поэтому матричное умножение — через mul().
+  vuMat = mul(transpose(float3x3(ca.y, 0., -sa.y, 0., 1., 0., sa.y, 0., ca.y)),
+              transpose(float3x3(1., 0., 0., 0., ca.x, -sa.x, 0., sa.x, ca.x)));
+  ro = mul(vuMat, float3(0., 1.2, -13.));
+  zmFac = 6.;
+  ctx.dstFar = 40.;
+  ctx.ltDir = mul(vuMat, normalize(float3(1., 1., -1.)));
+#if ! AA
+  const float naa = 1.;
+#else
+  const float naa = 3.;
+#endif
+  col = (float3)0.;
+  sr = 2. * gmod(dot(gmod(floor(0.5 * (uv + 1.) * canvas), 2.), (float2)1.), 2.) - 1.;
+  for (float a = 0.; a < naa; a++) {
+    rd = mul(vuMat, normalize(float3(uv + step(1.5, naa) * Rot2D(float2(0.5 / canvas.y, 0.),
+       sr * (0.667 * a + 0.5) * pi), zmFac)));
+    col += (1. / naa) * ShowScene(ctx, ro, rd);
+  }
+  return float4(pow(col, (float3)0.8), 1.);
+}
+
+float PrBoxDf(float3 p, float3 b)
+{
+  float3 d;
+  d = abs(p) - b;
+  return min(max(d.x, max(d.y, d.z)), 0.) + length(max(d, (float3)0.));
+}
+
+float PrEllipsDf(float3 p, float3 r)
+{
+  return (length(p / r) - 1.) * min(r.x, min(r.y, r.z));
+}
+
+float SmoothMin(float a, float b, float r)
+{
+  float h;
+  h = clamp(0.5 + 0.5 * (b - a) / r, 0., 1.);
+  return lerp(b, a, h) - r * h * (1. - h);
+}
+
+float SmoothMax(float a, float b, float r)
+{
+  return -SmoothMin(-a, -b, r);
+}
+
+float2 Rot2D(float2 q, float a)
+{
+  float2 cs;
+  cs = sin(a + float2(0.5 * pi, 0.));
+  return float2(dot(q, float2(cs.x, -cs.y)), dot(q.yx, cs));
+}
+
+static const float cHashM = 43758.54;
+
+float2 Hashv2v2(float2 p)
+{
+  float2 cHashVA2 = float2(37., 39.);
+  return frac(sin(float2(dot(p, cHashVA2), dot(p + float2(1., 0.), cHashVA2))) * cHashM);
+}
+
+float4 Hashv4v3(float3 p)
+{
+  float3 cHashVA3 = float3(37., 39., 41.);
+  return frac(sin(float4(dot(p, cHashVA3), dot(p + float3(1., 0., 0.), cHashVA3),
+     dot(p + float3(0., 1., 0.), cHashVA3), dot(p + float3(0., 0., 1.), cHashVA3))) * cHashM);
+}
+
+float Noisefv2(float2 p)
+{
+  float2 t, ip, fp;
+  ip = floor(p);
+  fp = frac(p);
+  fp = fp * fp * (3. - 2. * fp);
+  t = lerp(Hashv2v2(ip), Hashv2v2(ip + float2(0., 1.)), fp.y);
+  return lerp(t.x, t.y, fp.x);
+}
+
+float Noisefv3(float3 p)
+{
+  float4 t;
+  float3 ip, fp;
+  ip = floor(p);
+  fp = frac(p);
+  fp *= fp * (3. - 2. * fp);
+  t = lerp(Hashv4v3(ip), Hashv4v3(ip + float3(0., 0., 1.)), fp.z);
+  return lerp(lerp(t.x, t.y, fp.x), lerp(t.z, t.w, fp.x), fp.y);
+}
+
+float Fbm2(float2 p)
+{
+  float f, a;
+  f = 0.;
+  a = 1.;
+  for (int j = 0; j < 5; j++) {
+    f += a * Noisefv2(p);
+    a *= 0.5;
+    p *= 2.;
+  }
+  return f * (1. / 1.9375);
+}
+
+float Fbm3(float3 p)
+{
+  float f, a;
+  f = 0.;
+  a = 1.;
+  for (int i = 0; i < 5; i++) {
+    f += a * Noisefv3(p);
+    a *= 0.5;
+    p *= 2.;
+  }
+  return f * (1. / 1.9375);
+}
+
+float Fbmn(float3 p, float3 n)
+{
+  float3 s;
+  float a;
+  s = (float3)0.;
+  a = 1.;
+  for (int j = 0; j < 5; j++) {
+    s += a * float3(Noisefv2(p.yz), Noisefv2(p.zx), Noisefv2(p.xy));
+    a *= 0.5;
+    p *= 2.;
+  }
+  return dot(s, abs(n));
+}
+
+float3 VaryNf(float3 p, float3 n, float f)
+{
+  float3 g;
+  g = float3(Fbmn(p + float3(0.1, 0., 0.), n), Fbmn(p + float3(0., 0.1, 0.), n),
+     Fbmn(p + float3(0., 0., 0.1), n)) - Fbmn(p, n);
+  return normalize(n + f * (g - n * dot(n, g)));
+}
+
+struct VSOut {
+    float4 pos: SV_Position;
+    float2 uv: TEXCOORD0;
+};
+
+float4 main(VSOut inp): SV_Target {
+    SceneCtx ctx;
+    return mainImage(ctx, inp.uv * resolution);
+}
+)";
+
+// ---------------------------------------------------------------------------
 // Sokol app
 // ---------------------------------------------------------------------------
 
@@ -441,12 +798,18 @@ void init() {
         return;
     }
 
-    // Только Metal (macOS): GLSL/HLSL варианты намеренно не поддерживаем.
+    // Compile-time выбор исходника под активный бэкенд (как в render_core).
     sg_shader_desc shdDesc{};
+#if defined(SOKOL_D3D11)
+    shdDesc.vertex_func.source = vs_src_hlsl;
+    shdDesc.fragment_func.source = fs_src_hlsl;
+#else
     shdDesc.vertex_func.source = vs_src_msl;
     shdDesc.fragment_func.source = fs_src_msl;
+#endif
     shdDesc.uniform_blocks[0].stage = SG_SHADERSTAGE_FRAGMENT;
     shdDesc.uniform_blocks[0].size = sizeof(FsParams);
+    shdDesc.uniform_blocks[0].hlsl_register_b_n = 0;
     shdDesc.uniform_blocks[0].msl_buffer_n = 0;
     shdDesc.label = "omphalos-shader";
 
