@@ -198,7 +198,8 @@ public:
         camera.offset = m_cameraOffset;
         camera.zoom = m_cameraZoom;
 
-        // Water caustics background first (world-space quad), the map on top.
+        // Water caustics background first (fullscreen world-anchored pass),
+        // the map on top.
         m_water.render(camera, viewW, viewH, (float)m_time.elapsed() / 1000.0f);
         m_worldRenderer.render(m_frame, m_iso, camera, viewW, viewH, m_time.elapsed() / 1000.0);
 

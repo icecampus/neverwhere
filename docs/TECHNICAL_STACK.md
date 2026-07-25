@@ -72,7 +72,9 @@
   `beforeRendering`/`afterRendering`), QSG-версии `DiamondGrid`/`DiamondCursor`,
   Mandelbrot-`CustomItem` — заменены `MapRenderItem`. Водный фон старого
   `CustomItem` (каустики) восстановлен в новом пути: `src/water_background.*`
-  (world-space квад 20000×20000 перед миром, iTime-анимация).
+  (полноэкранный проход перед миром, мировые координаты восстанавливаются из
+  камеры в фрагментном шейдере — вода бесконечная и остаётся привязанной к
+  миру: камера летит над ней; iTime-анимация).
 
 ---
 
