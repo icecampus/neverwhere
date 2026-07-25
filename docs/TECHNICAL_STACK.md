@@ -232,25 +232,41 @@ TileShapePlayground — чекбокс «CGAL region» на raised-слое (A/B
 верх строится по нефаскованному контуру, а стены фасят выпуклые углы
 (`bevel`) — на углах возможны мелкие щели до введения фаски на петлях.
 
-**Cliff-field (scalar field + surface nets) `[прототип]`:** альтернативный
+**Cliff-field (scalar field + surface nets) `[есть]`:** альтернативный
 конвейер поднятой земли из CliffFieldPlayground перенесён в `highground_core`
 (`include/highground_core/cliff_field.h`, `surface_nets.h`): бинарная сетка
 нод (инжектится в конструктор `CliffField`, регион — прямоугольный bbox нод)
 → размытый scalar field (плато + omphalos-борозды + band-limited fbm) →
 `regularizeSigns` (разрешение checkerboard-сёдел) → naive surface nets →
 watertight-mesh с запечённым groove-атрибутом. Чистый C++/glm, без Qt/GPU.
-В TileShapePlayground живёт как кисть «Cliff 3D» (кэш меша с debounce 0.3 с,
-z-buffer с той же формулой глубины, что у raised-прохода, per-pixel шейдер
-палитры из CliffFieldPlayground — GLSL/HLSL/MSL). Плоская подложка
-(ground chunk вокруг плато) отключается параметром
-`FieldParams::groundEnabled`; в TileShapePlayground она выключена —
-рисуется только standalone-хайграунд (подложка будет делаться отдельно),
-меш остаётся watertight (низ закрывается на y = -edgeRadius). Стоимость полного ребилда —
-секунды на поле ~1 млн вокселов (Debug), поэтому только debounced-ребилд.
+Плоская подложка (ground chunk вокруг плато) отключается параметром
+`FieldParams::groundEnabled` (низ закрывается на y = -edgeRadius, меш остаётся
+watertight). Стоимость полного ребилда — секунды на поле ~1 млн вокселов
+(Debug), поэтому только debounced-ребилд.
 Покрытие: `src/tests/highground/cliff_field_test.cpp` + cliff-сценарий в
 smoke плейграунда. Известное ограничение: эвристика регуляризации сёдел
 итеративная и не гарантирует сходимость на произвольных формах (статус
-watertight виден в UI). Порт в редактор (ассет/слой) — отдельный шаг.
+watertight виден в логе/UI).
+
+**Cliff 3D в редакторе `[есть]`:** ассеты `cliff3d` (`CliffAsset : SliceAsset`,
+без атласа; payload `"cliff3d"` в index.json — полный набор параметров
+генератора: зеркало `cliff::FieldParams` + палитра shading + `raisedHeight`;
+`groundEnabled` по умолчанию выключен) рисуются инструментом `CliffPencil`
+(наследник `LandscapePencil`) на слое `CliffLandscape` — данные те же
+Landscape-тайлы с tileIndex (ноды по конвенции атласа). Рендер —
+`render_core::CliffRenderer` (порт cliff-прохода TileShapePlayground):
+ноды из тайлов → CliffField → surface nets, кэш меша per-asset с debounce
+0.3 с (контент-хэш тайлов+параметров; `raisedHeight` — дешёвая ре-проекция,
+shading — только юниформы), камера в VS (кэш переживает pan/zoom), глубина
+через z_range как у raised-прохода, GLSL/HLSL/MSL по `sg_query_backend()`.
+Кадр: `WorldFrame.cliffTiles` (редактор — `ModelFrameSource`, клиент/play-таб —
+`world_frame_builder`; `ensureCliffAsset` пробрасывает параметры в обоих).
+Панель параметров — `CliffSettings.qml` в правой колонке (секции
+Field/Grooves/Shading/Colors/Advanced, живое применение, кнопка Save пишет
+index.json через `AssetsLibraryModel::save`); видна при выбранном cliff3d-ассете.
+Покрытие: `src/tests/assets/cliff3d_asset_data_test.cpp` (JSON/AssetIndex),
+`cliff_asset_test.cpp` (API панели), map_authoring на слое. Песочница для
+отладки алгоритма — кисть «Cliff 3D» в TileShapePlayground.
 Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
 `raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —
