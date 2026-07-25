@@ -114,44 +114,48 @@ private:
         float params1[4]; // spec power, gamma, wrap backlight, unused
     };
 
-    // Cached derivative of one asset's cliff tiles: the extracted surface-nets
-    // meshes (one per connected node region, so distant islands never inflate
-    // a shared field bbox) plus the projected vertex stream, rebuilt only when
-    // the tile set or the field params change (debounced) — the full rebuild
-    // costs seconds.
-    struct CliffCache {
-        std::uint64_t contentHash = 0;
-        float heightScale = 0.0f;
-        bool contentValid = false;
-        double lastEditSec = 0.0;
-        bool meshDirty = false;   // field + extraction needed (heavy)
-        bool streamDirty = false; // re-projection only (cheap, heightScale edits)
-        bool gpuDirty = false;
-        cliff::FieldParams fieldParams{};
-        struct Region {
-            cliff::Mesh mesh;
-            glm::ivec2 origin{0, 0}; // node coords of the region field's (0,0)
-        };
-        std::vector<Region> regions;
+    // Per-region cache: an independently rebuildable piece of one asset's
+    // cliffs (one connected node component). A local edit invalidates only
+    // the region it touches — the others keep their meshes on screen.
+    struct RegionCache {
+        bool pending = true;          // in the debounce queue (not built / rebuilding)
+        double pendingSince = -1.0;   // first frame this content went pending
+        bool watertight = true;
+        cliff::Mesh mesh;
+        glm::ivec2 origin{0, 0};      // node coords of the region field's (0,0)
         std::vector<CliffVertex> stream;
         sg_buffer vbuf{SG_INVALID_ID};
         std::size_t vbufSize = 0;
-        bool watertight = true;
+    };
+
+    // Per-asset cache: connected node regions keyed by their content hash
+    // (sorted node set + field params). A key mismatch marks only that region
+    // pending; dead keys are swept (and their vbufs destroyed).
+    struct AssetCache {
+        std::unordered_map<std::uint64_t, RegionCache> regions;
+        float heightScale = 0.0f;
+        bool heightScaleValid = false;
     };
 
     void ensurePipeline();
     void destroyPipeline();
-    void rebuildCliffCache(
-        CliffCache& cache,
-        const std::vector<const LandscapeTile*>& group,
-        const topology_core::DiamondIsometry& iso);
+    void rebuildRegion(
+        RegionCache& region,
+        const std::vector<glm::ivec2>& componentNodes,
+        const topology_core::DiamondIsometry& iso,
+        const cliff::FieldParams& fieldParams,
+        float heightScale);
+    void projectRegionStream(
+        RegionCache& region,
+        const topology_core::DiamondIsometry& iso,
+        float heightScale);
 
     sg_pipeline pip{SG_INVALID_ID};
     sg_shader shd{SG_INVALID_ID};
     sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
 
     std::unordered_map<std::string, CliffParams> assets;
-    std::unordered_map<std::string, CliffCache> caches;
+    std::unordered_map<std::string, AssetCache> caches;
 
     // Prototype silhouette: while a group's cache is pending (edit waiting
     // for the debounce/rebuild), the tiles are drawn as flat palette-shaded

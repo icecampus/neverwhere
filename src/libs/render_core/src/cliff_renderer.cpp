@@ -469,6 +469,89 @@ std::uint64_t hashFieldParams(const cliff::FieldParams& p) {
     return h;
 }
 
+// One connected piece of an asset's cliffs: its on-nodes and the tiles
+// carrying them (tiles drive the prototype silhouette while pending).
+struct CliffComponent {
+    std::vector<glm::ivec2> nodes;
+    std::vector<const LandscapeTile*> tiles;
+};
+
+// Content key of a region: the field params + the sorted node set. The same
+// node set hashes identically every frame, so an untouched region keeps its
+// cache entry; a local edit changes only its own component's key.
+std::uint64_t regionKey(std::vector<glm::ivec2> nodes, const cliff::FieldParams& params) {
+    std::uint64_t h = hashFieldParams(params);
+    std::sort(nodes.begin(), nodes.end(), [](const glm::ivec2& a, const glm::ivec2& b) {
+        if (a.y != b.y) return a.y < b.y;
+        return a.x < b.x;
+    });
+    for (const glm::ivec2& n : nodes) {
+        hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(n.x)));
+        hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(n.y)));
+    }
+    return h;
+}
+
+// Split one asset's tiles into connected node components (8-connectivity on
+// the node grid — nodes are neighbours when they share a map cell). Tiles
+// attach to the component of their on corner nodes (a cell's corner nodes are
+// mutually connected, so the mapping is unambiguous).
+std::vector<CliffComponent> computeComponents(const std::vector<const LandscapeTile*>& group) {
+    std::unordered_map<std::uint64_t, glm::ivec2> remaining;
+    remaining.reserve(group.size() * 4);
+    for (const LandscapeTile* t : group) {
+        const auto mask = landscape_core::tileTypeToNodeMask(tileTypeFromAtlasIndex(t->tileIndex));
+        const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t->cell);
+        for (int i = 0; i < 4; ++i) {
+            if (mask[i]) {
+                remaining.emplace(nodeKey(corners[i]), corners[i]);
+            }
+        }
+    }
+
+    std::vector<CliffComponent> components;
+    while (!remaining.empty()) {
+        CliffComponent comp;
+        std::vector<glm::ivec2> stack{remaining.begin()->second};
+        remaining.erase(remaining.begin());
+        while (!stack.empty()) {
+            const glm::ivec2 node = stack.back();
+            stack.pop_back();
+            comp.nodes.push_back(node);
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    const auto it = remaining.find(nodeKey({node.x + dx, node.y + dy}));
+                    if (it != remaining.end()) {
+                        stack.push_back(it->second);
+                        remaining.erase(it);
+                    }
+                }
+            }
+        }
+        components.push_back(std::move(comp));
+    }
+
+    // Tiles -> the component of their first on corner node.
+    std::unordered_map<std::uint64_t, std::size_t> nodeToComp;
+    for (std::size_t ci = 0; ci < components.size(); ++ci) {
+        for (const glm::ivec2& n : components[ci].nodes) {
+            nodeToComp.emplace(nodeKey(n), ci);
+        }
+    }
+    for (const LandscapeTile* t : group) {
+        const auto mask = landscape_core::tileTypeToNodeMask(tileTypeFromAtlasIndex(t->tileIndex));
+        const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t->cell);
+        for (int i = 0; i < 4; ++i) {
+            if (mask[i]) {
+                components[nodeToComp[nodeKey(corners[i])]].tiles.push_back(t);
+                break;
+            }
+        }
+    }
+    return components;
+}
+
 } // namespace
 
 void CliffRenderer::init(sg_pixel_format depthFormat_) {
@@ -482,10 +565,12 @@ void CliffRenderer::init(sg_pixel_format depthFormat_) {
 
 void CliffRenderer::shutdown() {
     destroyPipeline();
-    for (auto& [uuid, cache] : caches) {
-        if (cache.vbuf.id != SG_INVALID_ID) {
-            sg_destroy_buffer(cache.vbuf);
-            cache.vbuf = {};
+    for (auto& [uuid, asset] : caches) {
+        for (auto& [key, region] : asset.regions) {
+            if (region.vbuf.id != SG_INVALID_ID) {
+                sg_destroy_buffer(region.vbuf);
+                region.vbuf = {};
+            }
         }
     }
     caches.clear();
@@ -637,87 +722,101 @@ void CliffRenderer::render(
 
     for (auto& [uuid, group] : groups) {
         const CliffParams& params = assets.find(uuid)->second;
-        CliffCache& cache = caches[uuid];
+        AssetCache& asset = caches[uuid];
 
-        // Content key: the sorted (cell, tileIndex) set + the field params.
-        std::sort(group.begin(), group.end(), [](const LandscapeTile* a, const LandscapeTile* b) {
-            if (a->cell.y != b->cell.y) return a->cell.y < b->cell.y;
-            if (a->cell.x != b->cell.x) return a->cell.x < b->cell.x;
-            return a->tileIndex < b->tileIndex;
-        });
-        std::uint64_t hash = hashFieldParams(params.field);
-        for (const LandscapeTile* t : group) {
-            hashCombine(hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(t->cell.x)));
-            hashCombine(hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(t->cell.y)));
-            hashCombine(hash, static_cast<std::uint64_t>(t->tileIndex));
+        // Split into connected regions and key them by content: an untouched
+        // region keeps its cache entry, a local edit rehashes only its own.
+        const std::vector<CliffComponent> components = computeComponents(group);
+        std::vector<std::uint64_t> keys;
+        keys.reserve(components.size());
+        std::unordered_set<std::uint64_t> liveKeys;
+        for (const CliffComponent& comp : components) {
+            const std::uint64_t key = regionKey(comp.nodes, params.field);
+            keys.push_back(key);
+            liveKeys.insert(key);
         }
 
-        const bool contentChanged = !cache.contentValid || cache.contentHash != hash;
-        const bool scaleChanged = cache.heightScale != params.heightScale;
-        if (contentChanged || scaleChanged) {
-            cache.contentHash = hash;
-            cache.heightScale = params.heightScale;
-            cache.fieldParams = params.field;
-            cache.contentValid = true;
-            cache.lastEditSec = nowSec;
-            cache.meshDirty = cache.meshDirty || contentChanged;
-            cache.streamDirty = true;
+        // Sweep dead regions (vbufs included) — keys that vanished by edits.
+        for (auto it = asset.regions.begin(); it != asset.regions.end();) {
+            if (liveKeys.find(it->first) == liveKeys.end()) {
+                if (it->second.vbuf.id != SG_INVALID_ID) {
+                    sg_destroy_buffer(it->second.vbuf);
+                }
+                it = asset.regions.erase(it);
+            } else {
+                ++it;
+            }
         }
-        if ((cache.meshDirty || cache.streamDirty) && (nowSec - cache.lastEditSec) > 0.3) {
-            rebuildCliffCache(cache, group, iso);
-            cache.meshDirty = false;
-            cache.streamDirty = false;
-            cache.gpuDirty = true;
-        }
-        if (cache.gpuDirty) {
-            const std::size_t bytes = cache.stream.size() * sizeof(CliffVertex);
-            if (bytes > 0) {
-                if (cache.vbufSize < bytes) {
-                    if (cache.vbuf.id != SG_INVALID_ID) {
-                        sg_destroy_buffer(cache.vbuf);
+
+        // heightScale edits only re-project the built regions (no field work).
+        const bool scaleChanged = !asset.heightScaleValid || asset.heightScale != params.heightScale;
+        if (scaleChanged) {
+            for (auto& [key, region] : asset.regions) {
+                if (!region.pending) {
+                    projectRegionStream(region, iso, params.heightScale);
+                    const std::size_t bytes = region.stream.size() * sizeof(CliffVertex);
+                    if (bytes > 0) {
+                        if (region.vbufSize < bytes) {
+                            if (region.vbuf.id != SG_INVALID_ID) {
+                                sg_destroy_buffer(region.vbuf);
+                            }
+                            sg_buffer_desc buf_desc = {};
+                            buf_desc.size = ((bytes / (std::size_t{1} << 20)) + 1) * (std::size_t{1} << 20);
+                            buf_desc.usage.dynamic_update = true;
+                            buf_desc.label = "render-core-cliff-vbuf";
+                            region.vbuf = sg_make_buffer(&buf_desc);
+                            region.vbufSize = buf_desc.size;
+                        }
+                        if (region.vbuf.id != SG_INVALID_ID) {
+                            sg_update_buffer(region.vbuf, sg_range{region.stream.data(), bytes});
+                        }
                     }
-                    sg_buffer_desc buf_desc = {};
-                    buf_desc.size = ((bytes / (std::size_t{1} << 20)) + 1) * (std::size_t{1} << 20);
-                    buf_desc.usage.dynamic_update = true;
-                    buf_desc.label = "render-core-cliff-vbuf";
-                    cache.vbuf = sg_make_buffer(&buf_desc);
-                    cache.vbufSize = buf_desc.size;
-                }
-                if (cache.vbuf.id != SG_INVALID_ID) {
-                    sg_update_buffer(cache.vbuf, sg_range{cache.stream.data(), bytes});
                 }
             }
-            cache.gpuDirty = false;
+            asset.heightScale = params.heightScale;
+            asset.heightScaleValid = true;
         }
 
-        // Pending edit (debounce/rebuild not done yet): show the prototype
-        // silhouette of the current tiles instead of the stale/missing mesh.
-        const bool pending = cache.meshDirty || cache.streamDirty;
-        if (pending) {
-            PreviewRange range;
-            range.base = static_cast<int>(m_previewVerts.size());
-            range.params = &params;
-            for (const LandscapeTile* t : group) {
-                appendPreviewDiamond(m_previewVerts, t->cell);
+        for (std::size_t ci = 0; ci < components.size(); ++ci) {
+            const CliffComponent& comp = components[ci];
+            RegionCache& region = asset.regions[keys[ci]]; // pending entry on miss
+            if (region.pending) {
+                if (region.pendingSince < 0.0) {
+                    region.pendingSince = nowSec;
+                }
+                if ((nowSec - region.pendingSince) > 0.3) {
+                    rebuildRegion(region, comp.nodes, iso, params.field, params.heightScale);
+                    region.pending = false;
+                }
             }
-            range.count = static_cast<int>(m_previewVerts.size()) - range.base;
-            if (range.count > 0) {
-                m_previewRanges.push_back(range);
+
+            if (region.pending) {
+                // Prototype silhouette of THIS region's tiles while it rebuilds.
+                PreviewRange range;
+                range.base = static_cast<int>(m_previewVerts.size());
+                range.params = &params;
+                for (const LandscapeTile* t : comp.tiles) {
+                    appendPreviewDiamond(m_previewVerts, t->cell);
+                }
+                range.count = static_cast<int>(m_previewVerts.size()) - range.base;
+                if (range.count > 0) {
+                    m_previewRanges.push_back(range);
+                }
+                continue;
             }
-            continue;
+
+            if (region.stream.empty() || region.vbuf.id == SG_INVALID_ID) continue;
+
+            const CliffFsParams fs = buildFs(params);
+
+            sg_bindings bind = {};
+            bind.vertex_buffers[0] = region.vbuf;
+            sg_apply_pipeline(pip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
+            sg_apply_uniforms(1, sg_range{&fs, sizeof(fs)});
+            sg_draw(0, static_cast<int>(region.stream.size()), 1);
         }
-
-        if (cache.stream.empty() || cache.vbuf.id == SG_INVALID_ID) continue;
-
-        const CliffFsParams fs = buildFs(params);
-
-        sg_bindings bind = {};
-        bind.vertex_buffers[0] = cache.vbuf;
-        sg_apply_pipeline(pip);
-        sg_apply_bindings(&bind);
-        sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
-        sg_apply_uniforms(1, sg_range{&fs, sizeof(fs)});
-        sg_draw(0, static_cast<int>(cache.stream.size()), 1);
     }
 
     // Upload and draw the prototype silhouettes (one buffer update per frame).
@@ -750,126 +849,105 @@ void CliffRenderer::render(
     }
 }
 
-void CliffRenderer::rebuildCliffCache(
-    CliffCache& cache,
-    const std::vector<const LandscapeTile*>& group,
-    const topology_core::DiamondIsometry& iso) {
+void CliffRenderer::rebuildRegion(
+    RegionCache& region,
+    const std::vector<glm::ivec2>& componentNodes,
+    const topology_core::DiamondIsometry& iso,
+    const cliff::FieldParams& fieldParams,
+    float heightScale) {
 
-    if (cache.meshDirty) {
-        // Full path: tiles -> corner nodes -> per-region fields -> regularize
-        // -> surface nets (mirrors the playground's rebuild, but one field per
-        // connected node region: distant islands must not inflate a shared
-        // field bbox — a lone node and a block 200 cells apart would
-        // otherwise create an enormous empty field between them).
-        std::unordered_set<std::uint64_t> seen;
-        std::vector<glm::ivec2> onNodes;
-        for (const LandscapeTile* t : group) {
-            const auto mask = landscape_core::tileTypeToNodeMask(tileTypeFromAtlasIndex(t->tileIndex));
-            const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t->cell);
-            for (int i = 0; i < 4; ++i) {
-                if (mask[i] && seen.insert(nodeKey(corners[i])).second) {
-                    onNodes.push_back(corners[i]);
-                }
-            }
+    // Full path for ONE connected region: nodes -> bbox field -> regularize
+    // -> surface nets (the other regions of the same asset stay untouched).
+    if (!componentNodes.empty()) {
+        // Field over the component bbox + a one-cell margin (the blurred
+        // outline must not cross the field border).
+        int minX = componentNodes[0].x;
+        int minY = componentNodes[0].y;
+        int maxX = componentNodes[0].x;
+        int maxY = componentNodes[0].y;
+        for (const glm::ivec2& n : componentNodes) {
+            minX = std::min(minX, n.x);
+            minY = std::min(minY, n.y);
+            maxX = std::max(maxX, n.x);
+            maxY = std::max(maxY, n.y);
+        }
+        minX -= 1;
+        minY -= 1;
+        maxX += 1;
+        maxY += 1;
+        const int nodesX = maxX - minX + 1;
+        const int nodesY = maxY - minY + 1;
+        std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
+        for (const glm::ivec2& n : componentNodes) {
+            nodes[static_cast<std::size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
         }
 
-        cache.regions.clear();
-        cache.watertight = true;
-
-        // Connected components over the on-node set. Nodes are neighbours when
-        // they share a map cell (8-connectivity on the node grid).
-        std::unordered_map<std::uint64_t, glm::ivec2> remaining;
-        remaining.reserve(onNodes.size());
-        for (const glm::ivec2& n : onNodes) {
-            remaining.emplace(nodeKey(n), n);
+        cliff::CliffField field(fieldParams, nodes.data(), nodesX, nodesY);
+        std::vector<float> samples;
+        field.sample(samples);
+        cliff::RegularizeStats regStats;
+        cliff::regularizeSigns(field, samples, &regStats);
+        region.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+        region.origin = {minX, minY};
+        const cliff::WatertightReport report = cliff::checkWatertight(region.mesh);
+        region.watertight = report.ok();
+        if (!report.ok()) {
+            spdlog::warn("CliffRenderer: cliff mesh not watertight ({} bad of {} edges, {} saddles left)",
+                report.badEdges, report.undirectedEdges, regStats.remaining);
         }
-        while (!remaining.empty()) {
-            std::vector<glm::ivec2> component;
-            std::vector<glm::ivec2> stack;
-            stack.push_back(remaining.begin()->second);
-            remaining.erase(remaining.begin());
-            while (!stack.empty()) {
-                const glm::ivec2 node = stack.back();
-                stack.pop_back();
-                component.push_back(node);
-                for (int dy = -1; dy <= 1; ++dy) {
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        if (dx == 0 && dy == 0) continue;
-                        const auto it = remaining.find(nodeKey({node.x + dx, node.y + dy}));
-                        if (it != remaining.end()) {
-                            stack.push_back(it->second);
-                            remaining.erase(it);
-                        }
-                    }
-                }
-            }
-
-            // Field over the component bbox + a one-cell margin (the blurred
-            // outline must not cross the field border).
-            int minX = component[0].x;
-            int minY = component[0].y;
-            int maxX = component[0].x;
-            int maxY = component[0].y;
-            for (const glm::ivec2& n : component) {
-                minX = std::min(minX, n.x);
-                minY = std::min(minY, n.y);
-                maxX = std::max(maxX, n.x);
-                maxY = std::max(maxY, n.y);
-            }
-            minX -= 1;
-            minY -= 1;
-            maxX += 1;
-            maxY += 1;
-            const int nodesX = maxX - minX + 1;
-            const int nodesY = maxY - minY + 1;
-            std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
-            for (const glm::ivec2& n : component) {
-                nodes[static_cast<std::size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
-            }
-
-            cliff::CliffField field(cache.fieldParams, nodes.data(), nodesX, nodesY);
-            std::vector<float> samples;
-            field.sample(samples);
-            cliff::RegularizeStats regStats;
-            cliff::regularizeSigns(field, samples, &regStats);
-            CliffCache::Region region;
-            region.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
-            region.origin = {minX, minY};
-            const cliff::WatertightReport report = cliff::checkWatertight(region.mesh);
-            cache.watertight = cache.watertight && report.ok();
-            if (!report.ok()) {
-                spdlog::warn("CliffRenderer: cliff mesh not watertight ({} bad of {} edges, {} saddles left)",
-                    report.badEdges, report.undirectedEdges, regStats.remaining);
-            }
-            cache.regions.push_back(std::move(region));
-        }
+        spdlog::info("CliffRenderer: rebuilt region at ({}, {}) — {} nodes, {} tris",
+            minX, minY, componentNodes.size(), region.mesh.indices.size() / 3);
+    } else {
+        region.mesh = {};
+        region.watertight = true;
     }
 
-    // Projection path (also after a full rebuild): region meshes -> field-space
-    // vertex stream. Placement matches DiamondIsometry::nodeToField (no +halfH
-    // on y), z carries the raw ground fieldY (normalized in the VS via z_range).
-    cache.stream.clear();
-    std::size_t indexCount = 0;
-    for (const CliffCache::Region& region : cache.regions) {
-        indexCount += region.mesh.indices.size();
+    projectRegionStream(region, iso, heightScale);
+
+    // Upload the fresh stream.
+    const std::size_t bytes = region.stream.size() * sizeof(CliffVertex);
+    if (bytes > 0) {
+        if (region.vbufSize < bytes) {
+            if (region.vbuf.id != SG_INVALID_ID) {
+                sg_destroy_buffer(region.vbuf);
+            }
+            sg_buffer_desc buf_desc = {};
+            buf_desc.size = ((bytes / (std::size_t{1} << 20)) + 1) * (std::size_t{1} << 20);
+            buf_desc.usage.dynamic_update = true;
+            buf_desc.label = "render-core-cliff-vbuf";
+            region.vbuf = sg_make_buffer(&buf_desc);
+            region.vbufSize = buf_desc.size;
+        }
+        if (region.vbuf.id != SG_INVALID_ID) {
+            sg_update_buffer(region.vbuf, sg_range{region.stream.data(), bytes});
+        }
     }
-    cache.stream.reserve(indexCount);
+}
+
+void CliffRenderer::projectRegionStream(
+    RegionCache& region,
+    const topology_core::DiamondIsometry& iso,
+    float heightScale) {
+
+    // Projection path: region mesh -> field-space vertex stream. Placement
+    // matches DiamondIsometry::nodeToField (no +halfH on y), z carries the raw
+    // ground fieldY (normalized in the VS via z_range).
+    region.stream.clear();
+    region.stream.reserve(region.mesh.indices.size());
     const glm::vec2 cellSz = iso.dims.cellSize();
     const float halfW = cellSz.x * 0.5f;
     const float halfH = cellSz.y * 0.5f;
-    for (const CliffCache::Region& region : cache.regions) {
-        for (const std::uint32_t index : region.mesh.indices) {
-            const cliff::MeshVertex& v = region.mesh.vertices[index];
-            const float mapX = static_cast<float>(region.origin.x) + v.px;
-            const float mapZ = static_cast<float>(region.origin.y) + v.pz;
-            const float fieldX = (mapX - mapZ) * halfW + halfW;
-            const float fieldY = (mapX + mapZ) * halfH;
-            cache.stream.push_back(CliffVertex{
-                {fieldX, fieldY - v.py * cache.heightScale, fieldY},
-                {v.nx, v.ny, v.nz},
-                v.groove,
-                {mapX, v.py, mapZ}});
-        }
+    for (const std::uint32_t index : region.mesh.indices) {
+        const cliff::MeshVertex& v = region.mesh.vertices[index];
+        const float mapX = static_cast<float>(region.origin.x) + v.px;
+        const float mapZ = static_cast<float>(region.origin.y) + v.pz;
+        const float fieldX = (mapX - mapZ) * halfW + halfW;
+        const float fieldY = (mapX + mapZ) * halfH;
+        region.stream.push_back(CliffVertex{
+            {fieldX, fieldY - v.py * heightScale, fieldY},
+            {v.nx, v.ny, v.nz},
+            v.groove,
+            {mapX, v.py, mapZ}});
     }
 }
 
