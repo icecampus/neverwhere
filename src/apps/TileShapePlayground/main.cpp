@@ -442,6 +442,9 @@ void drawImGui(int w, int h) {
         ShadingParams& sh = g_cliffShading;
         ImGui::SliderFloat("Raised height", &g_raisedParams.height, 4.0f, 128.0f, "%.0f px");
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Ground-slab underlay toggle: off by default (standalone
+            // highground); a field param, so this goes through the debounce.
+            ImGui::Checkbox("Ground slab", &p.groundEnabled);
             ImGui::SliderFloat("Cell size", &p.cellSize, 0.03f, 0.07f, "%.3f");
             ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
             ImGui::SliderFloat("Plateau height", &p.plateauHeight, 0.4f, 2.0f);
@@ -707,6 +710,9 @@ int main(int argc, char* argv[]) {
     bool smoke = false;
     // Playground default: smoothed raised contours (overridable via --smooth).
     g_raisedParams.smoothIterations = 2;
+    // Playground default: no ground-slab underlay under the cliff mesh — the
+    // highground stands alone; the underlay will be authored separately.
+    g_cliffParams.groundEnabled = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--smoke") {

@@ -1,6 +1,7 @@
 // Scalar field for the cliff/highground prototype: blurred binary height nodes
-// define the plateau outline in plan; a slab + ground chunk gives the 3D base;
-// omphalos-style grooves (three rotated gmod frames) carve the wall band.
+// define the plateau outline in plan; a slab (+ optional ground chunk) gives
+// the 3D base; omphalos-style grooves (three rotated gmod frames) carve the
+// wall band.
 //
 // Pure pipeline like highground.h: node grid + FieldParams -> sampled field,
 // no Qt/GPU. The node grid is injected (CliffFieldPlayground's hardcoded
@@ -32,6 +33,9 @@ struct FieldParams {
     float groundDepth = 0.3f;      // ground slab thickness (y in [-groundDepth, 0])
     float groundMargin = 0.35f;    // ground slab extent beyond the region
     float groundRounding = 0.1f;   // ground slab edge rounding
+    // false: no ground chunk under the plateau — the raised slab stands alone
+    // (its underside closes at y = -edgeRadius, the mesh stays watertight).
+    bool groundEnabled = true;
     // Groove wave: abs(gmod(y + phase, period) - period/2) - (period/2 - depthMax).
     float groovePeriod = 0.4f;     // gmod period along the groove axis
     float groovePhase = 0.1f;      // phase shift
@@ -57,7 +61,7 @@ public:
 
     // Full field: base shape + grooves + fbm displacement. Negative inside the solid.
     float eval(const glm::vec3& p) const;
-    // Base shape only (slab + ground chunk, no grooves/fbm). Cheap.
+    // Base shape only (slab + ground chunk if enabled, no grooves/fbm). Cheap.
     float evalBase(const glm::vec3& p) const;
     // Groove carve depth: 0 on the untouched surface, > 0 towards groove floors.
     float grooveDepth(const glm::vec3& p) const;

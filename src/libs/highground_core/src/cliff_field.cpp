@@ -225,6 +225,12 @@ float CliffField::evalBase(const glm::vec3& p, float& outD2) const {
     // Plateau slab: inside the outline and 0 <= y <= H; edgeRadius expands the
     // slab so its convex rim (wall meets top) gets rounded.
     const float slab = std::max(d2, std::fabs(p.y - halfH) - halfH) - m_params.edgeRadius;
+    if (!m_params.groundEnabled) {
+        // Standalone highground: the plateau slab alone is a closed solid —
+        // its underside caps at y = -edgeRadius and the padding keeps the
+        // field positive on the grid border, so the mesh stays watertight.
+        return slab;
+    }
     // Ground chunk: rounded box with its top at y = 0, fully inside the padding
     // so the field stays positive on the grid border.
     const float centerX = 0.5f * m_regionX;

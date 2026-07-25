@@ -49,8 +49,9 @@ struct PipelineResult {
     float border = 0.0f;
 };
 
-PipelineResult runPipeline(const std::uint8_t* nodes, int nodesX, int nodesY) {
-    cliff::CliffField field(cliff::FieldParams{}, nodes, nodesX, nodesY);
+PipelineResult runPipeline(const std::uint8_t* nodes, int nodesX, int nodesY,
+    const cliff::FieldParams& params = {}) {
+    cliff::CliffField field(params, nodes, nodesX, nodesY);
     std::vector<float> samples;
     field.sample(samples);
 
@@ -121,4 +122,28 @@ TEST(CliffField, EmptyNodeGrid) {
     const cliff::WatertightReport report = cliff::checkWatertight(result.mesh);
     EXPECT_TRUE(report.ok()) << "bad edges: " << report.badEdges
         << " of " << report.undirectedEdges;
+}
+
+TEST(CliffField, NoGroundSlab) {
+    // groundEnabled = false: the raised slab stands alone — the mesh must
+    // stay watertight and nothing may reach below the slab underside
+    // (y = -edgeRadius; the ground chunk would extend to -groundDepth).
+    cliff::FieldParams params;
+    params.groundEnabled = false;
+    const PipelineResult result = runPipeline(&kHeightNodes[0][0], 7, 7, params);
+
+    EXPECT_GT(result.border, 0.0f);
+    EXPECT_EQ(result.regStats.remaining, 0);
+    ASSERT_FALSE(result.mesh.vertices.empty());
+
+    const cliff::WatertightReport report = cliff::checkWatertight(result.mesh);
+    EXPECT_TRUE(report.ok()) << "bad edges: " << report.badEdges
+        << " of " << report.undirectedEdges;
+
+    float minY = 1e9f;
+    for (const cliff::MeshVertex& v : result.mesh.vertices) {
+        minY = std::min(minY, v.py);
+    }
+    EXPECT_GT(minY, -0.1f) << "geometry below the slab underside";
+    EXPECT_LT(minY, 0.0f);
 }

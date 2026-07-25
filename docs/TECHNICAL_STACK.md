@@ -241,7 +241,11 @@ TileShapePlayground — чекбокс «CGAL region» на raised-слое (A/B
 watertight-mesh с запечённым groove-атрибутом. Чистый C++/glm, без Qt/GPU.
 В TileShapePlayground живёт как кисть «Cliff 3D» (кэш меша с debounce 0.3 с,
 z-buffer с той же формулой глубины, что у raised-прохода, per-pixel шейдер
-палитры из CliffFieldPlayground — GLSL/HLSL/MSL). Стоимость полного ребилда —
+палитры из CliffFieldPlayground — GLSL/HLSL/MSL). Плоская подложка
+(ground chunk вокруг плато) отключается параметром
+`FieldParams::groundEnabled`; в TileShapePlayground она выключена —
+рисуется только standalone-хайграунд (подложка будет делаться отдельно),
+меш остаётся watertight (низ закрывается на y = -edgeRadius). Стоимость полного ребилда —
 секунды на поле ~1 млн вокселов (Debug), поэтому только debounced-ребилд.
 Покрытие: `src/tests/highground/cliff_field_test.cpp` + cliff-сценарий в
 smoke плейграунда. Известное ограничение: эвристика регуляризации сёдел
