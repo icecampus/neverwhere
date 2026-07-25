@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import Game 1.0
 
     
@@ -12,11 +12,18 @@ MouseArea
     hoverEnabled: true 
     acceptedButtons: Qt.LeftButton | Qt.RightButton 
 
+    // Tool drag-stroke: LMB held paints continuously (MapView wires these to
+    // AssetToolsSelector.stroke).
+    signal strokeStart(real x, real y, int modifiers)
+    signal strokeMove(real x, real y, int modifiers)
+    signal strokeFinish()
+
     property int startX: 0
     property int startY: 0
     property int startCamX: 0
     property int startCamY: 0
     property bool startDrag: false
+    property bool painting: false
 
     onPressed:(mouse)=>
     {
@@ -29,6 +36,11 @@ MouseArea
             
             startDrag = true
         }
+        else if(mouse.button === Qt.LeftButton )
+        {
+            painting = true
+            strokeStart(mouse.x, mouse.y, mouse.modifiers)
+        }
     }
 
 
@@ -37,6 +49,11 @@ MouseArea
         if(mouse.button === Qt.RightButton )
         {
             startDrag = false
+        }
+        else if(mouse.button === Qt.LeftButton )
+        {
+            painting = false
+            strokeFinish()
         }
     }
 
@@ -49,6 +66,11 @@ MouseArea
             var dy = mouseY - startY
             isoView.cameraX = startCamX + dx
             isoView.cameraY = startCamY + dy
+        }
+
+        if (painting)
+        {
+            strokeMove(mouse.x, mouse.y, mouse.modifiers)
         }
 
         var screenPos = math.vec2(mouseArea.mouseX, mouseArea.mouseY)

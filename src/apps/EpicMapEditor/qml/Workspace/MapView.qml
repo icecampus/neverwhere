@@ -78,13 +78,19 @@ Rectangle
         id: mouseArea
         anchors.fill: parent
         isoView: isoView
-        onClicked:(mouse)=>
+        onStrokeStart:(x, y, modifiers)=>
         {
-            if(mouse.button === Qt.LeftButton )
-            {
-                toolsSelector.click(Qt.point(mouse.x, mouse.y), mapModel, isoView,
-                    mouse.modifiers & Qt.ControlModifier, mouse.modifiers & Qt.ShiftModifier, mouse.modifiers & Qt.AltModifier)
-            }
+            toolsSelector.stroke(0, Qt.point(x, y), mapModel, isoView,
+                modifiers & Qt.ControlModifier, modifiers & Qt.ShiftModifier, modifiers & Qt.AltModifier)
+        }
+        onStrokeMove:(x, y, modifiers)=>
+        {
+            toolsSelector.stroke(1, Qt.point(x, y), mapModel, isoView,
+                modifiers & Qt.ControlModifier, modifiers & Qt.ShiftModifier, modifiers & Qt.AltModifier)
+        }
+        onStrokeFinish:
+        {
+            toolsSelector.stroke(2, Qt.point(0, 0), mapModel, isoView, false, false, false)
         }
     }
 

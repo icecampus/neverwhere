@@ -39,6 +39,15 @@ void AssetToolsModel::click(QPoint screenPos, Asset* currentAsset, LayerModel* l
     }
 }
 
+void AssetToolsModel::stroke(StrokeKind kind, QPoint screenPos, Asset* currentAsset, LayerModel* layerModel,
+    DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier)
+{
+    if (currentTool >= 0 && currentAsset && layerModel)
+    {
+        element(currentTool)->stroke(kind, screenPos, currentAsset, layerModel, iso, ctrlModifier, shiftModifier, altModifier);
+    }
+}
+
 //ToolsModel
 AssetToolsSelector::AssetToolsSelector(QObject* parent):
     QObject(parent)
@@ -98,6 +107,22 @@ void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, DiamondIsom
         if (layerModel)
         {
             currentToolsModel->click(screenPos, currentAsset, layerModel, iso, ctrlModifier, shiftModifier, altModifier);
+        }
+    }
+}
+
+void AssetToolsSelector::stroke(int kind, QPoint screenPos, MapModel* mapModel, DiamondIsometryView* iso,
+    bool ctrlModifier, bool shiftModifier, bool altModifier)
+{
+    AssetToolsModel* currentToolsModel = getToolsModel();
+    if (currentToolsModel && currentAsset)
+    {
+        LayerModel* layerModel = mapModel->layer(currentAsset->getLayerType());
+
+        if (layerModel)
+        {
+            currentToolsModel->stroke(static_cast<StrokeKind>(kind), screenPos, currentAsset, layerModel, iso,
+                ctrlModifier, shiftModifier, altModifier);
         }
     }
 }

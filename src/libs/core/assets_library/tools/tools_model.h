@@ -20,6 +20,9 @@ public:
     void click(QPoint screenPos, Asset* currentAsset, LayerModel* mapModel, DiamondIsometryView* iso,
         bool ctrlModifier, bool shiftModifier, bool altModifier);
 
+    void stroke(StrokeKind kind, QPoint screenPos, Asset* currentAsset, LayerModel* mapModel,
+        DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier);
+
 signals:
     void currentToolChanged();
 
@@ -43,6 +46,7 @@ public:
     AssetToolsModel* getToolsModel();
 
     Q_INVOKABLE void click(QPoint screenPos, MapModel* mapModel, DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier);
+    Q_INVOKABLE void stroke(int kind, QPoint screenPos, MapModel* mapModel, DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier);
 signals:
     void currentAssetChanged();
     void toolsModelChanged();
