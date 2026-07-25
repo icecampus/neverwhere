@@ -238,7 +238,7 @@ static void frame(void) {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
     // World rendering (editor parity: landscape + sprites + overlays)
-    g_worldRenderer.render(g_frame, g_iso, g_camera, w, h);
+    g_worldRenderer.render(g_frame, g_iso, g_camera, w, h, stm_sec(now));
     if (g_state.imgui_ok) {
         simgui_render();
     }

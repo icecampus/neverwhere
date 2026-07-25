@@ -200,7 +200,7 @@ public:
 
         // Water caustics background first (world-space quad), the map on top.
         m_water.render(camera, viewW, viewH, (float)m_time.elapsed() / 1000.0f);
-        m_worldRenderer.render(m_frame, m_iso, camera, viewW, viewH);
+        m_worldRenderer.render(m_frame, m_iso, camera, viewW, viewH, m_time.elapsed() / 1000.0);
 
         sg_end_pass();
         // Exactly one sg_commit per frame at the top level (EcsPlayground rules).

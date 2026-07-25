@@ -6,6 +6,7 @@ namespace render_core {
 
 void WorldRenderer::init(sg_pixel_format depthFormat) {
     landscapeRenderer.init(depthFormat);
+    cliffRenderer.init(depthFormat);
     spriteRenderer.init(depthFormat);
     overlayRenderer.init(depthFormat);
 }
@@ -13,6 +14,7 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
 void WorldRenderer::shutdown() {
     overlayRenderer.shutdown();
     spriteRenderer.shutdown();
+    cliffRenderer.shutdown();
     landscapeRenderer.shutdown();
 }
 
@@ -22,6 +24,10 @@ void WorldRenderer::ensureLandscapeAtlas(const std::string& assetUuid, const std
 
 void WorldRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath) {
     landscapeRenderer.ensureRaisedAtlas(assetUuid, atlasPath, cols, rows, params, topTexturePath);
+}
+
+void WorldRenderer::ensureCliffAsset(const std::string& assetUuid, const CliffParams& params) {
+    cliffRenderer.ensureCliffAsset(assetUuid, params);
 }
 
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
@@ -46,10 +52,12 @@ void WorldRenderer::render(
     const topology_core::DiamondIsometry& iso,
     const topology_core::Camera2D& camera,
     int viewWidth,
-    int viewHeight) {
+    int viewHeight,
+    double nowSec) {
 
     landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight);
     landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
+    cliffRenderer.render(frame.cliffTiles, iso, camera, viewWidth, viewHeight, nowSec);
     spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
 
     scratchLines.clear();

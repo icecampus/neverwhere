@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include "render_core/landscape_renderer.h"
+#include "render_core/cliff_renderer.h"
 #include "render_core/overlay_renderer.h"
 #include "render_core/sprite_renderer.h"
 
@@ -20,6 +21,7 @@ namespace render_core {
 struct WorldFrame {
     std::vector<LandscapeTile> landscapeTiles;
     std::vector<LandscapeTile> raisedTiles; // RaisedLandscape layer (3D tiles: walls + lifted top)
+    std::vector<LandscapeTile> cliffTiles;  // CliffLandscape layer (cliff3d: surface-nets cliffs)
     std::vector<SpriteInstance> sprites;
 
     bool showGrid = true;
@@ -43,17 +45,21 @@ public:
 
     void ensureLandscapeAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows);
     void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {});
+    void ensureCliffAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 
+    // `nowSec` drives the cliff cache debounce (frame time of the shell).
     void render(
         const WorldFrame& frame,
         const topology_core::DiamondIsometry& iso,
         const topology_core::Camera2D& camera,
         int viewWidth,
-        int viewHeight);
+        int viewHeight,
+        double nowSec);
 
 private:
     LandscapeRenderer landscapeRenderer;
+    CliffRenderer cliffRenderer;
     SpriteRenderer spriteRenderer;
     OverlayRenderer overlayRenderer;
 

@@ -13,6 +13,8 @@
 #include <highground_core/highground.h>
 #include <landscape_core/landscape_logic.h>
 
+#include "atlas_tile_types.h"
+
 namespace render_core {
 
 static const char* vs_src_glsl = R"(
@@ -595,58 +597,8 @@ constexpr float kTopUvPerWorldPx = 1.0f / 256.0f;
 constexpr float kWallTexScale = 1.0f / 256.0f;
 
 // Same packing as DiamondIsometry::zOffset.
-std::uint64_t nodeKey(const glm::ivec2& node) {
-    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(node.y)) << 32)
-        | static_cast<std::uint32_t>(node.x);
-}
-
-// Recover the LandscapeTileType from the stored atlas tileIndex. Mirrors
-// SliceAsset::subTileTypeByIndex (Grass 4x6 slice atlas layout) — the same
-// table the vertex-centric pencil wrote the index with.
-landscape_core::LandscapeTileType tileTypeFromAtlasIndex(std::size_t tileIndex) {
-    using T = landscape_core::LandscapeTileType;
-    switch (tileIndex) {
-    case 0:
-    case 1:
-    case 2:
-    case 3:
-        return T::Full;
-    case 4:
-        return T::DownLack;
-    case 5:
-        return T::LeftLack;
-    case 6:
-        return T::UpLack;
-    case 7:
-        return T::RightLack;
-    case 8:
-        return T::UpCorner;
-    case 9:
-        return T::RightCorner;
-    case 10:
-        return T::DownCorner;
-    case 11:
-        return T::LeftCorner;
-    case 12:
-    case 16:
-        return T::RightUpLine;
-    case 13:
-    case 17:
-        return T::RightDownLine;
-    case 14:
-    case 18:
-        return T::LeftDownLine;
-    case 15:
-    case 19:
-        return T::LeftUpLine;
-    case 20:
-        return T::UpAndDownCorners;
-    case 21:
-        return T::LeftRightCorners;
-    default:
-        return T::Unknown;
-    }
-}
+// nodeKey and tileTypeFromAtlasIndex live in the shared internal header
+// src/atlas_tile_types.h (also used by CliffRenderer).
 
 } // namespace
 
