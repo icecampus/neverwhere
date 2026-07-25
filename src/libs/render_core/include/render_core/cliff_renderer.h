@@ -115,8 +115,10 @@ private:
     };
 
     // Cached derivative of one asset's cliff tiles: the extracted surface-nets
-    // mesh plus the projected vertex stream, rebuilt only when the tile set or
-    // the field params change (debounced) — the full rebuild costs seconds.
+    // meshes (one per connected node region, so distant islands never inflate
+    // a shared field bbox) plus the projected vertex stream, rebuilt only when
+    // the tile set or the field params change (debounced) — the full rebuild
+    // costs seconds.
     struct CliffCache {
         std::uint64_t contentHash = 0;
         float heightScale = 0.0f;
@@ -126,8 +128,11 @@ private:
         bool streamDirty = false; // re-projection only (cheap, heightScale edits)
         bool gpuDirty = false;
         cliff::FieldParams fieldParams{};
-        cliff::Mesh mesh;
-        glm::ivec2 origin{0, 0};
+        struct Region {
+            cliff::Mesh mesh;
+            glm::ivec2 origin{0, 0}; // node coords of the region field's (0,0)
+        };
+        std::vector<Region> regions;
         std::vector<CliffVertex> stream;
         sg_buffer vbuf{SG_INVALID_ID};
         std::size_t vbufSize = 0;

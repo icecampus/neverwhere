@@ -756,8 +756,11 @@ void CliffRenderer::rebuildCliffCache(
     const topology_core::DiamondIsometry& iso) {
 
     if (cache.meshDirty) {
-        // Full path: tiles -> corner nodes -> bbox grid -> scalar field ->
-        // regularize -> surface nets (mirrors the playground's rebuild).
+        // Full path: tiles -> corner nodes -> per-region fields -> regularize
+        // -> surface nets (mirrors the playground's rebuild, but one field per
+        // connected node region: distant islands must not inflate a shared
+        // field bbox — a lone node and a block 200 cells apart would
+        // otherwise create an enormous empty field between them).
         std::unordered_set<std::uint64_t> seen;
         std::vector<glm::ivec2> onNodes;
         for (const LandscapeTile* t : group) {
@@ -770,22 +773,49 @@ void CliffRenderer::rebuildCliffCache(
             }
         }
 
-        if (onNodes.empty()) {
-            cache.mesh = {};
-            cache.watertight = true;
-        } else {
-            int minX = onNodes[0].x;
-            int minY = onNodes[0].y;
-            int maxX = onNodes[0].x;
-            int maxY = onNodes[0].y;
-            for (const glm::ivec2& n : onNodes) {
+        cache.regions.clear();
+        cache.watertight = true;
+
+        // Connected components over the on-node set. Nodes are neighbours when
+        // they share a map cell (8-connectivity on the node grid).
+        std::unordered_map<std::uint64_t, glm::ivec2> remaining;
+        remaining.reserve(onNodes.size());
+        for (const glm::ivec2& n : onNodes) {
+            remaining.emplace(nodeKey(n), n);
+        }
+        while (!remaining.empty()) {
+            std::vector<glm::ivec2> component;
+            std::vector<glm::ivec2> stack;
+            stack.push_back(remaining.begin()->second);
+            remaining.erase(remaining.begin());
+            while (!stack.empty()) {
+                const glm::ivec2 node = stack.back();
+                stack.pop_back();
+                component.push_back(node);
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        if (dx == 0 && dy == 0) continue;
+                        const auto it = remaining.find(nodeKey({node.x + dx, node.y + dy}));
+                        if (it != remaining.end()) {
+                            stack.push_back(it->second);
+                            remaining.erase(it);
+                        }
+                    }
+                }
+            }
+
+            // Field over the component bbox + a one-cell margin (the blurred
+            // outline must not cross the field border).
+            int minX = component[0].x;
+            int minY = component[0].y;
+            int maxX = component[0].x;
+            int maxY = component[0].y;
+            for (const glm::ivec2& n : component) {
                 minX = std::min(minX, n.x);
                 minY = std::min(minY, n.y);
                 maxX = std::max(maxX, n.x);
                 maxY = std::max(maxY, n.y);
             }
-            // One-cell margin (the blurred outline must not cross the field
-            // border — the brush keeps border nodes off).
             minX -= 1;
             minY -= 1;
             maxX += 1;
@@ -793,7 +823,7 @@ void CliffRenderer::rebuildCliffCache(
             const int nodesX = maxX - minX + 1;
             const int nodesY = maxY - minY + 1;
             std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
-            for (const glm::ivec2& n : onNodes) {
+            for (const glm::ivec2& n : component) {
                 nodes[static_cast<std::size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
             }
 
@@ -802,36 +832,44 @@ void CliffRenderer::rebuildCliffCache(
             field.sample(samples);
             cliff::RegularizeStats regStats;
             cliff::regularizeSigns(field, samples, &regStats);
-            cache.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
-            const cliff::WatertightReport report = cliff::checkWatertight(cache.mesh);
-            cache.watertight = report.ok();
-            cache.origin = {minX, minY};
+            CliffCache::Region region;
+            region.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+            region.origin = {minX, minY};
+            const cliff::WatertightReport report = cliff::checkWatertight(region.mesh);
+            cache.watertight = cache.watertight && report.ok();
             if (!report.ok()) {
                 spdlog::warn("CliffRenderer: cliff mesh not watertight ({} bad of {} edges, {} saddles left)",
                     report.badEdges, report.undirectedEdges, regStats.remaining);
             }
+            cache.regions.push_back(std::move(region));
         }
     }
 
-    // Projection path (also after a full rebuild): mesh -> field-space vertex
-    // stream. Placement matches DiamondIsometry::nodeToField (no +halfH on y),
-    // z carries the raw ground fieldY (normalized in the VS via z_range).
+    // Projection path (also after a full rebuild): region meshes -> field-space
+    // vertex stream. Placement matches DiamondIsometry::nodeToField (no +halfH
+    // on y), z carries the raw ground fieldY (normalized in the VS via z_range).
     cache.stream.clear();
-    cache.stream.reserve(cache.mesh.indices.size());
+    std::size_t indexCount = 0;
+    for (const CliffCache::Region& region : cache.regions) {
+        indexCount += region.mesh.indices.size();
+    }
+    cache.stream.reserve(indexCount);
     const glm::vec2 cellSz = iso.dims.cellSize();
     const float halfW = cellSz.x * 0.5f;
     const float halfH = cellSz.y * 0.5f;
-    for (const std::uint32_t index : cache.mesh.indices) {
-        const cliff::MeshVertex& v = cache.mesh.vertices[index];
-        const float mapX = static_cast<float>(cache.origin.x) + v.px;
-        const float mapZ = static_cast<float>(cache.origin.y) + v.pz;
-        const float fieldX = (mapX - mapZ) * halfW + halfW;
-        const float fieldY = (mapX + mapZ) * halfH;
-        cache.stream.push_back(CliffVertex{
-            {fieldX, fieldY - v.py * cache.heightScale, fieldY},
-            {v.nx, v.ny, v.nz},
-            v.groove,
-            {mapX, v.py, mapZ}});
+    for (const CliffCache::Region& region : cache.regions) {
+        for (const std::uint32_t index : region.mesh.indices) {
+            const cliff::MeshVertex& v = region.mesh.vertices[index];
+            const float mapX = static_cast<float>(region.origin.x) + v.px;
+            const float mapZ = static_cast<float>(region.origin.y) + v.pz;
+            const float fieldX = (mapX - mapZ) * halfW + halfW;
+            const float fieldY = (mapX + mapZ) * halfH;
+            cache.stream.push_back(CliffVertex{
+                {fieldX, fieldY - v.py * cache.heightScale, fieldY},
+                {v.nx, v.ny, v.nz},
+                v.groove,
+                {mapX, v.py, mapZ}});
+        }
     }
 }
 
