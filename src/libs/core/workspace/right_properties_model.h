@@ -12,7 +12,8 @@ namespace PropertiesContainerTypes
         Unknown,
         MapSettings,
         AssetSettings,
-        GeneratorSettings
+        GeneratorSettings,
+        CliffSettings
     };
     Q_ENUM_NS(Type);
 }
@@ -58,6 +59,15 @@ class GeneratorSettings : public PropertyContainer
     Q_OBJECT
 public:
     GeneratorSettings(QObject* parent);
+
+};
+
+//CliffSettings — cliff3d generator/shading params panel (cliff assets only)
+class CliffSettings : public PropertyContainer
+{
+    Q_OBJECT
+public:
+    CliffSettings(QObject* parent);
 
 };
 

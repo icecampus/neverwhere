@@ -39,6 +39,13 @@ GeneratorSettings::GeneratorSettings(QObject* parent):
 
 }
 
+//CliffSettings
+CliffSettings::CliffSettings(QObject* parent):
+    PropertyContainer(PropertiesContainerTypes::CliffSettings, parent)
+{
+
+}
+
 
 //PropertyContainersModel
 PropertyContainersModel::PropertyContainersModel(QObject* parent):
@@ -47,5 +54,6 @@ PropertyContainersModel::PropertyContainersModel(QObject* parent):
     addElement<MapSetting>(this);
     addElement<AssetSettings>(this);
     addElement<GeneratorSettings>(this);
+    addElement<CliffSettings>(this);
 }
 

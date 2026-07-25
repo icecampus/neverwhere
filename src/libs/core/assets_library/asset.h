@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <QObject>
 #include <QUuid>
 #include <QJsonObject>
@@ -17,6 +17,7 @@ class Asset : public QObject
     Q_PROPERTY(QString name READ name CONSTANT)
     Q_PROPERTY(QString thumbnailUrl READ getThumbnailUrl CONSTANT)
     Q_PROPERTY(LayerTypes::Type layerType READ getLayerType CONSTANT)
+    Q_PROPERTY(AssetTypes::Type type READ getType CONSTANT)
 
     // pivot - это смещение ЦЕНТРА картинки относительно центра клетки игрового поля в размере клеток игрового поля
     // (0,0) - нет смешения, 
@@ -36,6 +37,7 @@ class Asset : public QObject
     QString name() const;
     QString getThumbnailUrl() const;
     LayerTypes::Type getLayerType() const;
+    AssetTypes::Type getType() const { return type; }
 
     math::vec2 getPivot() const;
     void setPivot(const math::vec2& pivot);

@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import Qt.labs.qmlmodels
 import Game 1.0
 import "PropertiesContainers"
@@ -53,8 +53,8 @@ Rectangle
                     asset: rightPanel.currentAsset
                 }
             }
-            DelegateChoice 
-            {   
+            DelegateChoice
+            {
                 roleValue: PropertiesContainerTypes.GeneratorSettings
                 delegate: NoiseGenerator
                 {
@@ -62,7 +62,18 @@ Rectangle
                     text: element.title
                     mapModel: rightPanel.mapModel
                     currentAsset: rightPanel.currentAsset
-                    
+
+                }
+            }
+            DelegateChoice
+            {
+                roleValue: PropertiesContainerTypes.CliffSettings
+                delegate: CliffSettings
+                {
+                    width: conteinersView.width
+                    text: element.title
+                    asset: rightPanel.currentAsset
+                    activeAsset: rightPanel.currentAsset && rightPanel.currentAsset.type === AssetTypes.cliff3d
                 }
             }
         }
