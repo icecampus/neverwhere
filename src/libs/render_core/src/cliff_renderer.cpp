@@ -489,6 +489,11 @@ void CliffRenderer::shutdown() {
         }
     }
     caches.clear();
+    if (m_previewVbuf.id != SG_INVALID_ID) {
+        sg_destroy_buffer(m_previewVbuf);
+        m_previewVbuf = {};
+        m_previewVbufSize = 0;
+    }
 }
 
 void CliffRenderer::ensureCliffAsset(const std::string& assetUuid, const CliffParams& params) {
@@ -574,6 +579,62 @@ void CliffRenderer::render(
     vs.z_range[1] = 1.0f / 200000.0f;
     vs.camera_zoom = camera.zoom;
 
+    // Shading uniforms from the *current* asset params — palette edits are
+    // instant and never touch the caches.
+    const auto buildFs = [&iso](const CliffParams& params) {
+        const CliffShading& s = params.shading;
+        CliffFsParams fs{};
+        const float lightCe = std::cos(s.lightElevation);
+        fs.lightDir[0] = lightCe * std::sin(s.lightAzimuth);
+        fs.lightDir[1] = std::sin(s.lightElevation);
+        fs.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
+        // Constant iso view direction (viewer -> scene), mirrors the playground.
+        const float halfH = iso.dims.cellSize().y * 0.5f;
+        const float viewY = 2.0f * halfH / std::max(params.heightScale, 1.0f);
+        const float viewLen = std::sqrt(2.0f + viewY * viewY);
+        fs.viewDir[0] = -1.0f / viewLen;
+        fs.viewDir[1] = -viewY / viewLen;
+        fs.viewDir[2] = -1.0f / viewLen;
+        std::memcpy(fs.darkColor, s.darkColor.data(), sizeof(s.darkColor));
+        std::memcpy(fs.goldColor, s.goldColor.data(), sizeof(s.goldColor));
+        std::memcpy(fs.grassA, s.grassA.data(), sizeof(s.grassA));
+        std::memcpy(fs.grassB, s.grassB.data(), sizeof(s.grassB));
+        fs.params0[0] = s.veinThreshold;
+        fs.params0[1] = s.ambient;
+        fs.params0[2] = s.diffuse;
+        fs.params0[3] = s.specStrength;
+        fs.params1[0] = s.specPower;
+        fs.params1[1] = s.gamma;
+        fs.params1[2] = s.backLight;
+        return fs;
+    };
+
+    // Prototype silhouette for pending groups: a flat tile diamond at ground
+    // level, shaded by the same FS palette (normal up, no carve -> grass top).
+    const auto appendPreviewDiamond = [&iso](std::vector<CliffVertex>& out, const glm::ivec2& cell) {
+        const glm::vec2 center = iso.mapToField(cell);
+        const float halfW = iso.dims.cellWidth * 0.5f;
+        const float halfH = iso.dims.cellSize().y * 0.5f;
+        const auto v = [](float px, float py, float wx, float wz) {
+            return CliffVertex{{px, py, py}, {0.0f, 1.0f, 0.0f}, 0.0f, {wx, 0.0f, wz}};
+        };
+        const float cx = static_cast<float>(cell.x);
+        const float cy = static_cast<float>(cell.y);
+        const CliffVertex vL = v(center.x - halfW, center.y, cx, cy + 0.5f);
+        const CliffVertex vU = v(center.x, center.y - halfH, cx + 0.5f, cy);
+        const CliffVertex vR = v(center.x + halfW, center.y, cx + 1.0f, cy + 0.5f);
+        const CliffVertex vD = v(center.x, center.y + halfH, cx + 0.5f, cy + 1.0f);
+        out.push_back(vL);
+        out.push_back(vU);
+        out.push_back(vR);
+        out.push_back(vL);
+        out.push_back(vR);
+        out.push_back(vD);
+    };
+
+    m_previewVerts.clear();
+    m_previewRanges.clear();
+
     for (auto& [uuid, group] : groups) {
         const CliffParams& params = assets.find(uuid)->second;
         CliffCache& cache = caches[uuid];
@@ -628,34 +689,27 @@ void CliffRenderer::render(
             }
             cache.gpuDirty = false;
         }
+
+        // Pending edit (debounce/rebuild not done yet): show the prototype
+        // silhouette of the current tiles instead of the stale/missing mesh.
+        const bool pending = cache.meshDirty || cache.streamDirty;
+        if (pending) {
+            PreviewRange range;
+            range.base = static_cast<int>(m_previewVerts.size());
+            range.params = &params;
+            for (const LandscapeTile* t : group) {
+                appendPreviewDiamond(m_previewVerts, t->cell);
+            }
+            range.count = static_cast<int>(m_previewVerts.size()) - range.base;
+            if (range.count > 0) {
+                m_previewRanges.push_back(range);
+            }
+            continue;
+        }
+
         if (cache.stream.empty() || cache.vbuf.id == SG_INVALID_ID) continue;
 
-        // Shading uniforms from the *current* params — palette edits are
-        // instant and never touch the cache.
-        const CliffShading& s = params.shading;
-        CliffFsParams fs{};
-        const float lightCe = std::cos(s.lightElevation);
-        fs.lightDir[0] = lightCe * std::sin(s.lightAzimuth);
-        fs.lightDir[1] = std::sin(s.lightElevation);
-        fs.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
-        // Constant iso view direction (viewer -> scene), mirrors the playground.
-        const float halfH = iso.dims.cellSize().y * 0.5f;
-        const float viewY = 2.0f * halfH / std::max(params.heightScale, 1.0f);
-        const float viewLen = std::sqrt(2.0f + viewY * viewY);
-        fs.viewDir[0] = -1.0f / viewLen;
-        fs.viewDir[1] = -viewY / viewLen;
-        fs.viewDir[2] = -1.0f / viewLen;
-        std::memcpy(fs.darkColor, s.darkColor.data(), sizeof(s.darkColor));
-        std::memcpy(fs.goldColor, s.goldColor.data(), sizeof(s.goldColor));
-        std::memcpy(fs.grassA, s.grassA.data(), sizeof(s.grassA));
-        std::memcpy(fs.grassB, s.grassB.data(), sizeof(s.grassB));
-        fs.params0[0] = s.veinThreshold;
-        fs.params0[1] = s.ambient;
-        fs.params0[2] = s.diffuse;
-        fs.params0[3] = s.specStrength;
-        fs.params1[0] = s.specPower;
-        fs.params1[1] = s.gamma;
-        fs.params1[2] = s.backLight;
+        const CliffFsParams fs = buildFs(params);
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = cache.vbuf;
@@ -664,6 +718,35 @@ void CliffRenderer::render(
         sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
         sg_apply_uniforms(1, sg_range{&fs, sizeof(fs)});
         sg_draw(0, static_cast<int>(cache.stream.size()), 1);
+    }
+
+    // Upload and draw the prototype silhouettes (one buffer update per frame).
+    if (!m_previewVerts.empty()) {
+        const std::size_t bytes = m_previewVerts.size() * sizeof(CliffVertex);
+        if (m_previewVbufSize < bytes) {
+            if (m_previewVbuf.id != SG_INVALID_ID) {
+                sg_destroy_buffer(m_previewVbuf);
+            }
+            sg_buffer_desc buf_desc = {};
+            buf_desc.size = ((bytes / (std::size_t{1} << 20)) + 1) * (std::size_t{1} << 20);
+            buf_desc.usage.dynamic_update = true;
+            buf_desc.label = "render-core-cliff-preview-vbuf";
+            m_previewVbuf = sg_make_buffer(&buf_desc);
+            m_previewVbufSize = buf_desc.size;
+        }
+        if (m_previewVbuf.id != SG_INVALID_ID) {
+            sg_update_buffer(m_previewVbuf, sg_range{m_previewVerts.data(), bytes});
+            for (const PreviewRange& range : m_previewRanges) {
+                const CliffFsParams fs = buildFs(*range.params);
+                sg_bindings bind = {};
+                bind.vertex_buffers[0] = m_previewVbuf;
+                sg_apply_pipeline(pip);
+                sg_apply_bindings(&bind);
+                sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
+                sg_apply_uniforms(1, sg_range{&fs, sizeof(fs)});
+                sg_draw(range.base, range.count, 1);
+            }
+        }
     }
 }
 

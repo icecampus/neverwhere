@@ -147,6 +147,20 @@ private:
 
     std::unordered_map<std::string, CliffParams> assets;
     std::unordered_map<std::string, CliffCache> caches;
+
+    // Prototype silhouette: while a group's cache is pending (edit waiting
+    // for the debounce/rebuild), the tiles are drawn as flat palette-shaded
+    // diamonds through the same pipeline instead of the stale/missing mesh.
+    // One scratch buffer, uploaded at most once per frame.
+    struct PreviewRange {
+        int base = 0;
+        int count = 0;
+        const CliffParams* params = nullptr;
+    };
+    std::vector<CliffVertex> m_previewVerts;
+    std::vector<PreviewRange> m_previewRanges;
+    sg_buffer m_previewVbuf{SG_INVALID_ID};
+    std::size_t m_previewVbufSize = 0;
 };
 
 } // namespace render_core
