@@ -88,14 +88,15 @@ std::optional<size_t> DiamondTiledLandscape::neighboursIndex(const math::ivec2& 
 //LandNodes helpers
 LandNodes DiamondTiledLandscape::buildLandNodes(LayerModel& map)
 {
+    // Sparse, unbounded: every Landscape object contributes its corner nodes,
+    // whatever its coordinates (no 200x200 contour, negatives included).
     LandNodes landMask;
-    landMask.init(200, 200);
 
     TileSet tileSet;
     map.iterate([&landMask, &tileSet](const GameObject& gameObject)
     {
         const Landscape* landObject = dynamic_cast<const Landscape*>(&gameObject);
-        if (landObject && landObject->getPosition().x < 200 && landObject->getPosition().y < 200)
+        if (landObject)
         {
             size_t tileIndex = landObject->getTileIndex();
             TileSet::TileType tileName = SliceAsset::subTileTypeByIndex(tileIndex);

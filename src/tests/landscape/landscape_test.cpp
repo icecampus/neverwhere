@@ -79,7 +79,6 @@ int maxAdjacentLevelDelta(const landscape_core::LandscapeLevelGrid& grid) {
 TEST_F(LandscapeTest, NodeDrawingLogic) {
     math::ivec2 nodePos(10, 10);
     LandNodes landNodes;
-    landNodes.init(100, 100);
     landNodes[nodePos] = 1;
 
     DiamondIsometry::Neighbours neighbours = DiamondIsometry::nodeNeighboursCell(nodePos);
@@ -104,7 +103,6 @@ TEST_F(LandscapeTest, PencilConnectivityTest) {
     // 1. Рисуем первую точку (узел)
     math::ivec2 node1(10, 10);
     LandNodes nodes1;
-    nodes1.init(100, 100);
     nodes1[node1] = 1;
 
     // Обновляем клетки вокруг node1

@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QtQml/qqml.h>
 #include <map>
+#include <unordered_map>
 #include "math/lib.h"
 
 // Topology-agnostic building blocks shared by every grid topology
@@ -77,24 +78,17 @@ struct TileSet
 };
 
 //LandNodes
-// Dense raster of node states (0/1). Pure storage — the meaning of the
-// (x, y) node coordinate is defined by the topology that fills/reads it.
-// Building this raster from a LayerModel and resolving a TileType from it
-// depend on neighbour topology, so those operations live in each
-// topology-specific header as free functions (buildLandNodes / tileTypeAt).
-struct LandNodes : public std::vector<uint8_t>
+// Sparse map of node states (0/1) keyed by node coordinate. Unbounded — any
+// (x, y) is valid, including negative (the grid extends in all directions);
+// a missing key reads as 0. Building this map from a LayerModel and resolving
+// a TileType from it depend on neighbour topology, so those operations live in
+// each topology-specific header as free functions (buildLandNodes / tileTypeAt).
+struct LandNodes
 {
-    void init(size_t width_, size_t height_);
-
-    // True when (x, y) is inside the [_width, _height) rectangle. Negative
-    // coordinates are out of bounds — diamond fieldToMap can return them.
-    bool inBounds(const math::ivec2& position) const;
-
     uint8_t& operator[](const math::ivec2& position);
     uint8_t operator[](const math::ivec2& position) const;
     uint8_t at(const math::ivec2& position) const;
 
-    size_t _width = 0;
-    size_t _height = 0;
+    std::unordered_map<math::ivec2, uint8_t> nodes;
 };
 

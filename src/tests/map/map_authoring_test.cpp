@@ -128,20 +128,21 @@ TEST(MapAuthoringTest, ApplyLandscapeUpdatesRaisesFullCell)
     EXPECT_EQ(total, 9);
 }
 
-TEST(MapAuthoringTest, ApplyLandscapeUpdatesSkipsOutOfBounds)
+TEST(MapAuthoringTest, ApplyLandscapeUpdatesAcceptsAnyCoordinate)
 {
     LayerModel layer(nullptr);
     auto slice = makeSliceAsset(kSliceUuid, "landscape");
 
+    // The node map is sparse and unbounded: negative and far coordinates are
+    // all valid painting targets (the 200x200 contour is gone).
     const std::vector<std::pair<math::ivec2, uint8_t>> updates = {
-        {math::ivec2(-1, 5), 1}, {math::ivec2(500, 500), 1},
+        {math::ivec2(-5, -5), 1}, {math::ivec2(500, 500), 1},
     };
-    // Out-of-bounds nodes are ignored; the affected cells are still
-    // recomputed (no-op content-wise) — nothing may be written.
-    MapAuthoring::applyLandscapeUpdates(layer, slice.get(), updates);
+    EXPECT_EQ(MapAuthoring::applyLandscapeUpdates(layer, slice.get(), updates), 8);
+
     int total = 0;
     layer.iterate([&total](GameObject&) { ++total; });
-    EXPECT_EQ(total, 0);
+    EXPECT_EQ(total, 8); // 4 corner tiles per isolated node
 
     EXPECT_EQ(MapAuthoring::applyLandscapeUpdates(layer, nullptr, updates), 0);
     EXPECT_EQ(MapAuthoring::applyLandscapeUpdates(layer, slice.get(), {}), 0);

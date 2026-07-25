@@ -11,6 +11,10 @@ namespace
     {
         return perlin.GetValue(nx, ny, 0);
     }
+
+    // Generated field rect (nodes); cells spanned are [0, w-1) x [0, h-1).
+    constexpr int kGenWidth = 90;
+    constexpr int kGenHeight = 160;
 }
 
 
@@ -27,11 +31,10 @@ LandNodes PerlinGen::generate(float frequency, float secondOctave, float thirdOc
 
     spdlog::info(__FUNCTION__ );
 
-    constexpr int width = 90;
-    constexpr int height = 160;
+    constexpr int width = kGenWidth;
+    constexpr int height = kGenHeight;
 
     LandNodes result;
-    result.init(width, height);
 
     double value[width][height];
 
@@ -101,9 +104,9 @@ void NoiseGenerator::generate(MapModel* mapModel, SliceAsset* sliceAsset)
 
     LayerModel* landLayer = mapModel->layer(LayerTypes::BaseLandscape);
 
-    for (size_t x=0; x<generatedNodes._width-1; ++x)
+    for (int x=0; x<kGenWidth-1; ++x)
     {
-        for (size_t y=0; y<generatedNodes._height-1; ++y)
+        for (int y=0; y<kGenHeight-1; ++y)
         {
             math::ivec2 cellPos(x, y);
 

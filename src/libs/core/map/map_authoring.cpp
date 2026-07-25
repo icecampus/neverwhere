@@ -66,11 +66,10 @@ int MapAuthoring::applyLandscapeUpdates(LayerModel& layer, SliceAsset* sliceAsse
     LandNodes landNodes = DiamondTiledLandscape::buildLandNodes(layer);
 
     // Apply node updates, collecting every cell that touches a changed node.
+    // The node map is sparse and unbounded — any coordinate is a valid target.
     std::unordered_set<math::ivec2> dirtyCells;
     for (const auto& [nodePos, value] : updates)
     {
-        if (!landNodes.inBounds(nodePos))
-            continue;
         landNodes[nodePos] = value ? 1 : 0;
         DiamondIsometry::Neighbours cells = DiamondIsometry::nodeNeighboursCell(nodePos);
         dirtyCells.insert(cells.begin(), cells.end());
