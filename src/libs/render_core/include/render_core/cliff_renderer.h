@@ -93,13 +93,13 @@ private:
         float world[3];
     };
 
-    // VS uniforms: camera + depth normalization (32 bytes).
+    // VS uniforms: camera + depth normalization (28 bytes; the GLSL backend
+    // requires the declared uniforms to sum exactly to the block size).
     struct CliffVsParams {
         float view_size[2];
         float camera_offset[2];
-        float camera_zoom;
         float z_range[2];
-        float _pad;
+        float camera_zoom;
     };
 
     // FS uniforms (palette/light, 8xvec4 = 128 bytes, slot 1).
