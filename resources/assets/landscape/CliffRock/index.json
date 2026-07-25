@@ -1,0 +1,53 @@
+{
+    "uuid": "7c9e4a2b-3f6d-4e1a-9b8c-5d2f0a1e6b3d",
+    "layerType": "CliffLandscape",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "cliff3d": {
+        "thumbnail": "thumbnail.png",
+        "raisedHeight": 96.0,
+        "cellSize": 0.045,
+        "padding": 0.5,
+        "plateauHeight": 1.0,
+        "d2Scale": 0.5,
+        "blurRadiusCells": 3,
+        "blurPasses": 3,
+        "edgeRadius": 0.04,
+        "grooveMaskWidth": 0.25,
+        "grooveFadeK": 1.0,
+        "grooveRimFade": 0.12,
+        "fbmAmplitude": 0.03,
+        "fbmFrequency": 5.0,
+        "fbmOctaves": 2,
+        "groundDepth": 0.3,
+        "groundMargin": 0.35,
+        "groundRounding": 0.1,
+        "groundEnabled": false,
+        "groovePeriod": 0.4,
+        "groovePhase": 0.1,
+        "grooveDepthMax": 0.1,
+        "grooveSmooth": 0.02,
+        "grooveAngles": [
+            [0.6283185, 0.0],
+            [2.1991149, 0.5654867],
+            [-2.146755, 0.6911504]
+        ],
+        "shading": {
+            "lightAzimuth": 2.23,
+            "lightElevation": 0.85,
+            "darkColor": [0.38, 0.38, 0.42],
+            "goldColor": [0.75, 0.62, 0.5],
+            "grassA": [0.4, 0.62, 0.35],
+            "grassB": [0.6, 0.65, 0.4],
+            "veinThreshold": 0.8,
+            "ambient": 0.35,
+            "diffuse": 0.75,
+            "backLight": 0.1,
+            "specStrength": 0.5,
+            "specPower": 24.0,
+            "gamma": 0.85
+        }
+    }
+}

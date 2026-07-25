@@ -322,6 +322,7 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     //   image: 0=Cursor, 1=Pencil, 2=Eraser
     //   slice: 0=LandscapePencil
     //   shape3d: 0=Shape3dPencil
+    //   cliff3d: 0=CliffPencil
     int index = -1;
     if (cur->type == AssetTypes::slice)
     {
@@ -330,6 +331,10 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     else if (cur->type == AssetTypes::shape3d)
     {
         if (tool == "shape3d_pencil" || tool == "0") index = 0;
+    }
+    else if (cur->type == AssetTypes::cliff3d)
+    {
+        if (tool == "cliff_pencil" || tool == "0") index = 0;
     }
     else
     {

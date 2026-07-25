@@ -91,7 +91,7 @@ float noisefv2(vec2 p) {
     vec2 ip = floor(p);
     vec2 fp = fract(p);
     fp = fp * fp * (3.0 - 2.0 * fp);
-    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(1.0, 0.0), chash)), fp.y);
+    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(1.0, 0.0)), fp.y);
     return mix(t.x, t.y, fp.x);
 }
 
@@ -137,7 +137,6 @@ cbuffer vs_params: register(b0) {
     float2 camera_offset;
     float2 z_range;
     float camera_zoom;
-    float _pad0;
 };
 struct VSIn {
     float3 pos: TEXCOORD0;
@@ -204,14 +203,14 @@ float fbm3(float3 p) {
 
 float2 hashv2v2(float2 p) {
     float2 chash = float2(37.0, 39.0);
-    return frac(sin(float2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+    return frac(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
 }
 
 float noisefv2(float2 p) {
     float2 ip = floor(p);
     float2 fp = frac(p);
     fp = fp * fp * (3.0 - 2.0 * fp);
-    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0), chash)), fp.y);
+    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
     return lerp(t.x, t.y, fp.x);
 }
 
@@ -267,7 +266,6 @@ struct VsParams {
     float2 camera_offset;
     float2 z_range;
     float camera_zoom;
-    float _pad0;
 };
 
 struct VSIn {
@@ -341,14 +339,14 @@ float fbm3(float3 p) {
 
 float2 hashv2v2(float2 p) {
     float2 chash = float2(37.0, 39.0);
-    return fract(sin(float2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+    return fract(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
 }
 
 float noisefv2(float2 p) {
     float2 ip = floor(p);
     float2 fp = fract(p);
     fp *= fp * (3.0 - 2.0 * fp);
-    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0), chash)), fp.y);
+    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
     return mix(t.x, t.y, fp.x);
 }
 

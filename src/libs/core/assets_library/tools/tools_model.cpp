@@ -6,6 +6,7 @@
 #include "tile_2d/eraser.h"
 #include "landscape/landscape_pencil.h"
 #include "landscape/shape3d_pencil.h"
+#include "landscape/cliff_pencil.h"
 
 
 //AssetToolsModel
@@ -53,6 +54,9 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
 
     assetType2ToolsModel[AssetTypes::shape3d].reset(new AssetToolsModel(this));
     assetType2ToolsModel[AssetTypes::shape3d]->addElement<Shape3dPencil>(this);
+
+    assetType2ToolsModel[AssetTypes::cliff3d].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::cliff3d]->addElement<CliffPencil>(this);
 
 }
 
