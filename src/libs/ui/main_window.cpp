@@ -3,6 +3,7 @@
 #include <QSettings>
 #include <QScreen>
 #include <QApplication>
+#include <QTimer>
 
 #ifdef USE_WINDOWS
 #define NOMINMAX
@@ -11,6 +12,11 @@
 #include "Windowsx.h"
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#elif defined(Q_OS_WIN)
+// Needed by syncGeometryFromOs (GetClientRect/IsIconic) even when the custom
+// frame (USE_WINDOWS) is compiled out.
+#define NOMINMAX
+#include <windows.h>
 #endif
 
 
@@ -66,7 +72,37 @@ EpicEditorWindow::EpicEditorWindow(QWindow* parent)
 	setMinimumWidth(800);
 
 	connect(this, SIGNAL(closing(QQuickCloseEvent*)), this, SLOT(onClosing()));
+
+#ifdef Q_OS_WIN
+	// Safety net for the geometry staleness the custom frame can cause (see
+	// syncGeometryFromOs): re-sync twice a second, cheap and catches the
+	// creation clamp too (WM_SIZE alone doesn't cover every path).
+	auto* geometryTimer = new QTimer(this);
+	geometryTimer->setInterval(500);
+	connect(geometryTimer, &QTimer::timeout, this, [this] { syncGeometryFromOs(); });
+	geometryTimer->start();
+#endif
 }
+
+#ifdef Q_OS_WIN
+void EpicEditorWindow::syncGeometryFromOs()
+{
+	HWND hwnd = (HWND)winId();
+	RECT clientRect;
+	if (!IsIconic(hwnd) && GetClientRect(hwnd, &clientRect))
+	{
+		const qreal dpr = devicePixelRatio();
+		const int newW = qRound((clientRect.right - clientRect.left) / dpr);
+		const int newH = qRound((clientRect.bottom - clientRect.top) / dpr);
+		if (newW > 0 && newH > 0 && (newW != width() || newH != height()))
+		{
+			qInfo("EpicEditorWindow: correcting stale geometry %dx%d -> %dx%d",
+				width(), height(), newW, newH);
+			resize(newW, newH);
+		}
+	}
+}
+#endif
 
 //
 bool EpicEditorWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)

@@ -17,6 +17,7 @@
 #include "core_context.h"
 #include "assets_library/asset.h"
 #include "assets_library/assets/slice_asset.h"
+#include "assets_library/assets_context.h"
 #include "assets_library/assets_library_model.h"
 #include "assets_library/assets_pack_model.h"
 #include "assets_library/tools/tools_model.h"
@@ -302,6 +303,10 @@ QByteArray EditorRpcServer::_cmdSelectAsset(const QJsonObject& args)
         return _error("not_found", "asset not found: " + uuidStr);
 
     sel->setCurrentAsset(asset);
+    // Drive the same selection state a palette click sets, so the right
+    // panel (properties, cliff settings) follows the RPC selection too.
+    if (AssetsContext* ctx = m_registry->activeAssetsContext())
+        ctx->setAsset(asset);
     QJsonObject d;
     d["name"] = asset->name();
     d["uuid"] = uuidStr;

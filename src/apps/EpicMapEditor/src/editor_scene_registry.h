@@ -7,6 +7,7 @@ class DiamondIsometryView;
 class Chapter;
 class AssetToolsSelector;
 class MapRenderItem;
+class AssetsContext;
 
 // Bridges QML-created scene objects to the C++ side (RPC server, automation).
 //
@@ -34,13 +35,15 @@ public:
                                     DiamondIsometryView* isoView,
                                     AssetToolsSelector* tools,
                                     Chapter* chapter,
-                                    MapRenderItem* renderItem)
+                                    MapRenderItem* renderItem,
+                                    AssetsContext* assetsContext)
     {
         m_mapModel = mapModel;
         m_isoView = isoView;
         m_tools = tools;
         m_chapter = chapter;
         m_renderItem = renderItem;
+        m_assetsContext = assetsContext;
     }
 
     // Accessors for the RPC server. May return nullptr if no scene active.
@@ -49,6 +52,7 @@ public:
     AssetToolsSelector* activeTools() const { return m_tools; }
     Chapter* activeChapter() const { return m_chapter; }
     MapRenderItem* activeRenderItem() const { return m_renderItem; }
+    AssetsContext* activeAssetsContext() const { return m_assetsContext; }
 
 private:
     // Raw pointers — these QML objects outlive the registry (parented to
@@ -59,4 +63,5 @@ private:
     AssetToolsSelector* m_tools = nullptr;
     Chapter* m_chapter = nullptr;
     MapRenderItem* m_renderItem = nullptr;
+    AssetsContext* m_assetsContext = nullptr;
 };

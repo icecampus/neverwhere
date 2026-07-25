@@ -73,7 +73,7 @@ Rectangle
                     width: conteinersView.width
                     text: element.title
                     asset: rightPanel.currentAsset
-                    activeAsset: rightPanel.currentAsset && rightPanel.currentAsset.type === AssetTypes.cliff3d
+                    activeAsset: rightPanel.currentAsset && rightPanel.currentAsset.isCliff3d
                 }
             }
         }

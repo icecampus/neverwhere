@@ -35,6 +35,12 @@ signals:
 private:
 	void initBlurBehind();
 	bool captionHitTest(const QPoint& ptMouse);
+	// Force QWindow::geometry to the real OS client size (logical px). Qt's
+	// own win32 geometry update misses some paths with the custom frame
+	// (creation clamp, external moves, monitor/DPI hops), and a stale
+	// geometry lays the QML out at the declared 1920x1080 with the right
+	// side off-screen. Guarded by a size check, so no resize loop.
+	void syncGeometryFromOs();
 
 
 	QQuickItem* _caption = nullptr;
