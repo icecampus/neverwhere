@@ -264,6 +264,16 @@ shading — только юниформы), камера в VS (кэш пере�
 Панель параметров — `CliffSettings.qml` в правой колонке (секции
 Field/Grooves/Shading/Colors/Advanced, живое применение, кнопка Save пишет
 index.json через `AssetsLibraryModel::save`); видна при выбранном cliff3d-ассете.
+**Прототип-подложка:** пока кэш клифа пересобирается (правка ждёт debounce
+0.3 с + ребилд), вместо меша рисуется мгновенный силуэт тайлов — плоские ромбы
+клеток на уровне земли через тот же пайплайн и палитру (нормаль вверх,
+groove=0 → «верх» плато); готовый меш заменяет силуэт. Во время drag-рисования
+debounce непрерывно откладывается, поэтому весь штрих виден силуэт, а меш
+достраивается после отпускания кнопки.
+**Drag-рисование:** ландшафтные кисти (Landscape/Shape3d/Cliff) рисуют непрерывно
+при зажатой ЛКМ — stroke-модель `Tool::stroke(Begin/Move/End)` (default: Begin =
+старый одиночный клик, остальные инструменты не изменились) с дедупом по
+(нода, действие) в `LandscapePencil`; покрытие `landscape_pencil_test.cpp`.
 Покрытие: `src/tests/assets/cliff3d_asset_data_test.cpp` (JSON/AssetIndex),
 `cliff_asset_test.cpp` (API панели), map_authoring на слое. Песочница для
 отладки алгоритма — кисть «Cliff 3D» в TileShapePlayground.
