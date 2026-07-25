@@ -102,24 +102,28 @@ void OverlayRenderer::init(sg_pixel_format depthFormat_) {
     depthFormat = depthFormat_;
     ensurePipeline();
 
-    // Dynamic vertex buffer for many line segments (2 vertices per segment);
-    // grows on demand in render() (a heavily zoomed-out grid can exceed the
-    // initial capacity — an oversized sg_update_buffer is a hard sokol error).
-    sg_buffer_desc buf_desc = {};
-    buf_desc.size = 2 * 65536 * (int)sizeof(Vertex);
-    buf_desc.usage.dynamic_update = true;
-    buf_desc.label = "overlay-verts";
-    vbuf = sg_make_buffer(&buf_desc);
-    vbufSize = buf_desc.size;
-
-    bind.vertex_buffers[0] = vbuf;
+    // Dynamic vertex buffers for many line segments (2 vertices per segment);
+    // they grow on demand in render() (a heavily zoomed-out grid can exceed
+    // the initial capacity — an oversized sg_update_buffer is a hard sokol
+    // error). Two channels: grid and the always-on-top cursor.
+    for (Channel* channel : {&channelA, &channelB}) {
+        sg_buffer_desc buf_desc = {};
+        buf_desc.size = 2 * 65536 * (int)sizeof(Vertex);
+        buf_desc.usage.dynamic_update = true;
+        buf_desc.label = "overlay-verts";
+        channel->vbuf = sg_make_buffer(&buf_desc);
+        channel->vbufSize = buf_desc.size;
+        channel->bind.vertex_buffers[0] = channel->vbuf;
+    }
 }
 
 void OverlayRenderer::shutdown() {
-    if (vbuf.id != SG_INVALID_ID) {
-        sg_destroy_buffer(vbuf);
-        vbuf.id = SG_INVALID_ID;
-        vbufSize = 0;
+    for (Channel* channel : {&channelA, &channelB}) {
+        if (channel->vbuf.id != SG_INVALID_ID) {
+            sg_destroy_buffer(channel->vbuf);
+            channel->vbuf.id = SG_INVALID_ID;
+            channel->vbufSize = 0;
+        }
     }
     destroyPipeline();
 }
@@ -183,8 +187,16 @@ void OverlayRenderer::destroyPipeline() {
 }
 
 void OverlayRenderer::render(const std::vector<LineSegment>& lines, int viewWidth, int viewHeight) {
+    renderLines(channelA, lines, viewWidth, viewHeight);
+}
+
+void OverlayRenderer::renderTop(const std::vector<LineSegment>& lines, int viewWidth, int viewHeight) {
+    renderLines(channelB, lines, viewWidth, viewHeight);
+}
+
+void OverlayRenderer::renderLines(Channel& channel, const std::vector<LineSegment>& lines, int viewWidth, int viewHeight) {
     if (lines.empty()) return;
-    if (pip.id == SG_INVALID_ID || vbuf.id == SG_INVALID_ID) return;
+    if (pip.id == SG_INVALID_ID) return;
 
     scratchVerts.clear();
     scratchVerts.reserve(lines.size() * 2);
@@ -199,25 +211,27 @@ void OverlayRenderer::render(const std::vector<LineSegment>& lines, int viewWidt
     sg_apply_uniforms(0, &uniform_range);
 
     const std::size_t bytes = scratchVerts.size() * sizeof(Vertex);
-    if (vbufSize < bytes) {
-        sg_destroy_buffer(vbuf);
+    if (channel.vbufSize < bytes) {
+        if (channel.vbuf.id != SG_INVALID_ID) {
+            sg_destroy_buffer(channel.vbuf);
+        }
         sg_buffer_desc buf_desc = {};
         buf_desc.size = ((bytes / (std::size_t{1} << 20)) + 1) * (std::size_t{1} << 20);
         buf_desc.usage.dynamic_update = true;
         buf_desc.label = "overlay-verts";
-        vbuf = sg_make_buffer(&buf_desc);
-        vbufSize = buf_desc.size;
-        bind.vertex_buffers[0] = vbuf;
+        channel.vbuf = sg_make_buffer(&buf_desc);
+        channel.vbufSize = buf_desc.size;
+        channel.bind.vertex_buffers[0] = channel.vbuf;
     }
-    if (vbuf.id == SG_INVALID_ID) {
+    if (channel.vbuf.id == SG_INVALID_ID) {
         spdlog::error("OverlayRenderer: failed to grow the vertex buffer to {} bytes", bytes);
         return;
     }
 
     sg_range range = { scratchVerts.data(), bytes };
-    sg_update_buffer(vbuf, &range);
+    sg_update_buffer(channel.vbuf, &range);
 
-    sg_apply_bindings(&bind);
+    sg_apply_bindings(&channel.bind);
 
     sg_draw(0, (int)scratchVerts.size(), 1);
 }

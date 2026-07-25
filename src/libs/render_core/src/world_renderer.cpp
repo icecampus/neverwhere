@@ -56,10 +56,10 @@ void WorldRenderer::render(
     double nowSec) {
 
     landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight);
-    landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
-    cliffRenderer.render(frame.cliffTiles, iso, camera, viewWidth, viewHeight, nowSec);
-    spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
 
+    // Grid overlay: above the water and the flat ground, but UNDER the 3D
+    // world (raised walls / cliffs / sprites overdraw it — no depth write
+    // here, and the 3D passes both test and write depth).
     scratchLines.clear();
 
     if (frame.showGrid && viewWidth > 0 && viewHeight > 0 && camera.zoom > 0.0f) {
@@ -84,15 +84,22 @@ void WorldRenderer::render(
             }
         }
     }
+    overlayRenderer.render(scratchLines, viewWidth, viewHeight);
 
+    landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
+    cliffRenderer.render(frame.cliffTiles, iso, camera, viewWidth, viewHeight, nowSec);
+    spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
+
+    // The cell cursor is an editor UI element — always on top (own buffer:
+    // sokol allows only one update per buffer per frame).
+    scratchLines.clear();
     if (frame.cursorCell) {
         const glm::vec2 cellSize = iso.dims.cellSize();
         const glm::vec2 halfSizeScreen = cellSize * 0.5f * camera.zoom;
         const glm::vec2 screenCenter = camera.worldToScreen(iso.mapToField(*frame.cursorCell));
         appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.cursorColor);
     }
-
-    overlayRenderer.render(scratchLines, viewWidth, viewHeight);
+    overlayRenderer.renderTop(scratchLines, viewWidth, viewHeight);
 }
 
 } // namespace render_core

@@ -32,9 +32,9 @@ struct WorldFrame {
 };
 
 // Facade over the world renderers — the single world render shared by shells.
-// Draw order matches the editor's MapView.qml: flat landscape tiles, raised
-// landscape (cliff walls + lifted tops), Tile2D sprites, then overlays (grid,
-// cell cursor) on top.
+// Draw order: flat landscape tiles, grid overlay (above water/flat ground but
+// under the 3D world), raised landscape (cliff walls + lifted tops), cliff3d
+// meshes, Tile2D sprites, and finally the cell cursor overlay on top.
 class WorldRenderer {
 public:
     // depthFormat must match the pass the renderer draws into:
