@@ -459,6 +459,7 @@ out vec2 v_normal;
 uniform vec2 view_size;
 uniform vec2 z_range;
 uniform vec2 tri_params;
+uniform vec2 _pad0;
 void main() {
     vec2 clip_pos = vec2(
         (pos.x / view_size.x) * 2.0 - 1.0,
@@ -975,6 +976,13 @@ void LandscapeRenderer::ensureTriWallPipelines() {
         }
         desc.uniform_blocks[0].glsl_uniforms[slot].glsl_name = "tri_params";
         desc.uniform_blocks[0].glsl_uniforms[slot].type = SG_UNIFORMTYPE_FLOAT2;
+        ++slot;
+        if (depth) {
+            // The 32-byte block (view_size, z_range, tri_params, pad) must be
+            // fully covered by the declared GLSL uniforms (GL validation).
+            desc.uniform_blocks[0].glsl_uniforms[slot].glsl_name = "_pad0";
+            desc.uniform_blocks[0].glsl_uniforms[slot].type = SG_UNIFORMTYPE_FLOAT2;
+        }
 
         desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
         desc.views[0].texture.image_type = SG_IMAGETYPE_2D;
