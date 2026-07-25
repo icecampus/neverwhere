@@ -30,6 +30,10 @@ void to_json(nlohmann::json& j, const AssetData& obj)
     {
         j["shape3d"] = *obj.shape3dData;
     }
+    if (obj.cliff3dData)
+    {
+        j["cliff3d"] = *obj.cliff3dData;
+    }
 }
 
 void from_json(const nlohmann::json& j, AssetData& obj)
@@ -62,6 +66,10 @@ void from_json(const nlohmann::json& j, AssetData& obj)
     if (j.contains("shape3d"))
     {
         obj.shape3dData = j["shape3d"].get<Shape3dAssetData>();
+    }
+    if (j.contains("cliff3d"))
+    {
+        obj.cliff3dData = j["cliff3d"].get<Cliff3dAssetData>();
     }
 }
 

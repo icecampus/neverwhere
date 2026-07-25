@@ -24,6 +24,7 @@ enum class LayerType : int {
     BaseLandscape = 1,
     GameplayInteractive = 2,
     RaisedLandscape = 3,
+    CliffLandscape = 4,
 };
 
 struct LandscapeData {

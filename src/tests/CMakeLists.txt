@@ -18,6 +18,7 @@ target_link_libraries(neverwhere_tests PRIVATE
     core
     math
     base_data
+    game_data
     landscape_core
     landscape_mesh
     highground_core
