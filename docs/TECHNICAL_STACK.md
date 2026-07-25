@@ -255,9 +255,12 @@ watertight виден в логе/UI).
 (наследник `LandscapePencil`) на слое `CliffLandscape` — данные те же
 Landscape-тайлы с tileIndex (ноды по конвенции атласа). Рендер —
 `render_core::CliffRenderer` (порт cliff-прохода TileShapePlayground):
-ноды из тайлов → CliffField → surface nets, кэш меша per-asset с debounce
+ноды из тайлов → CliffField → surface nets, кэш per-asset с debounce
 0.3 с (контент-хэш тайлов+параметров; `raisedHeight` — дешёвая ре-проекция,
-shading — только юниформы), камера в VS (кэш переживает pan/zoom), глубина
+shading — только юниформы). Поле строится **per connected component** нод
+(8-связность): дальние острова одного ассета не раздувают общий bbox —
+каждый регион получает своё поле и меш, стрим слит в один vbuf.
+Камера в VS (кэш переживает pan/zoom), глубина
 через z_range как у raised-прохода, GLSL/HLSL/MSL по `sg_query_backend()`.
 Кадр: `WorldFrame.cliffTiles` (редактор — `ModelFrameSource`, клиент/play-таб —
 `world_frame_builder`; `ensureCliffAsset` пробрасывает параметры в обоих).
@@ -274,6 +277,8 @@ debounce непрерывно откладывается, поэтому вес�
 при зажатой ЛКМ — stroke-модель `Tool::stroke(Begin/Move/End)` (default: Begin =
 старый одиночный клик, остальные инструменты не изменились) с дедупом по
 (нода, действие) в `LandscapePencil`; покрытие `landscape_pencil_test.cpp`.
+Хранилище нод `LandNodes` — разреженная мапа по координате ноды (unbounded,
+включая отрицательные): контура 200×200 больше нет, рисовать можно где угодно.
 Покрытие: `src/tests/assets/cliff3d_asset_data_test.cpp` (JSON/AssetIndex),
 `cliff_asset_test.cpp` (API панели), map_authoring на слое. Песочница для
 отладки алгоритма — кисть «Cliff 3D» в TileShapePlayground.

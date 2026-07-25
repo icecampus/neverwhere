@@ -1,5 +1,7 @@
 #include "render_core/overlay_renderer.h"
 
+#include <spdlog/spdlog.h>
+
 namespace render_core {
 
 static const char* vs_src_glsl = R"(
@@ -100,12 +102,15 @@ void OverlayRenderer::init(sg_pixel_format depthFormat_) {
     depthFormat = depthFormat_;
     ensurePipeline();
 
-    // Dynamic vertex buffer for many line segments (2 vertices per segment)
+    // Dynamic vertex buffer for many line segments (2 vertices per segment);
+    // grows on demand in render() (a heavily zoomed-out grid can exceed the
+    // initial capacity — an oversized sg_update_buffer is a hard sokol error).
     sg_buffer_desc buf_desc = {};
     buf_desc.size = 2 * 65536 * (int)sizeof(Vertex);
     buf_desc.usage.dynamic_update = true;
     buf_desc.label = "overlay-verts";
     vbuf = sg_make_buffer(&buf_desc);
+    vbufSize = buf_desc.size;
 
     bind.vertex_buffers[0] = vbuf;
 }
@@ -114,6 +119,7 @@ void OverlayRenderer::shutdown() {
     if (vbuf.id != SG_INVALID_ID) {
         sg_destroy_buffer(vbuf);
         vbuf.id = SG_INVALID_ID;
+        vbufSize = 0;
     }
     destroyPipeline();
 }
@@ -192,7 +198,23 @@ void OverlayRenderer::render(const std::vector<LineSegment>& lines, int viewWidt
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(0, &uniform_range);
 
-    sg_range range = { scratchVerts.data(), scratchVerts.size() * sizeof(Vertex) };
+    const std::size_t bytes = scratchVerts.size() * sizeof(Vertex);
+    if (vbufSize < bytes) {
+        sg_destroy_buffer(vbuf);
+        sg_buffer_desc buf_desc = {};
+        buf_desc.size = ((bytes / (std::size_t{1} << 20)) + 1) * (std::size_t{1} << 20);
+        buf_desc.usage.dynamic_update = true;
+        buf_desc.label = "overlay-verts";
+        vbuf = sg_make_buffer(&buf_desc);
+        vbufSize = buf_desc.size;
+        bind.vertex_buffers[0] = vbuf;
+    }
+    if (vbuf.id == SG_INVALID_ID) {
+        spdlog::error("OverlayRenderer: failed to grow the vertex buffer to {} bytes", bytes);
+        return;
+    }
+
+    sg_range range = { scratchVerts.data(), bytes };
     sg_update_buffer(vbuf, &range);
 
     sg_apply_bindings(&bind);

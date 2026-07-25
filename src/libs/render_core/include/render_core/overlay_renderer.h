@@ -32,6 +32,7 @@ private:
 
     sg_pipeline pip{SG_INVALID_ID};
     sg_buffer vbuf{SG_INVALID_ID};
+    std::size_t vbufSize = 0; // allocated bytes (the buffer grows on demand)
     sg_bindings bind{};
     sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
 
