@@ -99,7 +99,9 @@ Linux-флоу — Ninja (single-config) + CMake Presets, триплет `x64-li
 - **GLCORE в Qt-приложениях** (EpicMapEditor, EcsPlayground) требует `OpenGL::GL` на линковке — sokol_gfx грузит GL-функции через `glXGetProcAddress`.
 - **RttrPlayground не собирается** (rttr windows-only; его CMakeLists возвращается сразу на не-Windows).
 - `compile_commands.json` в корне — симлинк на `_int_linux/compile_commands.json` (preset сам эмиттит, отдельный index-preset не нужен).
-- **RPC `screenshot` под Wayland отдаёт чёрное:** `_cmdScreenshot` использует `QScreen::grabWindow` (X11-протокол), а под XWayland контент живёт в Wayland-буферах и X-сервер его не видит. Сам рендер при этом исправен (проверено вживую на RTX 4090). Обходные пути: запускать редактор под `xvfb-run` (настоящий X11-сервер — тогда grabWindow работает; xvfb надо доустановить) либо сидеть в X11-сессии. На авторинг-операции (`set_tile`/`set_landscape`/…) это не влияет.
+- **RPC `screenshot` под Wayland отдаёт чёрное** ( `_cmdScreenshot` использует `QScreen::grabWindow` — X11-протокол, а под XWayland контент живёт в Wayland-буферах). **Штатный обход:** запускать редактор под `xvfb-run` (пакет `xvfb` установлен) — там настоящий X11-сервер и grabWindow честный:
+  `xvfb-run -a -s "-screen 0 1920x1080x24" _int_linux/src/apps/EpicMapEditor/Debug/EpicMapEditor`
+  Рендер внутри Xvfb — software (llvmpipe), кадры медленнее, чем на GPU; для скриншотов/авторинга через RPC этого хватает. На сами авторинг-операции (`set_tile`/`set_landscape`/…) платформа не влияет.
 
 ## Undo/Redo
 
