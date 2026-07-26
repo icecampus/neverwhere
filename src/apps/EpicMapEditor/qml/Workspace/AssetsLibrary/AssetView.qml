@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls 2.15
 import Game 1.0
@@ -15,6 +15,7 @@ GridElement
 
     ImageButton
     {
+        id: settingsButton
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.rightMargin: 10

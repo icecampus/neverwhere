@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls 2.15
 import Game 1.0
@@ -33,6 +33,9 @@ GridView
 
         onSettingsClicked:
         {
+            // The settings panel lives in the right panel and is driven by the
+            // SELECTED asset, so the gear click must select the asset too.
+            assetsContext.asset = element
             element.editMode = true
         }
 

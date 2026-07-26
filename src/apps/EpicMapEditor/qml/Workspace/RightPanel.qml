@@ -12,6 +12,16 @@ Rectangle
     color: colorPalette.surface     
     border.color: colorPalette.border 
 
+    // The asset settings block appears when the palette gear puts the
+    // selected asset into edit mode; scroll it into view (index 1 in the
+    // containers model).
+    property bool assetEditMode: currentAsset && currentAsset.editMode
+    onAssetEditModeChanged:
+    {
+        if (assetEditMode)
+            conteinersView.positionViewAtIndex(1, ListView.Contain)
+    }
+
        
     PropertyContainersModel
     {
@@ -51,6 +61,7 @@ Rectangle
                     width: conteinersView.width
                     text: element.title
                     asset: rightPanel.currentAsset
+                    activeAsset: rightPanel.assetEditMode
                 }
             }
             DelegateChoice
@@ -63,17 +74,6 @@ Rectangle
                     mapModel: rightPanel.mapModel
                     currentAsset: rightPanel.currentAsset
 
-                }
-            }
-            DelegateChoice
-            {
-                roleValue: PropertiesContainerTypes.CliffSettings
-                delegate: CliffSettings
-                {
-                    width: conteinersView.width
-                    text: element.title
-                    asset: rightPanel.currentAsset
-                    activeAsset: rightPanel.currentAsset && rightPanel.currentAsset.isCliff3d
                 }
             }
         }

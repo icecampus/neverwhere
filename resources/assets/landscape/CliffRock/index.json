@@ -1,53 +1,78 @@
 {
-    "uuid": "7c9e4a2b-3f6d-4e1a-9b8c-5d2f0a1e6b3d",
+    "cliff3d": {
+        "blurPasses": 3,
+        "blurRadiusCells": 3,
+        "cellSize": 0.04500000178813934,
+        "d2Scale": 0.5,
+        "edgeRadius": 0.03999999910593033,
+        "fbmAmplitude": 0.029999999329447746,
+        "fbmFrequency": 5.0,
+        "fbmOctaves": 2,
+        "grooveAngles": [
+            [
+                0.6283184885978699,
+                0.0
+            ],
+            [
+                2.1991147994995117,
+                0.56548672914505
+            ],
+            [
+                -2.1467549800872803,
+                0.691150426864624
+            ]
+        ],
+        "grooveDepthMax": 0.10000000149011612,
+        "grooveFadeK": 1.0,
+        "grooveMaskWidth": 0.25,
+        "groovePeriod": 0.4000000059604645,
+        "groovePhase": 0.10000000149011612,
+        "grooveRimFade": 0.11999999731779099,
+        "grooveSmooth": 0.019999999552965164,
+        "groundDepth": 0.30000001192092896,
+        "groundEnabled": false,
+        "groundMargin": 0.3499999940395355,
+        "groundRounding": 0.10000000149011612,
+        "padding": 0.5,
+        "plateauHeight": 1.0,
+        "raisedHeight": 96.0,
+        "shading": {
+            "ambient": 0.3499999940395355,
+            "backLight": 0.10000000149011612,
+            "darkColor": [
+                0.3799999952316284,
+                0.3799999952316284,
+                0.41999998688697815
+            ],
+            "diffuse": 0.75,
+            "gamma": 0.8500000238418579,
+            "goldColor": [
+                0.75,
+                0.6200000047683716,
+                0.5
+            ],
+            "grassA": [
+                0.4000000059604645,
+                0.6200000047683716,
+                0.3499999940395355
+            ],
+            "grassB": [
+                0.6000000238418579,
+                0.6499999761581421,
+                0.4000000059604645
+            ],
+            "lightAzimuth": 2.2300000190734863,
+            "lightElevation": 0.8500000238418579,
+            "specPower": 24.0,
+            "specStrength": 0.5,
+            "veinThreshold": 0.800000011920929
+        },
+        "thumbnail": "thumbnail.png"
+    },
     "layerType": "CliffLandscape",
     "pivot": {
         "x": 0.0,
         "y": 0.0
     },
-    "cliff3d": {
-        "thumbnail": "thumbnail.png",
-        "raisedHeight": 96.0,
-        "cellSize": 0.045,
-        "padding": 0.5,
-        "plateauHeight": 1.0,
-        "d2Scale": 0.5,
-        "blurRadiusCells": 3,
-        "blurPasses": 3,
-        "edgeRadius": 0.04,
-        "grooveMaskWidth": 0.25,
-        "grooveFadeK": 1.0,
-        "grooveRimFade": 0.12,
-        "fbmAmplitude": 0.03,
-        "fbmFrequency": 5.0,
-        "fbmOctaves": 2,
-        "groundDepth": 0.3,
-        "groundMargin": 0.35,
-        "groundRounding": 0.1,
-        "groundEnabled": false,
-        "groovePeriod": 0.4,
-        "groovePhase": 0.1,
-        "grooveDepthMax": 0.1,
-        "grooveSmooth": 0.02,
-        "grooveAngles": [
-            [0.6283185, 0.0],
-            [2.1991149, 0.5654867],
-            [-2.146755, 0.6911504]
-        ],
-        "shading": {
-            "lightAzimuth": 2.23,
-            "lightElevation": 0.85,
-            "darkColor": [0.38, 0.38, 0.42],
-            "goldColor": [0.75, 0.62, 0.5],
-            "grassA": [0.4, 0.62, 0.35],
-            "grassB": [0.6, 0.65, 0.4],
-            "veinThreshold": 0.8,
-            "ambient": 0.35,
-            "diffuse": 0.75,
-            "backLight": 0.1,
-            "specStrength": 0.5,
-            "specPower": 24.0,
-            "gamma": 0.85
-        }
-    }
+    "uuid": "7c9e4a2b-3f6d-4e1a-9b8c-5d2f0a1e6b3d"
 }

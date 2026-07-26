@@ -6,13 +6,17 @@ import QtQuick.Controls 2.15
 // shading parameter set, edited live (the renderer applies edits on the next
 // frame sync; field edits rebuild through the debounce). Save persists the
 // payload to the asset's index.json.
+// Hosted inside the AssetSettings right-panel block (asset in editMode) with
+// its own title/save hidden; can also stand alone (showTitle/showSaveButton).
 Rectangle
 {
     property var asset: null
     property alias text: titleText.text
-    // Set by the host (RightPanel): the panel exists for every asset but is
-    // only shown for cliff3d ones.
+    // Set by the host: the panel content only shows for cliff3d assets.
     property bool activeAsset: false
+    // Standalone-hosting knobs (off when embedded into AssetSettings).
+    property bool showTitle: true
+    property bool showSaveButton: true
 
     id: cliffSettings
     color: colorPalette.surface2
@@ -23,7 +27,11 @@ Rectangle
     height: activeAsset ? (title.height + content.height + 10) : 0
 
     // Re-read when the selected asset changes; rows also read through `params`.
-    property var params: asset ? asset.cliffParams() : ({})
+    // Self-contained guard: plain assets have no cliffParams() invokable, and
+    // going through the `activeAsset` property here would race (QML does not
+    // order independent binding updates — params can re-evaluate with a stale
+    // activeAsset right after the asset switches cliff -> non-cliff).
+    property var params: (asset && asset.isCliff3d) ? asset.cliffParams() : ({})
 
     // [key, label, from, to, stepSize] — ranges mirror the TileShapePlayground
     // ImGui panel.
@@ -234,7 +242,8 @@ Rectangle
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 30
+        visible: cliffSettings.showTitle
+        height: cliffSettings.showTitle ? 30 : 0
         color: "#80000000"
         radius: 5
 
@@ -276,6 +285,7 @@ Rectangle
         Button
         {
             anchors.horizontalCenter: parent.horizontalCenter
+            visible: cliffSettings.showSaveButton
             text: "Save to index.json"
             onClicked: if (cliffSettings.asset) core.assetsLibrary.save(cliffSettings.asset)
         }

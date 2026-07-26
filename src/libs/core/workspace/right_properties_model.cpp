@@ -54,6 +54,7 @@ PropertyContainersModel::PropertyContainersModel(QObject* parent):
     addElement<MapSetting>(this);
     addElement<AssetSettings>(this);
     addElement<GeneratorSettings>(this);
-    addElement<CliffSettings>(this);
+    // CliffSettings is no longer a separate container: its QML panel is
+    // embedded into the AssetSettings block (editMode-gated).
 }
 
