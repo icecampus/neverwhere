@@ -1,11 +1,11 @@
 {
     "cliff3d": {
-        "blurPasses": 3,
+        "blurPasses": 1,
         "blurRadiusCells": 3,
-        "cellSize": 0.04500000178813934,
+        "cellSize": 0.05999999865889549,
         "d2Scale": 0.5,
-        "edgeRadius": 0.03999999910593033,
-        "fbmAmplitude": 0.029999999329447746,
+        "edgeRadius": 0.004999999888241291,
+        "fbmAmplitude": 0.014000000432133675,
         "fbmFrequency": 5.0,
         "fbmOctaves": 2,
         "grooveAngles": [
@@ -24,7 +24,7 @@
         ],
         "grooveDepthMax": 0.10000000149011612,
         "grooveFadeK": 1.0,
-        "grooveMaskWidth": 0.25,
+        "grooveMaskWidth": 0.20000000298023224,
         "groovePeriod": 0.4000000059604645,
         "groovePhase": 0.10000000149011612,
         "grooveRimFade": 0.11999999731779099,
