@@ -1,0 +1,47 @@
+{
+  "id": "XtyGzc",
+  "name": "Desert Passage",
+  "author": "Shane",
+  "description": "A cave-like desert passageway.",
+  "tags": [
+    "raymarch",
+    "cellular",
+    "tile",
+    "cave",
+    "rock",
+    "desert",
+    "passage"
+  ],
+  "likes": 139,
+  "published": "1476198765",
+  "url": "https://www.shadertoy.com/view/XtyGzc",
+  "source": "web.archive.org snapshot 20191110211651",
+  "passes": [
+    {
+      "file": "Image.glsl",
+      "type": "image",
+      "inputs": [
+        {
+          "id": 45,
+          "src": "/media/a/3871e838723dd6b166e490664eead8ec60aedd6b8d95bc8e2fe3f882f0fd90f0.jpg",
+          "ctype": "texture",
+          "channel": 0,
+          "sampler": {
+            "filter": "mipmap",
+            "wrap": "repeat",
+            "vflip": "true",
+            "srgb": "false",
+            "internal": "byte"
+          },
+          "published": 1
+        }
+      ],
+      "outputs": [
+        {
+          "id": 37,
+          "channel": 0
+        }
+      ]
+    }
+  ]
+}
