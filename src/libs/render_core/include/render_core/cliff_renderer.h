@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -28,6 +29,7 @@
 #include <highground_core/surface_nets.h>
 
 #include "render_core/landscape_renderer.h" // LandscapeTile, camera, iso
+#include "render_core/texture_atlas.h"
 
 namespace render_core {
 
@@ -48,6 +50,15 @@ struct CliffShading {
     float specStrength = 0.5f;
     float specPower = 24.0f;
     float gamma = 0.85f;
+    // Top texture tiling: uv = world map cells * texScale (unused when
+    // CliffParams::topTexturePath is empty — procedural grassA/grassB mix).
+    float texScale = 1.0f;
+    // Bottom blend: the wall darkens to (1 - bottomDarken) at ground level,
+    // fading out over bottomBand * plateauHeight (stitches with the underlay).
+    float bottomDarken = 0.55f;
+    float bottomBand = 0.35f;
+    // Sediment strata banding on the walls (0 = off).
+    float strataStrength = 0.0f;
 };
 
 // Full parameter set of a cliff3d asset (mirror of BaseData/game_data
@@ -56,6 +67,12 @@ struct CliffParams {
     cliff::FieldParams field;
     CliffShading shading;
     float heightScale = 96.0f; // field px per 1.0 plateau height
+    std::filesystem::path topTexturePath; // optional tiled texture for the tops
+    // Wall flare: the walls bulge outward by up to flareAmount map cells at
+    // ground level, tapering off over flareBand * plateauHeight. Applied in
+    // the projection step — edits re-project, no field rebuild.
+    float flareAmount = 0.0f;
+    float flareBand = 0.3f;
 };
 
 class CliffRenderer {
@@ -70,6 +87,13 @@ public:
     // debounced mesh rebuild, heightScale — cheap re-projection, shading —
     // uniforms only).
     void ensureCliffAsset(const std::string& assetUuid, const CliffParams& params);
+
+    // Read access for the contact-shadow field (the underlay darkens with the
+    // same strength as the wall foot — shading.bottomDarken).
+    const CliffParams* findAsset(const std::string& assetUuid) const {
+        const auto it = assets.find(assetUuid);
+        return it != assets.end() ? &it->second : nullptr;
+    }
 
     // Draw the cliff tiles (CliffLandscape layer content). Tiles whose
     // assetUuid was never ensured are skipped. `nowSec` drives the edit
@@ -102,7 +126,7 @@ private:
         float camera_zoom;
     };
 
-    // FS uniforms (palette/light, 8xvec4 = 128 bytes, slot 1).
+    // FS uniforms (palette/light + blend params, 10xvec4 = 160 bytes, slot 1).
     struct CliffFsParams {
         float lightDir[4];
         float viewDir[4];
@@ -111,7 +135,9 @@ private:
         float grassA[4];
         float grassB[4];
         float params0[4]; // vein threshold, ambient, diffuse, spec strength
-        float params1[4]; // spec power, gamma, wrap backlight, unused
+        float params1[4]; // spec power, gamma, wrap backlight, tex scale
+        float params2[4]; // bottom darken, bottom band, plateau top, use texture
+        float params3[4]; // strata strength, unused x3
     };
 
     // Per-region cache: an independently rebuildable piece of one asset's
@@ -135,6 +161,14 @@ private:
         std::unordered_map<std::uint64_t, RegionCache> regions;
         float heightScale = 0.0f;
         bool heightScaleValid = false;
+        // Last projection inputs (flare edits re-project without a field
+        // rebuild, same as heightScale).
+        float flareAmount = -1.0f;
+        float flareBand = -1.0f;
+        // Optional tiled top texture (lazy-created from the params' path).
+        TextureAtlas topTex;
+        std::filesystem::path topTexPath;
+        bool topTexTried = false;
     };
 
     void ensurePipeline();
@@ -144,15 +178,26 @@ private:
         const std::vector<glm::ivec2>& componentNodes,
         const topology_core::DiamondIsometry& iso,
         const cliff::FieldParams& fieldParams,
-        float heightScale);
+        float heightScale,
+        float flareAmount,
+        float flareBand);
     void projectRegionStream(
         RegionCache& region,
         const topology_core::DiamondIsometry& iso,
-        float heightScale);
+        float heightScale,
+        float flareAmount,
+        float flareBand,
+        float plateauHeight);
 
     sg_pipeline pip{SG_INVALID_ID};
     sg_shader shd{SG_INVALID_ID};
     sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
+
+    // 1x1 white fallback bound when an asset has no top texture (the FS still
+    // declares the sampler — sokol requires a complete binding).
+    sg_image m_dummyImage{SG_INVALID_ID};
+    sg_view m_dummyView{SG_INVALID_ID};
+    sg_sampler m_dummySampler{SG_INVALID_ID};
 
     std::unordered_map<std::string, CliffParams> assets;
     std::unordered_map<std::string, AssetCache> caches;
@@ -165,6 +210,9 @@ private:
         int base = 0;
         int count = 0;
         const CliffParams* params = nullptr;
+        sg_view texView{SG_INVALID_ID};
+        sg_sampler texSampler{SG_INVALID_ID};
+        bool useTexture = false;
     };
     std::vector<CliffVertex> m_previewVerts;
     std::vector<PreviewRange> m_previewRanges;

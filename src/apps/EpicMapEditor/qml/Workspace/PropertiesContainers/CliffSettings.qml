@@ -81,6 +81,18 @@ Rectangle
             "checks": []
         },
         {
+            "title": "Blend",
+            "rows": [
+                ["shading.texScale", "Texture scale", 0.05, 3.0, 0.05],
+                ["shading.bottomDarken", "Bottom darken", 0.0, 1.0, 0.01],
+                ["shading.bottomBand", "Bottom band", 0.02, 1.0, 0.01],
+                ["flareAmount", "Wall flare", 0.0, 0.3, 0.005],
+                ["flareBand", "Flare band", 0.02, 1.0, 0.01],
+                ["shading.strataStrength", "Strata bands", 0.0, 0.5, 0.01]
+            ],
+            "checks": []
+        },
+        {
             "title": "Colors",
             "collapsed": true,
             "rows": [

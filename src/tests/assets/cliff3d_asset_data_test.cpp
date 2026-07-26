@@ -50,6 +50,13 @@ TEST(Cliff3dAssetData, BaseDataRoundTripPreservesAllFields) {
     d.grooveAngles[2][1] = 1.5f;
     d.shading.ambient = 0.55f;
     d.shading.darkColor = {0.1f, 0.2f, 0.3f};
+    d.topTexture = "../../textures/grass.png";
+    d.flareAmount = 0.12f;
+    d.flareBand = 0.45f;
+    d.shading.texScale = 1.5f;
+    d.shading.bottomDarken = 0.7f;
+    d.shading.bottomBand = 0.2f;
+    d.shading.strataStrength = 0.3f;
 
     nlohmann::json j;
     BaseData::to_json(j, asset);
@@ -67,6 +74,13 @@ TEST(Cliff3dAssetData, BaseDataRoundTripPreservesAllFields) {
     EXPECT_FLOAT_EQ(b.shading.ambient, 0.55f);
     EXPECT_FLOAT_EQ(b.shading.darkColor[0], 0.1f);
     EXPECT_FLOAT_EQ(b.shading.darkColor[2], 0.3f);
+    EXPECT_EQ(b.topTexture, "../../textures/grass.png");
+    EXPECT_FLOAT_EQ(b.flareAmount, 0.12f);
+    EXPECT_FLOAT_EQ(b.flareBand, 0.45f);
+    EXPECT_FLOAT_EQ(b.shading.texScale, 1.5f);
+    EXPECT_FLOAT_EQ(b.shading.bottomDarken, 0.7f);
+    EXPECT_FLOAT_EQ(b.shading.bottomBand, 0.2f);
+    EXPECT_FLOAT_EQ(b.shading.strataStrength, 0.3f);
 }
 
 TEST(Cliff3dAssetData, GameDataFromJson) {
@@ -76,7 +90,11 @@ TEST(Cliff3dAssetData, GameDataFromJson) {
         {"cellSize", 0.06},
         {"groundEnabled", true},
         {"grooveSmooth", 0.05},
-        {"shading", {{"diffuse", 0.9}, {"goldColor", {0.7, 0.6, 0.4}}}},
+        {"topTexture", "../../textures/grass.png"},
+        {"flareAmount", 0.1},
+        {"flareBand", 0.25},
+        {"shading", {{"diffuse", 0.9}, {"goldColor", {0.7, 0.6, 0.4}},
+            {"texScale", 2.0}, {"bottomDarken", 0.6}, {"strataStrength", 0.2}}},
     };
     const game_data::AssetData asset = j.get<game_data::AssetData>();
 
@@ -88,9 +106,16 @@ TEST(Cliff3dAssetData, GameDataFromJson) {
     EXPECT_FLOAT_EQ(asset.cliff3d->grooveSmooth, 0.05f);
     EXPECT_FLOAT_EQ(asset.cliff3d->shading.diffuse, 0.9f);
     EXPECT_FLOAT_EQ(asset.cliff3d->shading.goldColor[2], 0.4f);
+    EXPECT_EQ(asset.cliff3d->topTexture, "../../textures/grass.png");
+    EXPECT_FLOAT_EQ(asset.cliff3d->flareAmount, 0.1f);
+    EXPECT_FLOAT_EQ(asset.cliff3d->flareBand, 0.25f);
+    EXPECT_FLOAT_EQ(asset.cliff3d->shading.texScale, 2.0f);
+    EXPECT_FLOAT_EQ(asset.cliff3d->shading.bottomDarken, 0.6f);
+    EXPECT_FLOAT_EQ(asset.cliff3d->shading.strataStrength, 0.2f);
     // Omitted fields keep the generator defaults.
     EXPECT_FLOAT_EQ(asset.cliff3d->groovePeriod, 0.4f);
     EXPECT_EQ(asset.cliff3d->fbmOctaves, 2);
+    EXPECT_FLOAT_EQ(asset.cliff3d->shading.bottomBand, 0.35f);
 }
 
 TEST(Cliff3dAssetData, AssetIndexLoadMapsCliffEntry) {
@@ -99,8 +124,10 @@ TEST(Cliff3dAssetData, AssetIndexLoadMapsCliffEntry) {
     const std::filesystem::path assetDir = root / "pack" / "CliffRock";
     std::filesystem::create_directories(assetDir);
     {
+        nlohmann::json payload = minimalPayload();
+        payload["cliff3d"]["topTexture"] = "../../textures/grass.png";
         std::ofstream file(assetDir / "index.json");
-        file << minimalPayload().dump(2);
+        file << payload.dump(2);
     }
 
     const game_data::AssetIndex index = game_data::AssetIndex::load(root);
@@ -112,6 +139,8 @@ TEST(Cliff3dAssetData, AssetIndexLoadMapsCliffEntry) {
     EXPECT_FALSE(entry->cliff.groundEnabled);
     EXPECT_FALSE(entry->isSlice());
     EXPECT_FALSE(entry->isShape3d());
+    // The cliff's topTexture resolves against the asset dir (shared slot).
+    EXPECT_EQ(entry->topTexturePath, assetDir / "../../textures/grass.png");
 
     std::filesystem::remove_all(root);
 }

@@ -1122,7 +1122,8 @@ void LandscapeRenderer::appendAtlasQuad(
     const topology_core::DiamondIsometry& iso,
     const glm::ivec2& cell,
     std::size_t tileIndex,
-    float yOffset) const {
+    float yOffset,
+    const CliffShadowField* cliffShadow) const {
 
     // Field-space quad centered on the cell; the camera transform (zoom scales
     // positions and sizes together) happens at emission into the frame buffer.
@@ -1132,16 +1133,31 @@ void LandscapeRenderer::appendAtlasQuad(
 
     const TileUV uv = atlas.atlas.tileUv(tileIndex);
 
-    const float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+    // Cliff contact shadow: darken each corner by the nearest lattice node.
+    // The quad corners sit exactly on lattice nodes when the tile matches the
+    // cell size (fieldToNode snaps to the nearest one either way).
+    float shTL = 1.0f, shTR = 1.0f, shBL = 1.0f, shBR = 1.0f;
+    if (cliffShadow && !cliffShadow->nodeDarken.empty()) {
+        const auto shadeAt = [&iso, cliffShadow](const glm::vec2& pos) {
+            const auto it = cliffShadow->nodeDarken.find(nodeKey(iso.fieldToNode(pos)));
+            return it != cliffShadow->nodeDarken.end() ? 1.0f - it->second : 1.0f;
+        };
+        shTL = shadeAt(tl);
+        shTR = shadeAt({br.x, tl.y});
+        shBL = shadeAt({tl.x, br.y});
+        shBR = shadeAt(br);
+    }
+
+    const float a = 1.0f;
 
     // 2 triangles (TL, TR, BL) (BL, TR, BR)
-    out.push_back({{tl.x, tl.y}, {uv.uv0.x, uv.uv0.y}, {r, g, b, a}});
-    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
-    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
+    out.push_back({{tl.x, tl.y}, {uv.uv0.x, uv.uv0.y}, {shTL, shTL, shTL, a}});
+    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {shTR, shTR, shTR, a}});
+    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {shBL, shBL, shBL, a}});
 
-    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
-    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
-    out.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {r, g, b, a}});
+    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {shBL, shBL, shBL, a}});
+    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {shTR, shTR, shTR, a}});
+    out.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {shBR, shBR, shBR, a}});
 }
 
 void LandscapeRenderer::render(
@@ -1149,7 +1165,8 @@ void LandscapeRenderer::render(
     const topology_core::DiamondIsometry& iso,
     const topology_core::Camera2D& camera,
     int viewWidth,
-    int viewHeight) {
+    int viewHeight,
+    const CliffShadowField* cliffShadow) {
 
     if (tiles.empty()) return;
     if (pip.id == SG_INVALID_ID || vbuf.id == SG_INVALID_ID) return;
@@ -1184,7 +1201,7 @@ void LandscapeRenderer::render(
         const int baseVertex = (int)scratchVerts.size();
 
         for (const LandscapeTile* t : group) {
-            appendAtlasQuad(scratchVerts, atlas, iso, t->cell, t->tileIndex, 0.0f);
+            appendAtlasQuad(scratchVerts, atlas, iso, t->cell, t->tileIndex, 0.0f, cliffShadow);
         }
 
         scratchDraws.push_back({&atlas.atlas, baseVertex, (int)scratchVerts.size() - baseVertex});

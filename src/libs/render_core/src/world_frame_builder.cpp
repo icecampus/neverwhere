@@ -106,6 +106,12 @@ static CliffParams cliffParamsFromAssetData(const game_data::Cliff3dAssetData& d
     s.specStrength = d.shading.specStrength;
     s.specPower = d.shading.specPower;
     s.gamma = d.shading.gamma;
+    s.texScale = d.shading.texScale;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    params.flareAmount = d.flareAmount;
+    params.flareBand = d.flareBand;
     return params;
 }
 
@@ -133,7 +139,9 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
             renderer.ensureLandscapeAtlas(uuid, entry->atlasPath, entry->cols, entry->rows);
         }
         if (entry->isCliff3d()) {
-            renderer.ensureCliffAsset(uuid, cliffParamsFromAssetData(entry->cliff));
+            CliffParams params = cliffParamsFromAssetData(entry->cliff);
+            params.topTexturePath = entry->topTexturePath;
+            renderer.ensureCliffAsset(uuid, params);
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);

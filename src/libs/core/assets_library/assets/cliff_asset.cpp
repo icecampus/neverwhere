@@ -49,6 +49,9 @@ QVariantMap CliffAsset::cliffParams() const
 
     const BaseData::Cliff3dAssetData& d = *data.cliff3dData;
     out["raisedHeight"] = d.raisedHeight;
+    out["topTexture"] = QString::fromStdString(d.topTexture);
+    out["flareAmount"] = d.flareAmount;
+    out["flareBand"] = d.flareBand;
     out["cellSize"] = d.cellSize;
     out["padding"] = d.padding;
     out["plateauHeight"] = d.plateauHeight;
@@ -90,6 +93,10 @@ QVariantMap CliffAsset::cliffParams() const
     out["shading.specStrength"] = s.specStrength;
     out["shading.specPower"] = s.specPower;
     out["shading.gamma"] = s.gamma;
+    out["shading.texScale"] = s.texScale;
+    out["shading.bottomDarken"] = s.bottomDarken;
+    out["shading.bottomBand"] = s.bottomBand;
+    out["shading.strataStrength"] = s.strataStrength;
     return out;
 }
 
@@ -130,6 +137,9 @@ void CliffAsset::setCliffParam(const QString& name, const QVariant& value)
         }
     }
     else if (name == "raisedHeight") d.raisedHeight = value.toFloat();
+    else if (name == "topTexture") d.topTexture = value.toString().toStdString();
+    else if (name == "flareAmount") d.flareAmount = value.toFloat();
+    else if (name == "flareBand") d.flareBand = value.toFloat();
     else if (name == "cellSize") d.cellSize = value.toFloat();
     else if (name == "padding") d.padding = value.toFloat();
     else if (name == "plateauHeight") d.plateauHeight = value.toFloat();
@@ -160,4 +170,8 @@ void CliffAsset::setCliffParam(const QString& name, const QVariant& value)
     else if (name == "shading.specStrength") s.specStrength = value.toFloat();
     else if (name == "shading.specPower") s.specPower = value.toFloat();
     else if (name == "shading.gamma") s.gamma = value.toFloat();
+    else if (name == "shading.texScale") s.texScale = value.toFloat();
+    else if (name == "shading.bottomDarken") s.bottomDarken = value.toFloat();
+    else if (name == "shading.bottomBand") s.bottomBand = value.toFloat();
+    else if (name == "shading.strataStrength") s.strataStrength = value.toFloat();
 }

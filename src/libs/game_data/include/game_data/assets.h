@@ -49,6 +49,15 @@ struct Cliff3dShadingData {
     float specStrength = 0.5f;
     float specPower = 24.0f;
     float gamma = 0.85f;
+    // Top texture tiling: uv = world map cells * texScale (unused without a
+    // topTexture — the top falls back to the procedural grassA/grassB mix).
+    float texScale = 1.0f;
+    // Bottom blend: the wall darkens to (1 - bottomDarken) at ground level,
+    // fading out over bottomBand * plateauHeight (stitches with the underlay).
+    float bottomDarken = 0.55f;
+    float bottomBand = 0.35f;
+    // Sediment strata banding on the walls (0 = off).
+    float strataStrength = 0.0f;
 };
 
 // Cliff3D assets — the whole cliff-field generator parameter set (mirror of
@@ -56,7 +65,12 @@ struct Cliff3dShadingData {
 // No atlas; tiles on the CliffLandscape layer encode the vertex nodes.
 struct Cliff3dAssetData {
     std::string thumbnail; // optional palette preview
+    std::string topTexture; // optional: tiled texture for the flat tops (world-space uv)
     float raisedHeight = 96.0f; // field px per 1.0 plateau height (heightScale)
+    // Wall flare: the walls bulge outward by up to flareAmount map cells at
+    // ground level, tapering off over flareBand * plateauHeight.
+    float flareAmount = 0.0f;
+    float flareBand = 0.3f;
 
     float cellSize = 0.045f;
     float padding = 0.5f;
@@ -136,11 +150,18 @@ inline void from_json(const nlohmann::json& j, Cliff3dShadingData& d) {
     if (j.contains("specStrength")) j.at("specStrength").get_to(d.specStrength);
     if (j.contains("specPower")) j.at("specPower").get_to(d.specPower);
     if (j.contains("gamma")) j.at("gamma").get_to(d.gamma);
+    if (j.contains("texScale")) j.at("texScale").get_to(d.texScale);
+    if (j.contains("bottomDarken")) j.at("bottomDarken").get_to(d.bottomDarken);
+    if (j.contains("bottomBand")) j.at("bottomBand").get_to(d.bottomBand);
+    if (j.contains("strataStrength")) j.at("strataStrength").get_to(d.strataStrength);
 }
 
 inline void from_json(const nlohmann::json& j, Cliff3dAssetData& d) {
     if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("topTexture")) j.at("topTexture").get_to(d.topTexture);
     if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+    if (j.contains("flareAmount")) j.at("flareAmount").get_to(d.flareAmount);
+    if (j.contains("flareBand")) j.at("flareBand").get_to(d.flareBand);
     if (j.contains("cellSize")) j.at("cellSize").get_to(d.cellSize);
     if (j.contains("padding")) j.at("padding").get_to(d.padding);
     if (j.contains("plateauHeight")) j.at("plateauHeight").get_to(d.plateauHeight);

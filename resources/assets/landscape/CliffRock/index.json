@@ -8,6 +8,8 @@
         "fbmAmplitude": 0.014000000432133675,
         "fbmFrequency": 5.0,
         "fbmOctaves": 2,
+        "flareAmount": 0.12,
+        "flareBand": 0.3,
         "grooveAngles": [
             [
                 0.6283184885978699,
@@ -39,6 +41,8 @@
         "shading": {
             "ambient": 0.3499999940395355,
             "backLight": 0.10000000149011612,
+            "bottomBand": 0.35,
+            "bottomDarken": 0.55,
             "darkColor": [
                 0.3799999952316284,
                 0.3799999952316284,
@@ -65,9 +69,12 @@
             "lightElevation": 0.8500000238418579,
             "specPower": 24.0,
             "specStrength": 0.5,
+            "strataStrength": 0.12,
+            "texScale": 1.0,
             "veinThreshold": 0.800000011920929
         },
-        "thumbnail": "thumbnail.png"
+        "thumbnail": "thumbnail.png",
+        "topTexture": "../../../textures/grass.png"
     },
     "layerType": "CliffLandscape",
     "pivot": {

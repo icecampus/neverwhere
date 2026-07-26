@@ -30,6 +30,9 @@ TEST(CliffAsset, SetCliffParamWritesCanonicalPayload) {
     asset->setCliffParam("shading.ambient", 0.55);
     asset->setCliffParam("shading.darkColor.1", 0.25);
     asset->setCliffParam("grooveAngles.2.0", -1.5);
+    asset->setCliffParam("topTexture", "../../../textures/grass.png");
+    asset->setCliffParam("flareAmount", 0.08);
+    asset->setCliffParam("shading.bottomDarken", 0.7);
 
     // getData() is what ModelFrameSource::ensureFrameAssets reads every sync.
     const BaseData::Cliff3dAssetData& d = *asset->getData().cliff3dData;
@@ -38,6 +41,9 @@ TEST(CliffAsset, SetCliffParamWritesCanonicalPayload) {
     EXPECT_FLOAT_EQ(d.shading.ambient, 0.55f);
     EXPECT_FLOAT_EQ(d.shading.darkColor[1], 0.25f);
     EXPECT_FLOAT_EQ(d.grooveAngles[2][0], -1.5f);
+    EXPECT_EQ(d.topTexture, "../../../textures/grass.png");
+    EXPECT_FLOAT_EQ(d.flareAmount, 0.08f);
+    EXPECT_FLOAT_EQ(d.shading.bottomDarken, 0.7f);
 
     // ...and what AssetData::save serializes back to index.json.
     nlohmann::json j;
@@ -47,6 +53,10 @@ TEST(CliffAsset, SetCliffParamWritesCanonicalPayload) {
     EXPECT_FLOAT_EQ(back.cliff3dData->cellSize, 0.06f);
     EXPECT_FLOAT_EQ(back.cliff3dData->shading.darkColor[1], 0.25f);
     EXPECT_TRUE(back.cliff3dData->groundEnabled);
+    EXPECT_EQ(back.cliff3dData->topTexture, "../../../textures/grass.png");
+    EXPECT_FLOAT_EQ(back.cliff3dData->flareAmount, 0.08f);
+    EXPECT_FLOAT_EQ(back.cliff3dData->shading.bottomDarken, 0.7f);
+    EXPECT_FLOAT_EQ(back.cliff3dData->shading.texScale, 1.0f); // default survived
 }
 
 TEST(CliffAsset, CliffParamsReadsBackFlatKeys) {

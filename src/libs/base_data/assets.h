@@ -71,10 +71,22 @@ namespace BaseData
         float specStrength{0.5f};
         float specPower{24.0f};
         float gamma{0.85f};
+        // Top texture tiling: uv = world map cells * texScale (unused when the
+        // asset has no topTexture — the top falls back to the procedural
+        // grassA/grassB mix).
+        float texScale{1.0f};
+        // Bottom blend (stitches the walls with the underlay): the wall
+        // darkens to (1 - bottomDarken) at ground level, fading out over
+        // bottomBand * plateauHeight.
+        float bottomDarken{0.55f};
+        float bottomBand{0.35f};
+        // Sediment strata banding on the walls (0 = off).
+        float strataStrength{0.0f};
 
         NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Cliff3dShadingData,
             lightAzimuth, lightElevation, darkColor, goldColor, grassA, grassB,
-            veinThreshold, ambient, diffuse, backLight, specStrength, specPower, gamma);
+            veinThreshold, ambient, diffuse, backLight, specStrength, specPower, gamma,
+            texScale, bottomDarken, bottomBand, strataStrength);
     };
 
     // Cliff3D: the whole cliff-field generator parameter set (mirror of
@@ -84,7 +96,13 @@ namespace BaseData
     struct Cliff3dAssetData
     {
         std::string thumbnail; // optional palette preview
+        std::string topTexture; // optional: tiled texture for the flat tops (world-space uv)
         float raisedHeight{96.0f}; // field px per 1.0 plateau height (heightScale)
+        // Wall flare: the walls bulge outward by up to flareAmount map cells at
+        // ground level, tapering off over flareBand * plateauHeight. Helps the
+        // base merge with the underlay (0 = vertical walls).
+        float flareAmount{0.0f};
+        float flareBand{0.3f};
 
         // Scalar field (defaults = cliff::FieldParams; ground slab off — the
         // underlay is authored separately).
@@ -118,7 +136,7 @@ namespace BaseData
         Cliff3dShadingData shading;
 
         NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Cliff3dAssetData,
-            thumbnail, raisedHeight, cellSize, padding, plateauHeight, d2Scale,
+            thumbnail, topTexture, raisedHeight, flareAmount, flareBand, cellSize, padding, plateauHeight, d2Scale,
             blurRadiusCells, blurPasses, edgeRadius, grooveMaskWidth, grooveFadeK,
             grooveRimFade, fbmAmplitude, fbmFrequency, fbmOctaves, groundDepth,
             groundMargin, groundRounding, groundEnabled, groovePeriod, groovePhase,

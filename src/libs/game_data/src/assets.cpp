@@ -66,6 +66,11 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
         if (asset.cliff3d) {
             idx.cliff3d = true;
             idx.cliff = *asset.cliff3d;
+            // Shares the entry's texture slot with shape3d (an asset is one
+            // kind or the other).
+            if (!asset.cliff3d->topTexture.empty()) {
+                idx.topTexturePath = asset.root() / asset.cliff3d->topTexture;
+            }
         }
 
         index.byUuid[idx.uuid] = idx;

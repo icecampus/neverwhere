@@ -66,6 +66,12 @@ render_core::CliffParams cliffParamsFromAssetData(const BaseData::Cliff3dAssetDa
     s.specStrength = d.shading.specStrength;
     s.specPower = d.shading.specPower;
     s.gamma = d.shading.gamma;
+    s.texScale = d.shading.texScale;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    params.flareAmount = d.flareAmount;
+    params.flareBand = d.flareBand;
     return params;
 }
 
@@ -168,7 +174,11 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
         if (data.cliff3dData) {
             // Cliff tiles: the full generator + shading parameter set (no
             // atlas — geometry comes from the cliff field).
-            renderer.ensureCliffAsset(uuid, cliffParamsFromAssetData(*data.cliff3dData));
+            render_core::CliffParams params = cliffParamsFromAssetData(*data.cliff3dData);
+            if (!data.cliff3dData->topTexture.empty()) {
+                params.topTexturePath = data.root() / data.cliff3dData->topTexture;
+            }
+            renderer.ensureCliffAsset(uuid, params);
         }
         if (data.sliceData) {
             // Editor convention: landscape atlases are split into 4x6 tiles.

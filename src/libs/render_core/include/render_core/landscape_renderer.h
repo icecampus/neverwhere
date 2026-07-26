@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cstdint>
 
 #include <glm/glm.hpp>
 
@@ -19,6 +20,15 @@ struct LandscapeTile {
     glm::ivec2 cell{0, 0};
     std::string assetUuid;
     std::size_t tileIndex = 0;
+};
+
+// Contact-shadow field: per vertex-node darkening (0..1) spilled by nearby
+// cliffs. Built from the cliff tiles (same vertex-node lattice), sampled by
+// the base landscape pass at quad corners — the cliff foot's bottom blend
+// continues onto the underlay, stitching the transition.
+struct CliffShadowField {
+    std::unordered_map<std::uint64_t, float> nodeDarken; // nodeKey -> 0..1
+    bool empty() const { return nodeDarken.empty(); }
 };
 
 // Presentation params of a raised (3D) slice atlas: the top is lifted by
@@ -56,7 +66,8 @@ public:
         const topology_core::DiamondIsometry& iso,
         const topology_core::Camera2D& camera,
         int viewWidth,
-        int viewHeight);
+        int viewHeight,
+        const CliffShadowField* cliffShadow = nullptr);
 
     // Raised landscape: per-cell cliff walls (rock or simple flat) plus the
     // lifted tops. With a depth attachment (depthFormat != NONE at init) the
@@ -185,14 +196,16 @@ private:
 
     // One atlas tile quad in FIELD space (6 verts); yOffset shifts the quad in
     // world pixels (raised tops pass -height). Screen transform happens at
-    // batch emission after the depth sort.
+    // batch emission after the depth sort. cliffShadow (base ground pass
+    // only): per-corner darkening from the cliff contact-shadow field.
     void appendAtlasQuad(
         std::vector<Vertex>& out,
         const AtlasGpu& atlas,
         const topology_core::DiamondIsometry& iso,
         const glm::ivec2& cell,
         std::size_t tileIndex,
-        float yOffset) const;
+        float yOffset,
+        const CliffShadowField* cliffShadow = nullptr) const;
 
     void ensurePipeline();
     void destroyPipeline();

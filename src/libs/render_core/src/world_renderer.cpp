@@ -2,7 +2,53 @@
 
 #include <algorithm>
 
+#include "atlas_tile_types.h"
+
 namespace render_core {
+
+namespace {
+
+// Contact-shadow field for the base landscape pass: every "on" cliff node
+// darkens itself and its 2-ring neighbourhood on the same vertex lattice the
+// underlay tiles sample at their quad corners. Strength comes from the
+// asset's shading.bottomDarken (the wall-foot blend), so the spill matches
+// the wall's own bottom darkening. Ring weights fall off quadratically.
+void buildCliffShadowField(
+    const std::vector<LandscapeTile>& cliffTiles,
+    const CliffRenderer& cliffRenderer,
+    CliffShadowField& out) {
+
+    out.nodeDarken.clear();
+    if (cliffTiles.empty()) return;
+
+    constexpr float kRingWeights[3] = {1.0f, 0.55f, 0.28f};
+    const auto add = [&out](const glm::ivec2& node, float value) {
+        float& slot = out.nodeDarken[nodeKey(node)];
+        slot = std::max(slot, value);
+    };
+
+    for (const LandscapeTile& t : cliffTiles) {
+        const CliffParams* params = cliffRenderer.findAsset(t.assetUuid);
+        if (!params) continue;
+        const float strength = params->shading.bottomDarken;
+        if (strength <= 0.0f) continue;
+
+        const auto mask = landscape_core::tileTypeToNodeMask(tileTypeFromAtlasIndex(t.tileIndex));
+        const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t.cell);
+        for (int i = 0; i < 4; ++i) {
+            if (!mask[i]) continue;
+            const glm::ivec2 n = corners[i];
+            for (int dy = -2; dy <= 2; ++dy) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    const int ring = std::max(std::abs(dx), std::abs(dy));
+                    add({n.x + dx, n.y + dy}, strength * kRingWeights[ring]);
+                }
+            }
+        }
+    }
+}
+
+} // namespace
 
 void WorldRenderer::init(sg_pixel_format depthFormat) {
     landscapeRenderer.init(depthFormat);
@@ -55,7 +101,11 @@ void WorldRenderer::render(
     int viewHeight,
     double nowSec) {
 
-    landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight);
+    // Cliff contact shadow on the underlay (built even when empty — the pass
+    // checks emptiness and skips the per-corner lookup).
+    CliffShadowField cliffShadow;
+    buildCliffShadowField(frame.cliffTiles, cliffRenderer, cliffShadow);
+    landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight, &cliffShadow);
 
     // Grid overlay: above the water and the flat ground, but UNDER the 3D
     // world (raised walls / cliffs / sprites overdraw it — no depth write

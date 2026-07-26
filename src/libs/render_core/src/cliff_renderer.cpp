@@ -56,6 +56,9 @@ uniform vec4 grass_a;
 uniform vec4 grass_b;
 uniform vec4 params0;
 uniform vec4 params1;
+uniform vec4 params2;
+uniform vec4 params3;
+uniform sampler2D top_tex;
 
 vec4 hashv4v3(vec3 p) {
     vec3 chash = vec3(37.0, 39.0, 41.0);
@@ -114,11 +117,18 @@ void main() {
     float shell = 1.0 - smoothstep(0.005, 0.05, v_groove);
     vec3 gold = gold_color.rgb + vec3(1.0, 0.9, 0.4) * step(params0.x, f);
     vec3 rock = mix(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Grassy flat tops (omphalos idObj==2 style).
+    // Flat tops: tiled texture (slight uv wobble against visible tiling) or
+    // the procedural grassA/grassB mix when the asset has no top texture.
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
-    vec3 grass = mix(grass_a.rgb, grass_b.rgb, gm);
-    float topMask = smoothstep(0.7, 0.9, n.y);
+    vec2 tuv = p.xz * params1.w + 0.06 * vec2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
+    vec3 texCol = texture(top_tex, tuv).rgb;
+    vec3 grass = (params2.w > 0.5) ? texCol * (0.85 + 0.3 * gm) : mix(grass_a.rgb, grass_b.rgb, gm);
+    // Noise-distorted rim: the top creeps down the wall irregularly.
+    float rim = 0.22 * fbm2(6.0 * p.xz);
+    float topMask = smoothstep(0.7 - rim, 0.9 - rim, n.y);
     vec3 base = mix(rock, grass, topMask);
+    // Sediment strata bands on the walls.
+    base *= 1.0 - params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
     // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
     vec3 l = normalize(light_dir.xyz);
     vec3 rd = view_dir.xyz;
@@ -127,6 +137,12 @@ void main() {
         params0.z * max(ndl, 0.0));
     float specAmt = mix(0.05, params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
+    // Bottom blend: darken + a faint soil-green cast, so the wall foot merges
+    // with the underlay instead of hanging in the void.
+    float hf = clamp(p.y / max(params2.z, 0.001), 0.0, 1.0);
+    float bf = smoothstep(0.0, params2.y, hf);
+    col *= mix(1.0 - params2.x, 1.0, bf);
+    col = mix(col * vec3(0.85, 1.0, 0.8), col, bf);
     frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(params1.y)), 1.0);
 }
 )";
@@ -173,8 +189,12 @@ cbuffer fs_params: register(b0) {
     float4 grass_a;
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
-    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: tex scale
+    float4 params2; // x: bottom darken, y: bottom band, z: plateau top, w: use texture
+    float4 params3; // x: strata strength
 };
+Texture2D top_tex: register(t0);
+SamplerState top_tex_smp: register(s0);
 
 float4 hashv4v3(float3 p) {
     float3 chash = float3(37.0, 39.0, 41.0);
@@ -240,11 +260,17 @@ float4 main(PSIn inp): SV_Target {
     float shell = 1.0 - smoothstep(0.005, 0.05, inp.groove);
     float3 gold = gold_color.rgb + float3(1.0, 0.9, 0.4) * step(params0.x, f);
     float3 rock = lerp(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Grassy flat tops (omphalos idObj==2 style).
+    // Flat tops: tiled texture (uv wobble) or the procedural grass mix.
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
-    float3 grass = lerp(grass_a.rgb, grass_b.rgb, gm);
-    float topMask = smoothstep(0.7, 0.9, n.y);
+    float2 tuv = p.xz * params1.w + 0.06 * float2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
+    float3 texCol = top_tex.Sample(top_tex_smp, tuv).rgb;
+    float3 grass = (params2.w > 0.5) ? texCol * (0.85 + 0.3 * gm) : lerp(grass_a.rgb, grass_b.rgb, gm);
+    // Noise-distorted rim: the top creeps down the wall irregularly.
+    float rim = 0.22 * fbm2(6.0 * p.xz);
+    float topMask = smoothstep(0.7 - rim, 0.9 - rim, n.y);
     float3 base = lerp(rock, grass, topMask);
+    // Sediment strata bands on the walls.
+    base *= 1.0 - params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
     // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
     float3 l = normalize(light_dir.xyz);
     float3 rd = view_dir.xyz;
@@ -253,6 +279,11 @@ float4 main(PSIn inp): SV_Target {
         params0.z * max(ndl, 0.0));
     float specAmt = lerp(0.05, params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
+    // Bottom blend: darken + a faint soil-green cast toward the underlay.
+    float hf = clamp(p.y / max(params2.z, 0.001), 0.0, 1.0);
+    float bf = smoothstep(0.0, params2.y, hf);
+    col *= lerp(1.0 - params2.x, 1.0, bf);
+    col = lerp(col * float3(0.85, 1.0, 0.8), col, bf);
     return float4(pow(clamp(col, 0.0, 1.0), (float3)params1.y), 1.0);
 }
 )";
@@ -309,7 +340,9 @@ struct FsParams {
     float4 grass_a;
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
-    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: tex scale
+    float4 params2; // x: bottom darken, y: bottom band, z: plateau top, w: use texture
+    float4 params3; // x: strata strength
 };
 
 float4 hashv4v3(float3 p) {
@@ -368,7 +401,9 @@ struct PSIn {
     float3 world;
 };
 
-fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]]) {
+fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
+                      texture2d<float> top_tex [[texture(0)]],
+                      sampler top_tex_smp [[sampler(0)]]) {
     float3 n = normalize(in.normal);
     float3 p = in.world;
     // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
@@ -376,11 +411,17 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]])
     float shell = 1.0 - smoothstep(0.005, 0.05, in.groove);
     float3 gold = fs.gold_color.rgb + float3(1.0, 0.9, 0.4) * step(fs.params0.x, f);
     float3 rock = mix(fs.dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Grassy flat tops (omphalos idObj==2 style).
+    // Flat tops: tiled texture (uv wobble) or the procedural grass mix.
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
-    float3 grass = mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
-    float topMask = smoothstep(0.7, 0.9, n.y);
+    float2 tuv = p.xz * fs.params1.w + 0.06 * float2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
+    float3 texCol = top_tex.sample(top_tex_smp, tuv).rgb;
+    float3 grass = (fs.params2.w > 0.5) ? texCol * (0.85 + 0.3 * gm) : mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
+    // Noise-distorted rim: the top creeps down the wall irregularly.
+    float rim = 0.22 * fbm2(6.0 * p.xz);
+    float topMask = smoothstep(0.7 - rim, 0.9 - rim, n.y);
     float3 base = mix(rock, grass, topMask);
+    // Sediment strata bands on the walls.
+    base *= 1.0 - fs.params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
     // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
     float3 l = normalize(fs.light_dir.xyz);
     float3 rd = fs.view_dir.xyz;
@@ -389,6 +430,11 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]])
         fs.params0.z * max(ndl, 0.0));
     float specAmt = mix(0.05, fs.params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params1.x);
+    // Bottom blend: darken + a faint soil-green cast toward the underlay.
+    float hf = clamp(p.y / max(fs.params2.z, 0.001), 0.0, 1.0);
+    float bf = smoothstep(0.0, fs.params2.y, hf);
+    col *= mix(1.0 - fs.params2.x, 1.0, bf);
+    col = mix(col * float3(0.85, 1.0, 0.8), col, bf);
     return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), 1.0);
 }
 )";
@@ -418,9 +464,9 @@ void fillFsUniformDesc(sg_shader_uniform_block* block, std::size_t size) {
     block->msl_buffer_n = 1;
     block->wgsl_group0_binding_n = 1;
     block->spirv_set0_binding_n = 1;
-    const char* names[8] = {"light_dir", "view_dir", "dark_color", "gold_color",
-        "grass_a", "grass_b", "params0", "params1"};
-    for (int i = 0; i < 8; ++i) {
+    const char* names[10] = {"light_dir", "view_dir", "dark_color", "gold_color",
+        "grass_a", "grass_b", "params0", "params1", "params2", "params3"};
+    for (int i = 0; i < 10; ++i) {
         block->glsl_uniforms[i].glsl_name = names[i];
         block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
     }
@@ -566,6 +612,7 @@ void CliffRenderer::init(sg_pixel_format depthFormat_) {
 void CliffRenderer::shutdown() {
     destroyPipeline();
     for (auto& [uuid, asset] : caches) {
+        asset.topTex.destroy();
         for (auto& [key, region] : asset.regions) {
             if (region.vbuf.id != SG_INVALID_ID) {
                 sg_destroy_buffer(region.vbuf);
@@ -607,6 +654,24 @@ void CliffRenderer::ensurePipeline() {
     }
     fillVsUniformDesc(&shd_desc.uniform_blocks[0], sizeof(CliffVsParams));
     fillFsUniformDesc(&shd_desc.uniform_blocks[1], sizeof(CliffFsParams));
+    // Top texture (slot 0, fragment stage; same triplet shape as the sprite pass).
+    shd_desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.views[0].texture.image_type = SG_IMAGETYPE_2D;
+    shd_desc.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd_desc.views[0].texture.hlsl_register_t_n = 0;
+    shd_desc.views[0].texture.msl_texture_n = 0;
+    shd_desc.views[0].texture.wgsl_group1_binding_n = 0;
+    shd_desc.views[0].texture.spirv_set1_binding_n = 0;
+    shd_desc.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[0].hlsl_register_s_n = 0;
+    shd_desc.samplers[0].msl_sampler_n = 0;
+    shd_desc.samplers[0].wgsl_group1_binding_n = 1;
+    shd_desc.samplers[0].spirv_set1_binding_n = 1;
+    shd_desc.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.texture_sampler_pairs[0].view_slot = 0;
+    shd_desc.texture_sampler_pairs[0].sampler_slot = 0;
+    shd_desc.texture_sampler_pairs[0].glsl_name = "top_tex";
     shd = sg_make_shader(&shd_desc);
 
     sg_pipeline_desc pip_desc = {};
@@ -621,9 +686,44 @@ void CliffRenderer::ensurePipeline() {
     pip_desc.depth.write_enabled = true;
     pip_desc.label = "render-core-cliff-pip";
     pip = sg_make_pipeline(&pip_desc);
+
+    // 1x1 white fallback for assets without a top texture (the FS declares
+    // top_tex unconditionally, so the binding must always be complete).
+    const std::uint32_t white = 0xFFFFFFFF;
+    sg_image_desc img_desc = {};
+    img_desc.width = 1;
+    img_desc.height = 1;
+    img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    img_desc.data.mip_levels[0].ptr = &white;
+    img_desc.data.mip_levels[0].size = sizeof(white);
+    img_desc.label = "render-core-cliff-dummy-tex";
+    m_dummyImage = sg_make_image(&img_desc);
+    sg_view_desc view_desc = {};
+    view_desc.texture.image = m_dummyImage;
+    view_desc.label = "render-core-cliff-dummy-view";
+    m_dummyView = sg_make_view(&view_desc);
+    sg_sampler_desc smp_desc = {};
+    smp_desc.min_filter = SG_FILTER_LINEAR;
+    smp_desc.mag_filter = SG_FILTER_LINEAR;
+    smp_desc.wrap_u = SG_WRAP_REPEAT;
+    smp_desc.wrap_v = SG_WRAP_REPEAT;
+    smp_desc.label = "render-core-cliff-dummy-smp";
+    m_dummySampler = sg_make_sampler(&smp_desc);
 }
 
 void CliffRenderer::destroyPipeline() {
+    if (m_dummyView.id != SG_INVALID_ID) {
+        sg_destroy_view(m_dummyView);
+        m_dummyView = {};
+    }
+    if (m_dummySampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(m_dummySampler);
+        m_dummySampler = {};
+    }
+    if (m_dummyImage.id != SG_INVALID_ID) {
+        sg_destroy_image(m_dummyImage);
+        m_dummyImage = {};
+    }
     if (pip.id != SG_INVALID_ID) {
         sg_destroy_pipeline(pip);
         pip.id = SG_INVALID_ID;
@@ -666,7 +766,7 @@ void CliffRenderer::render(
 
     // Shading uniforms from the *current* asset params — palette edits are
     // instant and never touch the caches.
-    const auto buildFs = [&iso](const CliffParams& params) {
+    const auto buildFs = [&iso](const CliffParams& params, bool useTexture) {
         const CliffShading& s = params.shading;
         CliffFsParams fs{};
         const float lightCe = std::cos(s.lightElevation);
@@ -691,6 +791,12 @@ void CliffRenderer::render(
         fs.params1[0] = s.specPower;
         fs.params1[1] = s.gamma;
         fs.params1[2] = s.backLight;
+        fs.params1[3] = s.texScale;
+        fs.params2[0] = s.bottomDarken;
+        fs.params2[1] = s.bottomBand;
+        fs.params2[2] = params.field.plateauHeight;
+        fs.params2[3] = useTexture ? 1.0f : 0.0f;
+        fs.params3[0] = s.strataStrength;
         return fs;
     };
 
@@ -724,6 +830,23 @@ void CliffRenderer::render(
         const CliffParams& params = assets.find(uuid)->second;
         AssetCache& asset = caches[uuid];
 
+        // Lazy (re)load of the optional tiled top texture; the FS falls back
+        // to the procedural grass mix when the asset has none (or it failed).
+        if (!asset.topTexTried || asset.topTexPath != params.topTexturePath) {
+            asset.topTex.destroy();
+            asset.topTexPath = params.topTexturePath;
+            asset.topTexTried = true;
+            if (!params.topTexturePath.empty()) {
+                asset.topTex.createFromFile(params.topTexturePath, 1, 1, SG_FILTER_LINEAR, SG_WRAP_REPEAT);
+                if (!asset.topTex.valid()) {
+                    spdlog::warn("CliffRenderer: top texture failed to load: {}", params.topTexturePath.string());
+                }
+            }
+        }
+        const bool useTex = asset.topTex.valid();
+        const sg_view texView = useTex ? asset.topTex.sgView() : m_dummyView;
+        const sg_sampler texSmp = useTex ? asset.topTex.sgSampler() : m_dummySampler;
+
         // Split into connected regions and key them by content: an untouched
         // region keeps its cache entry, a local edit rehashes only its own.
         const std::vector<CliffComponent> components = computeComponents(group);
@@ -748,12 +871,14 @@ void CliffRenderer::render(
             }
         }
 
-        // heightScale edits only re-project the built regions (no field work).
+        // heightScale/flare edits only re-project the built regions (no field work).
         const bool scaleChanged = !asset.heightScaleValid || asset.heightScale != params.heightScale;
-        if (scaleChanged) {
+        const bool flareChanged = asset.flareAmount != params.flareAmount || asset.flareBand != params.flareBand;
+        if (scaleChanged || flareChanged) {
             for (auto& [key, region] : asset.regions) {
                 if (!region.pending) {
-                    projectRegionStream(region, iso, params.heightScale);
+                    projectRegionStream(region, iso, params.heightScale, params.flareAmount,
+                        params.flareBand, params.field.plateauHeight);
                     const std::size_t bytes = region.stream.size() * sizeof(CliffVertex);
                     if (bytes > 0) {
                         if (region.vbufSize < bytes) {
@@ -775,6 +900,8 @@ void CliffRenderer::render(
             }
             asset.heightScale = params.heightScale;
             asset.heightScaleValid = true;
+            asset.flareAmount = params.flareAmount;
+            asset.flareBand = params.flareBand;
         }
 
         for (std::size_t ci = 0; ci < components.size(); ++ci) {
@@ -785,7 +912,8 @@ void CliffRenderer::render(
                     region.pendingSince = nowSec;
                 }
                 if ((nowSec - region.pendingSince) > 0.3) {
-                    rebuildRegion(region, comp.nodes, iso, params.field, params.heightScale);
+                    rebuildRegion(region, comp.nodes, iso, params.field, params.heightScale,
+                        params.flareAmount, params.flareBand);
                     region.pending = false;
                 }
             }
@@ -795,6 +923,9 @@ void CliffRenderer::render(
                 PreviewRange range;
                 range.base = static_cast<int>(m_previewVerts.size());
                 range.params = &params;
+                range.texView = texView;
+                range.texSampler = texSmp;
+                range.useTexture = useTex;
                 for (const LandscapeTile* t : comp.tiles) {
                     appendPreviewDiamond(m_previewVerts, t->cell);
                 }
@@ -807,10 +938,12 @@ void CliffRenderer::render(
 
             if (region.stream.empty() || region.vbuf.id == SG_INVALID_ID) continue;
 
-            const CliffFsParams fs = buildFs(params);
+            const CliffFsParams fs = buildFs(params, useTex);
 
             sg_bindings bind = {};
             bind.vertex_buffers[0] = region.vbuf;
+            bind.views[0] = texView;
+            bind.samplers[0] = texSmp;
             sg_apply_pipeline(pip);
             sg_apply_bindings(&bind);
             sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
@@ -836,9 +969,11 @@ void CliffRenderer::render(
         if (m_previewVbuf.id != SG_INVALID_ID) {
             sg_update_buffer(m_previewVbuf, sg_range{m_previewVerts.data(), bytes});
             for (const PreviewRange& range : m_previewRanges) {
-                const CliffFsParams fs = buildFs(*range.params);
+                const CliffFsParams fs = buildFs(*range.params, range.useTexture);
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = m_previewVbuf;
+                bind.views[0] = range.texView;
+                bind.samplers[0] = range.texSampler;
                 sg_apply_pipeline(pip);
                 sg_apply_bindings(&bind);
                 sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
@@ -854,7 +989,9 @@ void CliffRenderer::rebuildRegion(
     const std::vector<glm::ivec2>& componentNodes,
     const topology_core::DiamondIsometry& iso,
     const cliff::FieldParams& fieldParams,
-    float heightScale) {
+    float heightScale,
+    float flareAmount,
+    float flareBand) {
 
     // Full path for ONE connected region: nodes -> bbox field -> regularize
     // -> surface nets (the other regions of the same asset stay untouched).
@@ -902,7 +1039,7 @@ void CliffRenderer::rebuildRegion(
         region.watertight = true;
     }
 
-    projectRegionStream(region, iso, heightScale);
+    projectRegionStream(region, iso, heightScale, flareAmount, flareBand, fieldParams.plateauHeight);
 
     // Upload the fresh stream.
     const std::size_t bytes = region.stream.size() * sizeof(CliffVertex);
@@ -927,20 +1064,41 @@ void CliffRenderer::rebuildRegion(
 void CliffRenderer::projectRegionStream(
     RegionCache& region,
     const topology_core::DiamondIsometry& iso,
-    float heightScale) {
+    float heightScale,
+    float flareAmount,
+    float flareBand,
+    float plateauHeight) {
 
     // Projection path: region mesh -> field-space vertex stream. Placement
     // matches DiamondIsometry::nodeToField (no +halfH on y), z carries the raw
     // ground fieldY (normalized in the VS via z_range).
+    //
+    // Wall flare: near ground level the vertices bulge outward along the
+    // horizontal normal (quadratic falloff over flareBand * plateauHeight), so
+    // the wall foot overlaps the underlay instead of ending in a hard line.
+    // Positions shift consistently (screen pos, ground anchor and the world
+    // attribute), the mesh topology/normals stay untouched.
     region.stream.clear();
     region.stream.reserve(region.mesh.indices.size());
     const glm::vec2 cellSz = iso.dims.cellSize();
     const float halfW = cellSz.x * 0.5f;
     const float halfH = cellSz.y * 0.5f;
+    const float flareTop = std::max(flareBand, 0.0f) * plateauHeight;
     for (const std::uint32_t index : region.mesh.indices) {
         const cliff::MeshVertex& v = region.mesh.vertices[index];
-        const float mapX = static_cast<float>(region.origin.x) + v.px;
-        const float mapZ = static_cast<float>(region.origin.y) + v.pz;
+        float px = v.px;
+        float pz = v.pz;
+        if (flareAmount > 0.0f && flareTop > 1e-6f && v.py < flareTop) {
+            const float t = 1.0f - v.py / flareTop;
+            const float off = flareAmount * t * t;
+            const float hl = std::sqrt(v.nx * v.nx + v.nz * v.nz);
+            if (hl > 1e-4f) {
+                px += v.nx / hl * off;
+                pz += v.nz / hl * off;
+            }
+        }
+        const float mapX = static_cast<float>(region.origin.x) + px;
+        const float mapZ = static_cast<float>(region.origin.y) + pz;
         const float fieldX = (mapX - mapZ) * halfW + halfW;
         const float fieldY = (mapX + mapZ) * halfH;
         region.stream.push_back(CliffVertex{
