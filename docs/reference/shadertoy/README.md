@@ -33,3 +33,24 @@
 | [Desert Passage](<Desert Passage/README.md>) | Shane | [XtyGzc](https://www.shadertoy.com/view/XtyGzc) | raymarch-каньон: cellular/tile-структура породы, реф для cliff-генерации |
 | [Voronoi - rocks](<Voronoi - rocks/README.md>) | iq | [MsXGzM](https://www.shadertoy.com/view/MsXGzM) | voronoi-структура скал + fbm из текстур, реф для rock/cliff-поверхности |
 | [Underground Passageway](<Underground Passageway/README.md>) | Shane | [XdcfDf](https://www.shadertoy.com/view/XdcfDf) | precalc высотной карты скал в буфере (splatter 7×7 cell check), маппинг на туннель |
+| [Jagged Plain](<Jagged Plain/README.md>) | — | [4tSXRm](https://www.shadertoy.com/view/4tSXRm) | заготовка, наполняется вручную |
+| [Desert Passage II](<Desert Passage II/README.md>) | — | [WdGcDt](https://www.shadertoy.com/view/WdGcDt) | заготовка, наполняется вручную |
+| [Cave Entrance](<Cave Entrance/README.md>) | — | [ltjXzd](https://www.shadertoy.com/view/ltjXzd) | заготовка, наполняется вручную |
+| [Canyon Pass](<Canyon Pass/README.md>) | — | [MlG3zh](https://www.shadertoy.com/view/MlG3zh) | заготовка, наполняется вручную |
+| [Rock Shapes WIP](<Rock Shapes WIP/README.md>) | — | [XsfXDl](https://www.shadertoy.com/view/XsfXDl) | заготовка, наполняется вручную |
+| [Cavernic](<Cavernic/README.md>) | — | [DlB3WV](https://www.shadertoy.com/view/DlB3WV) | заготовка, наполняется вручную |
+| [Rounded Voro Rocks](<Rounded Voro Rocks/README.md>) | — | [MdlcDS](https://www.shadertoy.com/view/MdlcDS) | заготовка, наполняется вручную |
+| [Green Hayduke](<Green Hayduke/README.md>) | — | [llcXRN](https://www.shadertoy.com/view/llcXRN) | заготовка, наполняется вручную |
+| [Noise Layer Raymarch Traversal](<Noise Layer Raymarch Traversal/README.md>) | — | [3XSSzw](https://www.shadertoy.com/view/3XSSzw) | заготовка, наполняется вручную |
+| [Between Worlds](<Between Worlds/README.md>) | — | [4scGWr](https://www.shadertoy.com/view/4scGWr) | заготовка, наполняется вручную |
+| [Rocky Tunnel 2](<Rocky Tunnel 2/README.md>) | — | [llGGWc](https://www.shadertoy.com/view/llGGWc) | заготовка, наполняется вручную |
+| [Glowing Spiral Lava Tunnel](<Glowing Spiral Lava Tunnel/README.md>) | — | [Wcd3W2](https://www.shadertoy.com/view/Wcd3W2) | заготовка, наполняется вручную |
+| [Antelope Canyon](<Antelope Canyon/README.md>) | — | [4tGfzz](https://www.shadertoy.com/view/4tGfzz) | заготовка, наполняется вручную |
+| [Blackbody Flowing Lava](<Blackbody Flowing Lava/README.md>) | — | [ddVBR3](https://www.shadertoy.com/view/ddVBR3) | заготовка, наполняется вручную |
+| [very noi](<very noi/README.md>) | — | [3t23z1](https://www.shadertoy.com/view/3t23z1) | заготовка, наполняется вручную |
+| [Tumble Rock](<Tumble Rock/README.md>) | — | [NcjGDh](https://www.shadertoy.com/view/NcjGDh) | заготовка, наполняется вручную |
+| [Flycam - Desert Passage by Shane](<Flycam - Desert Passage by Shane/README.md>) | — | [WsGfWm](https://www.shadertoy.com/view/WsGfWm) | заготовка, наполняется вручную |
+| [Flowing Water Over The Rock](<Flowing Water Over The Rock/README.md>) | — | [mtKyzw](https://www.shadertoy.com/view/mtKyzw) | заготовка, наполняется вручную |
+| [ProfilePicture 120003 (mouse L-R)](<ProfilePicture 120003 (mouse L-R)/README.md>) | — | [WcyyWG](https://www.shadertoy.com/view/WcyyWG) | заготовка, наполняется вручную |
+| [Rocknot](<Rocknot/README.md>) | — | [XccXWX](https://www.shadertoy.com/view/XccXWX) | заготовка, наполняется вручную |
+| [Code 33b Grassy Rocks](<Code 33b Grassy Rocks/README.md>) | — | [MXjcRc](https://www.shadertoy.com/view/MXjcRc) | заготовка, наполняется вручную |

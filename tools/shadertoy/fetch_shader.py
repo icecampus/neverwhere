@@ -272,6 +272,26 @@ def update_index(shader_id: str, name: str, author: str, note: str, folder: str)
     INDEX_MD.write_text(text.rstrip("\n") + "\n" + row, encoding="utf-8")
 
 
+def make_stub(url_or_id: str, title: str, note: str, force: bool) -> int:
+    """Только каркас: папка по тайтлу + README-заготовка + строка в индексе.
+    Контент (шейдеры, текстуры) наполняется вручную."""
+    shader_id = shader_id_from(url_or_id)
+    folder = OUT_ROOT / sanitize_dirname(title)
+    folder.mkdir(parents=True, exist_ok=True)
+    readme = folder / "README.md"
+    if readme.exists() and not force:
+        print(f"[skip] {folder.name}/README.md уже существует")
+    else:
+        readme.write_text(
+            f"# {title}\n\n- Ссылка: {VIEW_URL.format(id=shader_id)}\n- Автор: —\n\n"
+            "## Файлы\n\n_(наполняется вручную)_\n",
+            encoding="utf-8",
+        )
+        print(f"[stub] {folder.name}/README.md")
+    update_index(shader_id, title, "—", note or "заготовка, наполняется вручную", folder.name)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Fetch Shadertoy shader into docs/reference/shadertoy/")
     ap.add_argument("shader", help="Shadertoy URL (…/view/XtyGzc) или 6-символьный ID")
@@ -279,7 +299,15 @@ def main() -> int:
     ap.add_argument("--headed", action="store_true", help="показать окно браузера (если headless не проходит Cloudflare)")
     ap.add_argument("--no-archive", action="store_true", help="не ходить в web.archive.org, сразу живой сайт")
     ap.add_argument("--force", action="store_true", help="перезаписать README.md, даже если он уже есть (затрёт ручные правки)")
+    ap.add_argument("--stub", action="store_true", help="только создать папку + README-заготовку, без фетча (нужен --title)")
+    ap.add_argument("--title", default="", help="тайтл демки (обязателен с --stub)")
     args = ap.parse_args()
+
+    if args.stub:
+        if not args.title:
+            print("[fail] с --stub нужен --title", file=sys.stderr)
+            return 1
+        return make_stub(args.shader, args.title, args.note, args.force)
 
     shader_id = shader_id_from(args.shader)
 
