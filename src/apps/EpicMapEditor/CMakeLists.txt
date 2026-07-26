@@ -49,6 +49,11 @@ if(MSVC)
 elseif(APPLE)
     # GLCORE backend: sokol_gfx impl uses the system OpenGL framework.
     target_link_libraries(${AppName} PRIVATE "-framework OpenGL")
+elseif(NOT EMSCRIPTEN)
+    # GLCORE backend: sokol_gfx impl loads GL entry points via glXGetProcAddress,
+    # which requires libGL on the link line.
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(${AppName} PRIVATE OpenGL::GL)
 endif()
 
 accumulate_files_relative(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} png_resources png)

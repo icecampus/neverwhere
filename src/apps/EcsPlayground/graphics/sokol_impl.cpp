@@ -14,8 +14,10 @@
     // which conflicts with glad's gl* macro redefinitions.
     #define SOKOL_GLCORE
 #else
+    // No glad on Linux either: sokol_gfx.h (SOKOL_IMPL) pulls <GL/gl.h>, which
+    // glad's include guard blocks — sokol would call GL via glad's unloaded
+    // (NULL) pointers and crash in sg_setup.
     #define SOKOL_GLCORE
-    #include <glad/glad.h>
 #endif
 
 // Qt's `slots` macro breaks Sokol internals which use a field with that name.

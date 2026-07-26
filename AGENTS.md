@@ -57,7 +57,7 @@ macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`
 - **Рендер-бэкенды:** редактор и EcsPlayground — принудительный `SOKOL_GLCORE` (Qt OpenGL контекст), standalone-приложения — `SOKOL_METAL` (выбор в `render_core/sokol_config.h` и main.cpp по `__APPLE__`). Для GLCORE на macOS обязателен core profile: `QSurfaceFormat` 4.1 Core до создания `QApplication` (см. `main.cpp` редактора), иначе Qt даёт legacy 2.1 контекст и sokol падает на `sg_setup()` в Debug.
 - **Шейдеры:** у `render_core` и playground-рендереров три варианта исходников — GLSL / HLSL / MSL; Metal-ветка выбирается по `sg_query_backend() == SG_BACKEND_METAL_MACOS` (runtime) или `#elif defined(SOKOL_METAL)` (compile-time). Единого `SG_BACKEND_METAL` в sokol нет.
 - **sokol_app на macOS** требует Objective-C++: `main.cpp` standalone-приложений компилируется как ObjC++ через макрос `nw_configure_sokol_app(target)` в `cmake/utils.cmake` (там же линковка `Cocoa/QuartzCore/Metal/MetalKit`; на Windows — `d3d11/dxgi`). Все новые standalone sokol-приложения — через этот макрос.
-- **glad нельзя включать в TU с `SOKOL_IMPL` на macOS** (и вообще вместе с Qt GL-заголовками): sokol_gfx/qopengl тянут системный `<OpenGL/gl3.h>`, который конфликтует с glad-макросами. GLCORE-бэкенд линкуется `-framework OpenGL`.
+- **glad нельзя включать в TU с `SOKOL_IMPL` на macOS и Linux** (и вообще вместе с Qt GL-заголовками): sokol_gfx/qopengl тянут системные GL-заголовки (`<OpenGL/gl3.h>` на macOS, `<GL/gl.h>` на Linux), которые конфликтуют с glad-макросами. На macOS это compile-time конфликт, на Linux — коварнее: glad'овский `__gl_h_` guard молча блокирует `<GL/gl.h>`, и sokol зовёт GL через незагруженные glad-указатели (NULL) → SIGSEGV в `sg_setup`. На Windows спасает встроенный лоадер sokol (его макросы перекрывают glad'овские). GLCORE-бэкенд линкуется `-framework OpenGL` на macOS и `OpenGL::GL` на Linux.
 - **Ресурсы:** `baseDataPath` в `core_context.cpp` ищется вверх от cwd (repo root, `_intermediate_64` — оба сработают); хардкода абсолютных путей нет.
 - **Код-подпись:** ad-hoc (`CODE_SIGN_IDENTITY "-"` в `nw_add_app_sources`, post-build `codesign -f -s -` у EpicMapEditor) — пустая identity в Xcode невалидна для CLI-таргетов.
 - После обновления Xcode **сбрасывать CMake-кэш** (`cmake -U LIBRESOLV` или чистый `_intermediate_64`): `find_library` кэширует пути внутрь старого SDK.
@@ -81,6 +81,25 @@ macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`
 - `_intermediate_ide/` и `compile_commands.json` в `.gitignore` — это локальные artefacts.
 
 Без `compile_commands.json` Serena работает на структурном parse (видит имена, но не типы), и `get_diagnostics_for_file` выдаёт ложный шум (`'QObject' file not found`, `Unknown type name 'Q_OBJECT'`). С ним — полноценная индексация: чистая диагностика, полные references, type-aware навигация.
+
+## Сборка (Linux, CMake + vcpkg)
+
+Linux-флоу — Ninja (single-config) + CMake Presets, триплет `x64-linux`, бинарная директория `_int_linux` (**не** `_intermediate_64` — та под win/mac-кэш).
+
+- Системные зависимости (Ubuntu): `build-essential autoconf automake autoconf-archive libtool pkg-config bison flex gperf nasm python3 python3-venv` + X11/xcb/GL dev-стек для vcpkg-qtbase: `libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxtst-dev libxrandr-dev libxcursor-dev libxcomposite-dev libxdamage-dev libxrender-dev libxcb1-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev libfontconfig1-dev libfreetype6-dev libdbus-1-dev libsm-dev libxcb-xinput-dev`.
+- Конфигурация: `./build_linux.sh` (обёртка над `cmake --preset linux`). Первая конфигурация собирает все vcpkg-зависимости (включая Qt) — ~1–2 часа.
+- Сборка из CLI: `cmake --build --preset linux-debug --target EpicMapEditor`.
+- Бинарники: `_int_linux/src/apps/<App>/Debug/<App>` (app-макросы кладут exe в подпапку `$<CONFIG>`, как VS/Xcode — иначе на single-config Ninja exe коллидирует с директорией qml-модуля того же имени).
+- Smoke-проверки и юнит-тесты — как на macOS: `EpicMapEditor --smoke`, `_int_linux/src/tests/neverwhere_tests` (ctest: `ctest --test-dir _int_linux --output-on-failure`).
+
+Платформенные особенности порта:
+
+- **Рендер-бэкенд:** `SOKOL_GLCORE` везде (выбирается в `render_core/sokol_config.h` по умолчанию на не-win/apple/emscripten); шейдеры — GLSL-варианты. Внутри Qt-контекста (редактор, EcsPlayground) отдельный `QSurfaceFormat` не нужен: GLX по умолчанию даёт compat-контекст 4.x, sokol хватает (в отличие от macOS с legacy 2.1).
+- **sokol_app на Linux** идёт через X11 (на Wayland-сессии — XWayland): макрос `nw_configure_sokol_app(target)` линкует `X11 Xi Xcursor GL dl pthread m`.
+- **GLCORE в Qt-приложениях** (EpicMapEditor, EcsPlayground) требует `OpenGL::GL` на линковке — sokol_gfx грузит GL-функции через `glXGetProcAddress`.
+- **RttrPlayground не собирается** (rttr windows-only; его CMakeLists возвращается сразу на не-Windows).
+- `compile_commands.json` в корне — симлинк на `_int_linux/compile_commands.json` (preset сам эмиттит, отдельный index-preset не нужен).
+- **RPC `screenshot` под Wayland отдаёт чёрное:** `_cmdScreenshot` использует `QScreen::grabWindow` (X11-протокол), а под XWayland контент живёт в Wayland-буферах и X-сервер его не видит. Сам рендер при этом исправен (проверено вживую на RTX 4090). Обходные пути: запускать редактор под `xvfb-run` (настоящий X11-сервер — тогда grabWindow работает; xvfb надо доустановить) либо сидеть в X11-сессии. На авторинг-операции (`set_tile`/`set_landscape`/…) это не влияет.
 
 ## Undo/Redo
 

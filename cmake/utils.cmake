@@ -280,6 +280,14 @@ function(nw_add_app_sources)
     target_include_directories(${ARG_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/src/libs")
     target_precompile_headers(${ARG_NAME} PRIVATE pch.h)
 
+    # Exe lands in a <Config> subdir on every generator (VS/Xcode do this by
+    # default; single-config Ninja does not). Without it, on Ninja the exe path
+    # <bindir>/<Target> collides with the qt6_add_qml_module output directory
+    # of the same name ("cannot open output file ...: Is a directory").
+    set_target_properties(${ARG_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    )
+
     target_link_libraries(${ARG_NAME} PUBLIC ${ARG_LIBS})
 
     # grouping in source tree
@@ -324,6 +332,8 @@ endfunction()
 # - Windows (MSVC): линковка d3d11/dxgi (SOKOL_D3D11)
 # - macOS: main.cpp компилируется как Objective-C++ (sokol_app требует ObjC для
 #   Metal-бэкенда), линковка Cocoa/QuartzCore/Metal/MetalKit
+# - Linux: sokol_app идёт через X11 + GLCORE (на Wayland-сессии — через XWayland),
+#   линковка X11/Xi/Xcursor/GL + dl/pthread/m
 function(nw_configure_sokol_app target)
     if(MSVC)
         target_link_libraries(${target} PRIVATE d3d11 dxgi)
@@ -335,6 +345,8 @@ function(nw_configure_sokol_app target)
             "-framework Metal"
             "-framework MetalKit"
         )
+    elseif(UNIX)
+        target_link_libraries(${target} PRIVATE X11 Xi Xcursor GL dl pthread m)
     endif()
 endfunction()
 
@@ -362,7 +374,13 @@ function(nw_add_console_app)
 
     target_include_directories(${appName} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_include_directories(${appName} PRIVATE "${CMAKE_SOURCE_DIR}/src/libs")
-    
+
+    # Same <Config>-subdir layout as nw_add_app_sources (uniform exe paths
+    # across generators, see there).
+    set_target_properties(${appName} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    )
+
     # Optional PCH if it exists
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
         target_precompile_headers(${appName} PRIVATE pch.h)
