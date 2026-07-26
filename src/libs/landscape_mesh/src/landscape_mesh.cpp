@@ -836,6 +836,31 @@ LandscapeZone SolidMaskGrid::zoneAt(int x, int y) const {
     return zones[(std::size_t)cellIndex(x, y)];
 }
 
+SolidMaskGrid solidMaskFromNodes(const std::uint8_t* nodes, int nodesX, int nodesY) {
+    SolidMaskGrid mask;
+    if (!nodes || nodesX < 2 || nodesY < 2) {
+        return mask;
+    }
+
+    mask.width = nodesX - 1;
+    mask.height = nodesY - 1;
+    const std::size_t cellCount = static_cast<std::size_t>(mask.width) * mask.height;
+    mask.solidCells.assign(cellCount, 0);
+    for (int y = 0; y < mask.height; ++y) {
+        for (int x = 0; x < mask.width; ++x) {
+            const bool on =
+                nodes[static_cast<std::size_t>(y) * nodesX + x] != 0 ||
+                nodes[static_cast<std::size_t>(y) * nodesX + x + 1] != 0 ||
+                nodes[static_cast<std::size_t>(y + 1) * nodesX + x] != 0 ||
+                nodes[static_cast<std::size_t>(y + 1) * nodesX + x + 1] != 0;
+            mask.solidCells[static_cast<std::size_t>(y) * mask.width + x] = on ? 1 : 0;
+        }
+    }
+    mask.topCells = mask.solidCells;
+    mask.zones.assign(cellCount, landscape_core::LandscapeZone::Lowland);
+    return mask;
+}
+
 VertexKind classifyVertex(const SolidMaskGrid& mask, int x, int y) {
     const bool topLeft = mask.isSolid(x - 1, y - 1);
     const bool topRight = mask.isSolid(x, y - 1);

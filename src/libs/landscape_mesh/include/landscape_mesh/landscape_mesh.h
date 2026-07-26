@@ -192,6 +192,11 @@ private:
 };
 
 VertexKind classifyVertex(const SolidMaskGrid& mask, int x, int y);
+// Build a cell solid-mask from a dense vertex-node grid (nodesX*nodesY bytes,
+// row-major, 0/1). A cell is solid when ANY of its 4 corner nodes is on (matches
+// the painted silhouette of the 2D tile layers). Result: (nodesX-1)x(nodesY-1)
+// cells; topCells == solidCells; zones filled with LandscapeZone::Lowland.
+SolidMaskGrid solidMaskFromNodes(const std::uint8_t* nodes, int nodesX, int nodesY);
 std::vector<BoundarySegment> buildBoundarySegments(const SolidMaskGrid& mask);
 BeveledBoundaryResult buildBeveledBoundary(const SolidMaskGrid& mask, const MeshBuildSettings& settings);
 NormalOrientationStats validateNormalOrientation(const std::vector<MeshQuad>& quads);

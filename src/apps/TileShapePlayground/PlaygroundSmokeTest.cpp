@@ -12,6 +12,7 @@
 #include <highground_core/highground.h>
 #include <highground_core/inspect.h>
 #include <highground_core/surface_nets.h>
+#include <landscape_mesh/landscape_mesh.h>
 #include <topology_core/diamond_isometry.h>
 
 #include "FlatAtlasGenerator.h"
@@ -343,6 +344,57 @@ bool runTileShapeSmokeTest() {
         }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + highground_core generation + cliff field pipeline");
+    // --- Wall-mesh ("Cyclopean 3D") layer pipeline (landscape_mesh): brush
+    // nodes -> dense node grid -> cell solid-mask -> single-level Cyclopean
+    // plateau with valid seams (the same path the renderer's cache drives).
+    {
+        LandBrush b;
+        b.reset(24, 24);
+        for (int y = 10; y <= 13; ++y) {
+            for (int x = 10; x <= 13; ++x) {
+                b.setNode({x, y}, true);
+            }
+        }
+        const int nodesX = b.width() + 1;
+        const int nodesY = b.height() + 1;
+        std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
+        for (int y = 0; y < nodesY; ++y) {
+            for (int x = 0; x < nodesX; ++x) {
+                if (b.nodeIsOn({x, y})) {
+                    nodes[static_cast<std::size_t>(y) * nodesX + x] = 1;
+                }
+            }
+        }
+
+        landscape_mesh::MeshBuildSettings settings;
+        settings.wallStyle = landscape_mesh::WallStyleId::Cyclopean;
+        settings.wallHorizontalSubdivisions = 16;
+        settings.wallVerticalSubdivisions = 16;
+        settings.levelHeight = 3.0f;
+
+        landscape_mesh::SolidMeshBuildRequest request;
+        request.mask = landscape_mesh::solidMaskFromNodes(nodes.data(), nodesX, nodesY);
+        request.baseHeight = 0.0f;
+        request.topHeight = 3.0f;
+        request.level = 1;
+        request.maxLevel = 1;
+        request.includeWalls = true;
+        request.fadeWallDisplacementAtBottom = false;
+
+        const landscape_mesh::CompositionResult result =
+            landscape_mesh::composeSolidMaskMesh(request, settings);
+        if (result.quads.empty() || result.stats.topQuadCount <= 0 || result.stats.cliffWallQuadCount <= 0) {
+            spdlog::error("TEST FAIL TileShape: wall-mesh plateau is empty or incomplete");
+            return false;
+        }
+        if (!result.seams.passed) {
+            spdlog::error("TEST FAIL TileShape: wall-mesh seam validation ({} of {} edges)",
+                result.seams.mismatches,
+                result.seams.checkedEdges);
+            return false;
+        }
+    }
+
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + highground_core generation + cliff field pipeline + landscape_mesh wall-mesh pipeline");
     return true;
 }

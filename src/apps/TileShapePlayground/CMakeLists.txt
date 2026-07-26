@@ -8,8 +8,19 @@ nw_add_console_app(
         imgui::imgui
         topology_core
         landscape_core
+        landscape_mesh
         highground_core
 )
+
+if(WIN32)
+    find_package(FastNoise2 CONFIG REQUIRED)
+    add_custom_command(TARGET ${AppName} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:FastNoise2::FastNoise>
+            $<TARGET_FILE_DIR:${AppName}>/$<TARGET_FILE_NAME:FastNoise2::FastNoise>
+        VERBATIM
+    )
+endif()
 
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")
 if(NOT SOKOL_INCLUDE_DIRS)
@@ -24,3 +35,7 @@ endif()
 target_include_directories(${AppName} PRIVATE ${STB_INCLUDE_DIRS})
 
 nw_configure_sokol_app(${AppName})
+if(MSVC)
+    # dwmapi: DwmFlush in the Win32 screenshot helper.
+    target_link_libraries(${AppName} PRIVATE dwmapi)
+endif()

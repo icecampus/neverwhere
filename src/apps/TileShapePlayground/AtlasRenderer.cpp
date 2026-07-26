@@ -1186,6 +1186,13 @@ void AtlasRenderer::shutdown() {
         }
     }
     m_cliffCaches.clear();
+    for (WallMeshCache& cache : m_wallMeshCaches) {
+        if (cache.vbuf.id != SG_INVALID_ID) {
+            sg_destroy_buffer(cache.vbuf);
+            cache.vbuf = {};
+        }
+    }
+    m_wallMeshCaches.clear();
     if (m_texVbuf.id != SG_INVALID_ID) {
         sg_destroy_buffer(m_texVbuf);
         m_texVbuf = {};
@@ -1947,6 +1954,69 @@ void AtlasRenderer::render(
         }
     }
 
+    // Wall-mesh layers ("Cyclopean 3D"): nodes -> landscape_mesh solid-mask ->
+    // single-level plateau with styled walls. Same debounce/GPU-upload pattern
+    // as the cliff cache, drawn z-buffered with the depth-color pipeline (the
+    // baked depth uses the same zFar/zScale, so it interleaves with the
+    // raised/cliff passes).
+    for (int li = 0; li < layerCount; ++li) {
+        const PaintLayerView& layer = layers[li];
+        if (!layer.brush || !layer.wallMesh || !layer.wallMeshSettings) {
+            continue;
+        }
+        WallMeshCache& cache = wallMeshCacheFor(layer.brush);
+        const bool contentChanged = !cache.contentValid ||
+            cache.brushVersion != layer.brush->version() ||
+            std::memcmp(&cache.settings, layer.wallMeshSettings, sizeof(landscape_mesh::MeshBuildSettings)) != 0 ||
+            cache.height != layer.wallMeshHeight ||
+            cache.heightScale != layer.cliffHeightScale;
+        if (contentChanged) {
+            cache.brushVersion = layer.brush->version();
+            std::memcpy(&cache.settings, layer.wallMeshSettings, sizeof(landscape_mesh::MeshBuildSettings));
+            cache.height = layer.wallMeshHeight;
+            cache.heightScale = layer.cliffHeightScale;
+            cache.contentValid = true;
+            cache.lastEditSec = nowSec;
+            cache.streamDirty = true;
+            cache.stats.pending = true;
+        }
+        if (cache.streamDirty && (nowSec - cache.lastEditSec) > 0.3) {
+            rebuildWallMeshCache(cache, iso, zFar, zScale);
+            cache.streamDirty = false;
+            cache.gpuDirty = true;
+            cache.stats.pending = false;
+        }
+        if (cache.gpuDirty) {
+            const size_t bytes = cache.stream.size() * sizeof(DepthColorVertex);
+            if (bytes > 0) {
+                if (cache.vbufSize < bytes) {
+                    if (cache.vbuf.id != SG_INVALID_ID) {
+                        sg_destroy_buffer(cache.vbuf);
+                    }
+                    sg_buffer_desc bufDesc = {};
+                    bufDesc.size = ((bytes / (size_t{1} << 20)) + 1) * (size_t{1} << 20);
+                    bufDesc.usage.dynamic_update = true;
+                    bufDesc.label = "tileshape-wallmesh-vbuf";
+                    cache.vbuf = sg_make_buffer(&bufDesc);
+                    cache.vbufSize = bufDesc.size;
+                }
+                if (cache.vbuf.id != SG_INVALID_ID) {
+                    sg_update_buffer(cache.vbuf, sg_range{cache.stream.data(), bytes});
+                }
+            }
+            cache.gpuDirty = false;
+        }
+        if (!cache.stream.empty() && cache.vbuf.id != SG_INVALID_ID) {
+            sg_bindings bind{};
+            bind.vertex_buffers[0] = cache.vbuf;
+
+            sg_apply_pipeline(m_depthWallPip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+            sg_draw(0, static_cast<int>(cache.stream.size()), 1);
+        }
+    }
+
     if (!lineVerts.empty()) {
         sg_bindings bind{};
         bind.vertex_buffers[0] = m_colorVbuf;
@@ -2069,6 +2139,119 @@ void AtlasRenderer::rebuildCliffCache(
             v.nx, v.ny, v.nz, v.groove,
             mapX, v.py, mapZ});
     }
+    cache.stats.rebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+}
+
+AtlasRenderer::WallMeshCache& AtlasRenderer::wallMeshCacheFor(const LandBrush* brush) {
+    for (WallMeshCache& cache : m_wallMeshCaches) {
+        if (cache.brush == brush) {
+            return cache;
+        }
+    }
+    m_wallMeshCaches.push_back({});
+    m_wallMeshCaches.back().brush = brush;
+    return m_wallMeshCaches.back();
+}
+
+const WallMeshStats& AtlasRenderer::wallMeshStatsFor(const LandBrush* brush) const {
+    static const WallMeshStats kEmpty{};
+    for (const WallMeshCache& cache : m_wallMeshCaches) {
+        if (cache.brush == brush) {
+            return cache.stats;
+        }
+    }
+    return kEmpty;
+}
+
+void AtlasRenderer::rebuildWallMeshCache(
+    WallMeshCache& cache,
+    const topology_core::DiamondIsometry& iso,
+    float zFar,
+    float zScale) {
+
+    using Clock = std::chrono::steady_clock;
+    const auto t0 = Clock::now();
+
+    cache.stream.clear();
+    cache.stats.quadCount = 0;
+    cache.stats.vertexCount = 0;
+    cache.stats.seamsPassed = true;
+
+    // Dense node grid (the brush stores width()xheight() cells -> +1 nodes per
+    // axis), converted to a cell solid-mask with the painted silhouette.
+    const LandBrush& brush = *cache.brush;
+    const int nodesX = brush.width() + 1;
+    const int nodesY = brush.height() + 1;
+    std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
+    int onCount = 0;
+    for (int y = 0; y < nodesY; ++y) {
+        for (int x = 0; x < nodesX; ++x) {
+            if (brush.nodeIsOn({x, y})) {
+                nodes[static_cast<std::size_t>(y) * nodesX + x] = 1;
+                ++onCount;
+            }
+        }
+    }
+
+    if (onCount > 0) {
+        landscape_mesh::SolidMeshBuildRequest request;
+        request.mask = landscape_mesh::solidMaskFromNodes(nodes.data(), nodesX, nodesY);
+        request.baseHeight = 0.0f;
+        request.topHeight = cache.height;
+        request.level = 1;
+        request.maxLevel = 1;
+        request.includeWalls = true;
+        request.fadeWallDisplacementAtBottom = false;
+
+        // Single-level plateau: the level height equals the plateau top (same
+        // convention as MeshGenerationPlayground's rectangle cliff).
+        landscape_mesh::MeshBuildSettings settings = cache.settings;
+        settings.levelHeight = cache.height;
+        const landscape_mesh::CompositionResult result =
+            landscape_mesh::composeSolidMaskMesh(request, settings);
+
+        cache.stats.quadCount = static_cast<int>(result.quads.size());
+        cache.stats.seamsPassed = result.seams.passed;
+        if (!result.seams.passed) {
+            spdlog::warn("AtlasRenderer: wall mesh seam validation failed ({} of {} edges)",
+                result.seams.mismatches,
+                result.seams.checkedEdges);
+        }
+
+        // Projection matches rebuildCliffCache: wx/wz (in cellSize units) are
+        // the node-space mapX/mapZ, wy lifts along the view. Quads are
+        // triangulated as (a-b-c, a-c-d) with the baked vertex color.
+        const glm::vec2 cellSz = iso.dims.cellSize();
+        const float halfW = cellSz.x * 0.5f;
+        const float halfH = cellSz.y * 0.5f;
+        const float invCellSize = 1.0f / settings.cellSize;
+        cache.stream.reserve(result.quads.size() * 6);
+        const auto pushVertex = [&](const landscape_mesh::Vec3& v, const landscape_mesh::ColorRgba& c) {
+            const float mapX = v.x * invCellSize;
+            const float mapZ = v.z * invCellSize;
+            const float fieldX = (mapX - mapZ) * halfW + halfW;
+            const float fieldY = (mapX + mapZ) * halfH;
+            const float z = (zFar - fieldY) * zScale;
+            cache.stream.push_back(DepthColorVertex{
+                fieldX,
+                fieldY - v.y * cache.heightScale,
+                z,
+                c.r / 255.0f,
+                c.g / 255.0f,
+                c.b / 255.0f,
+                c.a / 255.0f});
+        };
+        for (const landscape_mesh::MeshQuad& quad : result.quads) {
+            pushVertex(quad.a, quad.color);
+            pushVertex(quad.b, quad.color);
+            pushVertex(quad.c, quad.color);
+            pushVertex(quad.a, quad.color);
+            pushVertex(quad.c, quad.color);
+            pushVertex(quad.d, quad.color);
+        }
+        cache.stats.vertexCount = static_cast<int>(cache.stream.size());
+    }
+
     cache.stats.rebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
 

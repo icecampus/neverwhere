@@ -24,6 +24,7 @@
 #include <highground_core/cliff_field.h>
 #include <highground_core/highground.h>
 #include <highground_core/surface_nets.h>
+#include <landscape_mesh/landscape_mesh.h>
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
@@ -97,6 +98,12 @@ struct PaintLayerView {
     bool cliff = false;
     const cliff::FieldParams* cliffParams = nullptr; // used when cliff == true
     float cliffHeightScale = 96.0f;                  // field px per 1.0 world height
+    // Cyclopean 3D: single-level plateau mesh from landscape_mesh built over
+    // the same nodes (cell solid-mask via solidMaskFromNodes), wall style from
+    // the settings. Reuses cliffHeightScale for the world->field lift.
+    bool wallMesh = false;
+    const landscape_mesh::MeshBuildSettings* wallMeshSettings = nullptr; // used when wallMesh == true
+    float wallMeshHeight = 3.0f; // plateau top height in world units
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;
@@ -121,6 +128,15 @@ struct CliffStats {
     int voxelCount = 0;
     int vertexCount = 0;
     int triangleCount = 0;
+};
+
+// Per-layer wall-mesh cache status for the UI (see AtlasRenderer::wallMeshStatsFor).
+struct WallMeshStats {
+    bool pending = false;     // edits happened, waiting out the debounce
+    bool seamsPassed = true;  // landscape_mesh seam validation of the last build
+    double rebuildMs = 0.0;
+    int quadCount = 0;
+    int vertexCount = 0;
 };
 
 class AtlasRenderer {
@@ -173,6 +189,10 @@ public:
     // the layer never rendered). UI reads this for the rebuild/watertight info.
     const CliffStats& cliffStatsFor(const LandBrush* brush) const;
 
+    // Status of the wall-mesh cache attached to the given brush (empty stats
+    // when the layer never rendered).
+    const WallMeshStats& wallMeshStatsFor(const LandBrush* brush) const;
+
 private:
     struct AtlasSlot {
         sg_image image{};
@@ -208,6 +228,33 @@ private:
     CliffCache& cliffCacheFor(const LandBrush* brush);
     void rebuildCliffCache(
         CliffCache& cache,
+        const topology_core::DiamondIsometry& iso,
+        float zFar,
+        float zScale);
+
+    // Cached landscape_mesh derivative of a brush: nodes -> cell solid-mask ->
+    // single-level composeSolidMaskMesh -> projected DepthColorVertex stream,
+    // rebuilt on brush version/settings edits with the same 0.3 s debounce as
+    // the cliff cache. Drawn with m_depthWallPip (DepthColorVertex layout).
+    struct WallMeshCache {
+        const LandBrush* brush = nullptr;
+        std::uint64_t brushVersion = 0;
+        landscape_mesh::MeshBuildSettings settings{};
+        float height = 0.0f;
+        float heightScale = 0.0f;
+        bool contentValid = false;
+        double lastEditSec = 0.0;
+        bool streamDirty = false;
+        bool gpuDirty = false;
+        std::vector<DepthColorVertex> stream;
+        sg_buffer vbuf{};
+        size_t vbufSize = 0;
+        WallMeshStats stats;
+    };
+
+    WallMeshCache& wallMeshCacheFor(const LandBrush* brush);
+    void rebuildWallMeshCache(
+        WallMeshCache& cache,
         const topology_core::DiamondIsometry& iso,
         float zFar,
         float zScale);
@@ -264,6 +311,7 @@ private:
     sg_sampler m_topSampler{};
 
     std::vector<CliffCache> m_cliffCaches;
+    std::vector<WallMeshCache> m_wallMeshCaches;
 
     AtlasSlot m_slots[2]{};
     AtlasSlot m_topSlots[2]{};
