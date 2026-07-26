@@ -58,6 +58,12 @@ def slugify(name: str) -> str:
     return slug or "shader"
 
 
+def sanitize_dirname(name: str) -> str:
+    """Имя папки = тайтл демки; чистим только недопустимые для ФС символы."""
+    name = re.sub(r'[\\/:*?"<>|]', "", name)
+    return re.sub(r"\s+", " ", name).strip() or "shader"
+
+
 def fetch_via_archive(shader_id: str, timeout_s: float = 60.0) -> dict | None:
     """web.archive.org fallback: shadertoy's API responses are often archived
     (the archive is NOT behind Cloudflare, unlike shadertoy.com itself).
@@ -157,8 +163,9 @@ def fetch_api_json(shader_id: str, headed: bool, timeout_s: float = 60.0) -> dic
     return captured
 
 
-def fetch_texture_files(renderpass: list[dict], folder: Path, timeout_s: float = 60.0) -> None:
-    """Download texture inputs (iChannel*) into <folder>/textures/ via web.archive.org."""
+def fetch_texture_files(renderpass: list[dict], folder: Path, timeout_s: float = 60.0) -> list[tuple[int, str]]:
+    """Download texture inputs (iChannel*) into <folder>/textures/ via web.archive.org.
+    Returns list of (channel, filename) actually saved."""
     import urllib.parse
     import urllib.request
 
@@ -168,7 +175,9 @@ def fetch_texture_files(renderpass: list[dict], folder: Path, timeout_s: float =
         for inp in pass_.get("inputs", [])
     )
     if not has_textures:
-        return
+        return []
+
+    saved: list[tuple[int, str]] = []
 
     tex_dir = folder / "textures"
     tex_dir.mkdir(exist_ok=True)
@@ -200,9 +209,11 @@ def fetch_texture_files(renderpass: list[dict], folder: Path, timeout_s: float =
                     f"https://web.archive.org/web/{ts}id_/{full_url}", timeout=timeout_s
                 ) as r:
                     (tex_dir / fname).write_bytes(r.read())
+                saved.append((inp.get("channel", 0), fname))
                 print(f"[save] {folder.name}/textures/{fname} (archive {ts})")
             except Exception as e:
                 print(f"[warn] текстура {fname}: {e}")
+    return saved
 
 
 def render_pass_filename(pass_: dict, used: set[str]) -> str:
@@ -219,17 +230,46 @@ def render_pass_filename(pass_: dict, used: set[str]) -> str:
     return f"{candidate}.glsl"
 
 
+def write_readme(
+    folder: Path,
+    shader_id: str,
+    name: str,
+    author: str,
+    info: dict,
+    source: str,
+    passes: list[dict],
+    textures: list[tuple[int, str]],
+) -> None:
+    tags = info.get("tags") or []
+    lines = [
+        f"# {name}",
+        "",
+        f"- Ссылка: {VIEW_URL.format(id=shader_id)}",
+        f"- Автор: {author}",
+    ]
+    if tags:
+        lines.append(f"- Теги: {', '.join(tags)}")
+    lines.append(f"- Источник: {source}")
+    desc = (info.get("description") or "").strip()
+    if desc:
+        lines += ["", desc]
+    lines += ["", "## Файлы", ""]
+    for p in passes:
+        inputs = ", ".join(
+            f"iChannel{inp.get('channel')}: {inp.get('ctype')}" for inp in p["inputs"]
+        ) or "без входов"
+        lines.append(f"- `{p['file']}` — пасс `{p['type']}` ({inputs}).")
+    for ch, fname in textures:
+        lines.append(f"- `textures/{fname}` — текстура iChannel{ch} (mipmap/repeat).")
+    (folder / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def update_index(shader_id: str, name: str, author: str, note: str, folder: str) -> None:
-    row = f"| {shader_id} | {name} | {author} | [link]({VIEW_URL.format(id=shader_id)}) | {note or '—'} |\n"
+    row = f"| [{name}](<{folder}/README.md>) | {author} | [{shader_id}]({VIEW_URL.format(id=shader_id)}) | {note or '—'} |\n"
     text = INDEX_MD.read_text(encoding="utf-8")
-    if f"| {shader_id} |" in text:
+    if f"]({VIEW_URL.format(id=shader_id)})" in text:
         return  # уже в индексе
-    # вставить вместо placeholder-строки либо дописать в конец таблицы
-    if "| —  | —" in text:
-        text = text.replace("| —  | —        | —     | —      | —          |\n", row, 1)
-    else:
-        text = text.rstrip("\n") + "\n" + row
-    INDEX_MD.write_text(text, encoding="utf-8")
+    INDEX_MD.write_text(text.rstrip("\n") + "\n" + row, encoding="utf-8")
 
 
 def main() -> int:
@@ -238,6 +278,7 @@ def main() -> int:
     ap.add_argument("--note", default="", help="короткая заметка 'зачем взят' для индекса")
     ap.add_argument("--headed", action="store_true", help="показать окно браузера (если headless не проходит Cloudflare)")
     ap.add_argument("--no-archive", action="store_true", help="не ходить в web.archive.org, сразу живой сайт")
+    ap.add_argument("--force", action="store_true", help="перезаписать README.md, даже если он уже есть (затрёт ручные правки)")
     args = ap.parse_args()
 
     shader_id = shader_id_from(args.shader)
@@ -270,39 +311,30 @@ def main() -> int:
     info = shader.get("info", {})
     name = info.get("name") or shader_id
     author = info.get("username") or "?"
-    folder = OUT_ROOT / f"{shader_id}_{slugify(name)}"
+    source = ("web.archive.org snapshot " + snapshot) if snapshot else "shadertoy.com live"
+    folder = OUT_ROOT / sanitize_dirname(name)
     folder.mkdir(parents=True, exist_ok=True)
 
-    meta = {
-        "id": shader_id,
-        "name": name,
-        "author": author,
-        "description": info.get("description", ""),
-        "tags": info.get("tags", []),
-        "likes": info.get("likes"),
-        "published": info.get("date"),
-        "url": VIEW_URL.format(id=shader_id),
-        "source": ("web.archive.org snapshot " + snapshot) if snapshot else "shadertoy.com live",
-        "passes": [],
-    }
-
+    passes = []
     used_names: set[str] = set()
     for pass_ in shader.get("renderpass", []):
         fname = render_pass_filename(pass_, used_names)
         (folder / fname).write_text(pass_.get("code", ""), encoding="utf-8")
-        meta["passes"].append({
+        passes.append({
             "file": fname,
             "type": pass_.get("type"),
             "inputs": pass_.get("inputs", []),
-            "outputs": pass_.get("outputs", []),
         })
         print(f"[save] {folder.name}/{fname} ({len(pass_.get('code', ''))} chars)")
 
-    (folder / "meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    textures = fetch_texture_files(shader.get("renderpass", []), folder)
 
-    fetch_texture_files(shader.get("renderpass", []), folder)
+    # README может содержать ручные заметки (лицензии, особенности) — не затираем без --force
+    readme = folder / "README.md"
+    if readme.exists() and not args.force:
+        print(f"[skip] {folder.name}/README.md уже существует (перезапись — с --force)")
+    else:
+        write_readme(folder, shader_id, name, author, info, source, passes, textures)
 
     update_index(shader_id, name, author, args.note, folder.name)
     print(f"[ok] {name} by {author} -> {folder.relative_to(REPO_ROOT)}")
