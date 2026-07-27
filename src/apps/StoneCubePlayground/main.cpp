@@ -8,6 +8,8 @@
 // platform (same exception as ShadertoyPlayground, see AGENTS.md).
 //
 // CLI: --smoke  --shot <file.png>  --scale <0.1..1.0>  --seed <n>
+//      --mesh (start on the baked-mesh view)  --proc (start on the
+//      procedural-mesh view)  --bake <dir> (export mesh.obj + PNGs, then quit)
 
 #include "pch.h"
 
@@ -54,6 +56,7 @@ struct CliOptions {
     std::string shotPath;
     std::string bakeDir;       // --bake <dir>: mesh + bake + export, then quit
     bool startInMeshMode = false; // --mesh: start on the baked-mesh view
+    bool startInProcMode = false; // --proc: start on the procedural-mesh view
 };
 
 struct AppState {
@@ -93,7 +96,7 @@ struct AppState {
 
 AppState g_state;
 
-void buildMeshAndBake();
+void buildMeshAndBake(bool withBake);
 void rebake();
 bool exportBake(const std::string& dir);
 
@@ -122,6 +125,8 @@ CliOptions parseCli(int argc, char* argv[]) {
             cli.bakeDir = argv[++i];
         } else if (arg == "--mesh") {
             cli.startInMeshMode = true;
+        } else if (arg == "--proc") {
+            cli.startInProcMode = true;
         }
     }
     return cli;
@@ -182,6 +187,9 @@ void init() {
     if (g_state.cli.startInMeshMode) {
         g_state.viewMode = 1;
     }
+    if (g_state.cli.startInProcMode) {
+        g_state.viewMode = 2;
+    }
 }
 
 void drawUi() {
@@ -198,34 +206,46 @@ void drawUi() {
     ImGui::RadioButton("Raymarch", &mode, 0);
     ImGui::SameLine();
     ImGui::RadioButton("Mesh", &mode, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("Procedural", &mode, 2);
     if (mode != g_state.viewMode) {
         g_state.viewMode = mode;
-        if (mode == 1 && (g_state.mesh.vertices.empty() || g_state.meshDirty)) {
-            buildMeshAndBake();
+        if (mode == 1) {
+            if (g_state.mesh.vertices.empty()) {
+                buildMeshAndBake(true);
+            } else if (g_state.baked.size == 0) {
+                rebake(); // coming from procedural mode: mesh is fresh, no bake yet
+            }
+        } else if (mode == 2 && g_state.mesh.vertices.empty()) {
+            buildMeshAndBake(false);
         }
     }
-    if (g_state.viewMode == 1) {
+    if (g_state.viewMode >= 1) {
         ImGui::Text("mesh: %zu verts, %zu tris", g_state.mesh.vertices.size(),
             g_state.mesh.indices.size() / 3);
         ImGui::Text("watertight bad: %d  saddles: %d", g_state.mesh.watertightBadEdges,
             g_state.mesh.remainingSaddles);
         ImGui::Text("mesh %.0f ms, bake %.0f ms", g_state.mesh.meshMs, g_state.baked.bakeMs);
         if (ImGui::Button("Rebuild")) {
-            buildMeshAndBake();
+            buildMeshAndBake(g_state.viewMode == 1);
         }
-        ImGui::SameLine();
-        static const int kSizes[] = {256, 512, 1024};
-        static const char* kSizeNames[] = {"256", "512", "1024"};
-        int sizeIndex = g_state.bakeSize == 1024 ? 2 : (g_state.bakeSize == 512 ? 1 : 0);
-        ImGui::SetNextItemWidth(110.0f);
-        if (ImGui::Combo("bake size", &sizeIndex, kSizeNames, 3)) {
-            g_state.bakeSize = kSizes[sizeIndex];
-            if (!g_state.mesh.vertices.empty()) {
-                rebake();
+        if (g_state.viewMode == 1) {
+            ImGui::SameLine();
+            static const int kSizes[] = {256, 512, 1024};
+            static const char* kSizeNames[] = {"256", "512", "1024"};
+            int sizeIndex = g_state.bakeSize == 1024 ? 2 : (g_state.bakeSize == 512 ? 1 : 0);
+            ImGui::SetNextItemWidth(110.0f);
+            if (ImGui::Combo("bake size", &sizeIndex, kSizeNames, 3)) {
+                g_state.bakeSize = kSizes[sizeIndex];
+                if (!g_state.mesh.vertices.empty()) {
+                    rebake();
+                }
             }
-        }
-        if (ImGui::Button("Export")) {
-            exportBake("bake_out");
+            if (ImGui::Button("Export")) {
+                exportBake("bake_out");
+            }
+        } else {
+            ImGui::TextDisabled("no bake: look params update live");
         }
     }
     ImGui::Separator();
@@ -261,26 +281,38 @@ void drawUi() {
     ImGui::End();
 }
 
-// Builds the stone mesh and (re)bakes the textures at the current bakeSize.
-// Synchronous: freezes the UI for a moment in Debug, acceptable for a bake.
-void buildMeshAndBake() {
+// Builds the stone mesh and, for the baked view, (re)bakes the textures at
+// the current bakeSize. The procedural view needs no bake: its material is
+// per-pixel from uniforms. Synchronous: freezes the UI for a moment in
+// Debug, acceptable for a bake.
+void buildMeshAndBake(bool withBake) {
     const stone_gen::StoneSdf sdf(g_state.params);
     const stone_gen::MeshParams meshParams;
     g_state.mesh = stone_gen::generateMesh(sdf, meshParams);
     g_state.meshView.setMesh(g_state.mesh);
 
-    stone_gen::BakeParams bakeParams;
-    bakeParams.textureSize = g_state.bakeSize;
-    bakeParams.aoTaps = 6;
-    g_state.baked = stone_gen::bakeTextures(sdf, g_state.mesh, bakeParams);
-    g_state.meshView.setTextures(g_state.baked.size, g_state.baked.albedo,
-        g_state.baked.normal);
+    if (withBake) {
+        stone_gen::BakeParams bakeParams;
+        bakeParams.textureSize = g_state.bakeSize;
+        bakeParams.aoTaps = 6;
+        g_state.baked = stone_gen::bakeTextures(sdf, g_state.mesh, bakeParams);
+        g_state.meshView.setTextures(g_state.baked.size, g_state.baked.albedo,
+            g_state.baked.normal);
+    }
     g_state.meshDirty = false;
     g_state.paramsSnapshot = g_state.params;
-    spdlog::info("mesh: {} verts / {} tris, watertight bad={}, saddles={}, mesh {:.0f} ms, bake {:.0f} ms ({}x{})",
-        g_state.mesh.vertices.size(), g_state.mesh.indices.size() / 3,
-        g_state.mesh.watertightBadEdges, g_state.mesh.remainingSaddles,
-        g_state.mesh.meshMs, g_state.baked.bakeMs, g_state.baked.size, g_state.baked.size);
+    if (withBake) {
+        spdlog::info("mesh: {} verts / {} tris, watertight bad={}, saddles={}, mesh {:.0f} ms, bake {:.0f} ms ({}x{})",
+            g_state.mesh.vertices.size(), g_state.mesh.indices.size() / 3,
+            g_state.mesh.watertightBadEdges, g_state.mesh.remainingSaddles,
+            g_state.mesh.meshMs, g_state.baked.bakeMs, g_state.baked.size,
+            g_state.baked.size);
+    } else {
+        spdlog::info("mesh: {} verts / {} tris, watertight bad={}, saddles={}, mesh {:.0f} ms (no bake: procedural view)",
+            g_state.mesh.vertices.size(), g_state.mesh.indices.size() / 3,
+            g_state.mesh.watertightBadEdges, g_state.mesh.remainingSaddles,
+            g_state.mesh.meshMs);
+    }
 }
 
 // Re-bakes the textures on the existing mesh (bake-size change).
@@ -361,7 +393,7 @@ void frame() {
 
     // One-shot actions (--smoke / --bake) run on the first frame.
     if (g_state.frameIndex == 1 && (g_state.cli.smoke || !g_state.cli.bakeDir.empty())) {
-        buildMeshAndBake();
+        buildMeshAndBake(true);
         bool ok = !g_state.mesh.vertices.empty() &&
             g_state.mesh.watertightBadEdges == 0 &&
             g_state.mesh.remainingSaddles == 0 &&
@@ -379,9 +411,14 @@ void frame() {
     }
 
     // Debounce: params changed -> rebuild mesh+bake after 0.3 s of quiet.
-    if (g_state.viewMode == 1) {
-        if (std::memcmp(&g_state.params, &g_state.paramsSnapshot,
-                sizeof(stonecube::Params)) != 0) {
+    // The procedural view shares the mesh but not the bake, and only shape
+    // params touch the mesh — look params (light/moss/toneSeed) reach the
+    // shader via uniforms, so they never trigger a rebuild there.
+    if (g_state.viewMode >= 1) {
+        const size_t cmpLen = g_state.viewMode == 2
+            ? offsetof(stone_gen::StoneCubeParams, look)
+            : sizeof(stonecube::Params);
+        if (std::memcmp(&g_state.params, &g_state.paramsSnapshot, cmpLen) != 0) {
             // Refresh the timer on EVERY change: otherwise the rebuild fires
             // 0.3 s after the first slider tick, mid-drag instead of quiet.
             g_state.meshDirty = true;
@@ -389,7 +426,7 @@ void frame() {
         }
         if (g_state.meshDirty &&
             stm_sec(stm_diff(stm_now(), g_state.paramChangeTime)) > 0.3) {
-            buildMeshAndBake();
+            buildMeshAndBake(g_state.viewMode == 1);
         }
     }
 
@@ -408,6 +445,15 @@ void frame() {
     if (g_state.viewMode == 0) {
         g_state.scene.drawScene(g_state.params, g_state.camera,
             g_state.cli.renderScale, sapp_width(), sapp_height());
+    } else if (g_state.viewMode == 2) {
+        // The procedural shader is per-pixel heavy (AO + soft-shadow SDF
+        // taps): render into the same scaled offscreen target as the
+        // raymarch view, then blit.
+        g_state.scene.beginTargetPass(g_state.cli.renderScale,
+            sapp_width(), sapp_height());
+        g_state.meshView.drawProcedural(g_state.camera, g_state.params,
+            g_state.scene.targetWidth(), g_state.scene.targetHeight());
+        g_state.scene.endTargetPass();
     }
 
     float lightDir[3];
@@ -426,10 +472,10 @@ void frame() {
     pass.action = action;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
-    if (g_state.viewMode == 0) {
-        g_state.scene.drawBlit();
-    } else {
+    if (g_state.viewMode == 1) {
         g_state.meshView.draw(g_state.camera, lightDir, sapp_width(), sapp_height());
+    } else {
+        g_state.scene.drawBlit();
     }
     if (g_state.imguiOk) {
         simgui_render();

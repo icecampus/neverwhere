@@ -37,6 +37,10 @@ public:
     // Renders the cube into the scaled offscreen target (own sg_pass).
     void drawScene(const Params& params, const Camera& cam, float renderScale,
         int fbWidth, int fbHeight);
+    // Manual scaled-target pass for custom heavy draws (procedural mesh):
+    // begin/end around the draw, then blit in the swapchain pass.
+    void beginTargetPass(float renderScale, int fbWidth, int fbHeight);
+    void endTargetPass();
     // Blits the target in the CURRENT pass (swapchain pass expected).
     void drawBlit() const;
 

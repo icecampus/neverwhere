@@ -186,6 +186,29 @@ void StoneCubeScene::drawScene(const Params& params, const Camera& cam,
     sg_end_pass();
 }
 
+void StoneCubeScene::beginTargetPass(float renderScale, int fbWidth, int fbHeight) {
+    const int w = std::max(64, static_cast<int>(fbWidth * renderScale));
+    const int h = std::max(64, static_cast<int>(fbHeight * renderScale));
+    ensureTarget(w, h);
+
+    sg_pass_action action = {};
+    action.colors[0].load_action = SG_LOADACTION_CLEAR;
+    // Approximate the raymarch view's bg gradient mid-tone after gamma, so
+    // toggling Raymarch <-> Procedural keeps the backdrop familiar.
+    action.colors[0].clear_value = {0.70f, 0.74f, 0.80f, 1.0f};
+    action.depth.load_action = SG_LOADACTION_CLEAR;
+    action.depth.clear_value = 1.0f;
+    sg_pass pass = {};
+    pass.action = action;
+    pass.attachments.colors[0] = m_colorAttach;
+    pass.attachments.depth_stencil = m_depthAttach;
+    sg_begin_pass(&pass);
+}
+
+void StoneCubeScene::endTargetPass() {
+    sg_end_pass();
+}
+
 void StoneCubeScene::drawBlit() const {
     if (m_colorTex.id == SG_INVALID_ID || m_blitPip.id == SG_INVALID_ID) {
         return;
