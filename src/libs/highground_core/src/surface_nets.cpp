@@ -104,11 +104,23 @@ void regularizeSigns(const CliffField& field, std::vector<float>& samples,
     RegularizeStats& out = stats != nullptr ? *stats : localStats;
     out = RegularizeStats{};
 
+    auto pointIndex = [&](int x, int y, int z) -> size_t {
+        return (static_cast<size_t>(y) * pz + z) * px + x;
+    };
+    // One frozen flag per grid point, cleared at every pass start. A point
+    // flipped earlier in the current pass may not flip again until the next
+    // pass: two adjacent saddle faces can demand contradictory signs for their
+    // shared corner, and re-flipping it just oscillates the point forever
+    // (observed in the wild: two faces flip-flopping one corner every pass,
+    // remaining=2 at any pass budget).
+    std::vector<std::uint8_t> frozen(samples.size(), 0);
+
     // Flip the weakest corner of the sacrificed diagonal on every checkerboard
-    // face. Between the two candidate corners prefer the flip that creates no
+    // face. Between the candidate corners prefer the flip that creates no
     // new saddles on the 12 faces touching the corner (local optimality keeps
     // the iteration from cascading).
     for (int pass = 0; pass < 16; ++pass) {
+        std::fill(frozen.begin(), frozen.end(), static_cast<std::uint8_t>(0));
         int passSaddles = 0;
         int passFlips = 0;
         for (int d = 0; d < 3; ++d) {
@@ -147,11 +159,38 @@ void regularizeSigns(const CliffField& field, std::vector<float>& samples,
                         faceCorners(base, d, c);
                         const int k0 = sacrificeA ? 0 : 1;
                         const int k1 = sacrificeA ? 2 : 3;
-                        // Try both candidates, keep the locally optimal flip.
+                        // Candidate corners: the sacrificed diagonal, minus the
+                        // points frozen earlier in this pass. If both are frozen,
+                        // fall back to the kept diagonal — any single corner
+                        // flip breaks the checkerboard (the surface then connects
+                        // against the face center's vote, a sub-cell detail).
+                        // A face with all four corners frozen waits for the next
+                        // pass, which restarts with a clean frozen set.
+                        int candidates[4];
+                        int candidateCount = 0;
+                        for (const int k : {k0, k1}) {
+                            if (!frozen[pointIndex(c[k][0], c[k][1], c[k][2])]) {
+                                candidates[candidateCount++] = k;
+                            }
+                        }
+                        if (candidateCount == 0) {
+                            const int j0 = sacrificeA ? 1 : 0;
+                            const int j1 = sacrificeA ? 3 : 2;
+                            for (const int k : {j0, j1}) {
+                                if (!frozen[pointIndex(c[k][0], c[k][1], c[k][2])]) {
+                                    candidates[candidateCount++] = k;
+                                }
+                            }
+                        }
+                        if (candidateCount == 0) {
+                            continue;
+                        }
+                        // Try the candidates, keep the locally optimal flip.
                         int bestVictim = -1;
                         int bestCost = 100;
                         float bestAbs = 1e9f;
-                        for (const int candidate : {k0, k1}) {
+                        for (int ci = 0; ci < candidateCount; ++ci) {
+                            const int candidate = candidates[ci];
                             float& corner = valueAt(c[candidate][0], c[candidate][1], c[candidate][2]);
                             const float saved = corner;
                             corner = neg[candidate] ? std::fabs(saved) : -std::fabs(saved);
@@ -167,6 +206,7 @@ void regularizeSigns(const CliffField& field, std::vector<float>& samples,
                         float& corner = valueAt(c[bestVictim][0], c[bestVictim][1], c[bestVictim][2]);
                         // Flip the sign, keep the magnitude (surface moves < 1 cell).
                         corner = neg[bestVictim] ? std::fabs(corner) : -std::fabs(corner);
+                        frozen[pointIndex(c[bestVictim][0], c[bestVictim][1], c[bestVictim][2])] = 1;
                         ++passFlips;
                     }
                 }

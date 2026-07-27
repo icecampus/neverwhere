@@ -112,6 +112,38 @@ TEST(CliffField, RectangularRegion) {
         << " of " << report.undirectedEdges;
 }
 
+TEST(CliffField, CoarseBlockShape) {
+    // TileShapePlayground smoke scenario: a solid 4x4 block of on-nodes in a
+    // 6x6 grid (1-cell zero margin), sampled coarse (cellSize 0.09) for speed.
+    // Regression: two adjacent saddle faces used to flip-flop their shared
+    // corner on every pass, leaving regStats.remaining = 2 at any pass budget.
+    const std::uint8_t nodes[6][6] = {
+        {0, 0, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 0},
+        {0, 1, 1, 1, 1, 0},
+        {0, 1, 1, 1, 1, 0},
+        {0, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 0, 0},
+    };
+    cliff::FieldParams params;
+    params.cellSize = 0.09f;
+    const PipelineResult result = runPipeline(&nodes[0][0], 6, 6, params);
+
+    EXPECT_GT(result.border, 0.0f);
+    EXPECT_EQ(result.regStats.remaining, 0);
+    ASSERT_FALSE(result.mesh.vertices.empty());
+
+    const cliff::WatertightReport report = cliff::checkWatertight(result.mesh);
+    EXPECT_TRUE(report.ok()) << "bad edges: " << report.badEdges
+        << " of " << report.undirectedEdges;
+
+    float gMax = -1e9f;
+    for (const cliff::MeshVertex& v : result.mesh.vertices) {
+        gMax = std::max(gMax, v.groove);
+    }
+    EXPECT_GT(gMax, 0.02f) << "no groove carve detected";
+}
+
 TEST(CliffField, EmptyNodeGrid) {
     // All nodes off -> no solid above the ground chunk, but the pipeline
     // must stay sane (the ground slab alone is still a closed solid).

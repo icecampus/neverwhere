@@ -38,7 +38,11 @@ struct RegularizeStats {
 // nets are manifold iff no grid face has an alternating +−+− sign pattern.
 // Each saddle is collapsed by flipping the sign of the weakest corner of the
 // diagonal that disagrees with the field value at the face center; flips move
-// the surface by less than a cell and iterate to a fixpoint.
+// the surface by less than a cell and iterate to a fixpoint. A grid point
+// flipped within the current pass is frozen until the next pass — adjacent
+// saddle faces can demand contradictory signs for their shared corner, and
+// re-flipping it would oscillate forever. Convergence on arbitrary fields
+// stays heuristic (16-pass cap); `remaining` reports the last scan's count.
 void regularizeSigns(const CliffField& field, std::vector<float>& samples,
     RegularizeStats* stats = nullptr);
 
