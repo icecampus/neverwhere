@@ -19,17 +19,25 @@ float sdRoundBox(const glm::vec3& p, const glm::vec3& b, float r) {
         std::min(std::max(q.x, std::max(q.y, q.z)), 0.0f) - r;
 }
 
+// pcg3d integer hash (same mixing as the GLSL twin): no sin-hash
+// decorrelation, no directional stripes on higher octaves/large coords.
+glm::uvec3 pcg3d(glm::uvec3 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v;
+}
+
 } // namespace
 
 glm::vec3 StoneSdf::hash3f(const glm::vec3& p) const {
-    const glm::vec3 q(
-        glm::dot(p, glm::vec3(127.1f, 311.7f, 74.7f)),
-        glm::dot(p, glm::vec3(269.5f, 183.3f, 246.1f)),
-        glm::dot(p, glm::vec3(113.5f, 271.9f, 124.6f)));
-    return glm::vec3(
-        fractf(std::sin(q.x) * 43758.5453123f),
-        fractf(std::sin(q.y) * 43758.5453123f),
-        fractf(std::sin(q.z) * 43758.5453123f));
+    const glm::uvec3 h = pcg3d(glm::uvec3(glm::ivec3(glm::floor(p))));
+    return glm::vec3(h) * (1.0f / 4294967296.0f);
 }
 
 glm::vec3 StoneSdf::voro(const glm::vec3& x) const {

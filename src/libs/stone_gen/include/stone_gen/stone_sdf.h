@@ -13,7 +13,7 @@ namespace stone_gen {
 
 struct StoneCubeParams {
     float boxSize[4] = {1.0f, 1.0f, 1.0f, 0.08f}; // half extents xyz, w = bevel
-    float shape1[4] = {1.6f, 1.0f, 0.22f, 3.5f};  // voronoiScale, cellJitter, grooveDepth, grooveK
+    float shape1[4] = {1.6f, 1.0f, 0.22f, 2.5f};  // voronoiScale, cellJitter, grooveDepth, grooveK
     float shape2[4] = {0.02f, 4.0f, 0.35f, 0.0f}; // fbmAmp, fbmFreq, bumpStrength, seed
     float look[4] = {0.7f, 0.9f, 0.35f, 0.0f};    // lightYaw, lightPitch, moss, toneSeed
 };

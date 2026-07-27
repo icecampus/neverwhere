@@ -177,6 +177,7 @@ MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-edi
 
 - Playground: режимы Raymarch | Mesh (debounce-ребилд 0.3 с по правке параметров), bake 256/512/1024, Export в `bake_out/`, CLI `--smoke` / `--shot` / `--scale` / `--seed` / `--mesh` / `--bake <dir>`.
 - Грабли (по опыту): naive surface nets террасит на крутых voronoi-бороздах — лечится 3-tap блюром сэмплов (`MeshParams::blurPasses`); bump-градиент fbm десятки единиц — без кепа `g/(1+|g|)` запечённая normal-map выходит радужным шумом; на бейке stencil градиента ~1–2 текселя (low-pass); GLSL 330 `const float x = <uniform-выражение>` не компилируется.
+- Шейдерные: полосы «шторки» на реймарче — это квантование глубины попадания (raymarch banding), лечится секант-уточнением хита + широким stencil нормали (0.004), а НЕ более мелким eps; `fract(sin(x)*43758)` на больших аргументах даёт направленные полосы — в генераторах использовать целочисленный pcg3d-хэш (GLSL и C++ дублируют друг друга бит-в-бит).
 - stb-имплементации (STB_IMAGE_..._IMPLEMENTATION) — в одном TU на бинарь: для `stone_gen` это `stone_bake.cpp`, приложения либу линкуют и не повторяют.
 
 ## Где что искать

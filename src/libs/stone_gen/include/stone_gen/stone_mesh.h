@@ -30,7 +30,7 @@ struct StoneMesh {
 struct MeshParams {
     float cellSize = 0.04f; // field voxel size (world units)
     float padding = 0.3f;   // margin outside the cube bbox
-    int blurPasses = 1;     // 3-tap box blur passes over the sampled field:
+    int blurPasses = 2;     // 3-tap box blur passes over the sampled field:
                             // smooths naive-surface-nets terracing on the
                             // steep voronoi grooves (0 keeps the raw field)
 };

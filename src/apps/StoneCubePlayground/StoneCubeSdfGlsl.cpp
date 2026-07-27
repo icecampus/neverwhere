@@ -36,11 +36,23 @@ out vec4 fragColor;
 // Hashes / voronoi / fbm (iq's "Voronoi - rocks" principles)
 // ---------------------------------------------------------------------------
 
+// pcg3d integer hash (iq's recommendation): no sin-hash decorrelation, no
+// directional stripes on higher octaves/large coords. Inputs are always
+// integer lattice points (voronoi cells, noise corners).
+uvec3 pcg3d(uvec3 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v;
+}
+
 vec3 hash3f(vec3 p) {
-    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
-             dot(p, vec3(269.5, 183.3, 246.1)),
-             dot(p, vec3(113.5, 271.9, 124.6)));
-    return fract(sin(p) * 43758.5453123);
+    return vec3(pcg3d(uvec3(ivec3(floor(p))))) * (1.0 / 4294967296.0);
 }
 
 // Returns (F1, F2, cellId).
@@ -116,20 +128,32 @@ vec3 map(vec3 p) {
 float mapDist(vec3 p) { return map(p).x; }
 
 vec3 calcNormal(vec3 p) {
-    const vec2 e = vec2(0.0015, -0.0015);
+    // Wide stencil: low-passes residual hit-depth banding, keeps the stones.
+    const vec2 e = vec2(0.004, -0.004);
     return normalize(e.xyy * mapDist(p + e.xyy) + e.yyx * mapDist(p + e.yyx) +
                      e.yxy * mapDist(p + e.yxy) + e.xxx * mapDist(p + e.xxx));
 }
 
 float raymarch(vec3 ro, vec3 rd, out float cellF, out float cellId) {
     float t = 0.01;
+    float prevT = t;
+    float prevD = 1.0;
     for (int i = 0; i < 160; ++i) {
         vec3 m = map(ro + rd * t);
         if (m.x < 0.0008 * t + 0.0004) {
+            // Secant refinement between the last two samples: the plain
+            // step leaves hit-depth quantization that shows as parallel
+            // hatch stripes in the normal/shading (raymarch banding).
+            float denom = prevD - m.x;
+            if (abs(denom) > 1e-6) {
+                t = prevT + (t - prevT) * (prevD / denom);
+            }
             cellF = m.y;
             cellId = m.z;
             return t;
         }
+        prevT = t;
+        prevD = m.x;
         // Relaxed step: the voronoi bulge + fbm displacement break Lipschitz.
         t += 0.7 * m.x;
         if (t > 30.0) break;
