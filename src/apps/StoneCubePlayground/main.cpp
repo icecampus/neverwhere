@@ -215,9 +215,10 @@ void drawUi() {
         }
         ImGui::SameLine();
         static const int kSizes[] = {256, 512, 1024};
+        static const char* kSizeNames[] = {"256", "512", "1024"};
         int sizeIndex = g_state.bakeSize == 1024 ? 2 : (g_state.bakeSize == 512 ? 1 : 0);
         ImGui::SetNextItemWidth(110.0f);
-        if (ImGui::Combo("bake size", &sizeIndex, "256\0512\01024\0")) {
+        if (ImGui::Combo("bake size", &sizeIndex, kSizeNames, 3)) {
             g_state.bakeSize = kSizes[sizeIndex];
             if (!g_state.mesh.vertices.empty()) {
                 rebake();
@@ -348,6 +349,13 @@ void frame() {
     }
 
     if (!g_state.gfxOk) {
+        // No graphics device (headless GL failure): one-shot modes must exit
+        // with failure instead of spinning forever.
+        if (g_state.cli.smoke || !g_state.cli.bakeDir.empty()) {
+            spdlog::error("TEST FAIL: sg_setup failed, no graphics device");
+            ++g_state.logErrors;
+            sapp_quit();
+        }
         return;
     }
 
@@ -372,9 +380,10 @@ void frame() {
 
     // Debounce: params changed -> rebuild mesh+bake after 0.3 s of quiet.
     if (g_state.viewMode == 1) {
-        if (!g_state.meshDirty &&
-            std::memcmp(&g_state.params, &g_state.paramsSnapshot,
+        if (std::memcmp(&g_state.params, &g_state.paramsSnapshot,
                 sizeof(stonecube::Params)) != 0) {
+            // Refresh the timer on EVERY change: otherwise the rebuild fires
+            // 0.3 s after the first slider tick, mid-drag instead of quiet.
             g_state.meshDirty = true;
             g_state.paramChangeTime = stm_now();
         }
@@ -535,5 +544,10 @@ int main(int argc, char* argv[]) {
     desc.logger.func = logCapture;
 
     sapp_run(&desc);
-    return g_state.cli.smoke && g_state.logErrors > 0 ? 1 : 0;
+    // One-shot modes report failure via the exit code: sokol/log errors,
+    // smoke-check failures (watertight/saddles) and bake-export failures.
+    const bool oneShot = g_state.cli.smoke || !g_state.cli.bakeDir.empty();
+    const bool failed = g_state.logErrors > 0 ||
+        (g_state.cli.smoke && !g_state.smokeCheckOk);
+    return oneShot && failed ? 1 : 0;
 }
