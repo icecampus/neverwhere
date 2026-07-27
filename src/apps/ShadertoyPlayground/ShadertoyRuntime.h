@@ -59,20 +59,27 @@ public:
     const std::string& lastError() const { return m_error; }
 
     bool cubeMode = false;
+    // Render-resolution scale relative to the framebuffer: raymarch demos are
+    // meant for a ~1024x576 canvas, at a 2x-DPI framebuffer (2560x1440) they
+    // crawl. The Image pass renders into a scaled target, then gets blitted
+    // (or cube-mapped) to the swapchain.
+    float renderScale = 0.5f;
 
     // Frame sequence:
-    //   renderBuffers(fp)                       — buffer passes (own sg_pass)
-    //   if cubeMode: renderImageToTarget(fp)    — Image -> texture (own pass)
+    //   renderBuffers(fp)                        — buffer passes (own sg_pass)
+    //   renderImageToTarget(fp)                  — Image -> scaled target
     //   <swapchain pass>
-    //     if !cubeMode: drawImageFullscreen(fp) — Image into the current pass
+    //     if !cubeMode: drawImageBlit()          — target -> swapchain
     //     else:         CubePreview::draw(imageTextureView(), ...)
-    //   endFrame()                              — ping-pong swap
+    //   endFrame()                               — ping-pong swap
     void renderBuffers(const FrameParams& fp);
     void renderImageToTarget(const FrameParams& fp);
-    void drawImageFullscreen(const FrameParams& fp);
+    void drawImageBlit();
     void endFrame();
 
     sg_view imageTextureView() const { return m_imageTexView; }
+    int scaledWidth(float fbWidth) const;
+    int scaledHeight(float fbHeight) const;
 
 private:
     struct BufferTarget {
@@ -129,6 +136,13 @@ private:
     sg_view m_depthAttachView{};
     int m_targetW = 0;
     int m_targetH = 0;
+
+    // Scaled frame params: iResolution/iMouse live in render-target pixels
+    // (shadertoy canvas semantics), everything else passes through.
+    FrameParams scaledParams(const FrameParams& fp) const;
+
+    sg_shader m_blitShader{};
+    sg_pipeline m_blitPip{};
 
     sg_image m_placeholderImg{};
     sg_view m_placeholderView{};

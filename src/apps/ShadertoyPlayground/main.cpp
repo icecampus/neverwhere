@@ -53,6 +53,7 @@ struct CliOptions {
     bool list = false;
     bool smoke = false;
     bool cube = false;
+    float renderScale = 0.5f;
     std::string shotPath;
 };
 
@@ -75,6 +76,8 @@ struct AppState {
 
     uint64_t lastTime = 0;
     float dt = 1.0f / 60.0f;
+    float dtAccum = 0.0f;
+    int dtSamples = 0;
     uint64_t demoStartTime = 0;
     int demoFrame = 0;
     MouseState mouse;
@@ -122,6 +125,8 @@ CliOptions parseCli(int argc, char* argv[]) {
             cli.list = true;
         } else if (arg == "--cube") {
             cli.cube = true;
+        } else if (arg == "--scale" && i + 1 < argc) {
+            cli.renderScale = std::clamp(std::stof(argv[++i]), 0.1f, 1.0f);
         } else if (arg == "--dir" && i + 1 < argc) {
             cli.dir = argv[++i];
         } else if (arg == "--demo" && i + 1 < argc) {
@@ -239,6 +244,7 @@ void init() {
 
     g_state.runtime.init();
     g_state.runtime.cubeMode = g_state.cli.cube;
+    g_state.runtime.renderScale = g_state.cli.renderScale;
     g_state.cube.init();
 
     const std::filesystem::path root = shadertoy::resolveShadertoyRoot(g_state.cli.dir);
@@ -320,6 +326,10 @@ void drawUi() {
     ImGui::RadioButton("Cube", &mode, 1);
     g_state.runtime.cubeMode = mode == 1;
 
+    ImGui::SliderFloat("Render scale", &g_state.runtime.renderScale, 0.25f, 1.0f, "%.2f");
+    ImGui::Text("render: %dx%d", g_state.runtime.scaledWidth((float)sapp_width()),
+        g_state.runtime.scaledHeight((float)sapp_height()));
+
     if (ImGui::Button("Reload (R)")) {
         if (g_state.runtime.reloadDemo()) {
             g_state.demoStartTime = stm_now();
@@ -391,6 +401,19 @@ void frame() {
     g_state.dt = static_cast<float>(stm_sec(stm_diff(now, g_state.lastTime)));
     g_state.lastTime = now;
 
+    // Average dt over 60-frame windows: single samples are useless for perf
+    // judgements (the demos' camera moves, cost varies by scene region).
+    g_state.dtAccum += g_state.dt;
+    if (++g_state.dtSamples >= 60) {
+        spdlog::info("avg dt: {:.2f} ms ({}x{}, scale {:.2f})",
+            1000.0f * g_state.dtAccum / g_state.dtSamples,
+            g_state.runtime.scaledWidth((float)sapp_width()),
+            g_state.runtime.scaledHeight((float)sapp_height()),
+            g_state.runtime.renderScale);
+        g_state.dtAccum = 0.0f;
+        g_state.dtSamples = 0;
+    }
+
     if (!g_state.gfxOk) {
         return;
     }
@@ -434,9 +457,7 @@ void frame() {
     }
 
     g_state.runtime.renderBuffers(fp);
-    if (g_state.runtime.cubeMode) {
-        g_state.runtime.renderImageToTarget(fp);
-    }
+    g_state.runtime.renderImageToTarget(fp);
 
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -450,7 +471,7 @@ void frame() {
         g_state.cube.draw(g_state.runtime.imageTextureView(),
             sapp_width(), sapp_height(), fp.timeSec);
     } else {
-        g_state.runtime.drawImageFullscreen(fp);
+        g_state.runtime.drawImageBlit();
     }
 
     if (g_state.imguiOk) {

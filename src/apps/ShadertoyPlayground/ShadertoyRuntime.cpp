@@ -135,10 +135,40 @@ void ShadertoyRuntime::init() {
 
     m_depthFormat = sglue_swapchain().depth_format;
     m_colorFormat = sglue_swapchain().color_format;
+
+    // Fullscreen blit (scaled image target -> swapchain).
+    sg_shader_desc shd = {};
+    shd.vertex_func.source = blitVertexSource();
+    shd.fragment_func.source = blitFragmentSource();
+    shd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd.views[0].texture.image_type = SG_IMAGETYPE_2D;
+    shd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd.texture_sampler_pairs[0].view_slot = 0;
+    shd.texture_sampler_pairs[0].sampler_slot = 0;
+    shd.texture_sampler_pairs[0].glsl_name = "demo_tex";
+    shd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd.label = "shadertoy-blit-shader";
+    m_blitShader = sg_make_shader(&shd);
+
+    sg_pipeline_desc pip = {};
+    pip.shader = m_blitShader;
+    pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+    pip.colors[0].pixel_format = m_colorFormat;
+    pip.depth.pixel_format = m_depthFormat;
+    pip.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    pip.depth.write_enabled = false;
+    pip.label = "shadertoy-blit-pipeline";
+    m_blitPip = sg_make_pipeline(&pip);
 }
 
 void ShadertoyRuntime::shutdown() {
     unloadDemo();
+    if (m_blitPip.id != SG_INVALID_ID) sg_destroy_pipeline(m_blitPip);
+    if (m_blitShader.id != SG_INVALID_ID) sg_destroy_shader(m_blitShader);
+    m_blitPip = {};
+    m_blitShader = {};
     if (m_placeholderView.id != SG_INVALID_ID) sg_destroy_view(m_placeholderView);
     if (m_placeholderImg.id != SG_INVALID_ID) sg_destroy_image(m_placeholderImg);
     if (m_samplerTex.id != SG_INVALID_ID) sg_destroy_sampler(m_samplerTex);
@@ -519,11 +549,30 @@ void ShadertoyRuntime::drawPass(const CompiledPass& pass, const FrameParams& fp,
     sg_draw(0, 3, 1);
 }
 
+int ShadertoyRuntime::scaledWidth(float fbWidth) const {
+    return std::max(64, static_cast<int>(fbWidth * renderScale));
+}
+
+int ShadertoyRuntime::scaledHeight(float fbHeight) const {
+    return std::max(64, static_cast<int>(fbHeight * renderScale));
+}
+
+FrameParams ShadertoyRuntime::scaledParams(const FrameParams& fp) const {
+    FrameParams out = fp;
+    out.width = static_cast<float>(scaledWidth(fp.width));
+    out.height = static_cast<float>(scaledHeight(fp.height));
+    for (int i = 0; i < 4; ++i) {
+        out.mouse[i] = fp.mouse[i] * renderScale;
+    }
+    return out;
+}
+
 void ShadertoyRuntime::renderBuffers(const FrameParams& fp) {
     if (!m_loaded) {
         return;
     }
-    ensureTargets(static_cast<int>(fp.width), static_cast<int>(fp.height));
+    const FrameParams sfp = scaledParams(fp);
+    ensureTargets(static_cast<int>(sfp.width), static_cast<int>(sfp.height));
     for (const CompiledPass& pass : m_bufferPasses) {
         BufferTarget* buf = bufferFor(pass.kind);
         if (buf == nullptr) {
@@ -536,7 +585,7 @@ void ShadertoyRuntime::renderBuffers(const FrameParams& fp) {
         passDesc.attachments.colors[0] = buf->attachViews[buf->writeSlot];
         passDesc.attachments.depth_stencil = m_depthAttachView;
         sg_begin_pass(&passDesc);
-        drawPass(pass, fp, false);
+        drawPass(pass, sfp, false);
         sg_end_pass();
     }
 }
@@ -545,7 +594,8 @@ void ShadertoyRuntime::renderImageToTarget(const FrameParams& fp) {
     if (!m_loaded || !m_hasImagePass) {
         return;
     }
-    ensureTargets(static_cast<int>(fp.width), static_cast<int>(fp.height));
+    const FrameParams sfp = scaledParams(fp);
+    ensureTargets(static_cast<int>(sfp.width), static_cast<int>(sfp.height));
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_DONTCARE;
     sg_pass pass = {};
@@ -553,15 +603,20 @@ void ShadertoyRuntime::renderImageToTarget(const FrameParams& fp) {
     pass.attachments.colors[0] = m_imageAttachView;
     pass.attachments.depth_stencil = m_depthAttachView;
     sg_begin_pass(&pass);
-    drawPass(m_imagePass, fp, true);
+    drawPass(m_imagePass, sfp, true);
     sg_end_pass();
 }
 
-void ShadertoyRuntime::drawImageFullscreen(const FrameParams& fp) {
-    if (!m_loaded || !m_hasImagePass) {
+void ShadertoyRuntime::drawImageBlit() {
+    if (!m_loaded || m_imageTexView.id == SG_INVALID_ID || m_blitPip.id == SG_INVALID_ID) {
         return;
     }
-    drawPass(m_imagePass, fp, true);
+    sg_apply_pipeline(m_blitPip);
+    sg_bindings bind = {};
+    bind.views[0] = m_imageTexView;
+    bind.samplers[0] = m_samplerBuf;
+    sg_apply_bindings(&bind);
+    sg_draw(0, 3, 1);
 }
 
 void ShadertoyRuntime::endFrame() {

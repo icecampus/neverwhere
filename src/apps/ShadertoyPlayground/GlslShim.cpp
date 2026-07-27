@@ -89,4 +89,33 @@ void main() {
 )GLSL";
 }
 
+const char* blitVertexSource() {
+    return R"GLSL(
+#version 330
+
+out vec2 v_uv;
+
+void main() {
+    vec2 pos = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+    v_uv = pos * 0.5 + 0.5;
+    gl_Position = vec4(pos, 0.0, 1.0);
+}
+)GLSL";
+}
+
+const char* blitFragmentSource() {
+    return R"GLSL(
+#version 330
+
+uniform sampler2D demo_tex;
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+void main() {
+    fragColor = vec4(texture(demo_tex, v_uv).rgb, 1.0);
+}
+)GLSL";
+}
+
 } // namespace shadertoy

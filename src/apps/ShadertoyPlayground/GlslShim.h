@@ -20,4 +20,9 @@ const char* fullscreenVertexSource();
 const char* cubeVertexSource();
 const char* cubeFragmentSource();
 
+// Fullscreen blit of the (possibly scaled) Image-pass texture to the
+// swapchain: the VS emits a normalized uv (no uniforms needed).
+const char* blitVertexSource();
+const char* blitFragmentSource();
+
 } // namespace shadertoy
