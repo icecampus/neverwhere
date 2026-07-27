@@ -186,4 +186,5 @@ MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-edi
 - `docs/ROADMAP_VISION.md` — продуктовое видение и статусы фич.
 - `docs/TECHNICAL_STACK.md` — стек и решения (что есть / прототип / концепт).
 - `docs/reference/` — бумаги и порты по процедурному рельефу.
+- `docs/SDF_TO_MESH_PLAYBOOK.md` — рецепт переноса shadertoy SDF-демки в меш-генератор (C++-двойник, surface nets, процедурный материал, грабли).
 - `docs/debugging.md` — отладка через cdb-MCP: flow, gotchas, first-chance exceptions, чек-лист.
