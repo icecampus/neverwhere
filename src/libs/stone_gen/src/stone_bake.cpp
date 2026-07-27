@@ -85,6 +85,20 @@ BakedTextures bakeTextures(const StoneSdf& sdf, const StoneMesh& mesh,
     out.normal.assign(static_cast<size_t>(size) * size * 4, 0);
     std::vector<std::uint8_t> covered(static_cast<size_t>(size) * size, 0);
 
+    // World units per texel: atlas tiles are size/3 x size/2 texels and each
+    // covers its face's extents (same boxHalf as the UV mapping in
+    // generateMesh). The bump gradient stencil spans ~1 texel so above-
+    // Nyquist fbm octaves average out (per-texel stencil = rainbow noise).
+    const float uvBulge = sdf.params().shape1[2] + sdf.params().boxSize[3] +
+        sdf.params().shape2[0];
+    const glm::vec3 boxHalf(sdf.params().boxSize[0] + uvBulge,
+        sdf.params().boxSize[1] + uvBulge, sdf.params().boxSize[2] + uvBulge);
+    const float tileW = static_cast<float>(size) / 3.0f;
+    const float tileH = static_cast<float>(size) / 2.0f;
+    const float texelWorld = std::max(
+        2.0f * std::max(boxHalf.x, boxHalf.z) / tileW,
+        2.0f * std::max(boxHalf.y, boxHalf.z) / tileH);
+
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
             const size_t index = static_cast<size_t>(y) * size + x;
@@ -99,11 +113,6 @@ BakedTextures bakeTextures(const StoneSdf& sdf, const StoneMesh& mesh,
             sdf.map(tex.pos, dist, cellF, cellId);
             const glm::vec3 alb = sdf.albedo(tex.pos, tex.normal, cellF, cellId);
             const float ao = sdf.ambientOcclusion(tex.pos, tex.normal, params.aoTaps);
-            // Bump gradient over ~1 texel: above-Nyquist fbm octaves average
-            // out (per-texel stencil explodes into rainbow noise).
-            const float texelWorld = 2.0f * (sdf.params().boxSize[0] +
-                sdf.params().shape1[2] + sdf.params().boxSize[3] +
-                sdf.params().shape2[0]) / static_cast<float>(size);
             const glm::vec3 nb = sdf.bumpNormal(tex.pos, sdf.normal(tex.pos),
                 2.0f * texelWorld);
 

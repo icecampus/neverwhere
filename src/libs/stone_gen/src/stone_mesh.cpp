@@ -20,8 +20,18 @@ int dominantAxis(const glm::vec3& n) {
     return a.y >= a.z ? 1 : 2;
 }
 
+// Six face tiles in a 3x2 atlas grid. Each cube face gets its OWN tile:
+// projecting every face into the same [0,1] region (the naive variant)
+// layers all six faces onto the same texels, and the bake ends up a
+// superposition that matches no face's geometry.
+const float kAtlasPad = 0.03f; // per-tile padding, fraction of a tile
+
+int faceIndex(float sign, int axis) {
+    return axis * 2 + (sign > 0.0f ? 1 : 0);
+}
+
 // Planar projection onto the given axis plane (same convention as
-// boxProjectUv below), normalized to [0,1] over the reference box.
+// boxProjectUv below), normalized to the face's atlas tile.
 glm::vec2 projectOnAxis(const glm::vec3& p, float sign, int axis, const glm::vec3& half) {
     glm::vec2 uv;
     if (axis == 0) {
@@ -34,20 +44,27 @@ glm::vec2 projectOnAxis(const glm::vec3& p, float sign, int axis, const glm::vec
         uv = glm::vec2(sign > 0.0f ? p.x : -p.x, p.y);
         uv /= 2.0f * glm::vec2(half.x, half.y);
     }
-    return uv + 0.5f;
+    uv += 0.5f; // local [0,1] on the face
+    const int face = faceIndex(sign, axis);
+    const glm::vec2 tile(static_cast<float>(face % 3), static_cast<float>(face / 3));
+    const glm::vec2 padded = glm::vec2(kAtlasPad) + uv * (1.0f - 2.0f * kAtlasPad);
+    return (tile + padded) / glm::vec2(3.0f, 2.0f);
 }
 
-// Box projection by the dominant normal axis, normalized per-face to [0,1]
+// Box projection by the dominant normal axis into the face's atlas tile
 // (uniform texel density on the reference box; rocks are 3D-baked, so the
-// edge seams are nearly invisible).
+// face-to-face color/normal continuity at the edges comes for free).
 glm::vec2 boxProjectUv(const glm::vec3& p, const glm::vec3& n, const glm::vec3& half) {
     const int axis = dominantAxis(n);
     return projectOnAxis(p, n[axis], axis, half);
 }
 
-// Triangles straddling the box-projection seams (corners with different
-// dominant axes) stretch across the whole texture otherwise. Clone the
-// offending corners with UVs re-projected onto the face's own axis.
+// Triangles straddling the box-projection seams (corners assigned to a
+// different atlas tile than the face) stretch across the whole atlas
+// otherwise. Clone the offending corners with UVs re-projected onto the
+// face's own tile. "Assigned elsewhere" = different dominant axis OR same
+// axis but opposite sign (overhanging rocks at cube edges can carry
+// vertex normals pointing at the opposite face).
 void splitSeamVertices(StoneMesh& mesh, const glm::vec3& half) {
     std::unordered_map<std::uint64_t, std::uint32_t> clones;
     for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
@@ -56,14 +73,16 @@ void splitSeamVertices(StoneMesh& mesh, const glm::vec3& half) {
         const glm::vec3& p2 = mesh.vertices[mesh.indices[t + 2]].pos;
         const glm::vec3 faceN = glm::cross(p1 - p0, p2 - p0);
         const int faceAxis = dominantAxis(faceN);
+        const int faceIdx = faceIndex(faceN[faceAxis], faceAxis);
         for (int k = 0; k < 3; ++k) {
             std::uint32_t& index = mesh.indices[t + k];
             const StoneMeshVertex& v = mesh.vertices[index];
-            if (dominantAxis(v.normal) == faceAxis) {
+            const int vAxis = dominantAxis(v.normal);
+            if (vAxis == faceAxis && faceIndex(v.normal[vAxis], vAxis) == faceIdx) {
                 continue;
             }
             const std::uint64_t key =
-                (static_cast<std::uint64_t>(index) << 2) | static_cast<std::uint64_t>(faceAxis);
+                (static_cast<std::uint64_t>(index) << 3) | static_cast<std::uint64_t>(faceIdx);
             auto it = clones.find(key);
             if (it == clones.end()) {
                 StoneMeshVertex clone = v;
