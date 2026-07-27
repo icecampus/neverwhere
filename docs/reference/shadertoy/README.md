@@ -6,6 +6,30 @@
 на Shadertoy и описанием, файлы шейдеров (`Image.glsl`, `BufferA.glsl`, …) и прочие ресурсы
 (`textures/` — текстуры iChannel, если удалось добыть).
 
+Папки подхватывает **ShadertoyPlayground** (`src/apps/ShadertoyPlayground`, см. AGENTS.md)
+без перекомпиляции: `Image.glsl`/`BufferA..D.glsl`/`Common.glsl` — по именам,
+текстуры `textures/iChannelN.(png|jpg)` — биндинг канала по имени файла.
+
+## shadertoy.json (манифест для multi-pass)
+
+Входы буферов (какой буфер в какой iChannel) на shadertoy.com — метаданные, в GLSL их
+нет, поэтому для multi-pass демок в папку кладётся `shadertoy.json`:
+
+```json
+{
+  "passes": {
+    "BufferB": { "iChannel0": "BufferB" },
+    "Image":    { "iChannel0": "BufferA", "iChannel2": "BufferB" }
+  }
+}
+```
+
+Значение — имя буфера (`BufferA`..`BufferD`). Чтение идёт через ping-pong: буфер видит
+свой прошлый кадр (self-feedback), Image — текущий кадр буферов. Текстурные каналы
+(файл `textures/iChannelN.*`) манифест не требуют и не переопределяются им; single-pass
+демкам манифест не нужен вообще. Если точная текстура оригинала недоступна — подбираем
+близкую (mipmap/repeat) и помечаем это в README демки.
+
 ## Как добавлять
 
 **Основной флоу — ручная паста:** shadertoy.com с текущего IP закрыт Cloudflare намертво

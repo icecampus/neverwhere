@@ -1,0 +1,7 @@
+{
+  "comment": "BufferA = perlin FBM lava generator (no inputs); BufferB = camera state, self-feedback on iChannel0; Image: iChannel0 = rock texture (textures/iChannel0.png, mipmap/repeat — точная оригинальная неизвестна, подобрана), iChannel1 = BufferA, iChannel2 = BufferB.",
+  "passes": {
+    "BufferB": { "iChannel0": "BufferB" },
+    "Image": { "iChannel1": "BufferA", "iChannel2": "BufferB" }
+  }
+}

@@ -160,6 +160,15 @@ EpicMapEditor поднимает TCP RPC-сервер на `127.0.0.1:9877` (п�
 
 MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-editor-win` в `.mcp.json`, код — `tools/editor_mcp/` (тонкий прокси, инструменты `editor_*`; TCP-клиент переиспользован из `tools/debug_mcp/editor_rpc_client.py`, пригоден и для ручных скриптов). Типовой цикл «карта по описанию»: `create_chapter`/`load_chapter` → `list_assets` → `set_landscape` → `fill_rect`/`set_tile` → `set_camera` + `screenshot` → `get_map` → `save` → `play`.
 
+### ShadertoyPlayground
+
+`src/apps/ShadertoyPlayground` — универсальный хост для shadertoy-референсов из `docs/reference/shadertoy` (дорога «демка → кубик с материалом → TileShapePlayground → инструмент → редактор»; это шаг 1–2). Демки подхватываются без перекомпиляции: пассы по именам (`Image.glsl`, `BufferA..D.glsl`, `Common.glsl` инжектится во все пассы), текстуры `textures/iChannelN.(png|jpg)` биндятся по имени файла, multi-pass граф — опциональный `shadertoy.json` (формат — в `docs/reference/shadertoy/README.md`). ImGui-список демок, hot-reload (R / кнопка; ошибки компиляции — в окне), превью «кубик с материалом» (Image-пасс на вращающемся кубе), `--list` / `--demo "name"` / `--cube` / `--dir` / `--shot <png>` / `--smoke` (прогон всех демок по 30 кадров с TEST PASS/FAIL).
+
+- **Бэкенд — осознанное исключение:** `SOKOL_GLCORE` на всех desktop-платформах (не Metal на macOS): демки — single-source GLSL `#version 330` + shim (iResolution/iTime/iMouse/…/iChannel0-3), портить каждую на 3 диалекта нерентабельно. На MSVC — `opengl32`, на macOS — `-framework OpenGL` (в CMakeLists поверх `nw_configure_sokol_app`).
+- **Заголовки с `#include <sokol_gfx.h>`** (ShadertoyRuntime.h, CubePreview.h) должны включаться в TU **до** `#define SOKOL_IMPL` — в этой версии sokol impl-секция живёт вне include-гарда и двойное включение с SOKOL_IMPL даёт redefinition-ошибки (конвенция как в SplattingPlayground).
+- **macOS-особенность GLSL:** Apple-компилятор резервирует `noise1..4` (legacy built-ins) — shim переименовывает их макросами в преамбуле; `pow(vecN, float)` нестандартен (ANGLE терпит, Apple — нет), правится в исходнике демки.
+- Пайплайны: буферы — RGBA16F (feedback-точность), Image — формат свапчейна (и image-target для куба в нём же); все пассы с общим depth-attachment'ом, чтобы один depth-формат подходил везде.
+
 ## Где что искать
 
 - `README.md` — что это за проект, высокоуровневая архитектура.

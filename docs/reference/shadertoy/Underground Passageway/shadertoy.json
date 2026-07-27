@@ -1,0 +1,7 @@
+{
+  "comment": "BufferA = self-feedback splatter heightmap (iFrame<10 recompute); Image reads BufferA on iChannel0. iChannel1 = detail rock texture (textures/iChannel1.png, mipmap/repeat — точная оригинальная текстура неизвестна, подобрана).",
+  "passes": {
+    "BufferA": { "iChannel0": "BufferA" },
+    "Image": { "iChannel0": "BufferA" }
+  }
+}
