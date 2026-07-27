@@ -169,6 +169,13 @@ MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-edi
 - **macOS-особенность GLSL:** Apple-компилятор резервирует `noise1..4` (legacy built-ins) — shim переименовывает их макросами в преамбуле; `pow(vecN, float)` нестандартен (ANGLE терпит, Apple — нет), правится в исходнике демки.
 - Пайплайны: буферы — RGBA16F (feedback-точность), Image — формат свапчейна (и image-target для куба в нём же); все пассы с общим depth-attachment'ом, чтобы один depth-формат подходил везде.
 
+### StoneCubePlayground
+
+`src/apps/StoneCubePlayground` — инкубатор генератора «кубика из камней» по принципам iq'шной демки Voronoi - rocks (`docs/reference/shadertoy`): SDF = round-box + bulge внутри voronoi-ячеек (`clamp(k*(F2-F1))`, борозды по границам), fbm-деталь + bump, AO + soft shadow, ground plane с тенью, orbit-камера (LMB — вращение, RMB — пан, колесо — зум), ImGui-параметры (Shape/Detail/Look, кнопка New seed). Дорога развития: C++-двойник SDF → меш через surface-nets (`highground_core`) → TileShapePlayground → редактор.
+
+- Бэкенд и конвенции — как у ShadertoyPlayground (GLCORE на всех desktop, проектные хедеры до `SOKOL_IMPL`, CLI `--smoke` / `--shot` / `--scale` / `--seed`).
+- GLSL 330 gotcha: `const float x = <выражение с uniform>` не компилируется (initializer must be constant) — такие переменные объявлять без `const`.
+
 ## Где что искать
 
 - `README.md` — что это за проект, высокоуровневая архитектура.
