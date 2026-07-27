@@ -3,7 +3,7 @@
 // full-res raymarching crawl, same as ShadertoyPlayground).
 #pragma once
 
-#include "StoneCubeParams.h"
+#include <stone_gen/stone_sdf.h>
 
 // Ensure a backend is selected everywhere we include sokol_gfx.h (GLCORE
 // everywhere in this playground).
@@ -17,6 +17,10 @@
 #include <sokol_gfx.h>
 
 namespace stonecube {
+
+// Generator params live in the stone_gen lib (canonical); the playground
+// passes them straight through (same 4 x vec4 layout as the GLSL uniforms).
+using Params = stone_gen::StoneCubeParams;
 
 struct Camera {
     float yaw = 0.7f;

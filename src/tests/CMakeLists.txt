@@ -22,6 +22,7 @@ target_link_libraries(neverwhere_tests PRIVATE
     landscape_core
     landscape_mesh
     highground_core
+    stone_gen
     topology_core
     utils
     Qt6::Core

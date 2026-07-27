@@ -37,15 +37,36 @@ glm::vec3 safeNormalize(const glm::vec3& v) {
 
 } // namespace
 
+namespace {
+
+ScalarFieldView viewOf(const CliffField& field) {
+    ScalarFieldView v;
+    v.origin = field.origin();
+    v.cellSize = field.params().cellSize;
+    v.nx = field.sizeX();
+    v.ny = field.sizeY();
+    v.nz = field.sizeZ();
+    v.eval = [&field](const glm::vec3& p) { return field.eval(p); };
+    v.grooveDepth = [&field](const glm::vec3& p) { return field.grooveDepth(p); };
+    return v;
+}
+
+} // namespace
+
 void regularizeSigns(const CliffField& field, std::vector<float>& samples,
     RegularizeStats* stats) {
-    const int nx = field.sizeX();
-    const int ny = field.sizeY();
-    const int nz = field.sizeZ();
+    regularizeSigns(viewOf(field), samples, stats);
+}
+
+void regularizeSigns(const ScalarFieldView& field, std::vector<float>& samples,
+    RegularizeStats* stats) {
+    const int nx = field.nx;
+    const int ny = field.ny;
+    const int nz = field.nz;
     const int px = nx + 1;
     const int pz = nz + 1;
-    const float cell = field.params().cellSize;
-    const glm::vec3 org = field.origin();
+    const float cell = field.cellSize;
+    const glm::vec3 org = field.origin;
     const int dims[3] = {nx, ny, nz};
 
     auto valueAt = [&](int x, int y, int z) -> float& {
@@ -226,13 +247,18 @@ void regularizeSigns(const CliffField& field, std::vector<float>& samples,
 
 Mesh extractSurfaceNets(const CliffField& field, const std::vector<float>& samples,
     ExtractStats* stats) {
-    const int nx = field.sizeX();
-    const int ny = field.sizeY();
-    const int nz = field.sizeZ();
+    return extractSurfaceNets(viewOf(field), samples, stats);
+}
+
+Mesh extractSurfaceNets(const ScalarFieldView& field, const std::vector<float>& samples,
+    ExtractStats* stats) {
+    const int nx = field.nx;
+    const int ny = field.ny;
+    const int nz = field.nz;
     const int px = nx + 1;
     const int pz = nz + 1;
-    const float cell = field.params().cellSize;
-    const glm::vec3 org = field.origin();
+    const float cell = field.cellSize;
+    const glm::vec3 org = field.origin;
 
     auto valueAt = [&](int x, int y, int z) -> float {
         return samples[(static_cast<size_t>(y) * pz + z) * px + x];
@@ -293,7 +319,8 @@ Mesh extractSurfaceNets(const CliffField& field, const std::vector<float>& sampl
                     field.eval(pos + ey) - field.eval(pos - ey),
                     field.eval(pos + ez) - field.eval(pos - ez));
                 n = safeNormalize(n);
-                MeshVertex vertex{pos.x, pos.y, pos.z, n.x, n.y, n.z, field.grooveDepth(pos)};
+                const float groove = field.grooveDepth ? field.grooveDepth(pos) : 0.0f;
+                MeshVertex vertex{pos.x, pos.y, pos.z, n.x, n.y, n.z, groove};
                 vertAt(x, y, z) = static_cast<int>(mesh.vertices.size());
                 mesh.vertices.push_back(vertex);
             }

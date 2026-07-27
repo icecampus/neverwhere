@@ -169,12 +169,15 @@ MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-edi
 - **macOS-особенность GLSL:** Apple-компилятор резервирует `noise1..4` (legacy built-ins) — shim переименовывает их макросами в преамбуле; `pow(vecN, float)` нестандартен (ANGLE терпит, Apple — нет), правится в исходнике демки.
 - Пайплайны: буферы — RGBA16F (feedback-точность), Image — формат свапчейна (и image-target для куба в нём же); все пассы с общим depth-attachment'ом, чтобы один depth-формат подходил везде.
 
-### StoneCubePlayground
+### StoneCubePlayground + stone_gen
 
 `src/apps/StoneCubePlayground` — инкубатор генератора «кубика из камней» по принципам iq'шной демки Voronoi - rocks (`docs/reference/shadertoy`): SDF = round-box + bulge внутри voronoi-ячеек (`clamp(k*(F2-F1))`, борозды по границам), fbm-деталь + bump, AO + soft shadow, ground plane с тенью, orbit-камера (LMB — вращение, RMB — пан, колесо — зум), ImGui-параметры (Shape/Detail/Look, кнопка New seed). Дорога развития: C++-двойник SDF → меш через surface-nets (`highground_core`) → TileShapePlayground → редактор.
 
-- Бэкенд и конвенции — как у ShadertoyPlayground (GLCORE на всех desktop, проектные хедеры до `SOKOL_IMPL`, CLI `--smoke` / `--shot` / `--scale` / `--seed`).
-- GLSL 330 gotcha: `const float x = <выражение с uniform>` не компилируется (initializer must be constant) — такие переменные объявлять без `const`.
+`src/libs/stone_gen` — no-GPU либа генератора и пекарни (паттерн `highground_core`): `StoneSdf` (C++-двойник, каноничен; GLSL в плейграунде — look-референс) → `generateMesh` (sample → `regularizeSigns`/`extractSurfaceNets` через `cliff::ScalarFieldView` — обобщённая точка входа в `surface_nets.h`, клифы делегируют в неё) → `bakeTextures` (CPU-растеризатор в UV-пространстве: `albedo.png` rgb=тинт+moss+groove, a=AO; `normal.png` object-space) + `writeObj`/`writePng`. UV — box-проекция по доминантной оси нормали с дедупом швов (`splitSeamVertices`: клонирует углы треугольников, стоящие на стыке проекций, иначе они тянутся через всю текстуру). Покрытие — `src/tests/stone/stone_gen_test.cpp` (watertight, бейк, экспорт).
+
+- Playground: режимы Raymarch | Mesh (debounce-ребилд 0.3 с по правке параметров), bake 256/512/1024, Export в `bake_out/`, CLI `--smoke` / `--shot` / `--scale` / `--seed` / `--mesh` / `--bake <dir>`.
+- Грабли (по опыту): naive surface nets террасит на крутых voronoi-бороздах — лечится 3-tap блюром сэмплов (`MeshParams::blurPasses`); bump-градиент fbm десятки единиц — без кепа `g/(1+|g|)` запечённая normal-map выходит радужным шумом; на бейке stencil градиента ~1–2 текселя (low-pass); GLSL 330 `const float x = <uniform-выражение>` не компилируется.
+- stb-имплементации (STB_IMAGE_..._IMPLEMENTATION) — в одном TU на бинарь: для `stone_gen` это `stone_bake.cpp`, приложения либу линкуют и не повторяют.
 
 ## Где что искать
 

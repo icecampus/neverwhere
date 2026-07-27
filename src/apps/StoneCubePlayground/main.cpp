@@ -14,8 +14,11 @@
 // Project headers first: they pull sokol_gfx.h for plain declarations, so
 // they must come before SOKOL_IMPL is defined (this sokol version compiles
 // the impl outside the include guard).
-#include "StoneCubeParams.h"
 #include "StoneCubeScene.h"
+#include "StoneMeshView.h"
+
+#include <stone_gen/stone_bake.h>
+#include <stone_gen/stone_mesh.h>
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -38,7 +41,8 @@
 #include <sokol_time.h>
 #include <util/sokol_imgui.h>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
+// stb_image_write implementation lives in stone_gen (stone_bake.cpp); here
+// only the declarations are needed (screenshot writer).
 #include <stb_image_write.h>
 
 namespace {
@@ -48,6 +52,8 @@ struct CliOptions {
     float renderScale = 0.5f;
     float seed = 0.0f;
     std::string shotPath;
+    std::string bakeDir;       // --bake <dir>: mesh + bake + export, then quit
+    bool startInMeshMode = false; // --mesh: start on the baked-mesh view
 };
 
 struct AppState {
@@ -57,6 +63,16 @@ struct AppState {
     stonecube::StoneCubeScene scene;
     bool gfxOk = false;
     bool imguiOk = false;
+
+    // Mesh view (baked geometry + textures, the "fast render" path).
+    int viewMode = 0; // 0 = raymarch, 1 = mesh
+    stonecube::StoneMeshView meshView;
+    stone_gen::StoneMesh mesh;
+    stone_gen::BakedTextures baked;
+    bool meshDirty = true;
+    uint64_t paramChangeTime = 0;
+    int bakeSize = 256;
+    stonecube::Params paramsSnapshot = {};
 
     uint64_t lastTime = 0;
     float dt = 1.0f / 60.0f;
@@ -72,9 +88,14 @@ struct AppState {
 
     int logErrors = 0;
     int shotFrame = -1;
+    bool smokeCheckOk = false;
 };
 
 AppState g_state;
+
+void buildMeshAndBake();
+void rebake();
+bool exportBake(const std::string& dir);
 
 void logCapture(const char* tag, uint32_t logLevel, uint32_t logItem,
     const char* message, uint32_t lineNr, const char* filename, void* userData) {
@@ -97,6 +118,10 @@ CliOptions parseCli(int argc, char* argv[]) {
             cli.seed = std::stof(argv[++i]);
         } else if (arg == "--shot" && i + 1 < argc) {
             cli.shotPath = argv[++i];
+        } else if (arg == "--bake" && i + 1 < argc) {
+            cli.bakeDir = argv[++i];
+        } else if (arg == "--mesh") {
+            cli.startInMeshMode = true;
         }
     }
     return cli;
@@ -145,9 +170,17 @@ void init() {
 
     g_state.params.shape2[3] = g_state.cli.seed;
     g_state.scene.init();
+    g_state.meshView.init();
+    g_state.paramsSnapshot = g_state.params;
 
     if (!g_state.cli.shotPath.empty()) {
         g_state.shotFrame = 60;
+    }
+    if (!g_state.cli.bakeDir.empty()) {
+        g_state.bakeSize = 512;
+    }
+    if (g_state.cli.startInMeshMode) {
+        g_state.viewMode = 1;
     }
 }
 
@@ -159,6 +192,41 @@ void drawUi() {
     ImGui::Text("fb: %dx%d  dpi: %.2f", sapp_width(), sapp_height(), sapp_dpi_scale());
     ImGui::SliderFloat("Render scale", &g_state.cli.renderScale, 0.25f, 1.0f, "%.2f");
     ImGui::Text("render: %dx%d", g_state.scene.targetWidth(), g_state.scene.targetHeight());
+    ImGui::Separator();
+
+    int mode = g_state.viewMode;
+    ImGui::RadioButton("Raymarch", &mode, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Mesh", &mode, 1);
+    if (mode != g_state.viewMode) {
+        g_state.viewMode = mode;
+        if (mode == 1 && (g_state.mesh.vertices.empty() || g_state.meshDirty)) {
+            buildMeshAndBake();
+        }
+    }
+    if (g_state.viewMode == 1) {
+        ImGui::Text("mesh: %zu verts, %zu tris", g_state.mesh.vertices.size(),
+            g_state.mesh.indices.size() / 3);
+        ImGui::Text("watertight bad: %d  saddles: %d", g_state.mesh.watertightBadEdges,
+            g_state.mesh.remainingSaddles);
+        ImGui::Text("mesh %.0f ms, bake %.0f ms", g_state.mesh.meshMs, g_state.baked.bakeMs);
+        if (ImGui::Button("Rebuild")) {
+            buildMeshAndBake();
+        }
+        ImGui::SameLine();
+        static const int kSizes[] = {256, 512, 1024};
+        int sizeIndex = g_state.bakeSize == 1024 ? 2 : (g_state.bakeSize == 512 ? 1 : 0);
+        ImGui::SetNextItemWidth(110.0f);
+        if (ImGui::Combo("bake size", &sizeIndex, "256\0512\01024\0")) {
+            g_state.bakeSize = kSizes[sizeIndex];
+            if (!g_state.mesh.vertices.empty()) {
+                rebake();
+            }
+        }
+        if (ImGui::Button("Export")) {
+            exportBake("bake_out");
+        }
+    }
     ImGui::Separator();
 
     stonecube::Params& p = g_state.params;
@@ -190,6 +258,63 @@ void drawUi() {
         g_state.camera = stonecube::Camera{};
     }
     ImGui::End();
+}
+
+// Builds the stone mesh and (re)bakes the textures at the current bakeSize.
+// Synchronous: freezes the UI for a moment in Debug, acceptable for a bake.
+void buildMeshAndBake() {
+    const stone_gen::StoneSdf sdf(g_state.params);
+    const stone_gen::MeshParams meshParams;
+    g_state.mesh = stone_gen::generateMesh(sdf, meshParams);
+    g_state.meshView.setMesh(g_state.mesh);
+
+    stone_gen::BakeParams bakeParams;
+    bakeParams.textureSize = g_state.bakeSize;
+    bakeParams.aoTaps = 6;
+    g_state.baked = stone_gen::bakeTextures(sdf, g_state.mesh, bakeParams);
+    g_state.meshView.setTextures(g_state.baked.size, g_state.baked.albedo,
+        g_state.baked.normal);
+    g_state.meshDirty = false;
+    g_state.paramsSnapshot = g_state.params;
+    spdlog::info("mesh: {} verts / {} tris, watertight bad={}, saddles={}, mesh {:.0f} ms, bake {:.0f} ms ({}x{})",
+        g_state.mesh.vertices.size(), g_state.mesh.indices.size() / 3,
+        g_state.mesh.watertightBadEdges, g_state.mesh.remainingSaddles,
+        g_state.mesh.meshMs, g_state.baked.bakeMs, g_state.baked.size, g_state.baked.size);
+}
+
+// Re-bakes the textures on the existing mesh (bake-size change).
+void rebake() {
+    const stone_gen::StoneSdf sdf(g_state.params);
+    stone_gen::BakeParams bakeParams;
+    bakeParams.textureSize = g_state.bakeSize;
+    bakeParams.aoTaps = 6;
+    g_state.baked = stone_gen::bakeTextures(sdf, g_state.mesh, bakeParams);
+    g_state.meshView.setTextures(g_state.baked.size, g_state.baked.albedo,
+        g_state.baked.normal);
+    spdlog::info("rebake: {:.0f} ms ({}x{})", g_state.baked.bakeMs,
+        g_state.baked.size, g_state.baked.size);
+}
+
+bool exportBake(const std::string& dir) {
+    if (g_state.mesh.vertices.empty() || g_state.baked.size == 0) {
+        spdlog::error("export: nothing to export (build the mesh first)");
+        return false;
+    }
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const fs::path root(dir);
+    const bool ok = stone_gen::writeObj((root / "mesh.obj").string(), g_state.mesh) &&
+        stone_gen::writePng((root / "albedo.png").string(), g_state.baked.size,
+            g_state.baked.size, g_state.baked.albedo) &&
+        stone_gen::writePng((root / "normal.png").string(), g_state.baked.size,
+            g_state.baked.size, g_state.baked.normal);
+    if (ok) {
+        spdlog::info("export: mesh.obj + albedo.png + normal.png written to {}", dir);
+    } else {
+        spdlog::error("export: failed to write into {}", dir);
+    }
+    return ok;
 }
 
 void writeScreenshot(const std::string& path) {
@@ -226,6 +351,39 @@ void frame() {
         return;
     }
 
+    // One-shot actions (--smoke / --bake) run on the first frame.
+    if (g_state.frameIndex == 1 && (g_state.cli.smoke || !g_state.cli.bakeDir.empty())) {
+        buildMeshAndBake();
+        bool ok = !g_state.mesh.vertices.empty() &&
+            g_state.mesh.watertightBadEdges == 0 &&
+            g_state.mesh.remainingSaddles == 0 &&
+            g_state.baked.size > 0;
+        if (!g_state.cli.bakeDir.empty()) {
+            ok = exportBake(g_state.cli.bakeDir) && ok;
+            spdlog::info(ok ? "TEST PASS: bake export finished OK" : "TEST FAIL: bake export failed");
+            if (!ok) {
+                ++g_state.logErrors;
+            }
+            sapp_quit();
+            return;
+        }
+        g_state.smokeCheckOk = ok;
+    }
+
+    // Debounce: params changed -> rebuild mesh+bake after 0.3 s of quiet.
+    if (g_state.viewMode == 1) {
+        if (!g_state.meshDirty &&
+            std::memcmp(&g_state.params, &g_state.paramsSnapshot,
+                sizeof(stonecube::Params)) != 0) {
+            g_state.meshDirty = true;
+            g_state.paramChangeTime = stm_now();
+        }
+        if (g_state.meshDirty &&
+            stm_sec(stm_diff(stm_now(), g_state.paramChangeTime)) > 0.3) {
+            buildMeshAndBake();
+        }
+    }
+
     if (g_state.imguiOk) {
         simgui_frame_desc_t fd = {};
         fd.width = sapp_width();
@@ -238,8 +396,19 @@ void frame() {
         }
     }
 
-    g_state.scene.drawScene(g_state.params, g_state.camera,
-        g_state.cli.renderScale, sapp_width(), sapp_height());
+    if (g_state.viewMode == 0) {
+        g_state.scene.drawScene(g_state.params, g_state.camera,
+            g_state.cli.renderScale, sapp_width(), sapp_height());
+    }
+
+    float lightDir[3];
+    {
+        const float yaw = g_state.params.look[0];
+        const float pitch = g_state.params.look[1];
+        lightDir[0] = std::cos(pitch) * std::sin(yaw);
+        lightDir[1] = std::sin(pitch);
+        lightDir[2] = std::cos(pitch) * std::cos(yaw);
+    }
 
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -248,7 +417,11 @@ void frame() {
     pass.action = action;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
-    g_state.scene.drawBlit();
+    if (g_state.viewMode == 0) {
+        g_state.scene.drawBlit();
+    } else {
+        g_state.meshView.draw(g_state.camera, lightDir, sapp_width(), sapp_height());
+    }
     if (g_state.imguiOk) {
         simgui_render();
     }
@@ -263,10 +436,11 @@ void frame() {
         }
     }
     if (g_state.cli.smoke && g_state.frameIndex >= 60) {
-        if (g_state.logErrors == 0) {
+        if (g_state.logErrors == 0 && g_state.smokeCheckOk) {
             spdlog::info("TEST PASS: smoke scenario finished OK");
         } else {
-            spdlog::error("TEST FAIL: smoke scenario failed ({} log errors)", g_state.logErrors);
+            spdlog::error("TEST FAIL: smoke scenario failed ({} log errors, check {})",
+                g_state.logErrors, g_state.smokeCheckOk);
         }
         sapp_quit();
     }
@@ -274,6 +448,7 @@ void frame() {
 
 void cleanup() {
     g_state.scene.shutdown();
+    g_state.meshView.shutdown();
     if (g_state.imguiOk) {
         simgui_shutdown();
         g_state.imguiOk = false;

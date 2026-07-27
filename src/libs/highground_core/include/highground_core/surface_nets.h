@@ -6,6 +6,7 @@
 #include "cliff_field.h"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace cliff {
@@ -34,6 +35,18 @@ struct RegularizeStats {
     int remaining = 0;     // saddles left after the last pass (must be 0)
 };
 
+// Generic scalar field for the surface-nets pipeline: lets non-cliff fields
+// (e.g. stone_gen's stone cube) reuse the tested regularize/extract code.
+struct ScalarFieldView {
+    glm::vec3 origin = glm::vec3(0.0f);
+    float cellSize = 0.0f;
+    int nx = 0;
+    int ny = 0;
+    int nz = 0;
+    std::function<float(const glm::vec3&)> eval;
+    std::function<float(const glm::vec3&)> grooveDepth; // empty -> 0 everywhere
+};
+
 // Resolves checkerboard grid faces (saddles) before extraction: naive surface
 // nets are manifold iff no grid face has an alternating +−+− sign pattern.
 // Each saddle is collapsed by flipping the sign of the weakest corner of the
@@ -45,8 +58,12 @@ struct RegularizeStats {
 // stays heuristic (16-pass cap); `remaining` reports the last scan's count.
 void regularizeSigns(const CliffField& field, std::vector<float>& samples,
     RegularizeStats* stats = nullptr);
+void regularizeSigns(const ScalarFieldView& field, std::vector<float>& samples,
+    RegularizeStats* stats = nullptr);
 
 Mesh extractSurfaceNets(const CliffField& field, const std::vector<float>& samples,
+    ExtractStats* stats = nullptr);
+Mesh extractSurfaceNets(const ScalarFieldView& field, const std::vector<float>& samples,
     ExtractStats* stats = nullptr);
 
 struct WatertightReport {
