@@ -8,6 +8,7 @@
 
 #include "render_core/landscape_renderer.h"
 #include "render_core/cliff_renderer.h"
+#include "render_core/cyclopean_renderer.h"
 #include "render_core/overlay_renderer.h"
 #include "render_core/sprite_renderer.h"
 
@@ -22,6 +23,7 @@ struct WorldFrame {
     std::vector<LandscapeTile> landscapeTiles;
     std::vector<LandscapeTile> raisedTiles; // RaisedLandscape layer (3D tiles: walls + lifted top)
     std::vector<LandscapeTile> cliffTiles;  // CliffLandscape layer (cliff3d: surface-nets cliffs)
+    std::vector<LandscapeTile> cyclopeanTiles; // CyclopeanLandscape layer (cyclopean3d: landscape_mesh walls)
     std::vector<SpriteInstance> sprites;
 
     bool showGrid = true;
@@ -34,7 +36,8 @@ struct WorldFrame {
 // Facade over the world renderers — the single world render shared by shells.
 // Draw order: flat landscape tiles, grid overlay (above water/flat ground but
 // under the 3D world), raised landscape (cliff walls + lifted tops), cliff3d
-// meshes, Tile2D sprites, and finally the cell cursor overlay on top.
+// meshes, cyclopean3d meshes, Tile2D sprites, and finally the cell cursor
+// overlay on top.
 class WorldRenderer {
 public:
     // depthFormat must match the pass the renderer draws into:
@@ -46,6 +49,7 @@ public:
     void ensureLandscapeAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows);
     void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {});
     void ensureCliffAsset(const std::string& assetUuid, const CliffParams& params);
+    void ensureCyclopeanAsset(const std::string& assetUuid, const CyclopeanParams& params);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 
     // `nowSec` drives the cliff cache debounce (frame time of the shell).
@@ -60,6 +64,7 @@ public:
 private:
     LandscapeRenderer landscapeRenderer;
     CliffRenderer cliffRenderer;
+    CyclopeanRenderer cyclopeanRenderer;
     SpriteRenderer spriteRenderer;
     OverlayRenderer overlayRenderer;
 

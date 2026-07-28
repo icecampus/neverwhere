@@ -79,6 +79,18 @@ Rectangle
             border.color: "transparent"
         }
 
+        // Cyclopean3d composer params (same embedding contract as CliffSettings).
+        CyclopeanSettings
+        {
+            width: parent.width
+            asset: assetSettings.asset
+            activeAsset: assetSettings.asset && assetSettings.asset.isCyclopean3d
+            showTitle: false
+            showSaveButton: false
+            color: "transparent"
+            border.color: "transparent"
+        }
+
         Row
         { 
             anchors.horizontalCenter: parent.horizontalCenter

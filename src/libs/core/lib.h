@@ -12,6 +12,7 @@
 #include "assets_library/assets/slice_asset.h"
 #include "assets_library/assets/shape3d_asset.h"
 #include "assets_library/assets/cliff_asset.h"
+#include "assets_library/assets/cyclopean_asset.h"
 #include "assets_library/assets_library_model.h"
 #include "assets_library/assets_context.h"
 #include "assets_library/assets_image_provider.h"

@@ -75,12 +75,27 @@ render_core::CliffParams cliffParamsFromAssetData(const BaseData::Cliff3dAssetDa
     return params;
 }
 
+// BaseData -> render_core parameter conversion for cyclopean3d assets (the
+// runtime's world_frame_builder has its own game_data twin).
+render_core::CyclopeanParams cyclopeanParamsFromAssetData(const BaseData::Cyclopean3dAssetData& d) {
+    render_core::CyclopeanParams params;
+    params.raisedHeight = d.raisedHeight;
+    params.rockSeed = d.rockSeed;
+    params.rockAmplitude = d.rockAmplitude;
+    params.rockEnabled = d.rockEnabled;
+    params.cornerBevel = d.cornerBevel;
+    params.wallSubdivH = d.wallSubdivH;
+    params.wallSubdivV = d.wallSubdivV;
+    return params;
+}
+
 } // namespace
 
 void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.landscapeTiles.clear();
     outFrame.raisedTiles.clear();
     outFrame.cliffTiles.clear();
+    outFrame.cyclopeanTiles.clear();
     outFrame.sprites.clear();
 
     if (!m_mapModel) return;
@@ -127,6 +142,21 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         });
     }
 
+    // CyclopeanLandscape layer -> cyclopean tiles (Cyclopean3d assets,
+    // landscape_mesh plateau with Cyclopean walls).
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::CyclopeanLandscape)) {
+        layer->iterate([&outFrame](GameObject& obj) {
+            const BaseData::GameObject data = obj.getData();
+            if (data.type != GameObjectTypes::Landscape || !data.landscapeData) return;
+
+            render_core::LandscapeTile t;
+            t.cell = data.position;
+            t.assetUuid = boost::uuids::to_string(data.assetUuid);
+            t.tileIndex = data.landscapeData->tileIndex;
+            outFrame.cyclopeanTiles.push_back(std::move(t));
+        });
+    }
+
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
         LayerModel* layer = m_mapModel->layer(layerType);
@@ -151,6 +181,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.raisedTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cliffTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -179,6 +210,11 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
                 params.topTexturePath = data.root() / data.cliff3dData->topTexture;
             }
             renderer.ensureCliffAsset(uuid, params);
+        }
+        if (data.cyclopean3dData) {
+            // Cyclopean tiles: landscape_mesh composer params (no atlas —
+            // geometry comes from the solid-mask composer).
+            renderer.ensureCyclopeanAsset(uuid, cyclopeanParamsFromAssetData(*data.cyclopean3dData));
         }
         if (data.sliceData) {
             // Editor convention: landscape atlases are split into 4x6 tiles.

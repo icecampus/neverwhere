@@ -21,6 +21,7 @@ class Asset : public QObject
     // Boolean mirror for QML conditionals (enum namespace values like
     // AssetTypes.cliff3d are not reliably accessible in QML here).
     Q_PROPERTY(bool isCliff3d READ getIsCliff3d CONSTANT)
+    Q_PROPERTY(bool isCyclopean3d READ getIsCyclopean3d CONSTANT)
 
     // pivot - это смещение ЦЕНТРА картинки относительно центра клетки игрового поля в размере клеток игрового поля
     // (0,0) - нет смешения, 
@@ -42,6 +43,7 @@ class Asset : public QObject
     LayerTypes::Type getLayerType() const;
     AssetTypes::Type getType() const { return type; }
     bool getIsCliff3d() const { return type == AssetTypes::cliff3d; }
+    bool getIsCyclopean3d() const { return type == AssetTypes::cyclopean3d; }
 
     math::vec2 getPivot() const;
     void setPivot(const math::vec2& pivot);

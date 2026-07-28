@@ -294,6 +294,23 @@ debounce непрерывно откладывается, поэтому вес�
 Покрытие: `src/tests/assets/cliff3d_asset_data_test.cpp` (JSON/AssetIndex),
 `cliff_asset_test.cpp` (API панели), map_authoring на слое. Песочница для
 отладки алгоритма — кисть «Cliff 3D» в TileShapePlayground.
+**Cyclopean 3D в редакторе `[есть]`:** ассеты `cyclopean3d`
+(`CyclopeanAsset : SliceAsset`, без атласа; payload `"cyclopean3d"` в
+index.json — параметры композитора `landscape_mesh`: `raisedHeight` в
+мировых единицах, rock seed/amplitude/enabled, `cornerBevel`, subdivisions
+стен) рисуются инструментом `CyclopeanPencil` (наследник `LandscapePencil`)
+на слое `CyclopeanLandscape` — данные те же Landscape-тайлы с tileIndex
+(ноды по конвенции атласа). Рендер — `render_core::CyclopeanRenderer`
+(порт wall-mesh прохода «Cyclopean 3D» из TileShapePlayground): ноды из
+тайлов → `solidMaskFromNodes` → `composeSolidMaskMesh` с захардкоженным
+`WallStyleId::Cyclopean`, цвет запечён в вершины (без текстур и
+FS-униформ), кэш per-asset по контент-хэшу с debounce 0.3 с; камера в VS,
+глубина через z_range как у raised/cliff проходов. Кадр:
+`WorldFrame.cyclopeanTiles` (редактор — `ModelFrameSource`, клиент/play-таб —
+`world_frame_builder`; `ensureCyclopeanAsset` пробрасывает параметры в обоих).
+Панель параметров — `CyclopeanSettings.qml` (секции Height/Rock, условие
+видимости — булево `Asset.isCyclopean3d`). Песочница для отладки алгоритма —
+кисть «Cyclopean 3D» в TileShapePlayground.
 Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
 `raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —

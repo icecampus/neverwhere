@@ -53,6 +53,7 @@ void buildCliffShadowField(
 void WorldRenderer::init(sg_pixel_format depthFormat) {
     landscapeRenderer.init(depthFormat);
     cliffRenderer.init(depthFormat);
+    cyclopeanRenderer.init(depthFormat);
     spriteRenderer.init(depthFormat);
     overlayRenderer.init(depthFormat);
 }
@@ -60,6 +61,7 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
 void WorldRenderer::shutdown() {
     overlayRenderer.shutdown();
     spriteRenderer.shutdown();
+    cyclopeanRenderer.shutdown();
     cliffRenderer.shutdown();
     landscapeRenderer.shutdown();
 }
@@ -74,6 +76,10 @@ void WorldRenderer::ensureRaisedAtlas(const std::string& assetUuid, const std::f
 
 void WorldRenderer::ensureCliffAsset(const std::string& assetUuid, const CliffParams& params) {
     cliffRenderer.ensureCliffAsset(assetUuid, params);
+}
+
+void WorldRenderer::ensureCyclopeanAsset(const std::string& assetUuid, const CyclopeanParams& params) {
+    cyclopeanRenderer.ensureCyclopeanAsset(assetUuid, params);
 }
 
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
@@ -138,6 +144,7 @@ void WorldRenderer::render(
 
     landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
     cliffRenderer.render(frame.cliffTiles, iso, camera, viewWidth, viewHeight, nowSec);
+    cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
     spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
 
     // The cell cursor is an editor UI element — always on top (own buffer:

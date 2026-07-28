@@ -14,7 +14,8 @@ namespace AssetTypes
         image,
         slice,
         shape3d,
-        cliff3d
+        cliff3d,
+        cyclopean3d
     };
     Q_ENUM_NS(Type);
 }
@@ -143,6 +144,26 @@ namespace BaseData
             grooveDepthMax, grooveSmooth, grooveAngles, shading);
     };
 
+    // Cyclopean3D: landscape_mesh solid-mask composer params (Cyclopean wall
+    // style, mirror of MeshBuildSettings). No atlas — objects are plain
+    // Landscape tiles on the CyclopeanLandscape layer whose tileIndex encodes
+    // the vertex nodes; these params drive the CyclopeanRenderer.
+    struct Cyclopean3dAssetData
+    {
+        std::string thumbnail; // optional preview
+        float raisedHeight{3.0f}; // plateau top height in world units (topHeight)
+        int rockSeed{1337};
+        float rockAmplitude{0.28f};
+        bool rockEnabled{true};
+        float cornerBevel{0.3f};
+        int wallSubdivH{16}; // wallHorizontalSubdivisions (clamped to [1,16])
+        int wallSubdivV{16}; // wallVerticalSubdivisions (clamped to [1,16])
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Cyclopean3dAssetData,
+            thumbnail, raisedHeight, rockSeed, rockAmplitude, rockEnabled,
+            cornerBevel, wallSubdivH, wallSubdivV);
+    };
+
     //Asset
     struct AssetData
     {
@@ -156,6 +177,7 @@ namespace BaseData
         std::optional<SliceAssetData> sliceData;
         std::optional<Shape3dAssetData> shape3dData;
         std::optional<Cliff3dAssetData> cliff3dData;
+        std::optional<Cyclopean3dAssetData> cyclopean3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

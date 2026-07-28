@@ -267,6 +267,72 @@ TEST(MapAuthoringTest, CliffLayerSaveLoadRoundTrip)
     std::filesystem::remove(tmpPath);
 }
 
+TEST(MapAuthoringTest, CyclopeanLayerSaveLoadRoundTrip)
+{
+    MapModel map;
+    auto slice = makeSliceAsset(kSliceUuid, "landscape");
+
+    // Cyclopean Landscape objects live on the CyclopeanLandscape layer
+    // (Cyclopean3d assets); the authoring ops are layer-agnostic.
+    const std::vector<std::pair<math::ivec2, uint8_t>> updates = {
+        {math::ivec2(5, 5), 1}, {math::ivec2(6, 5), 1},
+        {math::ivec2(5, 6), 1}, {math::ivec2(6, 6), 1},
+    };
+    MapAuthoring::applyLandscapeUpdates(*map.layer(LayerTypes::CyclopeanLandscape), slice.get(), updates);
+
+    const QJsonObject before = MapAuthoring::dumpMap(map);
+
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_cyclopean_roundtrip_test.json";
+    const QString path = QString::fromStdString(tmpPath.string());
+    map.save(path);
+
+    MapModel loaded;
+    loaded.load(path);
+    const QJsonObject after = MapAuthoring::dumpMap(loaded);
+
+    EXPECT_EQ(QJsonDocument(before).toJson(QJsonDocument::Compact),
+              QJsonDocument(after).toJson(QJsonDocument::Compact));
+
+    int cyclopeanTotal = 0;
+    loaded.layer(LayerTypes::CyclopeanLandscape)->iterate([&cyclopeanTotal](GameObject&) { ++cyclopeanTotal; });
+    EXPECT_GT(cyclopeanTotal, 0);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(MapAuthoringTest, LoadLegacyMapWithoutCyclopeanLayer)
+{
+    // Maps saved before the CyclopeanLandscape layer existed have no such
+    // key; loading must treat it as empty instead of throwing.
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_legacy_cyclopean_test.json";
+    {
+        std::ofstream file(tmpPath);
+        file << R"({
+            "BaseLandscape": [],
+            "Decoration": [],
+            "GameplayInteractive": [],
+            "RaisedLandscape": [],
+            "CliffLandscape": []
+        })";
+    }
+
+    MapModel loaded;
+    ASSERT_NO_THROW(loaded.load(QString::fromStdString(tmpPath.string())));
+
+    int cyclopeanTotal = 0;
+    loaded.layer(LayerTypes::CyclopeanLandscape)->iterate([&cyclopeanTotal](GameObject&) { ++cyclopeanTotal; });
+    EXPECT_EQ(cyclopeanTotal, 0);
+
+    const std::filesystem::path outPath =
+        std::filesystem::temp_directory_path() / "map_authoring_legacy_cyclopean_out_test.json";
+    ASSERT_NO_THROW(loaded.save(QString::fromStdString(outPath.string())));
+
+    std::filesystem::remove(tmpPath);
+    std::filesystem::remove(outPath);
+}
+
 TEST(MapAuthoringTest, LoadLegacyMapWithoutCliffLayer)
 {
     // Maps saved before the CliffLandscape layer existed have no such key;

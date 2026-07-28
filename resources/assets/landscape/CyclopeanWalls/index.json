@@ -1,0 +1,18 @@
+{
+    "cyclopean3d": {
+        "cornerBevel": 0.30000001192092896,
+        "raisedHeight": 3.0,
+        "rockAmplitude": 0.2800000011920929,
+        "rockEnabled": true,
+        "rockSeed": 1337,
+        "thumbnail": "thumbnail.png",
+        "wallSubdivH": 16,
+        "wallSubdivV": 16
+    },
+    "layerType": "CyclopeanLandscape",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "uuid": "8d1f5b3c-4a7e-5f2b-0c9d-6e3a1f2b7c4e"
+}

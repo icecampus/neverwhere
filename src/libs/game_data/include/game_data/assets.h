@@ -102,6 +102,20 @@ struct Cliff3dAssetData {
     Cliff3dShadingData shading;
 };
 
+// Cyclopean3D assets — landscape_mesh solid-mask composer params (Cyclopean
+// wall style; mirror of BaseData::Cyclopean3dAssetData). No atlas; tiles on
+// the CyclopeanLandscape layer encode the vertex nodes.
+struct Cyclopean3dAssetData {
+    std::string thumbnail; // optional preview
+    float raisedHeight = 3.0f; // plateau top height in world units (topHeight)
+    int rockSeed = 1337;
+    float rockAmplitude = 0.28f;
+    bool rockEnabled = true;
+    float cornerBevel = 0.3f;
+    int wallSubdivH = 16;
+    int wallSubdivV = 16;
+};
+
 struct AssetData {
     std::filesystem::path indexPath;
     std::string uuid;
@@ -112,6 +126,7 @@ struct AssetData {
     std::optional<ImageAssetData> image;
     std::optional<Shape3dAssetData> shape3d;
     std::optional<Cliff3dAssetData> cliff3d;
+    std::optional<Cyclopean3dAssetData> cyclopean3d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -187,6 +202,17 @@ inline void from_json(const nlohmann::json& j, Cliff3dAssetData& d) {
     if (j.contains("shading")) d.shading = j["shading"].get<Cliff3dShadingData>();
 }
 
+inline void from_json(const nlohmann::json& j, Cyclopean3dAssetData& d) {
+    if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+    if (j.contains("rockSeed")) j.at("rockSeed").get_to(d.rockSeed);
+    if (j.contains("rockAmplitude")) j.at("rockAmplitude").get_to(d.rockAmplitude);
+    if (j.contains("rockEnabled")) j.at("rockEnabled").get_to(d.rockEnabled);
+    if (j.contains("cornerBevel")) j.at("cornerBevel").get_to(d.cornerBevel);
+    if (j.contains("wallSubdivH")) j.at("wallSubdivH").get_to(d.wallSubdivH);
+    if (j.contains("wallSubdivV")) j.at("wallSubdivV").get_to(d.wallSubdivV);
+}
+
 inline void from_json(const nlohmann::json& j, AssetData& a) {
     j.at("uuid").get_to(a.uuid);
     // pivot may be omitted in older assets; default (0,0)
@@ -203,6 +229,7 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     else if (layerStr == "GameplayInteractive") a.layerType = LayerType::GameplayInteractive;
     else if (layerStr == "RaisedLandscape") a.layerType = LayerType::RaisedLandscape;
     else if (layerStr == "CliffLandscape") a.layerType = LayerType::CliffLandscape;
+    else if (layerStr == "CyclopeanLandscape") a.layerType = LayerType::CyclopeanLandscape;
 
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
@@ -218,6 +245,10 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("cliff3d") && !j["cliff3d"].is_null()) {
         a.cliff3d = j["cliff3d"].get<Cliff3dAssetData>();
+    }
+
+    if (j.contains("cyclopean3d") && !j["cyclopean3d"].is_null()) {
+        a.cyclopean3d = j["cyclopean3d"].get<Cyclopean3dAssetData>();
     }
 }
 
@@ -248,10 +279,16 @@ struct AssetIndexEntry {
     bool cliff3d = false;
     Cliff3dAssetData cliff;
 
+    // Cyclopean3D (landscape_mesh) assets — solid-mask plateau with Cyclopean
+    // walls, no atlas.
+    bool cyclopean3d = false;
+    Cyclopean3dAssetData cyclopean;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
     bool isShape3d() const { return shape3d; }
     bool isCliff3d() const { return cliff3d; }
+    bool isCyclopean3d() const { return cyclopean3d; }
 };
 
 struct AssetIndex {

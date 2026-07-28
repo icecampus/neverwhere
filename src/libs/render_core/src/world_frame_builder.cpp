@@ -10,6 +10,7 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     outFrame.landscapeTiles.clear();
     outFrame.raisedTiles.clear();
     outFrame.cliffTiles.clear();
+    outFrame.cyclopeanTiles.clear();
     outFrame.sprites.clear();
 
     for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
@@ -45,6 +46,19 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
         t.assetUuid = obj.assetUuid;
         t.tileIndex = obj.landscapeData->tileIndex;
         outFrame.cliffTiles.push_back(std::move(t));
+    }
+
+    // CyclopeanLandscape layer -> cyclopean tiles (Cyclopean3d assets,
+    // landscape_mesh plateau with Cyclopean walls).
+    for (const auto& obj : map.layer(game_data::LayerType::CyclopeanLandscape)) {
+        if (obj.type != game_data::GameObjectType::Landscape) continue;
+        if (!obj.landscapeData) continue;
+
+        LandscapeTile t;
+        t.cell = obj.position;
+        t.assetUuid = obj.assetUuid;
+        t.tileIndex = obj.landscapeData->tileIndex;
+        outFrame.cyclopeanTiles.push_back(std::move(t));
     }
 
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
@@ -115,11 +129,25 @@ static CliffParams cliffParamsFromAssetData(const game_data::Cliff3dAssetData& d
     return params;
 }
 
+// game_data -> render_core parameter conversion for cyclopean3d assets.
+static CyclopeanParams cyclopeanParamsFromAssetData(const game_data::Cyclopean3dAssetData& d) {
+    CyclopeanParams params;
+    params.raisedHeight = d.raisedHeight;
+    params.rockSeed = d.rockSeed;
+    params.rockAmplitude = d.rockAmplitude;
+    params.rockEnabled = d.rockEnabled;
+    params.cornerBevel = d.cornerBevel;
+    params.wallSubdivH = d.wallSubdivH;
+    params.wallSubdivV = d.wallSubdivV;
+    return params;
+}
+
 void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame& frame, WorldRenderer& renderer) {
     std::unordered_set<std::string> uniqueAssets;
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.raisedTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cliffTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -142,6 +170,9 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
             CliffParams params = cliffParamsFromAssetData(entry->cliff);
             params.topTexturePath = entry->topTexturePath;
             renderer.ensureCliffAsset(uuid, params);
+        }
+        if (entry->isCyclopean3d()) {
+            renderer.ensureCyclopeanAsset(uuid, cyclopeanParamsFromAssetData(entry->cyclopean));
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);

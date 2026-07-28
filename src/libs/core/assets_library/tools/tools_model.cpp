@@ -7,6 +7,7 @@
 #include "landscape/landscape_pencil.h"
 #include "landscape/shape3d_pencil.h"
 #include "landscape/cliff_pencil.h"
+#include "landscape/cyclopean_pencil.h"
 
 
 //AssetToolsModel
@@ -66,6 +67,9 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
 
     assetType2ToolsModel[AssetTypes::cliff3d].reset(new AssetToolsModel(this));
     assetType2ToolsModel[AssetTypes::cliff3d]->addElement<CliffPencil>(this);
+
+    assetType2ToolsModel[AssetTypes::cyclopean3d].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::cyclopean3d]->addElement<CyclopeanPencil>(this);
 
 }
 
