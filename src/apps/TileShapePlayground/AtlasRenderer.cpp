@@ -65,116 +65,11 @@ void main() {
 }
 )";
 
-// Z-buffered raised pass: pos.z is the normalized depth baked CPU-side from
-// highground::Vertex::groundY (field y before the lift; monotonic along the
-// iso view ray). Same fragment shaders as the painter pipelines.
-static const char* kDepthTexVsGlsl = R"(
-#version 330
-layout(location=0) in vec3 pos;
-layout(location=1) in vec2 uv;
-out vec2 v_uv;
-uniform vec2 view_size;
-uniform vec2 camera_offset;
-uniform float camera_zoom;
-void main() {
-    vec2 screen = (pos.xy * camera_zoom) + camera_offset;
-    vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
-    gl_Position = vec4(clip, pos.z, 1.0);
-    v_uv = uv;
-}
-)";
-
-static const char* kDepthColorVsGlsl = R"(
-#version 330
-layout(location=0) in vec3 pos;
-layout(location=1) in vec4 color;
-out vec4 v_color;
-uniform vec2 view_size;
-uniform vec2 camera_offset;
-uniform float camera_zoom;
-void main() {
-    vec2 screen = (pos.xy * camera_zoom) + camera_offset;
-    vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
-    gl_Position = vec4(clip, pos.z, 1.0);
-    v_color = color;
-}
-)";
-
-// Triplanar walls: tcoord = undeformed map coordinates in world px + lift;
-// the fragment shader blends the (mapY,lift) and (mapX,lift) projections of
-// a tiling rock texture by the contour normal — no UVs, no seams.
-static const char* kTriWallVsGlsl = R"(
-#version 330
-layout(location=0) in vec2 pos;
-layout(location=1) in vec4 color;
-layout(location=2) in vec3 tcoord;
-layout(location=3) in vec2 normal;
-out vec4 v_color;
-out vec2 v_uv1;
-out vec2 v_uv2;
-out vec2 v_normal;
-uniform vec2 view_size;
-uniform vec2 camera_offset;
-uniform float camera_zoom;
-uniform float tex_scale;
-void main() {
-    vec2 screen = (pos * camera_zoom) + camera_offset;
-    vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
-    gl_Position = vec4(clip, 0.0, 1.0);
-    v_color = color;
-    v_uv1 = tcoord.yz * tex_scale;
-    v_uv2 = tcoord.xz * tex_scale;
-    v_normal = normal;
-}
-)";
-
-static const char* kTriDepthWallVsGlsl = R"(
-#version 330
-layout(location=0) in vec3 pos;
-layout(location=1) in vec4 color;
-layout(location=2) in vec3 tcoord;
-layout(location=3) in vec2 normal;
-out vec4 v_color;
-out vec2 v_uv1;
-out vec2 v_uv2;
-out vec2 v_normal;
-uniform vec2 view_size;
-uniform vec2 camera_offset;
-uniform float camera_zoom;
-uniform float tex_scale;
-void main() {
-    vec2 screen = (pos.xy * camera_zoom) + camera_offset;
-    vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
-    gl_Position = vec4(clip, pos.z, 1.0);
-    v_color = color;
-    v_uv1 = tcoord.yz * tex_scale;
-    v_uv2 = tcoord.xz * tex_scale;
-    v_normal = normal;
-}
-)";
-
-static const char* kTriWallFsGlsl = R"(
-#version 330
-in vec4 v_color;
-in vec2 v_uv1;
-in vec2 v_uv2;
-in vec2 v_normal;
-out vec4 frag_color;
-uniform sampler2D wall_tex;
-void main() {
-    vec2 w = abs(v_normal);
-    float wsum = max(w.x + w.y, 1e-5);
-    vec4 c = (w.x * texture(wall_tex, v_uv1) + w.y * texture(wall_tex, v_uv2)) / wsum;
-    frag_color = c * v_color;
-}
-)";
-
 static const char* kTexVsHlsl = R"(
 cbuffer vs_params: register(b0) {
     float2 view_size;
     float2 camera_offset;
     float camera_zoom;
-    float3 _pad0;
 };
 struct VSIn {
     float2 pos: TEXCOORD0;
@@ -215,7 +110,6 @@ cbuffer vs_params: register(b0) {
     float2 view_size;
     float2 camera_offset;
     float camera_zoom;
-    float3 _pad0;
 };
 struct VSIn {
     float2 pos: TEXCOORD0;
@@ -247,154 +141,8 @@ float4 main(PSIn inp): SV_Target {
 }
 )";
 
-static const char* kDepthTexVsHlsl = R"(
-cbuffer vs_params: register(b0) {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    float3 _pad0;
-};
-struct VSIn {
-    float3 pos: TEXCOORD0;
-    float2 uv: TEXCOORD1;
-};
-struct VSOut {
-    float4 pos: SV_Position;
-    float2 uv: TEXCOORD0;
-};
-VSOut main(VSIn inp) {
-    VSOut o;
-    float2 screen = (inp.pos.xy * camera_zoom) + camera_offset;
-    float2 clip;
-    clip.x = (screen.x / view_size.x) * 2.0 - 1.0;
-    clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
-    o.pos = float4(clip, inp.pos.z, 1.0);
-    o.uv = inp.uv;
-    return o;
-}
-)";
-
-static const char* kDepthColorVsHlsl = R"(
-cbuffer vs_params: register(b0) {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    float3 _pad0;
-};
-struct VSIn {
-    float3 pos: TEXCOORD0;
-    float4 color: TEXCOORD1;
-};
-struct VSOut {
-    float4 pos: SV_Position;
-    float4 color: TEXCOORD0;
-};
-VSOut main(VSIn inp) {
-    VSOut o;
-    float2 screen = (inp.pos.xy * camera_zoom) + camera_offset;
-    float2 clip;
-    clip.x = (screen.x / view_size.x) * 2.0 - 1.0;
-    clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
-    o.pos = float4(clip, inp.pos.z, 1.0);
-    o.color = inp.color;
-    return o;
-}
-)";
-
-static const char* kTriWallVsHlsl = R"(
-cbuffer vs_params: register(b0) {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    float tex_scale;
-    float2 _pad0;
-};
-struct VSIn {
-    float2 pos: TEXCOORD0;
-    float4 color: TEXCOORD1;
-    float3 tcoord: TEXCOORD2;
-    float2 normal: TEXCOORD3;
-};
-struct VSOut {
-    float4 pos: SV_Position;
-    float4 color: TEXCOORD0;
-    float2 uv1: TEXCOORD1;
-    float2 uv2: TEXCOORD2;
-    float2 normal: TEXCOORD3;
-};
-VSOut main(VSIn inp) {
-    VSOut o;
-    float2 screen = (inp.pos * camera_zoom) + camera_offset;
-    float2 clip;
-    clip.x = (screen.x / view_size.x) * 2.0 - 1.0;
-    clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
-    o.pos = float4(clip, 0.0, 1.0);
-    o.color = inp.color;
-    o.uv1 = inp.tcoord.yz * tex_scale;
-    o.uv2 = inp.tcoord.xz * tex_scale;
-    o.normal = inp.normal;
-    return o;
-}
-)";
-
-static const char* kTriDepthWallVsHlsl = R"(
-cbuffer vs_params: register(b0) {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    float tex_scale;
-    float2 _pad0;
-};
-struct VSIn {
-    float3 pos: TEXCOORD0;
-    float4 color: TEXCOORD1;
-    float3 tcoord: TEXCOORD2;
-    float2 normal: TEXCOORD3;
-};
-struct VSOut {
-    float4 pos: SV_Position;
-    float4 color: TEXCOORD0;
-    float2 uv1: TEXCOORD1;
-    float2 uv2: TEXCOORD2;
-    float2 normal: TEXCOORD3;
-};
-VSOut main(VSIn inp) {
-    VSOut o;
-    float2 screen = (inp.pos.xy * camera_zoom) + camera_offset;
-    float2 clip;
-    clip.x = (screen.x / view_size.x) * 2.0 - 1.0;
-    clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
-    o.pos = float4(clip, inp.pos.z, 1.0);
-    o.color = inp.color;
-    o.uv1 = inp.tcoord.yz * tex_scale;
-    o.uv2 = inp.tcoord.xz * tex_scale;
-    o.normal = inp.normal;
-    return o;
-}
-)";
-
-static const char* kTriWallFsHlsl = R"(
-Texture2D wall_tex: register(t0);
-SamplerState smp: register(s0);
-struct PSIn {
-    float4 pos: SV_Position;
-    float4 color: TEXCOORD0;
-    float2 uv1: TEXCOORD1;
-    float2 uv2: TEXCOORD2;
-    float2 normal: TEXCOORD3;
-};
-float4 main(PSIn inp): SV_Target {
-    float2 w = abs(inp.normal);
-    float wsum = max(w.x + w.y, 1e-5);
-    float4 c = (w.x * wall_tex.Sample(smp, inp.uv1) + w.y * wall_tex.Sample(smp, inp.uv2)) / wsum;
-    return c * inp.color;
-}
-)";
-
 // MSL shaders (Metal backend, macOS). Entry point "_main" is sokol's default
-// for Metal; vertex attributes map by index ([[attribute(N)]]). VsParams field
-// layout must match the C++ struct — packed_float3 keeps the tail padding at
-// 12 bytes (32 bytes total), float3 would align to 16 and break the layout.
+// for Metal; vertex attributes map by index ([[attribute(N)]]).
 static const char* kTexVsMsl = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -403,7 +151,6 @@ struct VsParams {
     float2 view_size;
     float2 camera_offset;
     float camera_zoom;
-    packed_float3 _pad0;
 };
 
 struct VSIn {
@@ -457,7 +204,6 @@ struct VsParams {
     float2 view_size;
     float2 camera_offset;
     float camera_zoom;
-    packed_float3 _pad0;
 };
 
 struct VSIn {
@@ -494,182 +240,6 @@ struct PSIn {
 
 fragment float4 _main(PSIn in [[stage_in]]) {
     return in.color;
-}
-)";
-
-static const char* kDepthTexVsMsl = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct VsParams {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    packed_float3 _pad0;
-};
-
-struct VSIn {
-    float3 pos [[attribute(0)]];
-    float2 uv [[attribute(1)]];
-};
-
-struct VSOut {
-    float4 pos [[position]];
-    float2 uv;
-};
-
-vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
-    VSOut o;
-    float2 screen = (in.pos.xy * params.camera_zoom) + params.camera_offset;
-    float2 clip = float2(
-        (screen.x / params.view_size.x) * 2.0 - 1.0,
-        1.0 - (screen.y / params.view_size.y) * 2.0
-    );
-    o.pos = float4(clip, in.pos.z, 1.0);
-    o.uv = in.uv;
-    return o;
-}
-)";
-
-static const char* kDepthColorVsMsl = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct VsParams {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    packed_float3 _pad0;
-};
-
-struct VSIn {
-    float3 pos [[attribute(0)]];
-    float4 color [[attribute(1)]];
-};
-
-struct VSOut {
-    float4 pos [[position]];
-    float4 color;
-};
-
-vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
-    VSOut o;
-    float2 screen = (in.pos.xy * params.camera_zoom) + params.camera_offset;
-    float2 clip = float2(
-        (screen.x / params.view_size.x) * 2.0 - 1.0,
-        1.0 - (screen.y / params.view_size.y) * 2.0
-    );
-    o.pos = float4(clip, in.pos.z, 1.0);
-    o.color = in.color;
-    return o;
-}
-)";
-
-static const char* kTriWallVsMsl = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct VsParams {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    float tex_scale;
-    packed_float2 _pad0;
-};
-
-struct VSIn {
-    float2 pos [[attribute(0)]];
-    float4 color [[attribute(1)]];
-    float3 tcoord [[attribute(2)]];
-    float2 normal [[attribute(3)]];
-};
-
-struct VSOut {
-    float4 pos [[position]];
-    float4 color;
-    float2 uv1;
-    float2 uv2;
-    float2 normal;
-};
-
-vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
-    VSOut o;
-    float2 screen = (in.pos * params.camera_zoom) + params.camera_offset;
-    float2 clip = float2(
-        (screen.x / params.view_size.x) * 2.0 - 1.0,
-        1.0 - (screen.y / params.view_size.y) * 2.0
-    );
-    o.pos = float4(clip, 0.0, 1.0);
-    o.color = in.color;
-    o.uv1 = in.tcoord.yz * params.tex_scale;
-    o.uv2 = in.tcoord.xz * params.tex_scale;
-    o.normal = in.normal;
-    return o;
-}
-)";
-
-static const char* kTriDepthWallVsMsl = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct VsParams {
-    float2 view_size;
-    float2 camera_offset;
-    float camera_zoom;
-    float tex_scale;
-    packed_float2 _pad0;
-};
-
-struct VSIn {
-    float3 pos [[attribute(0)]];
-    float4 color [[attribute(1)]];
-    float3 tcoord [[attribute(2)]];
-    float2 normal [[attribute(3)]];
-};
-
-struct VSOut {
-    float4 pos [[position]];
-    float4 color;
-    float2 uv1;
-    float2 uv2;
-    float2 normal;
-};
-
-vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
-    VSOut o;
-    float2 screen = (in.pos.xy * params.camera_zoom) + params.camera_offset;
-    float2 clip = float2(
-        (screen.x / params.view_size.x) * 2.0 - 1.0,
-        1.0 - (screen.y / params.view_size.y) * 2.0
-    );
-    o.pos = float4(clip, in.pos.z, 1.0);
-    o.color = in.color;
-    o.uv1 = in.tcoord.yz * params.tex_scale;
-    o.uv2 = in.tcoord.xz * params.tex_scale;
-    o.normal = in.normal;
-    return o;
-}
-)";
-
-static const char* kTriWallFsMsl = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct PSIn {
-    float4 pos [[position]];
-    float4 color;
-    float2 uv1;
-    float2 uv2;
-    float2 normal;
-};
-
-fragment float4 _main(PSIn in [[stage_in]],
-                      texture2d<float> wall_tex [[texture(0)]],
-                      sampler smp [[sampler(0)]]) {
-    float2 w = abs(in.normal);
-    float wsum = max(w.x + w.y, 1e-5);
-    float4 c = (w.x * wall_tex.sample(smp, in.uv1) + w.y * wall_tex.sample(smp, in.uv2)) / wsum;
-    return c * in.color;
 }
 )";
 
@@ -752,14 +322,14 @@ float noisefv2(vec2 p) {
     vec2 ip = floor(p);
     vec2 fp = fract(p);
     fp = fp * fp * (3.0 - 2.0 * fp);
-    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(0.0, 1.0)), fp.y);
+    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(1.0, 0.0)), fp.y);
     return mix(t.x, t.y, fp.x);
 }
 
 float fbm2(vec2 p) {
     float f = 0.0;
     float a = 1.0;
-    for (int j = 0; j < 5; j++) {
+    for (int j = 0; j < 5; ++j) {
         f += a * noisefv2(p);
         a *= 0.5;
         p *= 2.0;
@@ -797,7 +367,6 @@ cbuffer vs_params: register(b0) {
     float2 view_size;
     float2 camera_offset;
     float camera_zoom;
-    float3 _pad0;
 };
 struct VSIn {
     float3 pos: TEXCOORD0;
@@ -864,14 +433,14 @@ float fbm3(float3 p) {
 
 float2 hashv2v2(float2 p) {
     float2 chash = float2(37.0, 39.0);
-    return frac(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+    return frac(sin(float2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
 }
 
 float noisefv2(float2 p) {
     float2 ip = floor(p);
     float2 fp = frac(p);
     fp = fp * fp * (3.0 - 2.0 * fp);
-    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(0.0, 1.0)), fp.y);
+    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
     return lerp(t.x, t.y, fp.x);
 }
 
@@ -926,7 +495,6 @@ struct VsParams {
     float2 view_size;
     float2 camera_offset;
     float camera_zoom;
-    packed_float3 _pad0;
 };
 
 struct VSIn {
@@ -1000,14 +568,14 @@ float fbm3(float3 p) {
 
 float2 hashv2v2(float2 p) {
     float2 chash = float2(37.0, 39.0);
-    return fract(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+    return fract(sin(float2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
 }
 
 float noisefv2(float2 p) {
     float2 ip = floor(p);
     float2 fp = fract(p);
     fp = fp * fp * (3.0 - 2.0 * fp);
-    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(0.0, 1.0)), fp.y);
+    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
     return mix(t.x, t.y, fp.x);
 }
 
@@ -1069,14 +637,6 @@ void fillVsUniformDesc(sg_shader_uniform_block* block) {
     block->glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
 }
 
-// Same block with the triplanar scale exposed (the triplanar wall shaders
-// declare tex_scale; the other pipelines simply ignore those bytes).
-void fillTriVsUniformDesc(sg_shader_uniform_block* block) {
-    fillVsUniformDesc(block);
-    block->glsl_uniforms[3].glsl_name = "tex_scale";
-    block->glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT;
-}
-
 // Cliff fragment block (palette/light): slot 1, after the vertex block.
 void fillCliffFsUniformDesc(sg_shader_uniform_block* block) {
     block->stage = SG_SHADERSTAGE_FRAGMENT;
@@ -1091,28 +651,6 @@ void fillCliffFsUniformDesc(sg_shader_uniform_block* block) {
         block->glsl_uniforms[i].glsl_name = names[i];
         block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
     }
-}
-
-void fillTextureSlotDesc(sg_shader_desc* shd, const char* glslName) {
-    shd->views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
-    shd->views[0].texture.image_type = SG_IMAGETYPE_2D;
-    shd->views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
-    shd->views[0].texture.hlsl_register_t_n = 0;
-    shd->views[0].texture.msl_texture_n = 0;
-    shd->views[0].texture.wgsl_group1_binding_n = 0;
-    shd->views[0].texture.spirv_set1_binding_n = 0;
-
-    shd->samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
-    shd->samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
-    shd->samplers[0].hlsl_register_s_n = 0;
-    shd->samplers[0].msl_sampler_n = 0;
-    shd->samplers[0].wgsl_group1_binding_n = 1;
-    shd->samplers[0].spirv_set1_binding_n = 1;
-
-    shd->texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
-    shd->texture_sampler_pairs[0].view_slot = 0;
-    shd->texture_sampler_pairs[0].sampler_slot = 0;
-    shd->texture_sampler_pairs[0].glsl_name = glslName;
 }
 
 } // namespace
@@ -1132,31 +670,6 @@ void AtlasRenderer::init() {
     colorBuf.label = "tileshape-color-vbuf";
     m_colorVbuf = sg_make_buffer(&colorBuf);
 
-    // Separate streams for the z-buffered raised pass: sokol allows only one
-    // sg_update_buffer per buffer per frame and the vertex strides differ
-    // from the painter streams anyway.
-    sg_buffer_desc depthTexBuf = {};
-    depthTexBuf.size = 6 * 65536 * sizeof(DepthTexVertex);
-    depthTexBuf.usage.dynamic_update = true;
-    depthTexBuf.label = "tileshape-depth-tex-vbuf";
-    m_depthTexVbuf = sg_make_buffer(&depthTexBuf);
-
-    sg_buffer_desc depthColorBuf = {};
-    depthColorBuf.size = 8 * 65536 * sizeof(DepthColorVertex);
-    depthColorBuf.usage.dynamic_update = true;
-    depthColorBuf.label = "tileshape-depth-color-vbuf";
-    m_depthColorVbuf = sg_make_buffer(&depthColorBuf);
-
-    // Triplanar painter walls get their own stream (the color buffer mixes
-    // painter walls with the grid lines; the z-buffered triplanar walls reuse
-    // m_depthColorVbuf — plain byte storage, the modes are mutually
-    // exclusive per frame).
-    sg_buffer_desc triWallBuf = {};
-    triWallBuf.size = 8 * 65536 * sizeof(TriWallVertex);
-    triWallBuf.usage.dynamic_update = true;
-    triWallBuf.label = "tileshape-tri-wall-vbuf";
-    m_triWallVbuf = sg_make_buffer(&triWallBuf);
-
     sg_sampler_desc smp = {};
     smp.min_filter = SG_FILTER_LINEAR;
     smp.mag_filter = SG_FILTER_LINEAR;
@@ -1164,15 +677,6 @@ void AtlasRenderer::init() {
     smp.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
     smp.label = "tileshape-atlas-smp";
     m_sampler = sg_make_sampler(&smp);
-
-    // Tiled ground texture of the raised top: world-UVs outside [0,1].
-    sg_sampler_desc topSmp = {};
-    topSmp.min_filter = SG_FILTER_LINEAR;
-    topSmp.mag_filter = SG_FILTER_LINEAR;
-    topSmp.wrap_u = SG_WRAP_REPEAT;
-    topSmp.wrap_v = SG_WRAP_REPEAT;
-    topSmp.label = "tileshape-top-smp";
-    m_topSampler = sg_make_sampler(&topSmp);
 
     m_ready = true;
 }
@@ -1186,13 +690,6 @@ void AtlasRenderer::shutdown() {
         }
     }
     m_cliffCaches.clear();
-    for (WallMeshCache& cache : m_wallMeshCaches) {
-        if (cache.vbuf.id != SG_INVALID_ID) {
-            sg_destroy_buffer(cache.vbuf);
-            cache.vbuf = {};
-        }
-    }
-    m_wallMeshCaches.clear();
     if (m_texVbuf.id != SG_INVALID_ID) {
         sg_destroy_buffer(m_texVbuf);
         m_texVbuf = {};
@@ -1201,31 +698,12 @@ void AtlasRenderer::shutdown() {
         sg_destroy_buffer(m_colorVbuf);
         m_colorVbuf = {};
     }
-    if (m_depthTexVbuf.id != SG_INVALID_ID) {
-        sg_destroy_buffer(m_depthTexVbuf);
-        m_depthTexVbuf = {};
-    }
-    if (m_depthColorVbuf.id != SG_INVALID_ID) {
-        sg_destroy_buffer(m_depthColorVbuf);
-        m_depthColorVbuf = {};
-    }
-    if (m_triWallVbuf.id != SG_INVALID_ID) {
-        sg_destroy_buffer(m_triWallVbuf);
-        m_triWallVbuf = {};
-    }
     if (m_sampler.id != SG_INVALID_ID) {
         sg_destroy_sampler(m_sampler);
         m_sampler = {};
     }
-    if (m_topSampler.id != SG_INVALID_ID) {
-        sg_destroy_sampler(m_topSampler);
-        m_topSampler = {};
-    }
     destroySlot(m_slots[0]);
     destroySlot(m_slots[1]);
-    destroySlot(m_topSlots[0]);
-    destroySlot(m_topSlots[1]);
-    destroySlot(m_wallTexSlot);
     m_ready = false;
 }
 
@@ -1325,55 +803,6 @@ bool AtlasRenderer::loadAtlasFromRgba(
     return ok;
 }
 
-bool AtlasRenderer::loadTopTextureFromFile(AtlasKind kind, const std::string& path) {
-    int w = 0, h = 0, comp = 0;
-    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
-    if (!pixels || w <= 0 || h <= 0) {
-        spdlog::error("AtlasRenderer: failed to load top texture '{}': {}", path, stbi_failure_reason());
-        if (pixels) {
-            stbi_image_free(pixels);
-        }
-        return false;
-    }
-
-    const bool ok = uploadSlot(m_topSlots[static_cast<int>(kind)], pixels, w, h, "raised-top-tex");
-    stbi_image_free(pixels);
-    if (ok) {
-        spdlog::info("AtlasRenderer: loaded raised-top texture {} into slot {} ({}x{})",
-            path,
-            static_cast<int>(kind),
-            w,
-            h);
-    }
-    return ok;
-}
-
-bool AtlasRenderer::loadTopTextureFromRgba(AtlasKind kind, const std::uint8_t* rgba, int width, int height) {
-    if (!rgba || width <= 0 || height <= 0) {
-        return false;
-    }
-    return uploadSlot(m_topSlots[static_cast<int>(kind)], rgba, width, height, "raised-top-rgba");
-}
-
-bool AtlasRenderer::loadWallTextureFromFile(const std::string& path) {
-    int w = 0, h = 0, comp = 0;
-    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
-    if (!pixels || w <= 0 || h <= 0) {
-        spdlog::warn("AtlasRenderer: failed to load wall texture '{}': {}", path, stbi_failure_reason());
-        if (pixels) {
-            stbi_image_free(pixels);
-        }
-        return false;
-    }
-
-    const bool ok = uploadSlot(m_wallTexSlot, pixels, w, h, "wall-rock-tex");
-    stbi_image_free(pixels);
-    if (ok) {
-        spdlog::info("AtlasRenderer: loaded wall texture {} ({}x{})", path, w, h);
-    }
-    return ok;
-}
-
 glm::vec4 AtlasRenderer::atlasUvRect(int tileIndex) const {
     if (tileIndex < 0) {
         return {};
@@ -1440,16 +869,15 @@ void AtlasRenderer::appendNodeMarker(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 node,
-    glm::vec4 color,
-    float yOffset) {
+    glm::vec4 color) {
 
     const glm::vec2 p = iso.nodeToField(node);
     const float s = 6.0f;
     const glm::vec2 pts[4] = {
-        {p.x - s, p.y + yOffset},
-        {p.x, p.y - s * 0.5f + yOffset},
-        {p.x + s, p.y + yOffset},
-        {p.x, p.y + s * 0.5f + yOffset},
+        {p.x - s, p.y},
+        {p.x, p.y - s * 0.5f},
+        {p.x + s, p.y},
+        {p.x, p.y + s * 0.5f},
     };
     for (int i = 0; i < 4; ++i) {
         out.push_back({pts[i].x, pts[i].y, color.r, color.g, color.b, color.a});
@@ -1466,10 +894,6 @@ void AtlasRenderer::render(
     int viewH,
     glm::ivec2 hoverNode,
     bool hasHover,
-    bool hoverRaised,
-    const highground::Params* raisedParams,
-    bool triplanarWalls,
-    float wallTexScale,
     const CliffFsParams* cliffShading,
     double nowSec) {
 
@@ -1502,12 +926,9 @@ void AtlasRenderer::render(
     std::vector<TexVertex> texVerts;
     texVerts.reserve(static_cast<std::size_t>(mapW * mapH * 6 * layerCount));
 
-    std::vector<ColorVertex> wallVerts;
-    wallVerts.reserve(static_cast<std::size_t>(mapW * mapH * 12));
-
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
-        if (!layer.brush || layer.raised) {
+        if (!layer.brush || layer.cliff) {
             continue;
         }
         TexRange range;
@@ -1530,251 +951,14 @@ void AtlasRenderer::render(
         }
     }
 
-    // Raised layers: geometry from highground_core (walls + top surface from
-    // the vertex-node grid). Painter mode: primitives arrive depth-sorted
-    // (walls and tops interleaved) and are emitted as batches that switch
-    // pipeline/texture only on change. Z-buffer mode (layer.zbuf): the lib
-    // sort is skipped and vertices carry a normalized depth baked from
-    // Vertex::groundY, so batches merge by texture only. The top surface is
-    // textured with the tiled ground texture matching the layer's atlas kind.
-    struct RaisedBatch {
-        bool wall = false;
-        int base = 0;
-        int count = 0;
-        AtlasKind atlas = AtlasKind::Grass;
-        bool depth = false; // draw from the depth streams with the z-buffer pipelines
-        bool tri = false;   // triplanar wall batch (rock texture, world-space UVs)
-    };
-    std::vector<RaisedBatch> raisedBatches;
-
     // Normalized depth along the iso view ray, anchored at the visible
     // ground-y center with generous margins (monotonicity is what matters;
     // the real scene stays far from the clip planes). Ground-y grows TOWARD
-    // the viewer (the painter draws larger ground-y last), so with LESS_EQUAL
-    // + clear 1.0 the closer fragment must map to the SMALLER z.
+    // the viewer, so with LESS_EQUAL + clear 1.0 the closer fragment must map
+    // to the SMALLER z.
     const float groundCenterY = camera.screenToWorld({viewW * 0.5f, viewH * 0.5f}).y;
     const float zFar = groundCenterY + 100000.0f;
     const float zScale = 1.0f / 200000.0f;
-
-    // Triplanar wall texture space: recover the undeformed map coordinates
-    // from the field position (inverse of mapToFieldPx) and scale to world
-    // px; the iso cell diagonals have equal length on both map axes.
-    const float halfW = iso.dims.cellWidth * 0.5f;
-    const float halfH = iso.dims.cellSize().y * 0.5f;
-    const float mapDiagPx = std::sqrt(halfW * halfW + halfH * halfH);
-    const bool tri = triplanarWalls && m_wallTexSlot.view.id != SG_INVALID_ID &&
-        m_triWallPip.id != SG_INVALID_ID && m_triDepthWallPip.id != SG_INVALID_ID;
-
-    std::vector<DepthTexVertex> depthTexVerts;
-    std::vector<DepthColorVertex> depthWallVerts;
-    std::vector<TriWallVertex> triWallVerts;
-    std::vector<TriDepthWallVertex> triDepthWallVerts;
-
-    const auto pushWallVertex = [&](const highground::Vertex& v, bool depthMode) {
-        if (tri) {
-            const float sx = (v.pos.x - halfW) / halfW; // map x - map y
-            const float sy = v.pos.y / halfH;           // map x + map y
-            const float tx = (sy + sx) * 0.5f * mapDiagPx;
-            const float ty = (sy - sx) * 0.5f * mapDiagPx;
-            const float lift = v.groundY - v.pos.y;
-            if (depthMode) {
-                const float z = (zFar - v.groundY) * zScale;
-                triDepthWallVerts.push_back(
-                    {v.pos.x, v.pos.y, z, v.color.r, v.color.g, v.color.b, v.color.a, tx, ty, lift, v.normal.x, v.normal.y});
-            } else {
-                triWallVerts.push_back(
-                    {v.pos.x, v.pos.y, v.color.r, v.color.g, v.color.b, v.color.a, tx, ty, lift, v.normal.x, v.normal.y});
-            }
-        } else if (depthMode) {
-            const float z = (zFar - v.groundY) * zScale;
-            depthWallVerts.push_back({v.pos.x, v.pos.y, z, v.color.r, v.color.g, v.color.b, v.color.a});
-        } else {
-            wallVerts.push_back({v.pos.x, v.pos.y, v.color.r, v.color.g, v.color.b, v.color.a});
-        }
-    };
-
-    // Current size of the wall stream for the given mode (for batch bases).
-    const auto wallStreamSize = [&](bool depthMode) -> int {
-        if (tri) {
-            return static_cast<int>(depthMode ? triDepthWallVerts.size() : triWallVerts.size());
-        }
-        return static_cast<int>(depthMode ? depthWallVerts.size() : wallVerts.size());
-    };
-
-    for (int li = 0; li < layerCount; ++li) {
-        const PaintLayerView& layer = layers[li];
-        if (!layer.brush || !layer.raised) {
-            continue;
-        }
-
-        std::vector<glm::ivec2> onNodes;
-        for (const auto& [z, cell] : drawOrder) {
-            (void)z;
-            const auto mask = layer.brush->nodeMaskAt(cell);
-            const auto corners = topology_core::DiamondIsometry::cellCornerNodes(cell);
-            for (int i = 0; i < 4; ++i) {
-                if (mask[i]) {
-                    onNodes.push_back(corners[i]);
-                }
-            }
-        }
-        if (onNodes.empty()) {
-            continue;
-        }
-
-        const bool zbuf = layer.zbuf;
-        highground::Params gp = raisedParams ? *raisedParams : highground::Params{};
-        gp.sortPrimitives = !zbuf; // the GPU depth buffer resolves ordering
-        const highground::Grid grid = highground::makeGrid(onNodes.data(), onNodes.size());
-        // CGAL region: exact boundary union + CDT top instead of per-cell
-        // beveled tops (falls back to generate() when CGAL is not built in).
-        const highground::Mesh mesh = (layer.cgal && highground::cgalAvailable())
-            ? highground::generateCgal(grid, gp)
-            : highground::generate(grid, gp);
-
-        for (const highground::Primitive& prim : mesh.primitives) {
-            if (prim.material == highground::Material::Wall) {
-                if (raisedBatches.empty() || !raisedBatches.back().wall ||
-                    raisedBatches.back().depth != zbuf || raisedBatches.back().tri != tri) {
-                    raisedBatches.push_back({true, wallStreamSize(zbuf), 0, layer.atlas, zbuf, tri});
-                }
-                for (std::uint32_t k = 0; k < prim.count; ++k) {
-                    pushWallVertex(mesh.vertices[prim.first + k], zbuf);
-                }
-                raisedBatches.back().count += static_cast<int>(prim.count);
-            } else {
-                if (zbuf) {
-                    if (raisedBatches.empty() || raisedBatches.back().wall || !raisedBatches.back().depth ||
-                        raisedBatches.back().atlas != layer.atlas) {
-                        raisedBatches.push_back({false, static_cast<int>(depthTexVerts.size()), 0, layer.atlas, true});
-                    }
-                    for (std::uint32_t k = 0; k < prim.count; ++k) {
-                        const highground::Vertex& v = mesh.vertices[prim.first + k];
-                        const float z = (zFar - v.groundY) * zScale;
-                        depthTexVerts.push_back({v.pos.x, v.pos.y, z, v.uv.x, v.uv.y});
-                    }
-                } else {
-                    if (raisedBatches.empty() || raisedBatches.back().wall || raisedBatches.back().depth ||
-                        raisedBatches.back().atlas != layer.atlas) {
-                        raisedBatches.push_back({false, static_cast<int>(texVerts.size()), 0, layer.atlas});
-                    }
-                    for (std::uint32_t k = 0; k < prim.count; ++k) {
-                        const highground::Vertex& v = mesh.vertices[prim.first + k];
-                        texVerts.push_back({v.pos.x, v.pos.y, v.uv.x, v.uv.y});
-                    }
-                }
-                raisedBatches.back().count += static_cast<int>(prim.count);
-            }
-        }
-    }
-
-    // Prism demo figure (boundary-first): simplified boundary loops from
-    // highground_core::boundaryLoops extruded into flat rectangular walls;
-    // the top comes from highground_core::generate (beveled per-cell tops).
-    for (int li = 0; li < layerCount; ++li) {
-        const PaintLayerView& layer = layers[li];
-        if (!layer.brush || !layer.prism) {
-            continue;
-        }
-
-        std::vector<glm::ivec2> onNodes;
-        for (const auto& [z, cell] : drawOrder) {
-            (void)z;
-            const auto mask = layer.brush->nodeMaskAt(cell);
-            const auto corners = topology_core::DiamondIsometry::cellCornerNodes(cell);
-            for (int i = 0; i < 4; ++i) {
-                if (mask[i]) {
-                    onNodes.push_back(corners[i]);
-                }
-            }
-        }
-        if (onNodes.empty()) {
-            continue;
-        }
-
-        const highground::Params gp = [&] {
-            highground::Params p = raisedParams ? *raisedParams : highground::Params{};
-            p.bevel = 0.0f; // the prism is pure rectangles: sharp corners everywhere
-            return p;
-        }();
-        const highground::Grid grid = highground::makeGrid(onNodes.data(), onNodes.size());
-        const auto loops = highground::boundaryLoops(grid, iso.dims.cellWidth, iso.dims.cellSize().y);
-        const highground::Mesh mesh = highground::generate(grid, gp);
-        const float height = gp.height;
-
-        struct Prim {
-            float depth;
-            bool wall;
-            int first;
-            int count;
-        };
-        std::vector<Prim> prims;
-
-        // Rectangular wall per loop edge; two brightness levels by iso axis
-        // fake iso lighting, bottom darker (same scheme as the flat walls).
-        for (const auto& loop : loops) {
-            for (std::size_t i = 0; i < loop.size(); ++i) {
-                const glm::vec2& a = loop[i];
-                const glm::vec2& b = loop[(i + 1) % loop.size()];
-                const glm::vec2 d = b - a;
-                const float alongX = std::abs(d.x * 64.0f + d.y * 32.0f);
-                const float alongY = std::abs(d.x * -64.0f + d.y * 32.0f);
-                const glm::vec3 base = (alongX >= alongY)
-                    ? glm::vec3(0.62f, 0.45f, 0.22f)
-                    : glm::vec3(0.45f, 0.32f, 0.16f);
-                const glm::vec4 top{base, 1.0f};
-                const glm::vec4 bottom{base * 0.7f, 1.0f};
-                const int first = static_cast<int>(wallVerts.size());
-                const auto push = [&](const glm::vec2& p, float lift, const glm::vec4& c) {
-                    wallVerts.push_back({p.x, p.y - lift, c.r, c.g, c.b, c.a});
-                };
-                push(a, height, top);
-                push(a, 0.0f, bottom);
-                push(b, 0.0f, bottom);
-                push(a, height, top);
-                push(b, 0.0f, bottom);
-                push(b, height, top);
-                prims.push_back({std::max(a.y, b.y), true, first, 6});
-            }
-        }
-        // Tops from the lib (beveled per-cell), textured with the layer's
-        // raised-top texture.
-        for (const highground::Primitive& prim : mesh.primitives) {
-            if (prim.material != highground::Material::Top) {
-                continue;
-            }
-            const int first = static_cast<int>(texVerts.size());
-            for (std::uint32_t k = 0; k < prim.count; ++k) {
-                const highground::Vertex& v = mesh.vertices[prim.first + k];
-                texVerts.push_back({v.pos.x, v.pos.y, v.uv.x, v.uv.y});
-            }
-            prims.push_back({prim.depth, false, first, static_cast<int>(prim.count)});
-        }
-
-        // Depth-sorted emission into the shared raised batches (ranges merge
-        // only when consecutive prims are contiguous in the vertex streams).
-        std::stable_sort(prims.begin(), prims.end(), [](const Prim& a, const Prim& b) {
-            if (a.depth != b.depth) return a.depth < b.depth;
-            return a.wall > b.wall;
-        });
-        for (const Prim& prim : prims) {
-            if (prim.wall) {
-                if (raisedBatches.empty() || !raisedBatches.back().wall || raisedBatches.back().depth ||
-                    raisedBatches.back().tri ||
-                    raisedBatches.back().base + raisedBatches.back().count != prim.first) {
-                    raisedBatches.push_back({true, prim.first, 0, layer.atlas});
-                }
-                raisedBatches.back().count += prim.count;
-            } else {
-                if (raisedBatches.empty() || raisedBatches.back().wall || raisedBatches.back().depth ||
-                    raisedBatches.back().atlas != layer.atlas ||
-                    raisedBatches.back().base + raisedBatches.back().count != prim.first) {
-                    raisedBatches.push_back({false, prim.first, 0, layer.atlas});
-                }
-                raisedBatches.back().count += prim.count;
-            }
-        }
-    }
 
     std::vector<ColorVertex> lineVerts;
     lineVerts.reserve(static_cast<std::size_t>(mapW * mapH * 8 + 16));
@@ -1787,13 +971,7 @@ void AtlasRenderer::render(
     }
 
     if (hasHover) {
-        const float hoverLift = raisedParams ? raisedParams->height : 32.0f;
-        appendNodeMarker(
-            lineVerts,
-            iso,
-            hoverNode,
-            {1.0f, 0.25f, 0.2f, 1.0f},
-            hoverRaised ? -hoverLift : 0.0f);
+        appendNodeMarker(lineVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f});
     }
 
     VsParams vsParams{};
@@ -1802,30 +980,13 @@ void AtlasRenderer::render(
     vsParams.camera_offset[0] = camera.offset.x;
     vsParams.camera_offset[1] = camera.offset.y;
     vsParams.camera_zoom = camera.zoom;
-    vsParams.tex_scale = wallTexScale;
 
     if (!texVerts.empty()) {
         sg_update_buffer(m_texVbuf, sg_range{texVerts.data(), texVerts.size() * sizeof(TexVertex)});
     }
-    if (!depthTexVerts.empty()) {
-        sg_update_buffer(m_depthTexVbuf, sg_range{depthTexVerts.data(), depthTexVerts.size() * sizeof(DepthTexVertex)});
-    }
-    // depthWallVerts and triDepthWallVerts are mutually exclusive (the
-    // triplanar mode is global per frame), so the shared buffer gets at most
-    // one upload per frame.
-    if (!depthWallVerts.empty()) {
-        sg_update_buffer(m_depthColorVbuf, sg_range{depthWallVerts.data(), depthWallVerts.size() * sizeof(DepthColorVertex)});
-    }
-    if (!triDepthWallVerts.empty()) {
-        sg_update_buffer(m_depthColorVbuf, sg_range{triDepthWallVerts.data(), triDepthWallVerts.size() * sizeof(TriDepthWallVertex)});
-    }
-    if (!triWallVerts.empty()) {
-        sg_update_buffer(m_triWallVbuf, sg_range{triWallVerts.data(), triWallVerts.size() * sizeof(TriWallVertex)});
-    }
 
-    // Painter order: flat ground layers, then the raised batches (painter:
-    // depth-sorted by the generator; z-buffer: texture-batched, depth-tested),
-    // then the grid lines.
+    // Painter order: flat ground layers, then the z-buffered cliff meshes,
+    // then the grid lines on top.
     const auto drawAtlasRange = [&](const TexRange& range) {
         const AtlasSlot& slot = m_slots[static_cast<int>(range.atlas)];
         if (slot.view.id == SG_INVALID_ID) {
@@ -1841,60 +1002,19 @@ void AtlasRenderer::render(
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
         sg_draw(range.base, range.count, 1);
     };
-    const auto drawTopRange = [&](const RaisedBatch& batch) {
-        const AtlasSlot& slot = m_topSlots[static_cast<int>(batch.atlas)];
-        if (slot.view.id == SG_INVALID_ID) {
-            return;
-        }
-        sg_bindings bind{};
-        bind.vertex_buffers[0] = batch.depth ? m_depthTexVbuf : m_texVbuf;
-        bind.views[0] = slot.view;
-        bind.samplers[0] = m_topSampler;
-
-        sg_apply_pipeline(batch.depth ? m_depthTexPip : m_texPip);
-        sg_apply_bindings(&bind);
-        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-        sg_draw(batch.base, batch.count, 1);
-    };
 
     for (const TexRange& range : flatRanges) {
         drawAtlasRange(range);
     }
 
-    std::vector<ColorVertex> colorVerts;
-    colorVerts.reserve(wallVerts.size() + lineVerts.size());
-    colorVerts.insert(colorVerts.end(), wallVerts.begin(), wallVerts.end());
-    colorVerts.insert(colorVerts.end(), lineVerts.begin(), lineVerts.end());
-    if (!colorVerts.empty()) {
-        sg_update_buffer(m_colorVbuf, sg_range{colorVerts.data(), colorVerts.size() * sizeof(ColorVertex)});
-    }
-
-    for (const RaisedBatch& batch : raisedBatches) {
-        if (batch.wall) {
-            sg_bindings bind{};
-            if (batch.tri) {
-                bind.vertex_buffers[0] = batch.depth ? m_depthColorVbuf : m_triWallVbuf;
-                bind.views[0] = m_wallTexSlot.view;
-                bind.samplers[0] = m_topSampler; // WRAP_REPEAT tiling
-            } else {
-                bind.vertex_buffers[0] = batch.depth ? m_depthColorVbuf : m_colorVbuf;
-            }
-
-            sg_apply_pipeline(batch.tri ? (batch.depth ? m_triDepthWallPip : m_triWallPip)
-                                        : (batch.depth ? m_depthWallPip : m_wallPip));
-            sg_apply_bindings(&bind);
-            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-            sg_draw(batch.base, batch.count, 1);
-        } else {
-            drawTopRange(batch);
-        }
+    if (!lineVerts.empty()) {
+        sg_update_buffer(m_colorVbuf, sg_range{lineVerts.data(), lineVerts.size() * sizeof(ColorVertex)});
     }
 
     // Cliff layers: scalar-field surface nets from the same nodes, drawn with
-    // the z-buffer (depth baked exactly like the raised pass) and per-pixel
-    // shading. The mesh is cached per brush; the heavy field rebuild runs at
-    // most once per edit burst (0.3 s debounce), a heightScale edit only
-    // re-projects the cached mesh.
+    // the z-buffer and per-pixel shading. The mesh is cached per brush; the
+    // heavy field rebuild runs at most once per edit burst (0.3 s debounce),
+    // a heightScale edit only re-projects the cached mesh.
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
         if (!layer.brush || !layer.cliff || !layer.cliffParams) {
@@ -1954,69 +1074,6 @@ void AtlasRenderer::render(
         }
     }
 
-    // Wall-mesh layers ("Cyclopean 3D"): nodes -> landscape_mesh solid-mask ->
-    // single-level plateau with styled walls. Same debounce/GPU-upload pattern
-    // as the cliff cache, drawn z-buffered with the depth-color pipeline (the
-    // baked depth uses the same zFar/zScale, so it interleaves with the
-    // raised/cliff passes).
-    for (int li = 0; li < layerCount; ++li) {
-        const PaintLayerView& layer = layers[li];
-        if (!layer.brush || !layer.wallMesh || !layer.wallMeshSettings) {
-            continue;
-        }
-        WallMeshCache& cache = wallMeshCacheFor(layer.brush);
-        const bool contentChanged = !cache.contentValid ||
-            cache.brushVersion != layer.brush->version() ||
-            std::memcmp(&cache.settings, layer.wallMeshSettings, sizeof(landscape_mesh::MeshBuildSettings)) != 0 ||
-            cache.height != layer.wallMeshHeight ||
-            cache.heightScale != layer.cliffHeightScale;
-        if (contentChanged) {
-            cache.brushVersion = layer.brush->version();
-            std::memcpy(&cache.settings, layer.wallMeshSettings, sizeof(landscape_mesh::MeshBuildSettings));
-            cache.height = layer.wallMeshHeight;
-            cache.heightScale = layer.cliffHeightScale;
-            cache.contentValid = true;
-            cache.lastEditSec = nowSec;
-            cache.streamDirty = true;
-            cache.stats.pending = true;
-        }
-        if (cache.streamDirty && (nowSec - cache.lastEditSec) > 0.3) {
-            rebuildWallMeshCache(cache, iso, zFar, zScale);
-            cache.streamDirty = false;
-            cache.gpuDirty = true;
-            cache.stats.pending = false;
-        }
-        if (cache.gpuDirty) {
-            const size_t bytes = cache.stream.size() * sizeof(DepthColorVertex);
-            if (bytes > 0) {
-                if (cache.vbufSize < bytes) {
-                    if (cache.vbuf.id != SG_INVALID_ID) {
-                        sg_destroy_buffer(cache.vbuf);
-                    }
-                    sg_buffer_desc bufDesc = {};
-                    bufDesc.size = ((bytes / (size_t{1} << 20)) + 1) * (size_t{1} << 20);
-                    bufDesc.usage.dynamic_update = true;
-                    bufDesc.label = "tileshape-wallmesh-vbuf";
-                    cache.vbuf = sg_make_buffer(&bufDesc);
-                    cache.vbufSize = bufDesc.size;
-                }
-                if (cache.vbuf.id != SG_INVALID_ID) {
-                    sg_update_buffer(cache.vbuf, sg_range{cache.stream.data(), bytes});
-                }
-            }
-            cache.gpuDirty = false;
-        }
-        if (!cache.stream.empty() && cache.vbuf.id != SG_INVALID_ID) {
-            sg_bindings bind{};
-            bind.vertex_buffers[0] = cache.vbuf;
-
-            sg_apply_pipeline(m_depthWallPip);
-            sg_apply_bindings(&bind);
-            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-            sg_draw(0, static_cast<int>(cache.stream.size()), 1);
-        }
-    }
-
     if (!lineVerts.empty()) {
         sg_bindings bind{};
         bind.vertex_buffers[0] = m_colorVbuf;
@@ -2024,7 +1081,7 @@ void AtlasRenderer::render(
         sg_apply_pipeline(m_colorPip);
         sg_apply_bindings(&bind);
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-        sg_draw(static_cast<int>(wallVerts.size()), static_cast<int>(lineVerts.size()), 1);
+        sg_draw(0, static_cast<int>(lineVerts.size()), 1);
     }
 }
 
@@ -2142,119 +1199,6 @@ void AtlasRenderer::rebuildCliffCache(
     cache.stats.rebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
 
-AtlasRenderer::WallMeshCache& AtlasRenderer::wallMeshCacheFor(const LandBrush* brush) {
-    for (WallMeshCache& cache : m_wallMeshCaches) {
-        if (cache.brush == brush) {
-            return cache;
-        }
-    }
-    m_wallMeshCaches.push_back({});
-    m_wallMeshCaches.back().brush = brush;
-    return m_wallMeshCaches.back();
-}
-
-const WallMeshStats& AtlasRenderer::wallMeshStatsFor(const LandBrush* brush) const {
-    static const WallMeshStats kEmpty{};
-    for (const WallMeshCache& cache : m_wallMeshCaches) {
-        if (cache.brush == brush) {
-            return cache.stats;
-        }
-    }
-    return kEmpty;
-}
-
-void AtlasRenderer::rebuildWallMeshCache(
-    WallMeshCache& cache,
-    const topology_core::DiamondIsometry& iso,
-    float zFar,
-    float zScale) {
-
-    using Clock = std::chrono::steady_clock;
-    const auto t0 = Clock::now();
-
-    cache.stream.clear();
-    cache.stats.quadCount = 0;
-    cache.stats.vertexCount = 0;
-    cache.stats.seamsPassed = true;
-
-    // Dense node grid (the brush stores width()xheight() cells -> +1 nodes per
-    // axis), converted to a cell solid-mask with the painted silhouette.
-    const LandBrush& brush = *cache.brush;
-    const int nodesX = brush.width() + 1;
-    const int nodesY = brush.height() + 1;
-    std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);
-    int onCount = 0;
-    for (int y = 0; y < nodesY; ++y) {
-        for (int x = 0; x < nodesX; ++x) {
-            if (brush.nodeIsOn({x, y})) {
-                nodes[static_cast<std::size_t>(y) * nodesX + x] = 1;
-                ++onCount;
-            }
-        }
-    }
-
-    if (onCount > 0) {
-        landscape_mesh::SolidMeshBuildRequest request;
-        request.mask = landscape_mesh::solidMaskFromNodes(nodes.data(), nodesX, nodesY);
-        request.baseHeight = 0.0f;
-        request.topHeight = cache.height;
-        request.level = 1;
-        request.maxLevel = 1;
-        request.includeWalls = true;
-        request.fadeWallDisplacementAtBottom = false;
-
-        // Single-level plateau: the level height equals the plateau top (same
-        // convention as MeshGenerationPlayground's rectangle cliff).
-        landscape_mesh::MeshBuildSettings settings = cache.settings;
-        settings.levelHeight = cache.height;
-        const landscape_mesh::CompositionResult result =
-            landscape_mesh::composeSolidMaskMesh(request, settings);
-
-        cache.stats.quadCount = static_cast<int>(result.quads.size());
-        cache.stats.seamsPassed = result.seams.passed;
-        if (!result.seams.passed) {
-            spdlog::warn("AtlasRenderer: wall mesh seam validation failed ({} of {} edges)",
-                result.seams.mismatches,
-                result.seams.checkedEdges);
-        }
-
-        // Projection matches rebuildCliffCache: wx/wz (in cellSize units) are
-        // the node-space mapX/mapZ, wy lifts along the view. Quads are
-        // triangulated as (a-b-c, a-c-d) with the baked vertex color.
-        const glm::vec2 cellSz = iso.dims.cellSize();
-        const float halfW = cellSz.x * 0.5f;
-        const float halfH = cellSz.y * 0.5f;
-        const float invCellSize = 1.0f / settings.cellSize;
-        cache.stream.reserve(result.quads.size() * 6);
-        const auto pushVertex = [&](const landscape_mesh::Vec3& v, const landscape_mesh::ColorRgba& c) {
-            const float mapX = v.x * invCellSize;
-            const float mapZ = v.z * invCellSize;
-            const float fieldX = (mapX - mapZ) * halfW + halfW;
-            const float fieldY = (mapX + mapZ) * halfH;
-            const float z = (zFar - fieldY) * zScale;
-            cache.stream.push_back(DepthColorVertex{
-                fieldX,
-                fieldY - v.y * cache.heightScale,
-                z,
-                c.r / 255.0f,
-                c.g / 255.0f,
-                c.b / 255.0f,
-                c.a / 255.0f});
-        };
-        for (const landscape_mesh::MeshQuad& quad : result.quads) {
-            pushVertex(quad.a, quad.color);
-            pushVertex(quad.b, quad.color);
-            pushVertex(quad.c, quad.color);
-            pushVertex(quad.a, quad.color);
-            pushVertex(quad.c, quad.color);
-            pushVertex(quad.d, quad.color);
-        }
-        cache.stats.vertexCount = static_cast<int>(cache.stream.size());
-    }
-
-    cache.stats.rebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-}
-
 void AtlasRenderer::ensurePipelines() {
     if (m_texPip.id != SG_INVALID_ID) {
         return;
@@ -2343,170 +1287,6 @@ void AtlasRenderer::ensurePipelines() {
         pip.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         pip.label = "tileshape-color-pip";
         m_colorPip = sg_make_pipeline(&pip);
-
-        // Same vertex format as the line pipeline, but triangles — cliff walls.
-        sg_pipeline_desc wallPip = {};
-        wallPip.shader = m_colorShd;
-        wallPip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-        wallPip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
-        wallPip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-        wallPip.label = "tileshape-wall-pip";
-        m_wallPip = sg_make_pipeline(&wallPip);
-    }
-
-    // Z-buffered raised pass: same shading as the painter pipelines, but the
-    // vertex carries a normalized depth and overlaps resolve via the depth
-    // buffer (LEQUAL + write) instead of the CPU painter sort.
-    {
-        sg_shader_desc shd = {};
-#if defined(SOKOL_D3D11)
-        shd.vertex_func.source = kDepthTexVsHlsl;
-        shd.fragment_func.source = kTexFsHlsl;
-        shd.attrs[0].hlsl_sem_name = "TEXCOORD";
-        shd.attrs[0].hlsl_sem_index = 0;
-        shd.attrs[1].hlsl_sem_name = "TEXCOORD";
-        shd.attrs[1].hlsl_sem_index = 1;
-#elif defined(SOKOL_METAL)
-        shd.vertex_func.source = kDepthTexVsMsl;
-        shd.fragment_func.source = kTexFsMsl;
-#else
-        shd.vertex_func.source = kDepthTexVsGlsl;
-        shd.fragment_func.source = kTexFsGlsl;
-#endif
-        fillVsUniformDesc(&shd.uniform_blocks[0]);
-
-        shd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
-        shd.views[0].texture.image_type = SG_IMAGETYPE_2D;
-        shd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
-        shd.views[0].texture.hlsl_register_t_n = 0;
-        shd.views[0].texture.msl_texture_n = 0;
-        shd.views[0].texture.wgsl_group1_binding_n = 0;
-        shd.views[0].texture.spirv_set1_binding_n = 0;
-
-        shd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
-        shd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
-        shd.samplers[0].hlsl_register_s_n = 0;
-        shd.samplers[0].msl_sampler_n = 0;
-        shd.samplers[0].wgsl_group1_binding_n = 1;
-        shd.samplers[0].spirv_set1_binding_n = 1;
-
-        shd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
-        shd.texture_sampler_pairs[0].view_slot = 0;
-        shd.texture_sampler_pairs[0].sampler_slot = 0;
-        shd.texture_sampler_pairs[0].glsl_name = "atlas_tex";
-
-        m_depthTexShd = sg_make_shader(&shd);
-
-        sg_pipeline_desc pip = {};
-        pip.shader = m_depthTexShd;
-        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
-        pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
-        pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-        pip.colors[0].blend.enabled = true;
-        pip.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pip.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pip.depth.write_enabled = true;
-        pip.label = "tileshape-depth-tex-pip";
-        m_depthTexPip = sg_make_pipeline(&pip);
-    }
-
-    {
-        sg_shader_desc shd = {};
-#if defined(SOKOL_D3D11)
-        shd.vertex_func.source = kDepthColorVsHlsl;
-        shd.fragment_func.source = kColorFsHlsl;
-        shd.attrs[0].hlsl_sem_name = "TEXCOORD";
-        shd.attrs[0].hlsl_sem_index = 0;
-        shd.attrs[1].hlsl_sem_name = "TEXCOORD";
-        shd.attrs[1].hlsl_sem_index = 1;
-#elif defined(SOKOL_METAL)
-        shd.vertex_func.source = kDepthColorVsMsl;
-        shd.fragment_func.source = kColorFsMsl;
-#else
-        shd.vertex_func.source = kDepthColorVsGlsl;
-        shd.fragment_func.source = kColorFsGlsl;
-#endif
-        fillVsUniformDesc(&shd.uniform_blocks[0]);
-        m_depthWallShd = sg_make_shader(&shd);
-
-        sg_pipeline_desc pip = {};
-        pip.shader = m_depthWallShd;
-        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
-        pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
-        pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-        pip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pip.depth.write_enabled = true;
-        pip.label = "tileshape-depth-wall-pip";
-        m_depthWallPip = sg_make_pipeline(&pip);
-    }
-
-    // Triplanar walls: the wall fragment samples a tiling rock texture in
-    // world-space projections instead of using the baked color alone.
-    {
-        sg_shader_desc shd = {};
-#if defined(SOKOL_D3D11)
-        shd.vertex_func.source = kTriWallVsHlsl;
-        shd.fragment_func.source = kTriWallFsHlsl;
-#elif defined(SOKOL_METAL)
-        shd.vertex_func.source = kTriWallVsMsl;
-        shd.fragment_func.source = kTriWallFsMsl;
-#else
-        shd.vertex_func.source = kTriWallVsGlsl;
-        shd.fragment_func.source = kTriWallFsGlsl;
-#endif
-        for (int i = 0; i < 4; ++i) {
-            shd.attrs[i].hlsl_sem_name = "TEXCOORD";
-            shd.attrs[i].hlsl_sem_index = i;
-        }
-        fillTriVsUniformDesc(&shd.uniform_blocks[0]);
-        fillTextureSlotDesc(&shd, "wall_tex");
-        m_triWallShd = sg_make_shader(&shd);
-
-        sg_pipeline_desc pip = {};
-        pip.shader = m_triWallShd;
-        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-        pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
-        pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT3;
-        pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT2;
-        pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-        pip.label = "tileshape-tri-wall-pip";
-        m_triWallPip = sg_make_pipeline(&pip);
-    }
-
-    {
-        sg_shader_desc shd = {};
-#if defined(SOKOL_D3D11)
-        shd.vertex_func.source = kTriDepthWallVsHlsl;
-        shd.fragment_func.source = kTriWallFsHlsl;
-#elif defined(SOKOL_METAL)
-        shd.vertex_func.source = kTriDepthWallVsMsl;
-        shd.fragment_func.source = kTriWallFsMsl;
-#else
-        shd.vertex_func.source = kTriDepthWallVsGlsl;
-        shd.fragment_func.source = kTriWallFsGlsl;
-#endif
-        for (int i = 0; i < 4; ++i) {
-            shd.attrs[i].hlsl_sem_name = "TEXCOORD";
-            shd.attrs[i].hlsl_sem_index = i;
-        }
-        fillTriVsUniformDesc(&shd.uniform_blocks[0]);
-        fillTextureSlotDesc(&shd, "wall_tex");
-        m_triDepthWallShd = sg_make_shader(&shd);
-
-        sg_pipeline_desc pip = {};
-        pip.shader = m_triDepthWallShd;
-        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
-        pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
-        pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT3;
-        pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT2;
-        pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-        pip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pip.depth.write_enabled = true;
-        pip.label = "tileshape-tri-depth-wall-pip";
-        m_triDepthWallPip = sg_make_pipeline(&pip);
     }
 
     // Cliff pass (scalar-field surface nets): baked depth + field-space
@@ -2554,26 +1334,6 @@ void AtlasRenderer::destroyPipelines() {
         sg_destroy_pipeline(m_colorPip);
         m_colorPip = {};
     }
-    if (m_wallPip.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(m_wallPip);
-        m_wallPip = {};
-    }
-    if (m_depthTexPip.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(m_depthTexPip);
-        m_depthTexPip = {};
-    }
-    if (m_depthWallPip.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(m_depthWallPip);
-        m_depthWallPip = {};
-    }
-    if (m_triWallPip.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(m_triWallPip);
-        m_triWallPip = {};
-    }
-    if (m_triDepthWallPip.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(m_triDepthWallPip);
-        m_triDepthWallPip = {};
-    }
     if (m_cliffPip.id != SG_INVALID_ID) {
         sg_destroy_pipeline(m_cliffPip);
         m_cliffPip = {};
@@ -2585,22 +1345,6 @@ void AtlasRenderer::destroyPipelines() {
     if (m_colorShd.id != SG_INVALID_ID) {
         sg_destroy_shader(m_colorShd);
         m_colorShd = {};
-    }
-    if (m_depthTexShd.id != SG_INVALID_ID) {
-        sg_destroy_shader(m_depthTexShd);
-        m_depthTexShd = {};
-    }
-    if (m_depthWallShd.id != SG_INVALID_ID) {
-        sg_destroy_shader(m_depthWallShd);
-        m_depthWallShd = {};
-    }
-    if (m_triWallShd.id != SG_INVALID_ID) {
-        sg_destroy_shader(m_triWallShd);
-        m_triWallShd = {};
-    }
-    if (m_triDepthWallShd.id != SG_INVALID_ID) {
-        sg_destroy_shader(m_triDepthWallShd);
-        m_triDepthWallShd = {};
     }
     if (m_cliffShd.id != SG_INVALID_ID) {
         sg_destroy_shader(m_cliffShd);

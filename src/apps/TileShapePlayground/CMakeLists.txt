@@ -8,7 +8,6 @@ nw_add_console_app(
         imgui::imgui
         topology_core
         landscape_core
-        landscape_mesh
         highground_core
 )
 

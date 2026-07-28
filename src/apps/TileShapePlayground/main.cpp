@@ -9,8 +9,7 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-#include <highground_core/highground.h>
-#include <landscape_mesh/landscape_mesh.h>
+#include <highground_core/cliff_field.h>
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
@@ -72,43 +71,26 @@ std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
-// own node grid and presentation (2D grass / 2D yellow / raised 3D / prism
-// boundary-first demo / cliff scalar-field / landscape_mesh plateau).
-// `cgal` toggles the raised layer between the per-cell generator and the CGAL
-// exact-region one. `wallMesh` builds a single-level Cyclopean plateau via
-// landscape_mesh from the same nodes.
+// own node grid and presentation (2D grass / 2D yellow / cliff scalar-field).
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
-    bool raised;
-    bool prism;
-    bool cgal;
     bool cliff;
-    bool wallMesh;
     const char* name;
 };
 
-PaintLayer g_layers[6] = {
-    {{}, AtlasKind::Grass, false, false, false, false, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, false, false, false, false, "Yellow 2D"},
-    {{}, AtlasKind::Flat, true, false, false, false, false, "Raised 3D"},
-    {{}, AtlasKind::Flat, false, true, false, false, false, "Prism 3D"},
-    {{}, AtlasKind::Flat, false, false, false, true, false, "Cliff 3D"},
-    {{}, AtlasKind::Flat, false, false, false, false, true, "Cyclopean 3D"},
+PaintLayer g_layers[3] = {
+    {{}, AtlasKind::Grass, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, "Yellow 2D"},
+    {{}, AtlasKind::Flat, true, "Cliff 3D"},
 };
 int g_activeLayer = 0;
-// Raised (3D) generation params for highground_core (generate/generateCgal) —
-// height, wall style and noise shaping all live here. `height` also scales the
-// cliff layer lift (field px per 1.0 plateau height).
-highground::Params g_raisedParams;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
 cliff::FieldParams g_cliffParams;
-// Wall-mesh ("Cyclopean 3D") layer: landscape_mesh build settings (debounced
-// rebuild like the cliff cache) and the plateau top height in world units.
-// Style/subdivision defaults are set in main().
-landscape_mesh::MeshBuildSettings g_wallMeshSettings;
-float g_wallMeshHeight = 3.0f;
+// Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
+// no mesh rebuild).
+float g_cliffHeightScale = 96.0f;
 struct ShadingParams {
     float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
     float lightElevation = 0.85f; // radians
@@ -125,14 +107,6 @@ struct ShadingParams {
     float gamma = 0.85f;
 };
 ShadingParams g_cliffShading;
-// Z-buffer mode for the raised layer (GPU depth buffer vs the CPU painter
-// sort); the UI checkbox toggles it for A/B, --painter forces painter mode.
-bool g_zbuf = true;
-// Triplanar walls: the walls sample a tiling rock texture in world-space
-// projections (no UV seams) multiplied by the baked shade; --no-triplanar
-// forces the plain baked-color path.
-bool g_triplanarWalls = true;
-float g_wallTexScale = 1.0f / 256.0f;
 
 LandBrush& activeBrush() {
     return g_layers[g_activeLayer].brush;
@@ -188,24 +162,14 @@ bool g_demoNode = false;
 
 // --- Visual debug CLI (headless screenshot comparisons vs the editor) ---
 // --no-ui                      hide the ImGui panel (clean captures)
-// --nodes=x,y;x,y;...          paint these nodes on the raised layer
 // --cliff-nodes=x,y;x,y;...    paint these nodes on the cliff layer
-// --wallmesh-nodes=x,y;x,y;... paint these nodes on the Cyclopean 3D layer
-// --raised-atlas=grass|flat    atlas for the raised layer (default flat)
-// --painter                    CPU painter sort instead of the z-buffer
-// --no-triplanar               baked-color walls instead of triplanar rock
-// --smooth=N                   Chaikin contour smoothing iterations (0..3,
-//                              default 2; CGAL raised tops only)
 // --zoom=Z                     camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy               camera center in cell coords
-//                              (default: bbox center of --nodes)
+//                              (default: bbox center of --cliff-nodes)
 // --shot=path.png              capture the window client area to a PNG after
 //                              the caches settle, then quit (Win32)
 bool g_noUi = false;
-std::vector<glm::ivec2> g_cliNodes;
 std::vector<glm::ivec2> g_cliCliffNodes;
-std::vector<glm::ivec2> g_cliWallMeshNodes;
-bool g_cliRaisedGrassAtlas = false;
 std::optional<float> g_cliZoom;
 std::optional<glm::vec2> g_cliCenter;
 std::string g_shotPath;
@@ -240,22 +204,15 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
         std::atof(value.substr(comma + 1).c_str()));
 }
 
-// Painted programmatically in --demo mode: one raised blob, one lone raised
-// node, a cliff blob, plus grass/yellow flat strokes — used for visual
-// verification.
+// Painted programmatically in --demo mode: a cliff blob plus grass/yellow
+// flat strokes — used for visual verification.
 void paintDemoPattern() {
-    for (int y = 9; y <= 12; ++y) {
-        for (int x = 9; x <= 12; ++x) {
+    for (int y = 14; y <= 17; ++y) {
+        for (int x = 15; x <= 18; ++x) {
             g_layers[2].brush.setNode({x, y}, true);
         }
     }
-    g_layers[2].brush.setNode({16, 10}, true);
-    for (int y = 14; y <= 17; ++y) {
-        for (int x = 15; x <= 18; ++x) {
-            g_layers[4].brush.setNode({x, y}, true);
-        }
-    }
-    g_layers[4].brush.setNode({14, 15}, true);
+    g_layers[2].brush.setNode({14, 15}, true);
     for (int y = 15; y <= 18; ++y) {
         for (int x = 6; x <= 9; ++x) {
             g_layers[0].brush.setNode({x, y}, true);
@@ -303,33 +260,14 @@ void init() {
     for (PaintLayer& layer : g_layers) {
         layer.brush.reset(24, 24);
     }
-    // CGAL region is the default raised-top generator when the library was
-    // built with CGAL; the UI checkbox can switch back to per-cell tops.
-    g_layers[2].cgal = highground::cgalAvailable();
-    // Prism demo figure (boundary-first, hardcoded for now): 2x2 block, a
-    // boot shape and a diagonal pair in the Prism 3D layer.
-    for (const glm::ivec2& n : {glm::ivec2{3, 3}, {4, 3}, {3, 4}, {4, 4},
-                                glm::ivec2{7, 4}, {7, 5}, {6, 6}, {7, 6},
-                                glm::ivec2{10, 3}, {11, 4}}) {
-        g_layers[3].brush.setNode(n, true);
-    }
     if (g_demoPattern) {
         paintDemoPattern();
     }
     if (g_demoNode) {
         g_layers[0].brush.setNode({10, 10}, true);
     }
-    for (const glm::ivec2& node : g_cliNodes) {
-        g_layers[2].brush.setNode(node, true);
-    }
     for (const glm::ivec2& node : g_cliCliffNodes) {
-        g_layers[4].brush.setNode(node, true);
-    }
-    for (const glm::ivec2& node : g_cliWallMeshNodes) {
-        g_layers[5].brush.setNode(node, true);
-    }
-    if (g_cliRaisedGrassAtlas) {
-        g_layers[2].atlas = AtlasKind::Grass;
+        g_layers[2].brush.setNode(node, true);
     }
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
@@ -355,31 +293,6 @@ void init() {
         spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
     }
 
-    // Tiled ground textures for the raised top (world-UV repeat): real grass
-    // for the Grass kind, a generated solid tile for the Flat kind.
-    const auto grassTopPath =
-        g_dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "grass.png";
-    if (!g_renderer.loadTopTextureFromFile(AtlasKind::Grass, grassTopPath.string())) {
-        spdlog::warn("TileShapePlayground: raised-top grass texture missing at {}", grassTopPath.string());
-    }
-    {
-        // Solid ochre 2x2 (matches the FlatAtlasGenerator fill color).
-        const std::uint8_t solid[] = {
-            210, 170, 90, 255, 210, 170, 90, 255,
-            210, 170, 90, 255, 210, 170, 90, 255,
-        };
-        if (!g_renderer.loadTopTextureFromRgba(AtlasKind::Flat, solid, 2, 2)) {
-            spdlog::error("TileShapePlayground: failed to upload solid raised-top texture");
-        }
-    }
-
-    // Tiling rock texture for the triplanar walls (world-space projections).
-    const auto wallRockPath =
-        g_dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials" / "rock.png";
-    if (!g_renderer.loadWallTextureFromFile(wallRockPath.string())) {
-        spdlog::warn("TileShapePlayground: wall rock texture missing at {}", wallRockPath.string());
-    }
-
     centerCamera(sapp_width(), sapp_height());
     if (g_demoNode) {
         const glm::vec2 nodePos = g_iso.nodeToField({10, 10});
@@ -387,21 +300,17 @@ void init() {
         g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - nodePos.x * g_camera.zoom;
         g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - nodePos.y * g_camera.zoom;
     }
-    if (g_cliZoom || g_cliCenter || !g_cliNodes.empty() || !g_cliCliffNodes.empty() ||
-        !g_cliWallMeshNodes.empty()) {
+    if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty()) {
         // Deterministic framing for screenshot comparisons.
-        const std::vector<glm::ivec2>& framingNodes =
-            !g_cliNodes.empty() ? g_cliNodes
-                                : (!g_cliCliffNodes.empty() ? g_cliCliffNodes : g_cliWallMeshNodes);
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
         } else {
             glm::vec2 acc(0.0f);
-            for (const glm::ivec2& node : framingNodes) {
+            for (const glm::ivec2& node : g_cliCliffNodes) {
                 acc += g_iso.nodeToField(node);
             }
-            worldCenter = acc / static_cast<float>(framingNodes.size());
+            worldCenter = acc / static_cast<float>(g_cliCliffNodes.size());
         }
         g_camera.zoom = g_cliZoom.value_or(1.0f);
         g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - worldCenter.x * g_camera.zoom;
@@ -422,46 +331,19 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     ImGui::Text("Brush palette:");
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 3; ++i) {
         if (i > 0) {
             ImGui::SameLine();
         }
         ImGui::RadioButton(g_layers[i].name, &g_activeLayer, i);
-    }
-    if (g_layers[g_activeLayer].raised) {
-        ImGui::SliderFloat("Raised height", &g_raisedParams.height, 4.0f, 128.0f, "%.0f px");
-        ImGui::Checkbox("Rock walls", &g_raisedParams.rockWalls);
-        if (g_raisedParams.rockWalls) {
-            ImGui::SliderFloat("Rock amplitude", &g_raisedParams.amplitude, 0.0f, 0.6f, "%.2f");
-            ImGui::SliderFloat("Corner bevel", &g_raisedParams.bevel, 0.0f, 0.45f, "%.2f");
-        }
-        // Chaikin corner-cutting on the region contour (CGAL tops only).
-        ImGui::SliderInt("Contour smooth", &g_raisedParams.smoothIterations, 0, 3);
-        if (highground::cgalAvailable()) {
-            ImGui::Checkbox("CGAL region", &g_layers[g_activeLayer].cgal);
-        } else {
-            // Built without CGAL: show the toggle disabled, generate() stays.
-            ImGui::BeginDisabled();
-            bool cgalOff = false;
-            ImGui::Checkbox("CGAL region", &cgalOff);
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::TextDisabled("(not built)");
-        }
-        // GPU depth buffer vs CPU painter sort for the raised layer (A/B).
-        ImGui::Checkbox("Z-buffer", &g_zbuf);
-        // Triplanar rock texture on the walls vs plain baked colors (A/B).
-        ImGui::Checkbox("Triplanar walls", &g_triplanarWalls);
-        if (g_triplanarWalls) {
-            ImGui::SliderFloat("Wall tex scale", &g_wallTexScale, 0.0005f, 0.02f, "%.4f");
-        }
     }
     if (g_layers[g_activeLayer].cliff) {
         // Scalar-field surface nets: edits are debounced (0.3 s) into a full
         // field rebuild — continuous slider drags just keep postponing it.
         cliff::FieldParams& p = g_cliffParams;
         ShadingParams& sh = g_cliffShading;
-        ImGui::SliderFloat("Raised height", &g_raisedParams.height, 4.0f, 128.0f, "%.0f px");
+        // Lift scale: cheap re-projection of the cached mesh, no field rebuild.
+        ImGui::SliderFloat("Cliff height", &g_cliffHeightScale, 4.0f, 128.0f, "%.0f px");
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
             // Ground-slab underlay toggle: off by default (standalone
             // highground); a field param, so this goes through the debounce.
@@ -506,35 +388,6 @@ void drawImGui(int w, int h) {
             ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
         }
     }
-    if (g_layers[g_activeLayer].wallMesh) {
-        // landscape_mesh single-level plateau: like the cliff layer, edits are
-        // debounced (0.3 s) into a full composeSolidMaskMesh rebuild.
-        ImGui::SliderFloat("Wall height", &g_wallMeshHeight, 0.5f, 8.0f, "%.1f");
-        static const char* kWallStyleNames[] = {"Block Cliff", "Cyclopean"};
-        int wallStyle = static_cast<int>(g_wallMeshSettings.wallStyle);
-        if (ImGui::Combo("Wall Style", &wallStyle, kWallStyleNames, 2)) {
-            g_wallMeshSettings.wallStyle = static_cast<landscape_mesh::WallStyleId>(wallStyle);
-            // Cyclopean stones are ~0.5 world units: keep the wall grid fine
-            // enough to resolve them (same rule as MeshGenerationPlayground).
-            if (g_wallMeshSettings.wallStyle == landscape_mesh::WallStyleId::Cyclopean) {
-                g_wallMeshSettings.wallHorizontalSubdivisions =
-                    std::max(g_wallMeshSettings.wallHorizontalSubdivisions, 16);
-                g_wallMeshSettings.wallVerticalSubdivisions =
-                    std::max(g_wallMeshSettings.wallVerticalSubdivisions, 16);
-            }
-        }
-        ImGui::SliderFloat("Rock amplitude", &g_wallMeshSettings.rockAmplitude, 0.0f, 1.0f, "%.2f");
-        ImGui::SliderInt("Rock seed", &g_wallMeshSettings.rockSeed, 0, 9999);
-        ImGui::SliderInt("Wall subdiv H", &g_wallMeshSettings.wallHorizontalSubdivisions, 4, 24);
-        ImGui::SliderInt("Wall subdiv V", &g_wallMeshSettings.wallVerticalSubdivisions, 4, 24);
-        const WallMeshStats& wst = g_renderer.wallMeshStatsFor(&g_layers[g_activeLayer].brush);
-        ImGui::Text("Wall mesh: %d quads, %d verts", wst.quadCount, wst.vertexCount);
-        ImGui::Text("Seams: %s", wst.seamsPassed ? "ok" : "FAILED");
-        ImGui::Text("Rebuild: %.0f ms", wst.rebuildMs);
-        if (wst.pending) {
-            ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
-        }
-    }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);
@@ -552,19 +405,13 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d, %s %d, %s %d",
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d",
         g_layers[0].name,
         g_layers[0].brush.onNodeCount(),
         g_layers[1].name,
         g_layers[1].brush.onNodeCount(),
         g_layers[2].name,
-        g_layers[2].brush.onNodeCount(),
-        g_layers[3].name,
-        g_layers[3].brush.onNodeCount(),
-        g_layers[4].name,
-        g_layers[4].brush.onNodeCount(),
-        g_layers[5].name,
-        g_layers[5].brush.onNodeCount());
+        g_layers[2].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -604,7 +451,7 @@ void frame() {
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
     action.colors[0].clear_value = {0.12f, 0.14f, 0.16f, 1.0f};
     // The swapchain has a depth-stencil attachment: clear it every frame for
-    // the z-buffered raised pass.
+    // the z-buffered cliff pass.
     action.depth.load_action = SG_LOADACTION_CLEAR;
     action.depth.clear_value = 1.0f;
 
@@ -613,11 +460,10 @@ void frame() {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
-    PaintLayerView views[6];
-    for (int i = 0; i < 6; ++i) {
-        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].raised, g_layers[i].prism,
-            g_layers[i].cgal, g_zbuf, g_layers[i].cliff, &g_cliffParams, g_raisedParams.height,
-            g_layers[i].wallMesh, &g_wallMeshSettings, g_wallMeshHeight};
+    PaintLayerView views[3];
+    for (int i = 0; i < 3; ++i) {
+        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].cliff,
+            &g_cliffParams, g_cliffHeightScale};
     }
 
     // Cliff shading uniforms: palette/light from the UI state; the view
@@ -630,7 +476,7 @@ void frame() {
     cliffFs.lightDir[1] = std::sin(s.lightElevation);
     cliffFs.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
     const float halfH = g_iso.dims.cellSize().y * 0.5f;
-    const float viewY = 2.0f * halfH / std::max(g_raisedParams.height, 1.0f);
+    const float viewY = 2.0f * halfH / std::max(g_cliffHeightScale, 1.0f);
     const float viewLen = std::sqrt(2.0f + viewY * viewY);
     cliffFs.viewDir[0] = -1.0f / viewLen;
     cliffFs.viewDir[1] = -viewY / viewLen;
@@ -649,17 +495,13 @@ void frame() {
 
     g_renderer.render(
         views,
-        6,
+        3,
         g_iso,
         g_camera,
         w,
         h,
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
-        g_layers[g_activeLayer].raised || g_layers[g_activeLayer].cliff || g_layers[g_activeLayer].wallMesh,
-        &g_raisedParams,
-        g_triplanarWalls,
-        g_wallTexScale,
         &cliffFs,
         stm_sec(stm_now()));
 
@@ -773,16 +615,9 @@ void event(const sapp_event* ev) {
 
 int main(int argc, char* argv[]) {
     bool smoke = false;
-    // Playground default: smoothed raised contours (overridable via --smooth).
-    g_raisedParams.smoothIterations = 2;
     // Playground default: no ground-slab underlay under the cliff mesh — the
     // highground stands alone; the underlay will be authored separately.
     g_cliffParams.groundEnabled = false;
-    // Playground default: Cyclopean walls at the production subdivision
-    // density (16x16) — the coarse 5x6 default cannot resolve the stones.
-    g_wallMeshSettings.wallStyle = landscape_mesh::WallStyleId::Cyclopean;
-    g_wallMeshSettings.wallHorizontalSubdivisions = 16;
-    g_wallMeshSettings.wallVerticalSubdivisions = 16;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--smoke") {
@@ -797,29 +632,11 @@ int main(int argc, char* argv[]) {
         if (arg == "--no-ui") {
             g_noUi = true;
         }
-        if (arg.rfind("--nodes=", 0) == 0) {
-            g_cliNodes = parseNodesArg(arg.substr(8));
-        }
         if (arg.rfind("--cliff-nodes=", 0) == 0) {
             g_cliCliffNodes = parseNodesArg(arg.substr(14));
         }
-        if (arg.rfind("--wallmesh-nodes=", 0) == 0) {
-            g_cliWallMeshNodes = parseNodesArg(arg.substr(17));
-        }
         if (arg.rfind("--shot=", 0) == 0) {
             g_shotPath = arg.substr(7);
-        }
-        if (arg == "--raised-atlas=grass") {
-            g_cliRaisedGrassAtlas = true;
-        }
-        if (arg == "--painter") {
-            g_zbuf = false;
-        }
-        if (arg == "--no-triplanar") {
-            g_triplanarWalls = false;
-        }
-        if (arg.rfind("--smooth=", 0) == 0) {
-            g_raisedParams.smoothIterations = std::atoi(arg.substr(9).c_str());
         }
         if (arg.rfind("--zoom=", 0) == 0) {
             g_cliZoom = static_cast<float>(std::atof(arg.substr(7).c_str()));

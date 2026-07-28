@@ -219,11 +219,10 @@ FBO редактора — NONE).
 `Grid нод + Params -> generate() -> Mesh` с примитивами `Top`/`Wall`,
 depth-отсортированными; контракт — `include/highground_core/highground.h`,
 инспекция — `inspect.h`). Общая для редактора/клиента (`render_core` — только
-GPU и материалы) и TileShapePlayground (отладка алгоритма без редактора).
+GPU и материалы).
 Публичный boundary-first API: `boundaryLoops(grid, w, h)` — строго простые
 петли контура (pinch-разрезы + чистка коллинеарных), готовые к экструзии в
-стены и заливке; в плейграунде на нём живёт демо-фигура «Prism 3D»
-(прямоугольная призма по петлям, верх из `generate` с bevel=0).
+стены и заливку.
 CGAL-генератор `[есть, desktop]`: `generateCgal(grid, params)` — регион земли
 как булево объединение квадратов вокруг on-нод (`CGAL::Polygon_set_2`, ядро
 EPICK: все координаты — точные половинки в double, GMP в рантайме не нужен),
@@ -231,9 +230,8 @@ EPICK: все координаты — точные половинки в double
 учитываются BFS-классификацией граней; «квадратные крышечки» исключены
 конструктивно), стены — из тех же петель региона через `buildRockWalls`.
 CGAL подключён из vcpkg только на desktop (`!emscripten`; без CGAL —
-`cgalAvailable() == false` и `generateCgal` возвращает пустой Mesh). В
-TileShapePlayground — чекбокс «CGAL region» на raised-слое (A/B со старым
-генератором), покрытие фаззером `highground_cgal_test.cpp`. Ограничение:
+`cgalAvailable() == false` и `generateCgal` возвращает пустой Mesh).
+Покрытие — фаззер `highground_cgal_test.cpp`. Ограничение:
 верх строится по нефаскованному контуру, а стены фасят выпуклые углы
 (`bevel`) — на углах возможны мелкие щели до введения фаски на петлях.
 
@@ -309,8 +307,10 @@ FS-униформ), кэш per-asset по контент-хэшу с debounce 0.
 `WorldFrame.cyclopeanTiles` (редактор — `ModelFrameSource`, клиент/play-таб —
 `world_frame_builder`; `ensureCyclopeanAsset` пробрасывает параметры в обоих).
 Панель параметров — `CyclopeanSettings.qml` (секции Height/Rock, условие
-видимости — булево `Asset.isCyclopean3d`). Песочница для отладки алгоритма —
-кисть «Cyclopean 3D» в TileShapePlayground.
+видимости — булево `Asset.isCyclopean3d`). Песочницы для отладки алгоритма —
+MeshGenerationPlayground и Landscape3dPlayground (слой «Cyclopean 3D» из
+TileShapePlayground, откуда портировался рендер, удалён после переноса в
+редактор).
 Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
 `raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —
