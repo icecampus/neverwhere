@@ -928,7 +928,10 @@ void AtlasRenderer::render(
 
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
-        if (!layer.brush || layer.cliff) {
+        // The cliff layer also paints its flat tiles: they show the painted
+        // silhouette instantly while the field mesh rebuilds (debounced), and
+        // the finished mesh covers them by depth afterwards.
+        if (!layer.brush) {
             continue;
         }
         TexRange range;
