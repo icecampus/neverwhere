@@ -242,8 +242,6 @@ void main() {
         float sky = 0.5 + 0.5 * n.y;
 
         col = rockCol * (0.15 + 0.30 * ao * sky) + rockCol * dif * sha * 1.15;
-        // Fog blends to the background with distance.
-        col = mix(col, bg, clamp(1.0 - exp(-0.015 * t * t), 0.0, 1.0));
     }
 
     // Ground plane under the cube: catches the soft shadow, anchors the block.
@@ -256,7 +254,7 @@ void main() {
                 sin(lightPitch), cos(lightPitch) * cos(lightYaw)));
             float sha = softShadow(gp + vec3(0.0, 0.01, 0.0), lightDir);
             vec3 gcol = bg * 0.6 * (0.35 + 0.65 * sha);
-            col = mix(gcol, bg, clamp(1.0 - exp(-0.02 * gt * gt), 0.0, 1.0));
+            col = gcol;
         }
     }
 

@@ -236,10 +236,6 @@ void main() {
     vec3 n = normalize(v_n);
     n = bumpNormal(wp, n);
 
-    vec3 toCam = wp - cam_pos.xyz;
-    float t = length(toCam);
-    vec3 rd = toCam / t;
-
     // Material — same formulas as the raymarch twin's shading block.
     vec3 m = map(wp);
     float cellF = m.y;
@@ -258,8 +254,6 @@ void main() {
     float sky = 0.5 + 0.5 * n.y;
 
     vec3 col = rockCol * (0.15 + 0.30 * ao * sky) + rockCol * dif * sha * 1.15;
-    vec3 bg = mix(vec3(0.65, 0.75, 0.85), vec3(0.25, 0.30, 0.38), 0.5 + 0.5 * rd.y);
-    col = mix(col, bg, clamp(1.0 - exp(-0.015 * t * t), 0.0, 1.0));
 
     fragColor = vec4(pow(col, vec3(0.4545)), 1.0);
 }
