@@ -23,6 +23,7 @@
 
 #include <highground_core/cliff_field.h>
 #include <highground_core/surface_nets.h>
+#include <stone_gen/stone_field.h>
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
@@ -38,6 +39,8 @@ struct ColorVertex {
     float r, g, b, a;
 };
 
+struct CliffFsParams; // defined below; PaintLayerView only points at it
+
 // Cliff pass (scalar-field surface nets): screen position + baked depth,
 // field-space normal, groove carve attribute and the world position (map
 // cells, height) for per-pixel shading.
@@ -49,14 +52,18 @@ struct CliffVertex {
 };
 
 // One paint layer on the shared canvas: its own node grid and either flat
-// (2D atlas tiles) or cliff (scalar-field surface nets from the same nodes,
-// z-buffered) presentation.
+// (2D atlas tiles) or scalar-field surface nets from the same nodes
+// (z-buffered): cliff (omphalos grooves) or stone (StoneCubePlayground
+// voronoi stones).
 struct PaintLayerView {
     const LandBrush* brush = nullptr;
     AtlasKind atlas = AtlasKind::Grass;
     bool cliff = false;
     const cliff::FieldParams* cliffParams = nullptr; // used when cliff == true
     float cliffHeightScale = 96.0f;                  // field px per 1.0 world height
+    bool stone = false;
+    const stone_gen::StoneFieldParams* stoneParams = nullptr; // used when stone == true
+    const CliffFsParams* shadingOverride = nullptr;           // per-layer palette (stone)
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;
@@ -132,13 +139,16 @@ private:
         float u, v;
     };
 
-    // Cached cliff derivative of a brush: the extracted surface-nets mesh plus
-    // the projected vertex stream, rebuilt only when the brush version or the
-    // field params change (debounced) — the full rebuild costs seconds.
+    // Cached scalar-field derivative of a brush: the extracted surface-nets
+    // mesh plus the projected vertex stream, rebuilt only when the brush
+    // version or the field params change (debounced) — the full rebuild
+    // costs seconds. Holds either cliff or stone params, per the layer kind.
     struct CliffCache {
         const LandBrush* brush = nullptr;
         std::uint64_t brushVersion = 0;
+        bool stone = false;
         cliff::FieldParams params{};
+        stone_gen::StoneFieldParams stoneParams{};
         float heightScale = 0.0f;
         bool contentValid = false;
         double lastEditSec = 0.0;

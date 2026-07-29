@@ -8,9 +8,11 @@ nw_add_lib_sources(
         include/stone_gen/stone_sdf.h
         include/stone_gen/stone_mesh.h
         include/stone_gen/stone_bake.h
+        include/stone_gen/stone_field.h
         src/stone_sdf.cpp
         src/stone_mesh.cpp
         src/stone_bake.cpp
+        src/stone_field.cpp
     LIBS
         glm::glm-header-only
         highground_core

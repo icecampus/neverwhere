@@ -1014,23 +1014,34 @@ void AtlasRenderer::render(
         sg_update_buffer(m_colorVbuf, sg_range{lineVerts.data(), lineVerts.size() * sizeof(ColorVertex)});
     }
 
-    // Cliff layers: scalar-field surface nets from the same nodes, drawn with
-    // the z-buffer and per-pixel shading. The mesh is cached per brush; the
-    // heavy field rebuild runs at most once per edit burst (0.3 s debounce),
-    // a heightScale edit only re-projects the cached mesh.
+    // Cliff/stone layers: scalar-field surface nets from the same nodes, drawn
+    // with the z-buffer and per-pixel shading. The mesh is cached per brush;
+    // the heavy field rebuild runs at most once per edit burst (0.3 s
+    // debounce), a heightScale edit only re-projects the cached mesh.
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
-        if (!layer.brush || !layer.cliff || !layer.cliffParams) {
+        if (!layer.brush || (!layer.cliff && !layer.stone)) {
+            continue;
+        }
+        if ((layer.cliff && !layer.cliffParams) || (layer.stone && !layer.stoneParams)) {
             continue;
         }
         CliffCache& cache = cliffCacheFor(layer.brush);
+        const bool paramsChanged = layer.stone
+            ? std::memcmp(&cache.stoneParams, layer.stoneParams, sizeof(stone_gen::StoneFieldParams)) != 0
+            : std::memcmp(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams)) != 0;
         const bool contentChanged = !cache.contentValid ||
             cache.brushVersion != layer.brush->version() ||
-            std::memcmp(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams)) != 0;
+            cache.stone != layer.stone || paramsChanged;
         const bool scaleChanged = cache.heightScale != layer.cliffHeightScale;
         if (contentChanged || scaleChanged) {
             cache.brushVersion = layer.brush->version();
-            std::memcpy(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams));
+            cache.stone = layer.stone;
+            if (layer.stone) {
+                std::memcpy(&cache.stoneParams, layer.stoneParams, sizeof(stone_gen::StoneFieldParams));
+            } else {
+                std::memcpy(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams));
+            }
             cache.heightScale = layer.cliffHeightScale;
             cache.contentValid = true;
             cache.lastEditSec = nowSec;
@@ -1065,14 +1076,15 @@ void AtlasRenderer::render(
             }
             cache.gpuDirty = false;
         }
-        if (!cache.stream.empty() && cache.vbuf.id != SG_INVALID_ID && cliffShading != nullptr) {
+        const CliffFsParams* shading = layer.shadingOverride ? layer.shadingOverride : cliffShading;
+        if (!cache.stream.empty() && cache.vbuf.id != SG_INVALID_ID && shading != nullptr) {
             sg_bindings bind{};
             bind.vertex_buffers[0] = cache.vbuf;
 
             sg_apply_pipeline(m_cliffPip);
             sg_apply_bindings(&bind);
             sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-            sg_apply_uniforms(1, sg_range{cliffShading, sizeof(CliffFsParams)});
+            sg_apply_uniforms(1, sg_range{shading, sizeof(CliffFsParams)});
             sg_draw(0, static_cast<int>(cache.stream.size()), 1);
         }
     }
@@ -1160,20 +1172,33 @@ void AtlasRenderer::rebuildCliffCache(
                 nodes[static_cast<size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
             }
 
-            cliff::CliffField field(cache.params, nodes.data(), nodesX, nodesY);
-            std::vector<float> samples;
-            field.sample(samples);
             cliff::RegularizeStats regStats;
-            cliff::regularizeSigns(field, samples, &regStats);
-            cache.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+            if (cache.stone) {
+                // StoneCubePlayground voronoi stones over the same slab:
+                // StoneField -> generic ScalarFieldView -> surface nets.
+                stone_gen::StoneField field(cache.stoneParams, nodes.data(), nodesX, nodesY);
+                cliff::ScalarFieldView view = field.view();
+                std::vector<float> samples;
+                field.sample(samples);
+                cliff::regularizeSigns(view, samples, &regStats);
+                cache.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+                cache.stats.voxelCount = view.nx * view.ny * view.nz;
+            } else {
+                cliff::CliffField field(cache.params, nodes.data(), nodesX, nodesY);
+                std::vector<float> samples;
+                field.sample(samples);
+                cliff::regularizeSigns(field, samples, &regStats);
+                cache.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+                cache.stats.voxelCount = field.sizeX() * field.sizeY() * field.sizeZ();
+            }
             const cliff::WatertightReport report = cliff::checkWatertight(cache.mesh);
             cache.stats.watertight = report.ok();
-            cache.stats.voxelCount = field.sizeX() * field.sizeY() * field.sizeZ();
             cache.stats.vertexCount = static_cast<int>(cache.mesh.vertices.size());
             cache.stats.triangleCount = static_cast<int>(cache.mesh.indices.size() / 3);
             cache.origin = {minX, minY};
             if (!report.ok()) {
-                spdlog::warn("AtlasRenderer: cliff mesh not watertight ({} bad of {} edges, {} saddles left)",
+                spdlog::warn("AtlasRenderer: {} mesh not watertight ({} bad of {} edges, {} saddles left)",
+                    cache.stone ? "stone" : "cliff",
                     report.badEdges, report.undirectedEdges, regStats.remaining);
             }
         }

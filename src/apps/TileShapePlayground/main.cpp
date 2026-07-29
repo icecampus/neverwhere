@@ -71,26 +71,33 @@ std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
-// own node grid and presentation (2D grass / 2D yellow / cliff scalar-field).
+// own node grid and presentation (2D grass / 2D yellow / cliff or stone
+// scalar-field).
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
     bool cliff;
+    bool stone;
     const char* name;
 };
 
-PaintLayer g_layers[3] = {
-    {{}, AtlasKind::Grass, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, "Yellow 2D"},
-    {{}, AtlasKind::Flat, true, "Cliff 3D"},
+PaintLayer g_layers[4] = {
+    {{}, AtlasKind::Grass, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, "Yellow 2D"},
+    {{}, AtlasKind::Flat, true, false, "Cliff 3D"},
+    {{}, AtlasKind::Flat, false, true, "Stone 3D"},
 };
 int g_activeLayer = 0;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
 cliff::FieldParams g_cliffParams;
+// Stone layer: StoneCubePlayground voronoi stones over the same slab —
+// its own params/height scale, same debounce mechanics.
+stone_gen::StoneFieldParams g_stoneParams;
 // Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
 // no mesh rebuild).
 float g_cliffHeightScale = 96.0f;
+float g_stoneHeightScale = 96.0f;
 struct ShadingParams {
     float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
     float lightElevation = 0.85f; // radians
@@ -204,8 +211,8 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
         std::atof(value.substr(comma + 1).c_str()));
 }
 
-// Painted programmatically in --demo mode: a cliff blob plus grass/yellow
-// flat strokes — used for visual verification.
+// Painted programmatically in --demo mode: a cliff blob plus a stone blob
+// plus grass/yellow flat strokes — used for visual verification.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
         for (int x = 15; x <= 18; ++x) {
@@ -213,6 +220,11 @@ void paintDemoPattern() {
         }
     }
     g_layers[2].brush.setNode({14, 15}, true);
+    for (int y = 6; y <= 9; ++y) {
+        for (int x = 6; x <= 9; ++x) {
+            g_layers[3].brush.setNode({x, y}, true);
+        }
+    }
     for (int y = 15; y <= 18; ++y) {
         for (int x = 6; x <= 9; ++x) {
             g_layers[0].brush.setNode({x, y}, true);
@@ -331,7 +343,7 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     ImGui::Text("Brush palette:");
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (i > 0) {
             ImGui::SameLine();
         }
@@ -388,6 +400,38 @@ void drawImGui(int w, int h) {
             ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
         }
     }
+    if (g_layers[g_activeLayer].stone) {
+        // StoneCubePlayground voronoi stones over the same slab; edits are
+        // debounced (0.3 s) into a full field rebuild, same as the cliff.
+        stone_gen::StoneFieldParams& p = g_stoneParams;
+        ImGui::SliderFloat("Stone height", &g_stoneHeightScale, 4.0f, 128.0f, "%.0f px");
+        if (ImGui::CollapsingHeader("Stones", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
+            ImGui::SliderFloat("Stone size", &p.voroScale, 1.0f, 6.0f);
+            ImGui::SliderFloat("Jitter", &p.cellJitter, 0.0f, 1.0f);
+            ImGui::SliderFloat("Groove depth", &p.grooveDepth, 0.0f, 0.2f);
+            ImGui::SliderFloat("Groove K", &p.grooveK, 0.5f, 6.0f);
+            ImGui::SliderFloat("Mask width", &p.grooveMaskWidth, 0.05f, 0.6f);
+            ImGui::SliderFloat("Seed", &p.seed, 0.0f, 16.0f);
+            ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 4);
+        }
+        if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
+            cliff::FieldParams& b = p.base;
+            ImGui::Checkbox("Ground slab", &b.groundEnabled);
+            ImGui::SliderFloat("Cell size", &b.cellSize, 0.03f, 0.07f, "%.3f");
+            ImGui::SliderFloat("Plateau height", &b.plateauHeight, 0.4f, 2.0f);
+            ImGui::SliderFloat("Edge radius", &b.edgeRadius, 0.0f, 0.12f);
+            ImGui::SliderFloat("Fbm amplitude", &p.fbmAmplitude, 0.0f, 0.08f);
+            ImGui::SliderFloat("Fbm frequency", &p.fbmFrequency, 2.0f, 10.0f);
+        }
+        const CliffStats& st = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
+        ImGui::Text("Stone mesh: %d verts, %d tris", st.vertexCount, st.triangleCount);
+        ImGui::Text("Watertight: %s", st.watertight ? "yes" : "NO");
+        ImGui::Text("Rebuild: %.0f ms (%d voxels)", st.rebuildMs, st.voxelCount);
+        if (st.pending) {
+            ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
+        }
+    }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);
@@ -405,13 +449,15 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d",
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d",
         g_layers[0].name,
         g_layers[0].brush.onNodeCount(),
         g_layers[1].name,
         g_layers[1].brush.onNodeCount(),
         g_layers[2].name,
-        g_layers[2].brush.onNodeCount());
+        g_layers[2].brush.onNodeCount(),
+        g_layers[3].name,
+        g_layers[3].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -460,10 +506,15 @@ void frame() {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
-    PaintLayerView views[3];
-    for (int i = 0; i < 3; ++i) {
-        views[i] = {&g_layers[i].brush, g_layers[i].atlas, g_layers[i].cliff,
-            &g_cliffParams, g_cliffHeightScale};
+    PaintLayerView views[4];
+    for (int i = 0; i < 4; ++i) {
+        views[i].brush = &g_layers[i].brush;
+        views[i].atlas = g_layers[i].atlas;
+        views[i].cliff = g_layers[i].cliff;
+        views[i].cliffParams = &g_cliffParams;
+        views[i].stone = g_layers[i].stone;
+        views[i].stoneParams = &g_stoneParams;
+        views[i].cliffHeightScale = g_layers[i].stone ? g_stoneHeightScale : g_cliffHeightScale;
     }
 
     // Cliff shading uniforms: palette/light from the UI state; the view
@@ -493,9 +544,27 @@ void frame() {
     cliffFs.params1[1] = s.gamma;
     cliffFs.params1[2] = s.backLight;
 
+    // Stone palette (per-layer shading override): the same omphalos shader,
+    // re-tinted to gray granite — dark groove floors, plain stone faces, no
+    // gold veins, weak spec; grassy tops stay.
+    CliffFsParams stoneFs = cliffFs;
+    stoneFs.darkColor[0] = 0.16f;
+    stoneFs.darkColor[1] = 0.16f;
+    stoneFs.darkColor[2] = 0.18f;
+    stoneFs.goldColor[0] = 0.55f;
+    stoneFs.goldColor[1] = 0.53f;
+    stoneFs.goldColor[2] = 0.48f;
+    stoneFs.params0[0] = 2.0f;  // vein threshold above the fbm range: veins off
+    stoneFs.params0[3] = 0.15f; // spec strength
+    for (int i = 0; i < 4; ++i) {
+        if (g_layers[i].stone) {
+            views[i].shadingOverride = &stoneFs;
+        }
+    }
+
     g_renderer.render(
         views,
-        3,
+        4,
         g_iso,
         g_camera,
         w,
@@ -618,6 +687,7 @@ int main(int argc, char* argv[]) {
     // Playground default: no ground-slab underlay under the cliff mesh — the
     // highground stands alone; the underlay will be authored separately.
     g_cliffParams.groundEnabled = false;
+    g_stoneParams.base.groundEnabled = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--smoke") {

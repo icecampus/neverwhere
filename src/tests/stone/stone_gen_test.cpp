@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <stone_gen/stone_bake.h>
+#include <stone_gen/stone_field.h>
 #include <stone_gen/stone_mesh.h>
 #include <stone_gen/stone_sdf.h>
 
@@ -78,6 +79,51 @@ TEST(StoneGen, MeshSeedVariation) {
         sumB += v.pos.x + v.pos.y + v.pos.z;
     }
     EXPECT_NE(sumA, sumB);
+}
+
+TEST(StoneGen, FieldWatertight) {
+    // Node blob (4x4 plateau + zero border) -> StoneField -> surface nets.
+    const int nodesX = 6;
+    const int nodesY = 6;
+    std::uint8_t nodes[nodesX * nodesY] = {};
+    for (int y = 1; y <= 4; ++y) {
+        for (int x = 1; x <= 4; ++x) {
+            nodes[y * nodesX + x] = 1;
+        }
+    }
+
+    stone_gen::StoneFieldParams params;
+    params.base.cellSize = 0.09f; // coarser than the UI default: test speed
+    params.base.groundEnabled = false;
+    stone_gen::StoneField field(params, nodes, nodesX, nodesY);
+
+    // Signs: plateau center is inside the solid, far away is outside.
+    const glm::vec3 origin = field.view().origin;
+    EXPECT_LT(field.eval(glm::vec3(2.5f, 0.5f, 2.5f)), 0.0f);
+    EXPECT_GT(field.eval(origin), 0.0f);
+
+    cliff::ScalarFieldView view = field.view();
+    std::vector<float> samples;
+    field.sample(samples);
+    cliff::RegularizeStats regStats;
+    cliff::regularizeSigns(view, samples, &regStats);
+    const cliff::Mesh mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+
+    EXPECT_EQ(regStats.remaining, 0);
+    ASSERT_FALSE(mesh.vertices.empty());
+    ASSERT_FALSE(mesh.indices.empty());
+    const cliff::WatertightReport report = cliff::checkWatertight(mesh);
+    EXPECT_TRUE(report.ok()) << report.badEdges << " bad of " << report.undirectedEdges << " edges";
+
+    // Groove attribute spans the carve range (stone faces and groove floors).
+    float gMin = 1e9f;
+    float gMax = -1e9f;
+    for (const cliff::MeshVertex& v : mesh.vertices) {
+        gMin = std::min(gMin, v.groove);
+        gMax = std::max(gMax, v.groove);
+    }
+    EXPECT_LT(gMin, params.grooveDepth * 0.3f);
+    EXPECT_GT(gMax, params.grooveDepth * 0.5f);
 }
 
 TEST(StoneGen, BakeAndExport) {

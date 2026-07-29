@@ -10,6 +10,7 @@
 
 #include <highground_core/cliff_field.h>
 #include <highground_core/surface_nets.h>
+#include <stone_gen/stone_field.h>
 #include <topology_core/diamond_isometry.h>
 
 #include "FlatAtlasGenerator.h"
@@ -184,8 +185,46 @@ bool runTileShapeSmokeTest() {
                 gMax);
             return false;
         }
+
+        // --- Stone layer pipeline (stone_gen::StoneField over the same
+        // nodes): voronoi stones carved into the slab, generic
+        // ScalarFieldView -> surface nets, watertight mesh, groove attr.
+        stone_gen::StoneFieldParams sp;
+        sp.base.cellSize = 0.09f; // coarse: smoke speed
+        sp.base.groundEnabled = false;
+        stone_gen::StoneField stoneField(sp, nodes.data(), nodesX, nodesY);
+        cliff::ScalarFieldView stoneView = stoneField.view();
+        std::vector<float> stoneSamples;
+        stoneField.sample(stoneSamples);
+        cliff::RegularizeStats stoneReg;
+        cliff::regularizeSigns(stoneView, stoneSamples, &stoneReg);
+        const cliff::Mesh stoneMesh = cliff::extractSurfaceNets(stoneView, stoneSamples, nullptr);
+        if (stoneReg.remaining != 0) {
+            spdlog::error("TEST FAIL TileShape: stone sign regularization left {} saddles",
+                stoneReg.remaining);
+            return false;
+        }
+        if (stoneMesh.vertices.empty() || stoneMesh.indices.empty()) {
+            spdlog::error("TEST FAIL TileShape: stone mesh is empty");
+            return false;
+        }
+        const cliff::WatertightReport stoneReport = cliff::checkWatertight(stoneMesh);
+        if (!stoneReport.ok()) {
+            spdlog::error("TEST FAIL TileShape: stone mesh not watertight ({} bad of {} edges)",
+                stoneReport.badEdges, stoneReport.undirectedEdges);
+            return false;
+        }
+        float sgMax = -1e9f;
+        for (const cliff::MeshVertex& v : stoneMesh.vertices) {
+            sgMax = std::max(sgMax, v.groove);
+        }
+        if (sgMax <= 0.01f) {
+            spdlog::error("TEST FAIL TileShape: stone groove attribute range max {:.4f} — no carve",
+                sgMax);
+            return false;
+        }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + cliff field pipeline");
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + cliff/stone field pipelines");
     return true;
 }

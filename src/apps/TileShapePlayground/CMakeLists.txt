@@ -9,6 +9,7 @@ nw_add_console_app(
         topology_core
         landscape_core
         highground_core
+        stone_gen
 )
 
 if(WIN32)
