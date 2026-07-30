@@ -104,6 +104,10 @@ float g_stoneGrassFade = 0.12f;
 // Stone rim shading: strength of the grass->stone gradient towards the wall
 // across the rim band (baked per-vertex rim weight; uniform-only, instant).
 float g_stoneRimShade = 1.0f;
+// Stone top texture: mix over the procedural grass palette (0 = palette only)
+// and tiling in tiles per world unit (uniform-only, instant).
+float g_stoneTopTexMix = 1.0f;
+float g_stoneTopTexTiles = 1.0f;
 struct ShadingParams {
     float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
     float lightElevation = 0.85f; // radians
@@ -311,6 +315,13 @@ void init() {
         spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
     }
 
+    // Tiling texture for the stone/cliff flat tops (mix lives in
+    // g_stoneTopTexMix; on failure keep the procedural palette only).
+    const auto topTexPath = g_dataRoot / "resources" / "textures" / "grass.png";
+    if (!g_renderer.loadTopTextureFromFile(topTexPath.string())) {
+        g_stoneTopTexMix = 0.0f;
+    }
+
     centerCamera(sapp_width(), sapp_height());
     if (g_demoNode) {
         const glm::vec2 nodePos = g_iso.nodeToField({10, 10});
@@ -429,6 +440,8 @@ void drawImGui(int w, int h) {
                 ImGui::SliderFloat("Rim notch", &p.rimNotch, 0.0f, 0.15f);
                 ImGui::SliderFloat("Grass fade", &g_stoneGrassFade, 0.02f, 0.3f);
                 ImGui::SliderFloat("Rim shade", &g_stoneRimShade, 0.0f, 1.0f);
+                ImGui::SliderFloat("Top texture", &g_stoneTopTexMix, 0.0f, 1.0f);
+                ImGui::SliderFloat("Tex tiling", &g_stoneTopTexTiles, 0.1f, 4.0f);
             }
         }
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -578,6 +591,8 @@ void frame() {
     stoneFs.params1[3] = g_stoneParams.base.plateauHeight + g_stoneParams.base.edgeRadius;
     stoneFs.params2[0] = g_stoneGrassFade;
     stoneFs.params2[1] = g_stoneRimShade;
+    stoneFs.params2[2] = g_stoneTopTexMix;
+    stoneFs.params2[3] = g_stoneTopTexTiles;
     for (int i = 0; i < 4; ++i) {
         if (g_layers[i].stone) {
             views[i].shadingOverride = &stoneFs;

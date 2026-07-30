@@ -81,7 +81,9 @@ struct CliffFsParams {
     float params1[4];    // spec power, gamma, wrap backlight, boulder plane Y
                          // (field units; > 0: rim-stitch shading on)
     float params2[4];    // grass->stone fade depth below the top plane,
-                         // rim gradient strength (0..1), unused x2
+                         // rim gradient strength (0..1),
+                         // top texture strength (0..1), top texture tiling
+                         // (tiles per world unit)
 };
 
 // Per-layer cliff cache status for the UI (see AtlasRenderer::cliffStatsFor).
@@ -115,6 +117,10 @@ public:
         int height,
         int cols = 4,
         int rows = 6);
+    // Tiling texture for the cliff/stone flat tops (world-space UV on the
+    // top plane; strength/tiling go through CliffFsParams.params2.zw).
+    // Until a file is loaded a 1x1 white placeholder is bound.
+    bool loadTopTextureFromFile(const std::string& path);
 
     void render(
         const PaintLayerView* layers,
@@ -210,6 +216,11 @@ private:
     sg_buffer m_texVbuf{};
     sg_buffer m_colorVbuf{};
     sg_sampler m_sampler{};
+    // Cliff/stone top texture (tiling, REPEAT sampler): placeholder 1x1 white
+    // until loadTopTextureFromFile succeeds.
+    sg_image m_topTexImage{};
+    sg_view m_topTexView{};
+    sg_sampler m_topTexSampler{};
 
     std::vector<CliffCache> m_cliffCaches;
 

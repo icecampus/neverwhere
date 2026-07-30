@@ -292,6 +292,7 @@ uniform vec4 grass_b;
 uniform vec4 params0;
 uniform vec4 params1;
 uniform vec4 params2;
+uniform sampler2D top_tex;
 
 vec4 hashv4v3(vec3 p) {
     vec3 chash = vec3(37.0, 39.0, 41.0);
@@ -350,9 +351,11 @@ void main() {
     float shell = 1.0 - smoothstep(0.005, 0.05, v_groove);
     vec3 gold = gold_color.rgb + vec3(1.0, 0.9, 0.4) * step(params0.x, f);
     vec3 rock = mix(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Grassy flat tops (omphalos idObj==2 style).
+    // Grassy flat tops (omphalos idObj==2 style), optionally textured:
+    // world-space tiling, params2.z = strength, params2.w = tiles per unit.
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
     vec3 grass = mix(grass_a.rgb, grass_b.rgb, gm);
+    grass = mix(grass, texture(top_tex, p.xz * params2.w).rgb, params2.z);
     float topMask = smoothstep(0.7, 0.9, n.y);
     // Rim stitch shading (stone layers only, params1.w = top plane Y):
     // boulders above the plane keep the wall palette; below the plane the
@@ -423,7 +426,7 @@ cbuffer fs_params: register(b0) {
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
     float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: boulder plane Y (0 = off)
-    float4 params2; // x: grass->stone fade depth below the top plane, y: rim gradient strength
+    float4 params2; // x: grass->stone fade depth, y: rim gradient strength, z: top texture strength, w: tiling
 };
 
 float4 hashv4v3(float3 p) {
@@ -475,6 +478,8 @@ float fbm2(float2 p) {
     return f * (1.0 / 1.9375);
 }
 
+Texture2D top_tex: register(t0);
+SamplerState top_smp: register(s0);
 struct PSIn {
     float4 pos: SV_Position;
     float3 normal: TEXCOORD0;
@@ -491,9 +496,11 @@ float4 main(PSIn inp): SV_Target {
     float shell = 1.0 - smoothstep(0.005, 0.05, inp.groove);
     float3 gold = gold_color.rgb + float3(1.0, 0.9, 0.4) * step(params0.x, f);
     float3 rock = lerp(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Grassy flat tops (omphalos idObj==2 style).
+    // Grassy flat tops (omphalos idObj==2 style), optionally textured:
+    // world-space tiling, params2.z = strength, params2.w = tiles per unit.
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
     float3 grass = lerp(grass_a.rgb, grass_b.rgb, gm);
+    grass = lerp(grass, top_tex.Sample(top_smp, p.xz * params2.w).rgb, params2.z);
     float topMask = smoothstep(0.7, 0.9, n.y);
     // Rim stitch shading (stone layers only, params1.w = top plane Y):
     // boulders above the plane keep the wall palette; below the plane the
@@ -574,7 +581,7 @@ struct FsParams {
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
     float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: boulder plane Y (0 = off)
-    float4 params2; // x: grass->stone fade depth below the top plane, y: rim gradient strength
+    float4 params2; // x: grass->stone fade depth, y: rim gradient strength, z: top texture strength, w: tiling
 };
 
 float4 hashv4v3(float3 p) {
@@ -634,7 +641,9 @@ struct PSIn {
     float rim;
 };
 
-fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]]) {
+fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
+                      texture2d<float> top_tex [[texture(0)]],
+                      sampler top_smp [[sampler(0)]]) {
     float3 n = normalize(in.normal);
     float3 p = in.world;
     // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
@@ -642,9 +651,11 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]])
     float shell = 1.0 - smoothstep(0.005, 0.05, in.groove);
     float3 gold = fs.gold_color.rgb + float3(1.0, 0.9, 0.4) * step(fs.params0.x, f);
     float3 rock = mix(fs.dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Grassy flat tops (omphalos idObj==2 style).
+    // Grassy flat tops (omphalos idObj==2 style), optionally textured:
+    // world-space tiling, params2.z = strength, params2.w = tiles per unit.
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
     float3 grass = mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
+    grass = mix(grass, top_tex.sample(top_smp, p.xz * fs.params2.w).rgb, fs.params2.z);
     float topMask = smoothstep(0.7, 0.9, n.y);
     // Rim stitch shading (stone layers only, params1.w = top plane Y):
     // boulders above the plane keep the wall palette; below the plane the
@@ -726,6 +737,29 @@ void AtlasRenderer::init() {
     smp.label = "tileshape-atlas-smp";
     m_sampler = sg_make_sampler(&smp);
 
+    sg_sampler_desc topSmp = {};
+    topSmp.min_filter = SG_FILTER_LINEAR;
+    topSmp.mag_filter = SG_FILTER_LINEAR;
+    topSmp.wrap_u = SG_WRAP_REPEAT;
+    topSmp.wrap_v = SG_WRAP_REPEAT;
+    topSmp.label = "tileshape-top-tex-smp";
+    m_topTexSampler = sg_make_sampler(&topSmp);
+
+    // Placeholder until a real top texture loads: keeps the cliff bindings
+    // valid (the shader always samples, strength lives in params2.z).
+    const std::uint32_t white = 0xFFFFFFFFu;
+    sg_image_desc topImg = {};
+    topImg.width = 1;
+    topImg.height = 1;
+    topImg.pixel_format = SG_PIXELFORMAT_RGBA8;
+    topImg.data.mip_levels[0].ptr = &white;
+    topImg.data.mip_levels[0].size = sizeof(white);
+    topImg.label = "tileshape-top-tex-placeholder";
+    m_topTexImage = sg_make_image(&topImg);
+    sg_view_desc topView = {};
+    topView.texture.image = m_topTexImage;
+    m_topTexView = sg_make_view(&topView);
+
     m_ready = true;
 }
 
@@ -749,6 +783,18 @@ void AtlasRenderer::shutdown() {
     if (m_sampler.id != SG_INVALID_ID) {
         sg_destroy_sampler(m_sampler);
         m_sampler = {};
+    }
+    if (m_topTexView.id != SG_INVALID_ID) {
+        sg_destroy_view(m_topTexView);
+        m_topTexView = {};
+    }
+    if (m_topTexImage.id != SG_INVALID_ID) {
+        sg_destroy_image(m_topTexImage);
+        m_topTexImage = {};
+    }
+    if (m_topTexSampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(m_topTexSampler);
+        m_topTexSampler = {};
     }
     destroySlot(m_slots[0]);
     destroySlot(m_slots[1]);
@@ -792,6 +838,51 @@ bool AtlasRenderer::uploadSlot(
     viewDesc.texture.image = slot.image;
     slot.view = sg_make_view(&viewDesc);
     return slot.view.id != SG_INVALID_ID;
+}
+
+bool AtlasRenderer::loadTopTextureFromFile(const std::string& path) {
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+    if (!pixels || w <= 0 || h <= 0) {
+        spdlog::error("AtlasRenderer: failed to load top texture '{}': {}", path, stbi_failure_reason());
+        if (pixels) {
+            stbi_image_free(pixels);
+        }
+        return false;
+    }
+
+    if (m_topTexView.id != SG_INVALID_ID) {
+        sg_destroy_view(m_topTexView);
+        m_topTexView = {};
+    }
+    if (m_topTexImage.id != SG_INVALID_ID) {
+        sg_destroy_image(m_topTexImage);
+        m_topTexImage = {};
+    }
+
+    sg_image_desc desc = {};
+    desc.width = w;
+    desc.height = h;
+    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.data.mip_levels[0].ptr = pixels;
+    desc.data.mip_levels[0].size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    desc.label = "tileshape-top-tex";
+    m_topTexImage = sg_make_image(&desc);
+    stbi_image_free(pixels);
+    if (m_topTexImage.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_image failed (top texture)");
+        return false;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = m_topTexImage;
+    m_topTexView = sg_make_view(&viewDesc);
+    if (m_topTexView.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_view failed (top texture)");
+        return false;
+    }
+    spdlog::info("AtlasRenderer: loaded top texture {} ({}x{})", path, w, h);
+    return true;
 }
 
 bool AtlasRenderer::loadAtlasFromFile(AtlasKind kind, const std::string& path, int cols, int rows) {
@@ -1128,6 +1219,8 @@ void AtlasRenderer::render(
         if (!cache.stream.empty() && cache.vbuf.id != SG_INVALID_ID && shading != nullptr) {
             sg_bindings bind{};
             bind.vertex_buffers[0] = cache.vbuf;
+            bind.views[0] = m_topTexView;
+            bind.samplers[0] = m_topTexSampler;
 
             sg_apply_pipeline(m_cliffPip);
             sg_apply_bindings(&bind);
@@ -1385,6 +1478,27 @@ void AtlasRenderer::ensurePipelines() {
         }
         fillVsUniformDesc(&shd.uniform_blocks[0]);
         fillCliffFsUniformDesc(&shd.uniform_blocks[1]);
+
+        shd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        shd.views[0].texture.image_type = SG_IMAGETYPE_2D;
+        shd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        shd.views[0].texture.hlsl_register_t_n = 0;
+        shd.views[0].texture.msl_texture_n = 0;
+        shd.views[0].texture.wgsl_group1_binding_n = 0;
+        shd.views[0].texture.spirv_set1_binding_n = 0;
+
+        shd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        shd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        shd.samplers[0].hlsl_register_s_n = 0;
+        shd.samplers[0].msl_sampler_n = 0;
+        shd.samplers[0].wgsl_group1_binding_n = 1;
+        shd.samplers[0].spirv_set1_binding_n = 1;
+
+        shd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        shd.texture_sampler_pairs[0].view_slot = 0;
+        shd.texture_sampler_pairs[0].sampler_slot = 0;
+        shd.texture_sampler_pairs[0].glsl_name = "top_tex";
+
         m_cliffShd = sg_make_shader(&shd);
 
         sg_pipeline_desc pip = {};
