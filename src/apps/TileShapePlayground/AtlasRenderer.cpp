@@ -287,6 +287,7 @@ uniform vec4 grass_a;
 uniform vec4 grass_b;
 uniform vec4 params0;
 uniform vec4 params1;
+uniform vec4 params2;
 
 vec4 hashv4v3(vec3 p) {
     vec3 chash = vec3(37.0, 39.0, 41.0);
@@ -349,6 +350,15 @@ void main() {
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
     vec3 grass = mix(grass_a.rgb, grass_b.rgb, gm);
     float topMask = smoothstep(0.7, 0.9, n.y);
+    // Rim stitch shading (stone layers only, params1.w = top plane Y):
+    // boulders above the plane keep the wall palette; below the plane the
+    // grass yields to stone gradually over params2.x (not at once) — the
+    // flat top and the shallow rim scoops stay grassy.
+    if (params1.w > 0.0) {
+        float stone = max(step(params1.w + 0.01, p.y),
+            smoothstep(0.0, max(params2.x, 1e-4), params1.w - p.y));
+        topMask *= 1.0 - stone;
+    }
     vec3 base = mix(rock, grass, topMask);
     // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
     vec3 l = normalize(light_dir.xyz);
@@ -403,7 +413,8 @@ cbuffer fs_params: register(b0) {
     float4 grass_a;
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
-    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: boulder plane Y (0 = off)
+    float4 params2; // x: grass->stone fade depth below the top plane
 };
 
 float4 hashv4v3(float3 p) {
@@ -474,6 +485,15 @@ float4 main(PSIn inp): SV_Target {
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
     float3 grass = lerp(grass_a.rgb, grass_b.rgb, gm);
     float topMask = smoothstep(0.7, 0.9, n.y);
+    // Rim stitch shading (stone layers only, params1.w = top plane Y):
+    // boulders above the plane keep the wall palette; below the plane the
+    // grass yields to stone gradually over params2.x (not at once) — the
+    // flat top and the shallow rim scoops stay grassy.
+    if (params1.w > 0.0) {
+        float stone = max(step(params1.w + 0.01, p.y),
+            smoothstep(0.0, max(params2.x, 1e-4), params1.w - p.y));
+        topMask *= 1.0 - stone;
+    }
     float3 base = lerp(rock, grass, topMask);
     // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
     float3 l = normalize(light_dir.xyz);
@@ -538,7 +558,8 @@ struct FsParams {
     float4 grass_a;
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
-    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+    float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: boulder plane Y (0 = off)
+    float4 params2; // x: grass->stone fade depth below the top plane
 };
 
 float4 hashv4v3(float3 p) {
@@ -609,6 +630,15 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]])
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
     float3 grass = mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
     float topMask = smoothstep(0.7, 0.9, n.y);
+    // Rim stitch shading (stone layers only, params1.w = top plane Y):
+    // boulders above the plane keep the wall palette; below the plane the
+    // grass yields to stone gradually over params2.x (not at once) — the
+    // flat top and the shallow rim scoops stay grassy.
+    if (fs.params1.w > 0.0) {
+        float stone = max(step(fs.params1.w + 0.01, p.y),
+            smoothstep(0.0, max(fs.params2.x, 1e-4), fs.params1.w - p.y));
+        topMask *= 1.0 - stone;
+    }
     float3 base = mix(rock, grass, topMask);
     // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
     float3 l = normalize(fs.light_dir.xyz);
@@ -645,9 +675,9 @@ void fillCliffFsUniformDesc(sg_shader_uniform_block* block) {
     block->msl_buffer_n = 1;
     block->wgsl_group0_binding_n = 1;
     block->spirv_set0_binding_n = 1;
-    const char* names[8] = {"light_dir", "view_dir", "dark_color", "gold_color",
-        "grass_a", "grass_b", "params0", "params1"};
-    for (int i = 0; i < 8; ++i) {
+    const char* names[9] = {"light_dir", "view_dir", "dark_color", "gold_color",
+        "grass_a", "grass_b", "params0", "params1", "params2"};
+    for (int i = 0; i < 9; ++i) {
         block->glsl_uniforms[i].glsl_name = names[i];
         block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
     }

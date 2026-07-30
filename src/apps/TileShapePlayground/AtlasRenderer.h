@@ -77,7 +77,9 @@ struct CliffFsParams {
     float grassA[4];     // rgb
     float grassB[4];     // rgb
     float params0[4];    // vein threshold, ambient, diffuse, spec strength
-    float params1[4];    // spec power, gamma, wrap backlight, unused
+    float params1[4];    // spec power, gamma, wrap backlight, boulder plane Y
+                         // (field units; > 0: rim-stitch shading on)
+    float params2[4];    // grass->stone fade depth below the top plane, unused x3
 };
 
 // Per-layer cliff cache status for the UI (see AtlasRenderer::cliffStatsFor).

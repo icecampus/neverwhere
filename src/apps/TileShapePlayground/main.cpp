@@ -98,6 +98,9 @@ stone_gen::StoneFieldParams g_stoneParams;
 // no mesh rebuild).
 float g_cliffHeightScale = 96.0f;
 float g_stoneHeightScale = 96.0f;
+// Stone rim shading: depth below the top plane over which the grass fades
+// into the wall palette (uniforms only, applies instantly).
+float g_stoneGrassFade = 0.12f;
 struct ShadingParams {
     float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
     float lightElevation = 0.85f; // radians
@@ -421,6 +424,7 @@ void drawImGui(int w, int h) {
                 ImGui::SliderFloat("Rim width", &p.rimWidth, 0.05f, 1.0f);
                 ImGui::SliderFloat("Rim bulge", &p.rimBulge, 0.0f, 2.0f);
                 ImGui::SliderFloat("Rim notch", &p.rimNotch, 0.0f, 0.15f);
+                ImGui::SliderFloat("Grass fade", &g_stoneGrassFade, 0.02f, 0.3f);
             }
         }
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -564,6 +568,11 @@ void frame() {
     stoneFs.goldColor[2] = 0.48f;
     stoneFs.params0[0] = 2.0f;  // vein threshold above the fbm range: veins off
     stoneFs.params0[3] = 0.15f; // spec strength
+    // Rim stitch shading: the flat top sits exactly at plateauHeight +
+    // edgeRadius; above it (+eps in the shader) boulders keep the wall
+    // palette, below it the grass yields to stone over the fade depth.
+    stoneFs.params1[3] = g_stoneParams.base.plateauHeight + g_stoneParams.base.edgeRadius;
+    stoneFs.params2[0] = g_stoneGrassFade;
     for (int i = 0; i < 4; ++i) {
         if (g_layers[i].stone) {
             views[i].shadingOverride = &stoneFs;
