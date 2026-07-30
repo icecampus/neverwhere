@@ -63,6 +63,9 @@ public:
     float eval(const glm::vec3& p) const;
     // Base shape only (slab + ground chunk if enabled, no grooves/fbm). Cheap.
     float evalBase(const glm::vec3& p) const;
+    // Same, also reporting the plateau-outline pseudo-SDF: d2 < 0 inside the
+    // outline, 0 at it, > 0 outside (the slab wall sits at d2 = edgeRadius).
+    float evalBase(const glm::vec3& p, float& outD2) const;
     // Groove carve depth: 0 on the untouched surface, > 0 towards groove floors.
     float grooveDepth(const glm::vec3& p) const;
 
@@ -81,7 +84,6 @@ public:
 
 private:
     float heightAt(float x, float z) const; // blurred 2D node field, bilinear lookup
-    float evalBase(const glm::vec3& p, float& outD2) const;
     float grooveWave(float y) const;           // parametrized omphalos wave
     float grooveMask(float d2, float y) const; // wall band mask with rim fade
     float applyGrooves(float f, const glm::vec3& p, float mask) const;

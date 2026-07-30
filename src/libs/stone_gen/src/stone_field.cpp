@@ -107,54 +107,107 @@ float StoneField::surfaceMask(float dBase) const {
     return 1.0f - glm::smoothstep(0.0f, m_params.grooveMaskWidth, std::fabs(dBase));
 }
 
-float StoneField::reliefMask(const glm::vec3& p) const {
-    if (!m_params.flatTop) {
-        return 1.0f;
-    }
-    // Base slab normal (central differences): on the planar top it points
-    // straight up, on the walls it is horizontal, across the rounded rim it
-    // rotates smoothly — so the relief fades over the rim and the flat top
-    // inherits the uneven outline of the carved wall below it.
+void StoneField::sampleBase(
+    const glm::vec3& p,
+    float& outDBase,
+    float& outD2,
+    float& outNormalY,
+    float& outD2GradLen) const {
     const float eps = 0.5f * m_params.base.cellSize;
-    const float gx = m_base.evalBase(p + glm::vec3(eps, 0.0f, 0.0f)) -
-        m_base.evalBase(p - glm::vec3(eps, 0.0f, 0.0f));
-    const float gy = m_base.evalBase(p + glm::vec3(0.0f, eps, 0.0f)) -
-        m_base.evalBase(p - glm::vec3(0.0f, eps, 0.0f));
-    const float gz = m_base.evalBase(p + glm::vec3(0.0f, 0.0f, eps)) -
-        m_base.evalBase(p - glm::vec3(0.0f, 0.0f, eps));
+    float d2xp = 0.0f;
+    float d2xm = 0.0f;
+    float d2zp = 0.0f;
+    float d2zm = 0.0f;
+    float d2yp = 0.0f;
+    float d2ym = 0.0f;
+    const float xp = m_base.evalBase(p + glm::vec3(eps, 0.0f, 0.0f), d2xp);
+    const float xm = m_base.evalBase(p - glm::vec3(eps, 0.0f, 0.0f), d2xm);
+    const float yp = m_base.evalBase(p + glm::vec3(0.0f, eps, 0.0f), d2yp);
+    const float ym = m_base.evalBase(p - glm::vec3(0.0f, eps, 0.0f), d2ym);
+    const float zp = m_base.evalBase(p + glm::vec3(0.0f, 0.0f, eps), d2zp);
+    const float zm = m_base.evalBase(p - glm::vec3(0.0f, 0.0f, eps), d2zm);
+    outDBase = m_base.evalBase(p, outD2);
+    // Slab normal: straight up on the planar top, horizontal on the walls,
+    // rotating smoothly across the rounded rim.
+    const float gx = xp - xm;
+    const float gy = yp - ym;
+    const float gz = zp - zm;
     const float len = std::sqrt(gx * gx + gy * gy + gz * gz);
-    if (len < 1e-6f) {
-        return 1.0f; // degenerate spot (medial axis), relief does no harm there
+    outNormalY = len < 1e-6f ? 0.0f : gy / len; // degenerate: treat as wall
+    outD2GradLen = std::sqrt(
+        (d2xp - d2xm) * (d2xp - d2xm) + (d2zp - d2zm) * (d2zp - d2zm)) /
+        (2.0f * eps);
+}
+
+void StoneField::rimStitch(
+    float normalY,
+    float d2,
+    float d2GradLen,
+    float& outTopness,
+    float& outRim) const {
+    if (!m_params.flatTop) {
+        outTopness = 0.0f;
+        outRim = 0.0f;
+        return;
     }
     const float edge0 = m_params.flatTopLo;
     const float edge1 = std::max(edge0 + 1e-3f, m_params.flatTopHi);
-    return 1.0f - glm::smoothstep(edge0, edge1, gy / len);
+    outTopness = glm::smoothstep(edge0, edge1, normalY);
+    // d2 is a pseudo-SDF compressed into a fixed range — dividing by its
+    // gradient gives the wall distance in ~world units.
+    const float inward =
+        (m_params.base.edgeRadius - d2) / std::max(d2GradLen, 0.05f);
+    outRim = 1.0f - glm::smoothstep(0.0f, m_params.rimWidth, inward);
 }
 
 float StoneField::eval(const glm::vec3& p) const {
-    const float dBase = m_base.evalBase(p);
-    const float mask = surfaceMask(dBase);
+    float d2 = 0.0f;
+    float dBase = m_base.evalBase(p, d2);
+    float mask = surfaceMask(dBase);
     if (mask <= 0.0f) {
         // Outside the surface band the carve and the fbm can't reach the zero
         // crossing anyway — keep the clean slab SDF (and skip their cost).
         return dBase;
     }
+    float normalY = 0.0f;
+    float d2GradLen = 0.0f;
+    sampleBase(p, dBase, d2, normalY, d2GradLen);
+    mask = surfaceMask(dBase);
     // StoneCubePlayground carve: d -= grooveDepth * cellFactor — the surface
     // bulges out inside voronoi cells and stays on the slab at the borders
-    // (grooves between stones). Both the carve and the fbm fade out on the
-    // flat plateau top (reliefMask).
-    const float relief = reliefMask(p);
-    float d = dBase - m_params.grooveDepth * cellFactor(p) * mask * relief;
-    d += m_params.fbmAmplitude * (fbm(m_params.fbmFrequency * p) - 0.5f) * mask * relief;
+    // (grooves between stones). Rim stitch: the bulge keeps full strength
+    // across the rim and wraps onto the top inside the rim band (fading
+    // inward), so rim stones are not sliced; groove mouths scoop the top
+    // down by rimNotch; the interior top stays exactly flat.
+    float topness = 0.0f;
+    float rim = 0.0f;
+    rimStitch(normalY, d2, d2GradLen, topness, rim);
+    const float cell = cellFactor(p);
+    const float bulge = (1.0f - topness) + topness * rim * m_params.rimBulge;
+    const float detail = (1.0f - topness) + topness * rim;
+    float d = dBase + mask *
+        (m_params.rimNotch * (1.0f - cell) * topness * rim -
+         m_params.grooveDepth * cell * bulge);
+    d += m_params.fbmAmplitude * (fbm(m_params.fbmFrequency * p) - 0.5f) * mask * detail;
     return d;
 }
 
 float StoneField::grooveDepth(const glm::vec3& p) const {
-    const float mask = surfaceMask(m_base.evalBase(p));
+    float d2 = 0.0f;
+    float dBase = m_base.evalBase(p, d2);
+    const float mask = surfaceMask(dBase);
     if (mask <= 0.0f) {
         return 0.0f;
     }
-    return m_params.grooveDepth * (1.0f - cellFactor(p)) * mask * reliefMask(p);
+    float normalY = 0.0f;
+    float d2GradLen = 0.0f;
+    sampleBase(p, dBase, d2, normalY, d2GradLen);
+    float topness = 0.0f;
+    float rim = 0.0f;
+    rimStitch(normalY, d2, d2GradLen, topness, rim);
+    // Wall groove floors plus the rim scoops read as carved area.
+    return mask * (1.0f - cellFactor(p)) *
+        (m_params.grooveDepth * (1.0f - topness) + m_params.rimNotch * topness * rim);
 }
 
 void StoneField::sample(std::vector<float>& outValues) const {

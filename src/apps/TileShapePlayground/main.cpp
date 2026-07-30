@@ -418,6 +418,9 @@ void drawImGui(int w, int h) {
             if (p.flatTop) {
                 ImGui::SliderFloat("Top fade lo", &p.flatTopLo, 0.0f, 1.0f);
                 ImGui::SliderFloat("Top fade hi", &p.flatTopHi, 0.0f, 1.0f);
+                ImGui::SliderFloat("Rim width", &p.rimWidth, 0.05f, 1.0f);
+                ImGui::SliderFloat("Rim bulge", &p.rimBulge, 0.0f, 2.0f);
+                ImGui::SliderFloat("Rim notch", &p.rimNotch, 0.0f, 0.15f);
             }
         }
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {

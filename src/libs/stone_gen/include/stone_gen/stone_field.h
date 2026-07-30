@@ -3,9 +3,11 @@
 // (clamp(k*(F2-F1)) bulge inside voronoi cells, grooves at the cell borders)
 // + fbm detail. The carve is masked to the slab surface band so the field
 // stays the clean slab SDF deep inside/outside (watertight border), and —
-// with flatTop — faded out where the base slab normal points up: the plateau
-// top stays exactly flat while the walls (and the rim they bulge into) keep
-// the stone relief.
+// with flatTop — stitched to the flat plateau top: the relief fades by the
+// base slab normal, but inside a rim band along the outline the stitch is
+// structural — stone bulges wrap onto the top (rimBulge) and groove mouths
+// scoop down into it (rimNotch), so rim stones are not sliced and the top
+// edge follows them; the interior top stays exactly flat.
 //
 // Same contract as cliff::CliffField (nodes + params -> sampled field ->
 // highground_core surface nets), no Qt/GPU.
@@ -35,6 +37,10 @@ struct StoneFieldParams {
                                    // (same trick as stone_mesh, 0 keeps raw)
     float flatTopLo = 0.55f;       // base-normal .y where the relief starts fading
     float flatTopHi = 0.85f;       // ... and where the top is fully flat
+    float rimWidth = 0.35f;        // rim stitch band width in ~world units
+                                   // from the wall into the top interior
+    float rimBulge = 1.0f;         // stone bulge wrap onto the top in the band
+    float rimNotch = 0.04f;        // groove-mouth scoop depth into the top
     bool flatTop = true;           // no stone relief on the plateau top: the
                                    // carve/fbm fade out by the base slab normal,
                                    // the walls keep the relief (uneven rim)
@@ -65,8 +71,19 @@ private:
     // 0 at voronoi cell borders (grooves) .. 1 inside stones.
     float cellFactor(const glm::vec3& p) const;
     float surfaceMask(float dBase) const;
-    // Relief fade by the base slab normal: 1 on the walls, 0 on the flat top.
-    float reliefMask(const glm::vec3& p) const;
+    // Base field bundle from one 7-tap evaluation: the slab value, the
+    // outline pseudo-SDF d2, the slab normal .y (1 on the planar top, ~0 on
+    // the walls) and the horizontal d2 gradient length.
+    void sampleBase(
+        const glm::vec3& p,
+        float& outDBase,
+        float& outD2,
+        float& outNormalY,
+        float& outD2GradLen) const;
+    // Rim stitch weights: outTopness = 0 on walls .. 1 on the flat top
+    // (angular fade), outRim = 1 at the wall plane .. 0 across rimWidth
+    // world units into the top interior. Both 0 when flatTop is off.
+    void rimStitch(float normalY, float d2, float d2GradLen, float& outTopness, float& outRim) const;
 
     StoneFieldParams m_params;
     cliff::CliffField m_base; // slab + sampling grid (evalBase only)

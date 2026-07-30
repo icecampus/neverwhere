@@ -183,6 +183,57 @@ TEST(StoneGen, FlatTop) {
     }
 }
 
+TEST(StoneGen, RimStitch) {
+    // Same node blob as FieldWatertight.
+    const int nodesX = 6;
+    const int nodesY = 6;
+    std::uint8_t nodes[nodesX * nodesY] = {};
+    for (int y = 1; y <= 4; ++y) {
+        for (int x = 1; x <= 4; ++x) {
+            nodes[y * nodesX + x] = 1;
+        }
+    }
+
+    stone_gen::StoneFieldParams params;
+    params.base.cellSize = 0.09f;
+    params.base.groundEnabled = false;
+    stone_gen::StoneField field(params, nodes, nodesX, nodesY);
+
+    const float topY = params.base.plateauHeight + params.base.edgeRadius;
+    const glm::vec2 center(2.5f, 2.5f);
+    int bulgePts = 0;
+    int scoopPts = 0;
+    int interiorHoles = 0;
+    float bulgeMinR = 1e9f;
+    float scoopMinR = 1e9f;
+    for (float x = 0.6f; x <= 4.6f; x += 0.06f) {
+        for (float z = 0.6f; z <= 4.6f; z += 0.06f) {
+            const float r = glm::length(glm::vec2(x, z) - center);
+            // Stone bulges wrap onto the top: solid above the base top plane.
+            if (field.eval(glm::vec3(x, topY + 0.02f, z)) < 0.0f) {
+                ++bulgePts;
+                bulgeMinR = std::min(bulgeMinR, r);
+            }
+            // Groove mouths scoop the top down: air pockets just under the
+            // top plane, but only over a solid column.
+            if (field.eval(glm::vec3(x, topY - 0.025f, z)) > 0.0f &&
+                field.eval(glm::vec3(x, 0.5f, z)) < 0.0f) {
+                ++scoopPts;
+                scoopMinR = std::min(scoopMinR, r);
+            }
+            // The interior top stays solid right under the plane (no scoops).
+            if (r < 0.9f && field.eval(glm::vec3(x, topY - 0.025f, z)) > 0.0f) {
+                ++interiorHoles;
+            }
+        }
+    }
+    EXPECT_GT(bulgePts, 3);
+    EXPECT_GT(bulgeMinR, 1.0f) << "bulge reached the top interior";
+    EXPECT_GT(scoopPts, 3);
+    EXPECT_GT(scoopMinR, 1.0f) << "scoop reached the top interior";
+    EXPECT_EQ(interiorHoles, 0);
+}
+
 TEST(StoneGen, BakeAndExport) {
     const stone_gen::StoneSdf sdf(stone_gen::StoneCubeParams{});
     stone_gen::MeshParams meshParams;
