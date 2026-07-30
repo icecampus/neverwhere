@@ -107,20 +107,54 @@ float StoneField::surfaceMask(float dBase) const {
     return 1.0f - glm::smoothstep(0.0f, m_params.grooveMaskWidth, std::fabs(dBase));
 }
 
+float StoneField::reliefMask(const glm::vec3& p) const {
+    if (!m_params.flatTop) {
+        return 1.0f;
+    }
+    // Base slab normal (central differences): on the planar top it points
+    // straight up, on the walls it is horizontal, across the rounded rim it
+    // rotates smoothly — so the relief fades over the rim and the flat top
+    // inherits the uneven outline of the carved wall below it.
+    const float eps = 0.5f * m_params.base.cellSize;
+    const float gx = m_base.evalBase(p + glm::vec3(eps, 0.0f, 0.0f)) -
+        m_base.evalBase(p - glm::vec3(eps, 0.0f, 0.0f));
+    const float gy = m_base.evalBase(p + glm::vec3(0.0f, eps, 0.0f)) -
+        m_base.evalBase(p - glm::vec3(0.0f, eps, 0.0f));
+    const float gz = m_base.evalBase(p + glm::vec3(0.0f, 0.0f, eps)) -
+        m_base.evalBase(p - glm::vec3(0.0f, 0.0f, eps));
+    const float len = std::sqrt(gx * gx + gy * gy + gz * gz);
+    if (len < 1e-6f) {
+        return 1.0f; // degenerate spot (medial axis), relief does no harm there
+    }
+    const float edge0 = m_params.flatTopLo;
+    const float edge1 = std::max(edge0 + 1e-3f, m_params.flatTopHi);
+    return 1.0f - glm::smoothstep(edge0, edge1, gy / len);
+}
+
 float StoneField::eval(const glm::vec3& p) const {
     const float dBase = m_base.evalBase(p);
     const float mask = surfaceMask(dBase);
+    if (mask <= 0.0f) {
+        // Outside the surface band the carve and the fbm can't reach the zero
+        // crossing anyway — keep the clean slab SDF (and skip their cost).
+        return dBase;
+    }
     // StoneCubePlayground carve: d -= grooveDepth * cellFactor — the surface
     // bulges out inside voronoi cells and stays on the slab at the borders
-    // (grooves between stones).
-    float d = dBase - m_params.grooveDepth * cellFactor(p) * mask;
-    d += m_params.fbmAmplitude * (fbm(m_params.fbmFrequency * p) - 0.5f);
+    // (grooves between stones). Both the carve and the fbm fade out on the
+    // flat plateau top (reliefMask).
+    const float relief = reliefMask(p);
+    float d = dBase - m_params.grooveDepth * cellFactor(p) * mask * relief;
+    d += m_params.fbmAmplitude * (fbm(m_params.fbmFrequency * p) - 0.5f) * mask * relief;
     return d;
 }
 
 float StoneField::grooveDepth(const glm::vec3& p) const {
     const float mask = surfaceMask(m_base.evalBase(p));
-    return m_params.grooveDepth * (1.0f - cellFactor(p)) * mask;
+    if (mask <= 0.0f) {
+        return 0.0f;
+    }
+    return m_params.grooveDepth * (1.0f - cellFactor(p)) * mask * reliefMask(p);
 }
 
 void StoneField::sample(std::vector<float>& outValues) const {

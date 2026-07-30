@@ -126,6 +126,63 @@ TEST(StoneGen, FieldWatertight) {
     EXPECT_GT(gMax, params.grooveDepth * 0.5f);
 }
 
+TEST(StoneGen, FlatTop) {
+    // Same node blob as FieldWatertight.
+    const int nodesX = 6;
+    const int nodesY = 6;
+    std::uint8_t nodes[nodesX * nodesY] = {};
+    for (int y = 1; y <= 4; ++y) {
+        for (int x = 1; x <= 4; ++x) {
+            nodes[y * nodesX + x] = 1;
+        }
+    }
+
+    stone_gen::StoneFieldParams params;
+    params.base.cellSize = 0.09f;
+    params.base.groundEnabled = false;
+
+    // Zero-crossing height of eval along the vertical line through (x, z).
+    auto topCrossing = [](const stone_gen::StoneField& f, float x, float z) {
+        float lo = 0.5f; // inside the slab
+        float hi = 1.5f; // above the top
+        for (int i = 0; i < 60; ++i) {
+            const float mid = 0.5f * (lo + hi);
+            if (f.eval(glm::vec3(x, mid, z)) < 0.0f) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        return 0.5f * (lo + hi);
+    };
+    const glm::vec2 probes[] = {
+        {2.0f, 2.0f}, {2.4f, 2.8f}, {2.8f, 2.2f}, {3.2f, 3.0f}, {2.2f, 3.3f}};
+
+    // flatTop on: every interior probe crosses at the same height — the top
+    // is exactly the base slab plane, the voronoi/fbm relief stays on walls.
+    {
+        stone_gen::StoneField field(params, nodes, nodesX, nodesY);
+        const float y0 = topCrossing(field, probes[0].x, probes[0].y);
+        for (const glm::vec2& q : probes) {
+            EXPECT_NEAR(topCrossing(field, q.x, q.y), y0, 1e-3f);
+        }
+        EXPECT_NEAR(y0, params.base.plateauHeight + params.base.edgeRadius, 0.05f);
+    }
+    // flatTop off: the relief reaches the top, crossings spread in height.
+    {
+        params.flatTop = false;
+        stone_gen::StoneField field(params, nodes, nodesX, nodesY);
+        float yMin = 1e9f;
+        float yMax = -1e9f;
+        for (const glm::vec2& q : probes) {
+            const float y = topCrossing(field, q.x, q.y);
+            yMin = std::min(yMin, y);
+            yMax = std::max(yMax, y);
+        }
+        EXPECT_GT(yMax - yMin, 0.01f);
+    }
+}
+
 TEST(StoneGen, BakeAndExport) {
     const stone_gen::StoneSdf sdf(stone_gen::StoneCubeParams{});
     stone_gen::MeshParams meshParams;

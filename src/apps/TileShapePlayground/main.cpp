@@ -414,6 +414,11 @@ void drawImGui(int w, int h) {
             ImGui::SliderFloat("Mask width", &p.grooveMaskWidth, 0.05f, 0.6f);
             ImGui::SliderFloat("Seed", &p.seed, 0.0f, 16.0f);
             ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 4);
+            ImGui::Checkbox("Flat top", &p.flatTop);
+            if (p.flatTop) {
+                ImGui::SliderFloat("Top fade lo", &p.flatTopLo, 0.0f, 1.0f);
+                ImGui::SliderFloat("Top fade hi", &p.flatTopHi, 0.0f, 1.0f);
+            }
         }
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
             cliff::FieldParams& b = p.base;
