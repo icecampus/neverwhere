@@ -444,7 +444,7 @@ float fbm3(float3 p) {
 
 float2 hashv2v2(float2 p) {
     float2 chash = float2(37.0, 39.0);
-    return frac(sin(float2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+    return frac(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
 }
 
 float noisefv2(float2 p) {
@@ -589,7 +589,7 @@ float fbm3(float3 p) {
 
 float2 hashv2v2(float2 p) {
     float2 chash = float2(37.0, 39.0);
-    return fract(sin(float2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+    return fract(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
 }
 
 float noisefv2(float2 p) {
