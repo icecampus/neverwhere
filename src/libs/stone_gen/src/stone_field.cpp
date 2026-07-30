@@ -210,6 +210,21 @@ float StoneField::grooveDepth(const glm::vec3& p) const {
         (m_params.grooveDepth * (1.0f - topness) + m_params.rimNotch * topness * rim);
 }
 
+float StoneField::rimFactor(const glm::vec3& p) const {
+    float dBase = 0.0f;
+    float d2 = 0.0f;
+    float normalY = 0.0f;
+    float d2GradLen = 0.0f;
+    sampleBase(p, dBase, d2, normalY, d2GradLen);
+    float topness = 0.0f;
+    float rim = 0.0f;
+    rimStitch(normalY, d2, d2GradLen, topness, rim);
+    // Plain wall proximity, not gated by topness: the top gate would halve
+    // the peak on the rounded rim, and the shader already selects walls by
+    // the normal — it combines this weight with its n.y top mask.
+    return rim;
+}
+
 void StoneField::sample(std::vector<float>& outValues) const {
     const glm::vec3 origin = m_base.origin();
     const float cell = m_params.base.cellSize;
@@ -266,6 +281,7 @@ cliff::ScalarFieldView StoneField::view() {
     v.nz = m_base.sizeZ();
     v.eval = [this](const glm::vec3& p) { return eval(p); };
     v.grooveDepth = [this](const glm::vec3& p) { return grooveDepth(p); };
+    v.rimFactor = [this](const glm::vec3& p) { return rimFactor(p); };
     return v;
 }
 

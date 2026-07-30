@@ -15,6 +15,7 @@ struct MeshVertex {
     float px, py, pz;
     float nx, ny, nz;
     float groove; // carve depth, 0 on untouched surface
+    float rim;    // wall proximity: 0 in the interior, 1 at the wall plane
 };
 
 struct Mesh {
@@ -45,6 +46,7 @@ struct ScalarFieldView {
     int nz = 0;
     std::function<float(const glm::vec3&)> eval;
     std::function<float(const glm::vec3&)> grooveDepth; // empty -> 0 everywhere
+    std::function<float(const glm::vec3&)> rimFactor;   // empty -> 0 everywhere
 };
 
 // Resolves checkerboard grid faces (saddles) before extraction: naive surface

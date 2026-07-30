@@ -257,9 +257,11 @@ layout(location=0) in vec3 pos;
 layout(location=1) in vec3 normal;
 layout(location=2) in float groove;
 layout(location=3) in vec3 world;
+layout(location=4) in float rim;
 out vec3 v_normal;
 out float v_groove;
 out vec3 v_world;
+out float v_rim;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
@@ -270,6 +272,7 @@ void main() {
     v_normal = normal;
     v_groove = groove;
     v_world = world;
+    v_rim = rim;
 }
 )";
 
@@ -278,6 +281,7 @@ static const char* kCliffFsGlsl = R"(
 in vec3 v_normal;
 in float v_groove;
 in vec3 v_world;
+in float v_rim;
 out vec4 frag_color;
 uniform vec4 light_dir;
 uniform vec4 view_dir;
@@ -353,10 +357,12 @@ void main() {
     // Rim stitch shading (stone layers only, params1.w = top plane Y):
     // boulders above the plane keep the wall palette; below the plane the
     // grass yields to stone gradually over params2.x (not at once) — the
-    // flat top and the shallow rim scoops stay grassy.
+    // flat top and the shallow rim scoops stay grassy; the baked rim weight
+    // turns the top stony towards the wall (params2.y = strength).
     if (params1.w > 0.0) {
         float stone = max(step(params1.w + 0.01, p.y),
             smoothstep(0.0, max(params2.x, 1e-4), params1.w - p.y));
+        stone = max(stone, clamp(v_rim * params2.y, 0.0, 1.0));
         topMask *= 1.0 - stone;
     }
     vec3 base = mix(rock, grass, topMask);
@@ -383,12 +389,14 @@ struct VSIn {
     float3 normal: TEXCOORD1;
     float groove: TEXCOORD2;
     float3 world: TEXCOORD3;
+    float rim: TEXCOORD4;
 };
 struct VSOut {
     float4 pos: SV_Position;
     float3 normal: TEXCOORD0;
     float groove: TEXCOORD1;
     float3 world: TEXCOORD2;
+    float rim: TEXCOORD3;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -400,6 +408,7 @@ VSOut main(VSIn inp) {
     o.normal = inp.normal;
     o.groove = inp.groove;
     o.world = inp.world;
+    o.rim = inp.rim;
     return o;
 }
 )";
@@ -414,7 +423,7 @@ cbuffer fs_params: register(b0) {
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
     float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: boulder plane Y (0 = off)
-    float4 params2; // x: grass->stone fade depth below the top plane
+    float4 params2; // x: grass->stone fade depth below the top plane, y: rim gradient strength
 };
 
 float4 hashv4v3(float3 p) {
@@ -471,6 +480,7 @@ struct PSIn {
     float3 normal: TEXCOORD0;
     float groove: TEXCOORD1;
     float3 world: TEXCOORD2;
+    float rim: TEXCOORD3;
 };
 
 float4 main(PSIn inp): SV_Target {
@@ -488,10 +498,12 @@ float4 main(PSIn inp): SV_Target {
     // Rim stitch shading (stone layers only, params1.w = top plane Y):
     // boulders above the plane keep the wall palette; below the plane the
     // grass yields to stone gradually over params2.x (not at once) — the
-    // flat top and the shallow rim scoops stay grassy.
+    // flat top and the shallow rim scoops stay grassy; the baked rim weight
+    // turns the top stony towards the wall (params2.y = strength).
     if (params1.w > 0.0) {
         float stone = max(step(params1.w + 0.01, p.y),
             smoothstep(0.0, max(params2.x, 1e-4), params1.w - p.y));
+        stone = max(stone, clamp(inp.rim * params2.y, 0.0, 1.0));
         topMask *= 1.0 - stone;
     }
     float3 base = lerp(rock, grass, topMask);
@@ -522,6 +534,7 @@ struct VSIn {
     float3 normal [[attribute(1)]];
     float groove [[attribute(2)]];
     float3 world [[attribute(3)]];
+    float rim [[attribute(4)]];
 };
 
 struct VSOut {
@@ -529,6 +542,7 @@ struct VSOut {
     float3 normal;
     float groove;
     float3 world;
+    float rim;
 };
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
@@ -542,6 +556,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
     o.normal = in.normal;
     o.groove = in.groove;
     o.world = in.world;
+    o.rim = in.rim;
     return o;
 }
 )";
@@ -559,7 +574,7 @@ struct FsParams {
     float4 grass_b;
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
     float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: boulder plane Y (0 = off)
-    float4 params2; // x: grass->stone fade depth below the top plane
+    float4 params2; // x: grass->stone fade depth below the top plane, y: rim gradient strength
 };
 
 float4 hashv4v3(float3 p) {
@@ -616,6 +631,7 @@ struct PSIn {
     float3 normal;
     float groove;
     float3 world;
+    float rim;
 };
 
 fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]]) {
@@ -633,10 +649,12 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]])
     // Rim stitch shading (stone layers only, params1.w = top plane Y):
     // boulders above the plane keep the wall palette; below the plane the
     // grass yields to stone gradually over params2.x (not at once) — the
-    // flat top and the shallow rim scoops stay grassy.
+    // flat top and the shallow rim scoops stay grassy; the baked rim weight
+    // turns the top stony towards the wall (params2.y = strength).
     if (fs.params1.w > 0.0) {
         float stone = max(step(fs.params1.w + 0.01, p.y),
             smoothstep(0.0, max(fs.params2.x, 1e-4), fs.params1.w - p.y));
+        stone = max(stone, clamp(in.rim * fs.params2.y, 0.0, 1.0));
         topMask *= 1.0 - stone;
     }
     float3 base = mix(rock, grass, topMask);
@@ -1252,7 +1270,7 @@ void AtlasRenderer::rebuildCliffCache(
         cache.stream.push_back(CliffVertex{
             fieldX, fieldY - v.py * cache.heightScale, z,
             v.nx, v.ny, v.nz, v.groove,
-            mapX, v.py, mapZ});
+            mapX, v.py, mapZ, v.rim});
     }
     cache.stats.rebuildMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
@@ -1361,7 +1379,7 @@ void AtlasRenderer::ensurePipelines() {
         shd.vertex_func.source = kCliffVsGlsl;
         shd.fragment_func.source = kCliffFsGlsl;
 #endif
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             shd.attrs[i].hlsl_sem_name = "TEXCOORD";
             shd.attrs[i].hlsl_sem_index = i;
         }
@@ -1375,6 +1393,7 @@ void AtlasRenderer::ensurePipelines() {
         pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3;
         pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT;
         pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT3;
+        pip.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT;
         pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pip.depth.write_enabled = true;

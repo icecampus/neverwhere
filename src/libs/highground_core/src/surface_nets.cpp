@@ -320,7 +320,8 @@ Mesh extractSurfaceNets(const ScalarFieldView& field, const std::vector<float>& 
                     field.eval(pos + ez) - field.eval(pos - ez));
                 n = safeNormalize(n);
                 const float groove = field.grooveDepth ? field.grooveDepth(pos) : 0.0f;
-                MeshVertex vertex{pos.x, pos.y, pos.z, n.x, n.y, n.z, groove};
+                const float rim = field.rimFactor ? field.rimFactor(pos) : 0.0f;
+                MeshVertex vertex{pos.x, pos.y, pos.z, n.x, n.y, n.z, groove, rim};
                 vertAt(x, y, z) = static_cast<int>(mesh.vertices.size());
                 mesh.vertices.push_back(vertex);
             }

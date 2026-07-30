@@ -101,6 +101,9 @@ float g_stoneHeightScale = 96.0f;
 // Stone rim shading: depth below the top plane over which the grass fades
 // into the wall palette (uniforms only, applies instantly).
 float g_stoneGrassFade = 0.12f;
+// Stone rim shading: strength of the grass->stone gradient towards the wall
+// across the rim band (baked per-vertex rim weight; uniform-only, instant).
+float g_stoneRimShade = 1.0f;
 struct ShadingParams {
     float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
     float lightElevation = 0.85f; // radians
@@ -425,6 +428,7 @@ void drawImGui(int w, int h) {
                 ImGui::SliderFloat("Rim bulge", &p.rimBulge, 0.0f, 2.0f);
                 ImGui::SliderFloat("Rim notch", &p.rimNotch, 0.0f, 0.15f);
                 ImGui::SliderFloat("Grass fade", &g_stoneGrassFade, 0.02f, 0.3f);
+                ImGui::SliderFloat("Rim shade", &g_stoneRimShade, 0.0f, 1.0f);
             }
         }
         if (ImGui::CollapsingHeader("Field", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -573,6 +577,7 @@ void frame() {
     // palette, below it the grass yields to stone over the fade depth.
     stoneFs.params1[3] = g_stoneParams.base.plateauHeight + g_stoneParams.base.edgeRadius;
     stoneFs.params2[0] = g_stoneGrassFade;
+    stoneFs.params2[1] = g_stoneRimShade;
     for (int i = 0; i < 4; ++i) {
         if (g_layers[i].stone) {
             views[i].shadingOverride = &stoneFs;

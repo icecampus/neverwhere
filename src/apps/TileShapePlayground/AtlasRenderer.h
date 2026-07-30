@@ -42,13 +42,14 @@ struct ColorVertex {
 struct CliffFsParams; // defined below; PaintLayerView only points at it
 
 // Cliff pass (scalar-field surface nets): screen position + baked depth,
-// field-space normal, groove carve attribute and the world position (map
-// cells, height) for per-pixel shading.
+// field-space normal, groove carve attribute, the world position (map
+// cells, height) and the wall-proximity rim weight for per-pixel shading.
 struct CliffVertex {
     float x, y, z;
     float nx, ny, nz;
     float groove;
     float wx, wy, wz;
+    float rim;
 };
 
 // One paint layer on the shared canvas: its own node grid and either flat
@@ -79,7 +80,8 @@ struct CliffFsParams {
     float params0[4];    // vein threshold, ambient, diffuse, spec strength
     float params1[4];    // spec power, gamma, wrap backlight, boulder plane Y
                          // (field units; > 0: rim-stitch shading on)
-    float params2[4];    // grass->stone fade depth below the top plane, unused x3
+    float params2[4];    // grass->stone fade depth below the top plane,
+                         // rim gradient strength (0..1), unused x2
 };
 
 // Per-layer cliff cache status for the UI (see AtlasRenderer::cliffStatsFor).

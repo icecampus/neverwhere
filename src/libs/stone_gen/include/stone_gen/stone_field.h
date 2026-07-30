@@ -57,6 +57,11 @@ public:
     float eval(const glm::vec3& p) const;
     // Carve depth for shading: 0 on stone faces, max at groove floors.
     float grooveDepth(const glm::vec3& p) const;
+    // Wall proximity for shading: 1 at the wall plane, fading to 0 across
+    // rimWidth into the top interior (height-agnostic — the walls and the
+    // rounded rim also read 1; the shader gates the effect to the flat top
+    // via its normal-based top mask).
+    float rimFactor(const glm::vec3& p) const;
 
     // Samples eval() on the base grid (same layout as cliff::CliffField::
     // sample), then applies the anti-terracing blur passes.

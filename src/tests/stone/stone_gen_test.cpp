@@ -234,6 +234,40 @@ TEST(StoneGen, RimStitch) {
     EXPECT_EQ(interiorHoles, 0);
 }
 
+TEST(StoneGen, RimFactorShading) {
+    // Same node blob as FieldWatertight.
+    const int nodesX = 6;
+    const int nodesY = 6;
+    std::uint8_t nodes[nodesX * nodesY] = {};
+    for (int y = 1; y <= 4; ++y) {
+        for (int x = 1; x <= 4; ++x) {
+            nodes[y * nodesX + x] = 1;
+        }
+    }
+
+    stone_gen::StoneFieldParams params;
+    params.base.cellSize = 0.09f;
+    params.base.groundEnabled = false;
+    stone_gen::StoneField field(params, nodes, nodesX, nodesY);
+
+    const float topY = params.base.plateauHeight + params.base.edgeRadius;
+    // Deep inside the flat top the wall proximity fades exactly to zero...
+    EXPECT_FLOAT_EQ(field.rimFactor(glm::vec3(2.5f, topY, 2.5f)), 0.0f);
+    // ...ramps up across the rim band (a real gradient, not a step)...
+    float maxRim = 0.0f;
+    int midBandPts = 0;
+    for (float x = 2.5f; x >= 0.15f; x -= 0.02f) {
+        const float r = field.rimFactor(glm::vec3(x, topY, 2.5f));
+        maxRim = std::max(maxRim, r);
+        if (r > 0.05f && r < 0.9f) {
+            ++midBandPts;
+        }
+    }
+    // ...and saturates at the wall plane.
+    EXPECT_GT(maxRim, 0.9f) << "no stone gradient towards the wall on the top";
+    EXPECT_GE(midBandPts, 3) << "rim gradient is a step, not a ramp";
+}
+
 TEST(StoneGen, BakeAndExport) {
     const stone_gen::StoneSdf sdf(stone_gen::StoneCubeParams{});
     stone_gen::MeshParams meshParams;
