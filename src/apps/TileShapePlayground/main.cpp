@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 #include <spdlog/spdlog.h>
@@ -41,6 +43,13 @@
 #include <sokol_time.h>
 #include <util/sokol_imgui.h>
 
+// On Windows the GDI capture path owns this implementation
+// (PlaygroundScreenshotWin32.cpp); elsewhere the GL readback below does.
+#if !defined(_WIN32)
+    #define STB_IMAGE_WRITE_IMPLEMENTATION
+#endif
+#include <stb_image_write.h>
+
 namespace {
 
 struct AppState {
@@ -70,9 +79,23 @@ std::filesystem::path g_dataRoot;
 std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
+// --- Units -----------------------------------------------------------------
+// sokol_app reports the framebuffer in pixels and mouse positions in those
+// same pixels, while ImGui — and with it the panel width — is laid out in
+// logical points. This app keeps the whole scene in points too and converts
+// exactly once, at the viewport: that way a HiDPI display only buys sharpness
+// and does not move the cursor away from what it paints.
+float dpiScale() {
+    return std::max(sapp_dpi_scale(), 0.01f);
+}
+
+glm::vec2 windowSize() {
+    return {sapp_widthf() / dpiScale(), sapp_heightf() / dpiScale()};
+}
+
 // Control panel: pinned to the left edge, full height. The scene canvas
 // starts at the panel's right edge — camera and mouse work in canvas-local
-// coordinates (canvas origin = panel width in logical pixels).
+// coordinates (canvas origin = panel width in logical points).
 constexpr float kPanelWidth = 340.0f;
 
 float panelWidth() {
@@ -80,9 +103,8 @@ float panelWidth() {
 }
 
 glm::vec2 canvasSize() {
-    return {
-        std::max(static_cast<float>(sapp_width()) - panelWidth(), 0.0f),
-        static_cast<float>(sapp_height())};
+    const glm::vec2 window = windowSize();
+    return {std::max(window.x - panelWidth(), 0.0f), window.y};
 }
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
@@ -127,22 +149,53 @@ float g_stoneTopTexTiles = 1.0f;
 // the map grid, the highground stands on it. Toggle + grid-aligned tiling.
 bool g_grassUnderlay = true;
 float g_underlayTilesPerCell = 1.0f;
+// Palette-only knobs of the cliff pass. The sun, the ambient/diffuse balance
+// and the gamma moved to g_scene: the ground pass needs the very same values,
+// and that shared light is what stitches the two together.
 struct ShadingParams {
-    float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
-    float lightElevation = 0.85f; // radians
     float darkColor[3] = {0.38f, 0.38f, 0.42f};
     float goldColor[3] = {0.75f, 0.62f, 0.5f};
     float grassA[3] = {0.4f, 0.62f, 0.35f};
     float grassB[3] = {0.6f, 0.65f, 0.4f};
     float veinThreshold = 0.8f;
-    float ambient = 0.35f;
-    float diffuse = 0.75f;
     float backLight = 0.1f;
     float specStrength = 0.5f;
     float specPower = 24.0f;
-    float gamma = 0.85f;
 };
 ShadingParams g_cliffShading;
+
+// Sun, tone, contact AO and the shadow map — shared by both passes.
+SceneStitchSettings g_scene;
+
+// Seam materials: how the wall meets the ground and how the plateau keeps its
+// distance from the ground it shares grass.png with. Uniform-only, instant.
+struct SeamParams {
+    float rimContactAo = 0.45f; // stone layers only (baked rim weight)
+    float skirtHeight = 0.14f;  // scalar-field units above the ground plane
+    float skirtFrequency = 5.0f;
+    // Grass creeping up the wall: off by default. The noise mask cuts flat
+    // green blotches into the rock that read as texture errors rather than
+    // vegetation — the foot needs geometry (a prop brush), not a decal.
+    float overgrowth = 0.0f;
+    float topBrightness = 1.12f;
+    float bounceStrength = 0.35f;
+    float bounceTint[3] = {0.72f, 0.95f, 0.62f};
+    float skyStrength = 0.2f;
+    float skyTint[3] = {0.80f, 0.88f, 1.10f};
+    // Plateau top material. It samples the very same grass.png as the ground,
+    // so without its own tint, tiling and UV rotation the two read as one
+    // continuous plane and the silhouette flips between a mound and a pit.
+    float topTexture = 0.7f;
+    float topTiling = 1.7f;
+    float topRotation = 0.6f; // radians
+    float topTint[3] = {0.86f, 0.94f, 0.80f};
+    // How deep the mesh is pushed below the ground plane (re-projection only).
+    float sink = 0.05f;
+};
+SeamParams g_seam;
+
+// Boulder ring at the foot of the highground (mesh cache, debounced).
+ScreeParams g_scree;
 
 LandBrush& activeBrush() {
     return g_layers[g_activeLayer].brush;
@@ -203,7 +256,7 @@ bool g_demoNode = false;
 // --center=cx,cy               camera center in cell coords
 //                              (default: bbox center of --cliff-nodes)
 // --shot=path.png              capture the window client area to a PNG after
-//                              the caches settle, then quit (Win32)
+//                              the caches settle, then quit
 bool g_noUi = false;
 std::vector<glm::ivec2> g_cliCliffNodes;
 std::optional<float> g_cliZoom;
@@ -432,12 +485,9 @@ void drawImGui(int w, int h) {
             ImGui::ColorEdit3("Gold color", sh.goldColor);
             ImGui::ColorEdit3("Grass A", sh.grassA);
             ImGui::ColorEdit3("Grass B", sh.grassB);
-            ImGui::SliderFloat("Ambient", &sh.ambient, 0.05f, 0.8f);
-            ImGui::SliderFloat("Diffuse", &sh.diffuse, 0.0f, 1.2f);
             ImGui::SliderFloat("Spec strength", &sh.specStrength, 0.0f, 1.5f);
             ImGui::SliderFloat("Spec power", &sh.specPower, 4.0f, 64.0f);
-            ImGui::SliderAngle("Light azimuth", &sh.lightAzimuth, -180.0f, 180.0f);
-            ImGui::SliderAngle("Light elevation", &sh.lightElevation, 0.0f, 90.0f);
+            ImGui::TextDisabled("(sun / ambient / gamma: Scene section)");
         }
         const CliffStats& st = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
         ImGui::Text("Cliff mesh: %d verts, %d tris", st.vertexCount, st.triangleCount);
@@ -492,6 +542,68 @@ void drawImGui(int w, int h) {
         }
     }
     ImGui::Separator();
+    // Everything that ties the highground to the ground it stands on. All of
+    // it is uniform- or re-projection-only except the scree ring, which goes
+    // through the mesh debounce.
+    if (ImGui::CollapsingHeader("Scene / Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
+        SceneStitchSettings& sc = g_scene;
+        ImGui::SliderAngle("Sun azimuth", &sc.lightAzimuth, -180.0f, 180.0f);
+        ImGui::SliderAngle("Sun elevation", &sc.lightElevation, 5.0f, 89.0f);
+        ImGui::SliderFloat("Ambient", &sc.ambient, 0.05f, 0.8f);
+        ImGui::SliderFloat("Diffuse", &sc.diffuse, 0.0f, 1.2f);
+        ImGui::SliderFloat("Gamma", &sc.gamma, 0.5f, 1.5f);
+        ImGui::Checkbox("Light the ground", &sc.groundLit);
+
+        ImGui::Separator();
+        ImGui::Checkbox("Contact AO", &sc.aoEnabled);
+        if (sc.aoEnabled) {
+            ImGui::SliderFloat("AO strength", &sc.aoStrength, 0.0f, 1.0f);
+            ImGui::SliderFloat("AO radius", &sc.aoRadius, 0.05f, 2.0f, "%.2f cells");
+            ImGui::SliderFloat("AO up the wall", &sc.aoWallFade, 0.0f, 1.0f);
+        }
+
+        ImGui::Separator();
+        ImGui::Checkbox("Shadows", &sc.shadowsEnabled);
+        if (sc.shadowsEnabled) {
+            ImGui::SliderFloat("Shadow strength", &sc.shadowStrength, 0.0f, 1.0f);
+            ImGui::SliderFloat("Shadow bias", &sc.shadowBias, 0.0f, 0.02f, "%.4f");
+            if (!g_renderer.shadowMapReady()) {
+                ImGui::TextColored({1.0f, 0.5f, 0.3f, 1.0f}, "shadow target unavailable");
+            }
+        }
+    }
+    if (ImGui::CollapsingHeader("Seam / Scree")) {
+        SeamParams& sm = g_seam;
+        ImGui::SliderFloat("Sink", &sm.sink, 0.0f, 0.3f);
+        ImGui::SliderFloat("Skirt height", &sm.skirtHeight, 0.0f, 0.5f);
+        ImGui::SliderFloat("Skirt frequency", &sm.skirtFrequency, 1.0f, 16.0f);
+        ImGui::SliderFloat("Overgrowth", &sm.overgrowth, 0.0f, 1.0f);
+        ImGui::SliderFloat("Rim contact AO", &sm.rimContactAo, 0.0f, 1.0f);
+        ImGui::SliderFloat("Top brightness", &sm.topBrightness, 0.7f, 1.5f);
+        ImGui::SliderFloat("Top texture", &sm.topTexture, 0.0f, 1.0f);
+        ImGui::SliderFloat("Top tiling", &sm.topTiling, 0.2f, 4.0f);
+        ImGui::SliderAngle("Top UV rotation", &sm.topRotation, 0.0f, 90.0f);
+        ImGui::ColorEdit3("Top tint", sm.topTint);
+        ImGui::SliderFloat("Grass bounce", &sm.bounceStrength, 0.0f, 1.0f);
+        ImGui::ColorEdit3("Bounce tint", sm.bounceTint);
+        ImGui::SliderFloat("Sky tint", &sm.skyStrength, 0.0f, 1.0f);
+        ImGui::ColorEdit3("Sky color", sm.skyTint);
+
+        ImGui::Separator();
+        ImGui::Checkbox("Scree ring", &g_scree.enabled);
+        if (g_scree.enabled) {
+            ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
+            ImGui::SliderInt("Scree density", &g_scree.perCell, 1, 12);
+            ImGui::SliderFloat("Scree band", &g_scree.band, 0.2f, 3.0f, "%.2f cells");
+            ImGui::SliderFloat("Scree min size", &g_scree.sizeMin, 0.02f, 0.3f);
+            ImGui::SliderFloat("Scree max size", &g_scree.sizeMax, 0.05f, 0.5f);
+            ImGui::SliderFloat("Scree buried", &g_scree.buried, 0.0f, 0.9f);
+            ImGui::SliderFloat("Scree seed", &g_scree.seed, 0.0f, 16.0f);
+            const CliffStats& sst = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
+            ImGui::Text("Scree boulders: %d", sst.screeCount);
+        }
+    }
+    ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);
     ImGui::Text("Camera: (%.0f, %.0f) zoom %.2f", g_camera.offset.x, g_camera.offset.y, g_camera.zoom);
@@ -528,6 +640,35 @@ void drawImGui(int w, int h) {
     ImGui::End();
 }
 
+// Portable --shot capture. Win32 grabs the window through GDI; everywhere else
+// we read the GL default framebuffer back, which is why this lives in the TU
+// that owns SOKOL_IMPL — glad must never be pulled into a translation unit
+// that already has sokol's GL headers (documented Linux trap).
+bool capturePlaygroundPng(const char* path) {
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    const int width = sapp_width();
+    const int height = sapp_height();
+    if (!path || path[0] == '\0' || width <= 0 || height <= 0) {
+        return false;
+    }
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    // GL's origin is bottom-left, PNG rows run top-down.
+    stbi_flip_vertically_on_write(1);
+    const int ok = stbi_write_png(path, width, height, 4, pixels.data(), width * 4);
+    stbi_flip_vertically_on_write(0);
+    if (!ok) {
+        spdlog::error("capturePlaygroundPng: stbi_write_png failed for {}", path);
+        return false;
+    }
+    spdlog::info("capturePlaygroundPng: saved {}x{} to {}", width, height, path);
+    return true;
+#else
+    return captureWindowClientPng(path);
+#endif
+}
+
 void frame() {
     const uint64_t now = stm_now();
     g_state.dt = static_cast<float>(stm_sec(stm_diff(now, g_state.last_time)));
@@ -538,44 +679,32 @@ void frame() {
         return;
     }
 
-    const int w = sapp_width();
-    const int h = sapp_height();
+    const float dpi = dpiScale();
+    const glm::vec2 window = windowSize();
+    const int w = static_cast<int>(std::lround(window.x));
+    const int h = static_cast<int>(std::lround(window.y));
     updateHover();
 
     if (g_state.imgui_ok) {
+        // simgui_new_frame() wants the framebuffer size and does the division
+        // by dpi_scale itself; everything downstream of it is in points.
         simgui_frame_desc_t fd = {};
-        fd.width = w;
-        fd.height = h;
+        fd.width = sapp_width();
+        fd.height = sapp_height();
         fd.delta_time = g_state.dt;
-        fd.dpi_scale = sapp_dpi_scale();
+        fd.dpi_scale = dpi;
         simgui_new_frame(&fd);
         drawImGui(w, h);
     }
 
-    sg_pass_action action = {};
-    action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    action.colors[0].clear_value = {0.12f, 0.14f, 0.16f, 1.0f};
-    // The swapchain has a depth-stencil attachment: clear it every frame for
-    // the z-buffered cliff pass.
-    action.depth.load_action = SG_LOADACTION_CLEAR;
-    action.depth.clear_value = 1.0f;
-
-    sg_pass pass = {};
-    pass.action = action;
-    pass.swapchain = sglue_swapchain();
-    sg_begin_pass(&pass);
-
-    // The scene renders only into the canvas right of the panel. Viewport
-    // and scissor take framebuffer pixels; sokol_imgui resets both to the
-    // full framebuffer for its own draws, so no restore is needed.
-    const int panelPx = static_cast<int>(panelWidth());
-    const int canvasW = std::max(w - panelPx, 0);
-    const float dpi = sapp_dpi_scale();
-    const int vpX = static_cast<int>(std::lround(panelPx * dpi));
+    // The scene renders only into the canvas right of the panel. This is the
+    // one place that leaves logical points for framebuffer pixels; sokol_imgui
+    // resets viewport and scissor to the full framebuffer for its own draws,
+    // so no restore is needed.
+    const int canvasW = std::max(w - static_cast<int>(panelWidth()), 0);
+    const int vpX = static_cast<int>(std::lround(panelWidth() * dpi));
     const int vpW = static_cast<int>(std::lround(canvasW * dpi));
     const int vpH = static_cast<int>(std::lround(h * dpi));
-    sg_apply_viewport(vpX, 0, vpW, vpH, true);
-    sg_apply_scissor_rect(vpX, 0, vpW, vpH, true);
 
     PaintLayerView views[4];
     for (int i = 0; i < 4; ++i) {
@@ -586,17 +715,17 @@ void frame() {
         views[i].stone = g_layers[i].stone;
         views[i].stoneParams = &g_stoneParams;
         views[i].cliffHeightScale = g_layers[i].stone ? g_stoneHeightScale : g_cliffHeightScale;
+        views[i].sink = g_seam.sink;
+        views[i].scree = &g_scree;
     }
 
-    // Cliff shading uniforms: palette/light from the UI state; the view
-    // direction is constant for the iso camera (viewer -> scene, mirrors
-    // CliffFieldPlayground's rd = normalize(p - camPos)).
+    // Cliff shading uniforms: palette from the UI state. The sun and the tone
+    // come from the shared scene block (SceneStitchParams), so both passes see
+    // literally the same values; the view direction is constant for the iso
+    // camera (viewer -> scene, mirrors CliffFieldPlayground's
+    // rd = normalize(p - camPos)).
     const ShadingParams& s = g_cliffShading;
     CliffFsParams cliffFs{};
-    const float lightCe = std::cos(s.lightElevation);
-    cliffFs.lightDir[0] = lightCe * std::sin(s.lightAzimuth);
-    cliffFs.lightDir[1] = std::sin(s.lightElevation);
-    cliffFs.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
     const float halfH = g_iso.dims.cellSize().y * 0.5f;
     const float viewY = 2.0f * halfH / std::max(g_cliffHeightScale, 1.0f);
     const float viewLen = std::sqrt(2.0f + viewY * viewY);
@@ -608,12 +737,28 @@ void frame() {
     std::memcpy(cliffFs.grassA, s.grassA, sizeof(s.grassA));
     std::memcpy(cliffFs.grassB, s.grassB, sizeof(s.grassB));
     cliffFs.params0[0] = s.veinThreshold;
-    cliffFs.params0[1] = s.ambient;
-    cliffFs.params0[2] = s.diffuse;
+    cliffFs.params0[1] = g_scene.ambient;
+    cliffFs.params0[2] = g_scene.diffuse;
     cliffFs.params0[3] = s.specStrength;
     cliffFs.params1[0] = s.specPower;
-    cliffFs.params1[1] = s.gamma;
+    cliffFs.params1[1] = g_scene.gamma;
     cliffFs.params1[2] = s.backLight;
+    // Seam materials. params3[1] (height -> world) and params5[3] (ground
+    // plane) are per-layer and get filled by the renderer.
+    cliffFs.params2[2] = g_seam.topTexture;
+    cliffFs.params2[3] = g_seam.topTiling;
+    cliffFs.params3[0] = g_seam.rimContactAo;
+    cliffFs.params3[2] = g_seam.skirtHeight;
+    cliffFs.params3[3] = g_seam.skirtFrequency;
+    cliffFs.params4[0] = g_seam.overgrowth;
+    cliffFs.params4[1] = g_seam.topBrightness;
+    cliffFs.params4[2] = g_seam.bounceStrength;
+    cliffFs.params4[3] = g_seam.skyStrength;
+    std::memcpy(cliffFs.params5, g_seam.bounceTint, sizeof(g_seam.bounceTint));
+    std::memcpy(cliffFs.params6, g_seam.skyTint, sizeof(g_seam.skyTint));
+    cliffFs.params6[3] = g_seam.topRotation;
+    std::memcpy(cliffFs.params7, g_seam.topTint, sizeof(g_seam.topTint));
+    cliffFs.params7[3] = g_scene.aoEnabled ? g_scene.aoWallFade : 0.0f;
 
     // Stone palette (per-layer shading override): the same omphalos shader,
     // re-tinted to gray granite — dark groove floors, plain stone faces, no
@@ -642,18 +787,42 @@ void frame() {
     }
 
     const UnderlayParams underlay{g_grassUnderlay, g_underlayTilesPerCell};
-    g_renderer.render(
-        views,
-        4,
-        g_iso,
-        g_camera,
-        canvasW,
-        h,
-        g_hoverNode.value_or(glm::ivec2{-1, -1}),
-        g_hoverNode.has_value(),
-        &cliffFs,
-        &underlay,
-        stm_sec(stm_now()));
+
+    SceneFrame sceneFrame;
+    sceneFrame.layers = views;
+    sceneFrame.layerCount = 4;
+    sceneFrame.iso = &g_iso;
+    sceneFrame.camera = &g_camera;
+    sceneFrame.viewW = canvasW;
+    sceneFrame.viewH = h;
+    sceneFrame.hoverNode = g_hoverNode.value_or(glm::ivec2{-1, -1});
+    sceneFrame.hasHover = g_hoverNode.has_value();
+    sceneFrame.cliffShading = &cliffFs;
+    sceneFrame.underlay = &underlay;
+    sceneFrame.stitch = &g_scene;
+    sceneFrame.nowSec = stm_sec(stm_now());
+
+    // Offscreen work (mesh caches, AO field, shadow map) opens its own passes,
+    // so it has to happen before the swapchain pass.
+    g_renderer.prepare(sceneFrame);
+
+    sg_pass_action action = {};
+    action.colors[0].load_action = SG_LOADACTION_CLEAR;
+    action.colors[0].clear_value = {0.12f, 0.14f, 0.16f, 1.0f};
+    // The swapchain has a depth-stencil attachment: clear it every frame for
+    // the z-buffered cliff pass.
+    action.depth.load_action = SG_LOADACTION_CLEAR;
+    action.depth.clear_value = 1.0f;
+
+    sg_pass pass = {};
+    pass.action = action;
+    pass.swapchain = sglue_swapchain();
+    sg_begin_pass(&pass);
+
+    sg_apply_viewport(vpX, 0, vpW, vpH, true);
+    sg_apply_scissor_rect(vpX, 0, vpW, vpH, true);
+
+    g_renderer.render(sceneFrame);
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -662,10 +831,23 @@ void frame() {
     sg_end_pass();
     sg_commit();
 
-    // Headless capture: wait until the debounced caches had time to rebuild,
-    // grab the window client area and quit.
-    if (!g_shotPath.empty() && g_state.frame_index >= 120) {
-        if (captureWindowClientPng(g_shotPath.c_str())) {
+    // Headless capture: the mesh caches are debounced on wall time and the
+    // rebuild itself takes a while, so wait for every painted 3D layer to
+    // actually have geometry rather than for a frame count — under llvmpipe
+    // frames fly by and a plain counter grabs the flat preview tiles. The
+    // frame cap is the escape hatch for scenes that never produce a mesh.
+    bool meshesReady = true;
+    for (int i = 0; i < 4 && meshesReady; ++i) {
+        if ((!g_layers[i].cliff && !g_layers[i].stone)
+            || g_layers[i].brush.onNodeCount() == 0) {
+            continue;
+        }
+        const CliffStats& stats = g_renderer.cliffStatsFor(&g_layers[i].brush);
+        meshesReady = !stats.pending && stats.triangleCount > 0;
+    }
+    if (!g_shotPath.empty() && g_state.frame_index >= 120
+        && (meshesReady || g_state.frame_index >= 900)) {
+        if (capturePlaygroundPng(g_shotPath.c_str())) {
             spdlog::info("TileShapePlayground: screenshot saved to {}", g_shotPath);
         } else {
             spdlog::error("TileShapePlayground: screenshot capture failed ({})", g_shotPath);
@@ -692,8 +874,11 @@ void event(const sapp_event* ev) {
         simgui_handle_event(ev);
     }
 
-    g_state.mouseX = ev->mouse_x;
-    g_state.mouseY = ev->mouse_y;
+    // sokol_app hands out framebuffer pixels; the rest of the app is in
+    // points, so this is where the cursor enters that frame. Nothing below may
+    // read ev->mouse_x directly.
+    g_state.mouseX = ev->mouse_x / dpiScale();
+    g_state.mouseY = ev->mouse_y / dpiScale();
 
     if (ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP) {
         if (ev->key_code == SAPP_KEYCODE_LEFT_CONTROL || ev->key_code == SAPP_KEYCODE_RIGHT_CONTROL) {
@@ -718,8 +903,8 @@ void event(const sapp_event* ev) {
             applyBrushAtMouse();
         } else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.dragging = true;
-            g_state.dragStartX = ev->mouse_x;
-            g_state.dragStartY = ev->mouse_y;
+            g_state.dragStartX = g_state.mouseX;
+            g_state.dragStartY = g_state.mouseY;
             g_state.camStartX = g_camera.offset.x;
             g_state.camStartY = g_camera.offset.y;
         }
@@ -737,8 +922,8 @@ void event(const sapp_event* ev) {
             applyBrushAtMouse();
         }
         if (g_state.dragging) {
-            g_camera.offset.x = g_state.camStartX + (ev->mouse_x - g_state.dragStartX);
-            g_camera.offset.y = g_state.camStartY + (ev->mouse_y - g_state.dragStartY);
+            g_camera.offset.x = g_state.camStartX + (g_state.mouseX - g_state.dragStartX);
+            g_camera.offset.y = g_state.camStartY + (g_state.mouseY - g_state.dragStartY);
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_SCROLL: {
@@ -749,11 +934,11 @@ void event(const sapp_event* ev) {
         const float zoomFactor = (delta > 0.0f) ? 1.1f : 0.9f;
         const float oldZoom = g_camera.zoom;
         float newZoom = std::clamp(oldZoom * zoomFactor, 0.15f, 3.0f);
-        const float mouseX = ev->mouse_x - panelWidth();
+        const float mouseX = g_state.mouseX - panelWidth();
         const float mapX = (mouseX - g_camera.offset.x) / oldZoom;
-        const float mapY = (ev->mouse_y - g_camera.offset.y) / oldZoom;
+        const float mapY = (g_state.mouseY - g_camera.offset.y) / oldZoom;
         g_camera.offset.x = mouseX - mapX * newZoom;
-        g_camera.offset.y = ev->mouse_y - mapY * newZoom;
+        g_camera.offset.y = g_state.mouseY - mapY * newZoom;
         g_camera.zoom = newZoom;
         break;
     }
