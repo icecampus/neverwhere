@@ -81,7 +81,7 @@ bool validTexture(const PreviewTexture& texture) {
 bool looksLikeDataRoot(const std::filesystem::path& dir) {
     namespace fs = std::filesystem;
     std::error_code ec;
-    return fs::exists(dir / "src" / "apps" / "TextureBlendLandscape" / "resources" / "materials" / "grass.png", ec) &&
+    return fs::exists(dir / "src" / "apps" / "landscapePlaygrounds" / "TextureBlendLandscape" / "resources" / "materials" / "grass.png", ec) &&
         fs::exists(dir / "resources" / "textures" / "rock_3.jpg", ec);
 }
 
@@ -1359,7 +1359,7 @@ void initProductionPreviewTextures() {
         dataRoot = std::filesystem::current_path(ec);
     }
 
-    const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "TextureBlendLandscape" / "resources" / "materials" / "grass.png";
+    const std::filesystem::path grassPath = dataRoot / "src" / "apps" / "landscapePlaygrounds" / "TextureBlendLandscape" / "resources" / "materials" / "grass.png";
     const std::filesystem::path rockPath = dataRoot / "resources" / "textures" / "rock_3.jpg";
 
     loadPreviewTexture(grassPath, grassFallback, 2, 2, "grass", "meshgen-grass", "meshgen-grass-sampler", g_textures.grass);

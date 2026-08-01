@@ -23,7 +23,7 @@
 - Высоты на вершинах непрерывные (не бинарные), что даёт континуум форм через аналитическую геометрию
 - Минимальный изолированный элемент = **2x2 тайла** (одна вершина влияет на 4 тайла)
 - См. `src/apps/Landscape3dPlayground/LandscapeTileRules.h` — `LandscapeTileType`, 15 вариантов
-- См. `src/apps/PolygonalGeneratedLandscapePlayground/main.cpp` — `classifyVertex()`, 5 типов вершин
+- См. `src/apps/landscapePlaygrounds/PolygonalGeneratedLandscapePlayground/main.cpp` — `classifyVertex()`, 5 типов вершин
 
 ## Ключевое различие
 

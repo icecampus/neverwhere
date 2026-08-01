@@ -350,7 +350,7 @@ TEST(LandscapePipelineTest, SharedTileResolverMatchesTileSetMasks) {
 | Editor tileset + slot order | `src/libs/core/topology/topology_common.h`, `src/libs/core/topology/diamond_tiled_landscape.{h,cpp}` |
 | Тесты (контракт + инварианты) | `src/tests/landscape/landscape_test.cpp` |
 | Тени от солнца (поверх level-grid) | `src/libs/landscape_core/include/landscape_core/sun_shadow.h` |
-| Playground'ы (визуальная проверка) | `src/apps/Landscape3dPlayground/`, `src/apps/PolygonalGeneratedLandscapePlayground/` |
+| Playground'ы (визуальная проверка) | `src/apps/Landscape3dPlayground/`, `src/apps/landscapePlaygrounds/PolygonalGeneratedLandscapePlayground/` |
 
 ---
 

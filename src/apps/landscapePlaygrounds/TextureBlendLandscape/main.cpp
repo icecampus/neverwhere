@@ -161,7 +161,7 @@ static void init(void) {
     spdlog::info("dataRoot={}", g_dataRoot.string());
 
     // Load test textures
-    const auto texDir = g_dataRoot / "src" / "apps" / "TextureBlendLandscape" / "resources" / "materials";
+    const auto texDir = g_dataRoot / "src" / "apps" / "landscapePlaygrounds" / "TextureBlendLandscape" / "resources" / "materials";
     g_renderer.loadMaterial(0, (texDir / "grass.png").string());
     g_renderer.loadMaterial(1, (texDir / "sand.png").string());
     g_renderer.loadMaterial(2, (texDir / "rock.png").string());

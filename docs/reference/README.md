@@ -34,7 +34,7 @@ Curated papers, open-source projects, and Neverwhere-specific notes for **volume
 
 Related apps in the monorepo (no dedicated port yet):
 
-- `src/apps/PolygonalGeneratedLandscapePlayground` — FastNoise cliff silhouette prototype
+- `src/apps/landscapePlaygrounds/PolygonalGeneratedLandscapePlayground` — FastNoise cliff silhouette prototype
 - `src/libs/landscape_mesh` — heightmap cliff walls for the map editor
 
 ## LIRIS research line (same authors)

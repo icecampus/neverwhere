@@ -6,7 +6,7 @@
 на Shadertoy и описанием, файлы шейдеров (`Image.glsl`, `BufferA.glsl`, …) и прочие ресурсы
 (`textures/` — текстуры iChannel, если удалось добыть).
 
-Папки подхватывает **ShadertoyPlayground** (`src/apps/ShadertoyPlayground`, см. AGENTS.md)
+Папки подхватывает **ShadertoyPlayground** (`src/apps/landscapePlaygrounds/ShadertoyPlayground`, см. AGENTS.md)
 без перекомпиляции: `Image.glsl`/`BufferA..D.glsl`/`Common.glsl` — по именам,
 текстуры `textures/iChannelN.(png|jpg)` — биндинг канала по имени файла.
 
