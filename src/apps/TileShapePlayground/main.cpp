@@ -123,6 +123,10 @@ float g_stoneRimShade = 1.0f;
 // and tiling in tiles per world unit (uniform-only, instant).
 float g_stoneTopTexMix = 1.0f;
 float g_stoneTopTexTiles = 1.0f;
+// Grass underlay: bottom canvas layer — the same tiling grass.png spread over
+// the map grid, the highground stands on it. Toggle + grid-aligned tiling.
+bool g_grassUnderlay = true;
+float g_underlayTilesPerCell = 1.0f;
 struct ShadingParams {
     float lightAzimuth = 2.23f;   // radians, matches the previous fixed sun dir
     float lightElevation = 0.85f; // radians
@@ -336,6 +340,7 @@ void init() {
     const auto topTexPath = g_dataRoot / "resources" / "textures" / "grass.png";
     if (!g_renderer.loadTopTextureFromFile(topTexPath.string())) {
         g_stoneTopTexMix = 0.0f;
+        g_grassUnderlay = false;
     }
 
     const glm::vec2 canvas = canvasSize();
@@ -386,6 +391,10 @@ void drawImGui(int w, int h) {
             ImGui::SameLine();
         }
         ImGui::RadioButton(g_layers[i].name, &g_activeLayer, i);
+    }
+    ImGui::Checkbox("Grass underlay", &g_grassUnderlay);
+    if (g_grassUnderlay) {
+        ImGui::SliderFloat("Underlay tiling", &g_underlayTilesPerCell, 0.25f, 4.0f);
     }
     if (g_layers[g_activeLayer].cliff) {
         // Scalar-field surface nets: edits are debounced (0.3 s) into a full
@@ -632,6 +641,7 @@ void frame() {
         }
     }
 
+    const UnderlayParams underlay{g_grassUnderlay, g_underlayTilesPerCell};
     g_renderer.render(
         views,
         4,
@@ -642,6 +652,7 @@ void frame() {
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
         &cliffFs,
+        &underlay,
         stm_sec(stm_now()));
 
     if (g_state.imgui_ok) {

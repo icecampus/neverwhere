@@ -52,6 +52,14 @@ struct CliffVertex {
     float rim;
 };
 
+// Canvas-level grass underlay: a single field-space quad under everything
+// (the highground stands on it), textured with the tiling top texture
+// (grass.png), UV aligned to the map grid in field space.
+struct UnderlayParams {
+    bool enabled = false;
+    float tilesPerCell = 1.0f; // texture repeats per cell width (field space)
+};
+
 // One paint layer on the shared canvas: its own node grid and either flat
 // (2D atlas tiles) or scalar-field surface nets from the same nodes
 // (z-buffered): cliff (omphalos grooves) or stone (StoneCubePlayground
@@ -132,6 +140,7 @@ public:
         glm::ivec2 hoverNode,
         bool hasHover,
         const CliffFsParams* cliffShading,
+        const UnderlayParams* underlay,
         double nowSec);
 
     // Status of the cliff cache attached to the given brush (empty stats when

@@ -1034,6 +1034,7 @@ void AtlasRenderer::render(
     glm::ivec2 hoverNode,
     bool hasHover,
     const CliffFsParams* cliffShading,
+    const UnderlayParams* underlay,
     double nowSec) {
 
     if (!m_ready || m_texPip.id == SG_INVALID_ID || !layers || layerCount <= 0 || !layers[0].brush) {
@@ -1064,6 +1065,36 @@ void AtlasRenderer::render(
     std::vector<TexRange> flatRanges;
     std::vector<TexVertex> texVerts;
     texVerts.reserve(static_cast<std::size_t>(mapW * mapH * 6 * layerCount));
+
+    // Grass underlay: the bottom-most range of the shared textured buffer
+    // (base 0, drawn first), bound to the tiling top texture instead of an
+    // atlas. One field-space quad over the map bbox plus a one-cell margin
+    // (edge cliff walls lean past the map border and must stand on it);
+    // UV tiles the texture per cell width, aligned to the field origin.
+    int underlayCount = 0;
+    if (underlay && underlay->enabled && m_topTexView.id != SG_INVALID_ID) {
+        const glm::vec2 cellSize = iso.dims.cellSize();
+        const glm::vec2 c00 = iso.mapToField({0, 0});
+        const glm::vec2 c10 = iso.mapToField({mapW - 1, 0});
+        const glm::vec2 c01 = iso.mapToField({0, mapH - 1});
+        const glm::vec2 c11 = iso.mapToField({mapW - 1, mapH - 1});
+        const float x0 = std::min({c00.x, c10.x, c01.x, c11.x}) - cellSize.x;
+        const float x1 = std::max({c00.x, c10.x, c01.x, c11.x}) + cellSize.x;
+        const float y0 = std::min({c00.y, c10.y, c01.y, c11.y}) - cellSize.y;
+        const float y1 = std::max({c00.y, c10.y, c01.y, c11.y}) + cellSize.y;
+        const float s = underlay->tilesPerCell / cellSize.x;
+        const TexVertex tl{x0, y0, x0 * s, y0 * s};
+        const TexVertex tr{x1, y0, x1 * s, y0 * s};
+        const TexVertex br{x1, y1, x1 * s, y1 * s};
+        const TexVertex bl{x0, y1, x0 * s, y1 * s};
+        texVerts.push_back(tl);
+        texVerts.push_back(tr);
+        texVerts.push_back(br);
+        texVerts.push_back(tl);
+        texVerts.push_back(br);
+        texVerts.push_back(bl);
+        underlayCount = 6;
+    }
 
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
@@ -1144,6 +1175,18 @@ void AtlasRenderer::render(
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
         sg_draw(range.base, range.count, 1);
     };
+
+    if (underlayCount > 0) {
+        sg_bindings bind{};
+        bind.vertex_buffers[0] = m_texVbuf;
+        bind.views[0] = m_topTexView;
+        bind.samplers[0] = m_topTexSampler;
+
+        sg_apply_pipeline(m_texPip);
+        sg_apply_bindings(&bind);
+        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+        sg_draw(0, underlayCount, 1);
+    }
 
     for (const TexRange& range : flatRanges) {
         drawAtlasRange(range);
