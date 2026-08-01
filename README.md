@@ -129,9 +129,9 @@ python utils/asset_generator/technical/generate_atlas_ridge.py --no-publish    #
 Исходные `.blend`-сцены ранних ручных прототипов геометрии (обрывы, hex-ландшафт) и референсы (`clifs/`, `landscape/hex/`, `reference/`). Используются вручную в Blender для визуальной проверки; в сборку и рантайм не входят. Каноничная логика ландшафта живёт в C++ (`src/libs/landscape_core`).
 
 ### Визуальные smoke-тесты — `utils/visual_tests/`
-Запускает `PolygonalGeneratedLandscapePlayground` со снятием скриншотов и гоняет OpenCV-эвристики по ним. Зависимости: см. `requirements.txt`.
+Запускает `PolygonalGeneratedLandscape` со снятием скриншотов и гоняет OpenCV-эвристики по ним. Зависимости: см. `requirements.txt`.
 ```powershell
-# предварительно собрать PolygonalGeneratedLandscapePlayground
+# предварительно собрать PolygonalGeneratedLandscape
 utils\visual_tests\run_visual_tests.ps1
 ```
 

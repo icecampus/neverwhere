@@ -1,4 +1,4 @@
-// C++ twin of the StoneCubePlayground GLSL SDF — the canonical form of the
+// C++ twin of the StoneCube GLSL SDF — the canonical form of the
 // stone-cube generator (the raymarch shader stays the look reference).
 // Principles from iq's "Voronoi - rocks" (docs/reference/shadertoy): round
 // box + bulge inside voronoi cells (clamp(k*(F2-F1))), fbm detail.

@@ -1,7 +1,7 @@
 # Из shadertoy-демки в геометрию движка (playbook)
 
 Рецепт переноса процедурной SDF-демки из `docs/reference/shadertoy` в меш-генератор
-движка. Отработан на «Voronoi - rocks» → `stone_gen` + StoneCubePlayground
+движка. Отработан на «Voronoi - rocks» → `stone_gen` + StoneCube
 (коммиты `73ce80b`, `50e54f3`, `e8ad617`). Цель документа — чтобы следующая
 демка портилась по чек-листу, без повторного наступания на грабли.
 
@@ -9,7 +9,7 @@
 
 ```
 shadertoy-референс
-  → ShadertoyPlayground        (оригинал крутится как есть, смотрим look)
+  → Shadertoy        (оригинал крутится как есть, смотрим look)
   → <name>_gen (no-GPU либа)   (C++-двойник SDF — КАНОНИЧЕН; тесты, меш, экспорт)
   → <Name>Playground           (Raymarch = look-reference, Mesh+Procedural = цель)
   → render_core                (перенос процедурного шейдера, образец — CliffRenderer)
@@ -69,7 +69,7 @@ fbm-бамп, AO, soft shadow — тот же блок, что в реймарч
 
 ### 7. Перф: тяжёлый попиксельный шейдер → scaled offscreen target
 На 2x-DPI фреймбуфере (2560×1440) процедурный шейдер полз (230 мс/кадр);
-рендер в пониженный target + blit (как у реймарча и ShadertoyPlayground) →
+рендер в пониженный target + blit (как у реймарча и Shadertoy) →
 13 мс при scale 0.5. Время кадра линейно по пикселям (GPU-bound).
 
 ### 8. Smoke — обязательный acceptance-ритуал
@@ -80,7 +80,7 @@ fbm-бамп, AO, soft shadow — тот же блок, что в реймарч
 ## Чек-лист портирования следующей демки
 
 1. **Референс.** Код в `docs/reference/shadertoy/<name>/` + README (источник,
-   лицензия, текстуры iChannel). Прогнать в ShadertoyPlayground
+   лицензия, текстуры iChannel). Прогнать в Shadertoy
    (`--demo`, `--cube`) — убедиться, что look понятен.
 2. **Декомпозиция.** Выделить `map()` (форма, SDF) отдельно от материала
    (тинт/мох/бамп). Список параметров → 4×vec4 uniform-блок (shape/look).
@@ -89,7 +89,7 @@ fbm-бамп, AO, soft shadow — тот же блок, что в реймарч
    сидом.
 4. **Меш** по образцу `stone_mesh.cpp` через `ScalarFieldView`. gtest:
    watertight=0, saddles=0, вершины в домене.
-5. **Плейграунд** по образцу StoneCubePlayground: Raymarch (look-reference) +
+5. **Плейграунд** по образцу StoneCube: Raymarch (look-reference) +
    Mesh+Procedural (цель) режимы, debounce-ребилд 0.3 с только по
    shape-параметрам, CLI `--smoke`/`--shot`/`--proc`.
 6. **Процедурный шейдер** = материал-блок реймарч-шейдера, позиция из

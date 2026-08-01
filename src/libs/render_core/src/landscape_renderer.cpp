@@ -591,7 +591,7 @@ constexpr std::size_t kWallVbufVertices = 8 * 65536;
 
 // World-space UV tiling of the raised-top ground texture: one texture repeat
 // per 256 world pixels (2 cells), continuous across cells (same convention as
-// PolygonalGeneratedLandscapePlayground's production preview ground UVs).
+// PolygonalGeneratedLandscape's production preview ground UVs).
 constexpr float kTopUvPerWorldPx = 1.0f / 256.0f;
 
 // Wall triplanar texture tiling: one rock texture repeat per 256 world px.

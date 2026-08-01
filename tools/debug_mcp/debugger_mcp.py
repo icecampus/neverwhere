@@ -3136,7 +3136,7 @@ def debug_process_find(name_query: str, *, limit: int = 20) -> dict[str, Any]:
                 "invalid_input",
                 "name_query must be non-empty",
                 recoverable=True,
-                suggested_next_actions=["Pass a process name fragment such as EpicMapEditor or PolygonalGeneratedLandscapePlayground."],
+                suggested_next_actions=["Pass a process name fragment such as EpicMapEditor or PolygonalGeneratedLandscape."],
             ),
         )
     try:

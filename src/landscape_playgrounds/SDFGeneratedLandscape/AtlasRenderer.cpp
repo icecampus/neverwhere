@@ -1315,7 +1315,7 @@ void AtlasRenderer::rebuildCliffCache(
 
             cliff::RegularizeStats regStats;
             if (cache.stone) {
-                // StoneCubePlayground voronoi stones over the same slab:
+                // StoneCube voronoi stones over the same slab:
                 // StoneField -> generic ScalarFieldView -> surface nets.
                 stone_gen::StoneField field(cache.stoneParams, nodes.data(), nodesX, nodesY);
                 cliff::ScalarFieldView view = field.view();

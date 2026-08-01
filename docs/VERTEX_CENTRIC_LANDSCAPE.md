@@ -350,7 +350,7 @@ TEST(LandscapePipelineTest, SharedTileResolverMatchesTileSetMasks) {
 | Editor tileset + slot order | `src/libs/core/topology/topology_common.h`, `src/libs/core/topology/diamond_tiled_landscape.{h,cpp}` |
 | Тесты (контракт + инварианты) | `src/tests/landscape/landscape_test.cpp` |
 | Тени от солнца (поверх level-grid) | `src/libs/landscape_core/include/landscape_core/sun_shadow.h` |
-| Playground'ы (визуальная проверка) | `src/apps/Landscape3dPlayground/`, `src/landscape_playgrounds/PolygonalGeneratedLandscapePlayground/` |
+| Playground'ы (визуальная проверка) | `src/apps/Landscape3dPlayground/`, `src/landscape_playgrounds/PolygonalGeneratedLandscape/` |
 
 ---
 
@@ -373,7 +373,7 @@ highground — центральная вершина и промежуточны
 
 Кисть рисует и стирает именно узлы; изменение узла обновляет четыре прилежащие
 ячейки. Рендер использует `render_core::MeshPreviewRenderer`, тот же
-offscreen-production-preview путь, что и `PolygonalGeneratedLandscapePlayground`.
+offscreen-production-preview путь, что и `PolygonalGeneratedLandscape`.
 `Landscape3dPlayground.exe --smoke` проверяет полноту 16 шаблонов, отсутствие
 наклонных top-поверхностей и контракт кисти.
 

@@ -1,5 +1,5 @@
 // Stone highground field: painted height nodes -> blurred plateau slab (the
-// cliff::CliffField base) carved by the StoneCubePlayground voronoi stones
+// cliff::CliffField base) carved by the StoneCube voronoi stones
 // (clamp(k*(F2-F1)) bulge inside voronoi cells, grooves at the cell borders)
 // + fbm detail. The carve is masked to the slab surface band so the field
 // stays the clean slab SDF deep inside/outside (watertight border), and —

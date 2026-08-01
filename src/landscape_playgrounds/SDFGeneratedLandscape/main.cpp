@@ -106,7 +106,7 @@ int g_activeLayer = 0;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
 cliff::FieldParams g_cliffParams;
-// Stone layer: StoneCubePlayground voronoi stones over the same slab —
+// Stone layer: StoneCube voronoi stones over the same slab —
 // its own params/height scale, same debounce mechanics.
 stone_gen::StoneFieldParams g_stoneParams;
 // Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
@@ -439,7 +439,7 @@ void drawImGui(int w, int h) {
         }
     }
     if (g_layers[g_activeLayer].stone) {
-        // StoneCubePlayground voronoi stones over the same slab; edits are
+        // StoneCube voronoi stones over the same slab; edits are
         // debounced (0.3 s) into a full field rebuild, same as the cliff.
         stone_gen::StoneFieldParams& p = g_stoneParams;
         ImGui::SliderFloat("Stone height", &g_stoneHeightScale, 4.0f, 128.0f, "%.0f px");

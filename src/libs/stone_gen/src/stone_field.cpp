@@ -10,7 +10,7 @@ namespace stone_gen {
 namespace {
 
 // pcg3d integer hash + voronoi/fbm — bit-exact twins of stone_sdf.cpp (the
-// canonical C++ form) and the StoneCubePlayground GLSL; duplicated here so
+// canonical C++ form) and the StoneCube GLSL; duplicated here so
 // StoneSdf stays untouched.
 glm::uvec3 pcg3d(glm::uvec3 v) {
     v = v * 1664525u + 1013904223u;
@@ -173,7 +173,7 @@ float StoneField::eval(const glm::vec3& p) const {
     float d2GradLen = 0.0f;
     sampleBase(p, dBase, d2, normalY, d2GradLen);
     mask = surfaceMask(dBase);
-    // StoneCubePlayground carve: d -= grooveDepth * cellFactor — the surface
+    // StoneCube carve: d -= grooveDepth * cellFactor — the surface
     // bulges out inside voronoi cells and stays on the slab at the borders
     // (grooves between stones). Rim stitch: the bulge keeps full strength
     // across the rim and wraps onto the top inside the rim band (fading

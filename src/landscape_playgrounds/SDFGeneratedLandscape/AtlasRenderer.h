@@ -54,7 +54,7 @@ struct CliffVertex {
 
 // One paint layer on the shared canvas: its own node grid and either flat
 // (2D atlas tiles) or scalar-field surface nets from the same nodes
-// (z-buffered): cliff (omphalos grooves) or stone (StoneCubePlayground
+// (z-buffered): cliff (omphalos grooves) or stone (StoneCube
 // voronoi stones).
 struct PaintLayerView {
     const LandBrush* brush = nullptr;

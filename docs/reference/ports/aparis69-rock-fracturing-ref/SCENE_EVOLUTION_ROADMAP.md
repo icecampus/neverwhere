@@ -239,7 +239,7 @@ CliffSceneModel buildCliffScene(const SceneSpec& spec, const TileLibrary& tiles)
 | Компонент | Роль |
 |-----------|------|
 | **`aparis69-rock-fracturing-ref`** | Paper blocks + replication R&D |
-| **`PolygonalGeneratedLandscapePlayground`** | FastNoise cliff — **silhouette / strata preview**, не замена `bi` |
+| **`PolygonalGeneratedLandscape`** | FastNoise cliff — **silhouette / strata preview**, не замена `bi` |
 | **`landscape_mesh`** | Heightfields карты → будущий input `h(x,y)` для `f` |
 | **`render_core`** | Позже GPU mesh path вместо ImGui CPU fill |
 

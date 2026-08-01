@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Heuristic visual checks for PolygonalGeneratedLandscapePlayground capture screenshots."""
+"""Heuristic visual checks for PolygonalGeneratedLandscape capture screenshots."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def main() -> int:
         "captures_dir",
         nargs="?",
         default="tools/visual_tests/captures",
-        help="Directory with PNG captures from PolygonalGeneratedLandscapePlayground",
+        help="Directory with PNG captures from PolygonalGeneratedLandscape",
     )
     parser.add_argument("--max-lit-patchiness", type=float, default=18.0)
     parser.add_argument("--max-hue-delta", type=float, default=18.0)
