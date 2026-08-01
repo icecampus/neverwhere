@@ -12,7 +12,7 @@
 
 // Project headers first: they pull sokol_gfx.h for plain declarations, so
 // they must come before SOKOL_IMPL is defined (same convention as
-// SplattingPlayground — this sokol version compiles the impl outside the
+// TextureBlendLandscape — this sokol version compiles the impl outside the
 // include guard and double-including it with SOKOL_IMPL is an error).
 #include "CubePreview.h"
 #include "DemoDiscovery.h"

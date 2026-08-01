@@ -1415,6 +1415,10 @@ void SplattingRenderer::ensurePipeline() {
     shd_desc.uniform_blocks[0].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
     shd_desc.uniform_blocks[0].glsl_uniforms[2].glsl_name = "camera_zoom";
     shd_desc.uniform_blocks[0].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT;
+    // Tail padding to match sizeof(VsParams): sokol's GL validation requires
+    // the declared members to sum exactly to the uniform block size.
+    shd_desc.uniform_blocks[0].glsl_uniforms[3].glsl_name = "_pad0";
+    shd_desc.uniform_blocks[0].glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT3;
 
     // FS uniforms
     shd_desc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;

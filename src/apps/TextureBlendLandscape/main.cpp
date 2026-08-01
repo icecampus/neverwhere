@@ -132,7 +132,7 @@ static void buildDemoMap() {
 
 static void init(void) {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("SplattingPlayground: init()");
+    spdlog::info("TextureBlendLandscape: init()");
 
     stm_setup();
     g_state.last_time = stm_now();
@@ -142,7 +142,7 @@ static void init(void) {
     desc.logger.func = slog_func;
     sg_setup(&desc);
     g_state.gfx_ok = sg_isvalid();
-    spdlog::info("SplattingPlayground: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
+    spdlog::info("TextureBlendLandscape: sg_setup() {}", g_state.gfx_ok ? "OK" : "FAILED");
 
     if (!g_state.gfx_ok) return;
 
@@ -161,7 +161,7 @@ static void init(void) {
     spdlog::info("dataRoot={}", g_dataRoot.string());
 
     // Load test textures
-    const auto texDir = g_dataRoot / "src" / "apps" / "SplattingPlayground" / "resources" / "materials";
+    const auto texDir = g_dataRoot / "src" / "apps" / "TextureBlendLandscape" / "resources" / "materials";
     g_renderer.loadMaterial(0, (texDir / "grass.png").string());
     g_renderer.loadMaterial(1, (texDir / "sand.png").string());
     g_renderer.loadMaterial(2, (texDir / "rock.png").string());
@@ -185,7 +185,7 @@ static void drawImGui(int w, int h) {
     const glm::vec2 worldPos = g_camera.screenToWorld(screenPos);
     const glm::ivec2 hoveredCell = g_iso.fieldToMap(worldPos);
 
-    ImGui::Begin("SplattingPlayground");
+    ImGui::Begin("TextureBlendLandscape");
     ImGui::Text("Frame: %d", g_state.frame_index);
     ImGui::Text("dt: %.3f ms", 1000.0f * g_state.dt);
     ImGui::Text("Size: %dx%d  DPI: %.2f", w, h, sapp_dpi_scale());
@@ -303,7 +303,7 @@ static void frame(void) {
 }
 
 static void cleanup(void) {
-    spdlog::info("SplattingPlayground: cleanup()");
+    spdlog::info("TextureBlendLandscape: cleanup()");
     g_renderer.shutdown();
     if (g_state.imgui_ok) {
         simgui_shutdown();
@@ -388,7 +388,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "SplattingPlayground - Isometric Diamond Cells";
+    desc.window_title = "TextureBlendLandscape - Isometric Diamond Cells";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32.console_utf8 = true;
