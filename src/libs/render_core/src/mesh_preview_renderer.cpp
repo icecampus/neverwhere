@@ -1125,6 +1125,10 @@ void MeshPreviewRenderer::ensurePipeline() {
     shdDesc.uniform_blocks[0].glsl_uniforms[5].type = SG_UNIFORMTYPE_FLOAT2;
     shdDesc.uniform_blocks[0].glsl_uniforms[6].glsl_name = "height_scale";
     shdDesc.uniform_blocks[0].glsl_uniforms[6].type = SG_UNIFORMTYPE_FLOAT;
+    // Tail padding to match sizeof(VsParams): sokol's GL validation requires
+    // the declared members to sum exactly to the uniform block size.
+    shdDesc.uniform_blocks[0].glsl_uniforms[7].glsl_name = "_pad0";
+    shdDesc.uniform_blocks[0].glsl_uniforms[7].type = SG_UNIFORMTYPE_FLOAT;
 
     shdDesc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
     shdDesc.uniform_blocks[1].size = sizeof(FsParams);
