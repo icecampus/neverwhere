@@ -273,7 +273,7 @@ void updateHover() {
 
 void init() {
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("TileShapePlayground: init()");
+    spdlog::info("SDFGeneratedLandscape: init()");
 
     stm_setup();
     g_state.last_time = stm_now();
@@ -284,7 +284,7 @@ void init() {
     sg_setup(&desc);
     g_state.gfx_ok = sg_isvalid();
     if (!g_state.gfx_ok) {
-        spdlog::error("TileShapePlayground: sg_setup FAILED");
+        spdlog::error("SDFGeneratedLandscape: sg_setup FAILED");
         return;
     }
 
@@ -310,14 +310,14 @@ void init() {
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
     if (g_dataRoot.empty()) {
-        spdlog::warn("TileShapePlayground: data root not found, using CWD");
+        spdlog::warn("SDFGeneratedLandscape: data root not found, using CWD");
         g_dataRoot = std::filesystem::current_path();
     }
     spdlog::info("dataRoot={}", g_dataRoot.string());
 
     const auto atlasPath = g_dataRoot / "resources" / "assets" / "landscape" / "Grass" / "atlas.png";
     if (!g_renderer.loadAtlasFromFile(AtlasKind::Grass, atlasPath.string(), 4, 6)) {
-        spdlog::error("TileShapePlayground: Grass atlas missing at {}", atlasPath.string());
+        spdlog::error("SDFGeneratedLandscape: Grass atlas missing at {}", atlasPath.string());
     }
 
     const FlatAtlasImage flat = generateFlatAtlas();
@@ -328,7 +328,7 @@ void init() {
             flat.height,
             flat.cols,
             flat.rows)) {
-        spdlog::error("TileShapePlayground: failed to upload generated flat atlas");
+        spdlog::error("SDFGeneratedLandscape: failed to upload generated flat atlas");
     }
 
     // Tiling texture for the stone/cliff flat tops (mix lives in
@@ -373,7 +373,7 @@ void drawImGui(int w, int h) {
     const glm::ivec2 cell = g_iso.fieldToMap(world);
 
     ImGui::Begin(
-        "TileShapePlayground",
+        "SDFGeneratedLandscape",
         nullptr,
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
     ImGui::Text("Vertex land brush");
@@ -655,9 +655,9 @@ void frame() {
     // grab the window client area and quit.
     if (!g_shotPath.empty() && g_state.frame_index >= 120) {
         if (captureWindowClientPng(g_shotPath.c_str())) {
-            spdlog::info("TileShapePlayground: screenshot saved to {}", g_shotPath);
+            spdlog::info("SDFGeneratedLandscape: screenshot saved to {}", g_shotPath);
         } else {
-            spdlog::error("TileShapePlayground: screenshot capture failed ({})", g_shotPath);
+            spdlog::error("SDFGeneratedLandscape: screenshot capture failed ({})", g_shotPath);
         }
         g_shotPath.clear();
         sapp_quit();
@@ -665,7 +665,7 @@ void frame() {
 }
 
 void cleanup() {
-    spdlog::info("TileShapePlayground: cleanup()");
+    spdlog::info("SDFGeneratedLandscape: cleanup()");
     g_renderer.shutdown();
     if (g_state.imgui_ok) {
         simgui_shutdown();
@@ -801,7 +801,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "TileShapePlayground - Vertex Land Tiles";
+    desc.window_title = "SDFGeneratedLandscape - Vertex Land Tiles";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32.console_utf8 = true;

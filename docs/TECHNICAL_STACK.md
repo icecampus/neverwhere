@@ -259,7 +259,7 @@ smoke плейграунда. Известное ограничение: эвр�
 `groundEnabled` по умолчанию выключен) рисуются инструментом `CliffPencil`
 (наследник `LandscapePencil`) на слое `CliffLandscape` — данные те же
 Landscape-тайлы с tileIndex (ноды по конвенции атласа). Рендер —
-`render_core::CliffRenderer` (порт cliff-прохода TileShapePlayground):
+`render_core::CliffRenderer` (порт cliff-прохода SDFGeneratedLandscape):
 ноды из тайлов → CliffField → surface nets, кэш **per-регион** (связная
 компонента нод, 8-связность), ключ — контент-хэш (отсортированные ноды +
 field-параметры): **локальная правка инвалидирует только свой кусок** —
@@ -291,7 +291,7 @@ debounce непрерывно откладывается, поэтому вес�
 включая отрицательные): контура 200×200 больше нет, рисовать можно где угодно.
 Покрытие: `src/tests/assets/cliff3d_asset_data_test.cpp` (JSON/AssetIndex),
 `cliff_asset_test.cpp` (API панели), map_authoring на слое. Песочница для
-отладки алгоритма — кисть «Cliff 3D» в TileShapePlayground.
+отладки алгоритма — кисть «Cliff 3D» в SDFGeneratedLandscape.
 **Cyclopean 3D в редакторе `[есть]`:** ассеты `cyclopean3d`
 (`CyclopeanAsset : SliceAsset`, без атласа; payload `"cyclopean3d"` в
 index.json — параметры композитора `landscape_mesh`: `raisedHeight` в
@@ -299,7 +299,7 @@ index.json — параметры композитора `landscape_mesh`: `rais
 стен) рисуются инструментом `CyclopeanPencil` (наследник `LandscapePencil`)
 на слое `CyclopeanLandscape` — данные те же Landscape-тайлы с tileIndex
 (ноды по конвенции атласа). Рендер — `render_core::CyclopeanRenderer`
-(порт wall-mesh прохода «Cyclopean 3D» из TileShapePlayground): ноды из
+(порт wall-mesh прохода «Cyclopean 3D» из SDFGeneratedLandscape): ноды из
 тайлов → `solidMaskFromNodes` → `composeSolidMaskMesh` с захардкоженным
 `WallStyleId::Cyclopean`, цвет запечён в вершины (без текстур и
 FS-униформ), кэш per-asset по контент-хэшу с debounce 0.3 с; камера в VS,
@@ -309,7 +309,7 @@ FS-униформ), кэш per-asset по контент-хэшу с debounce 0.
 Панель параметров — `CyclopeanSettings.qml` (секции Height/Rock, условие
 видимости — булево `Asset.isCyclopean3d`). Песочница для отладки алгоритма —
 PolygonalGeneratedLandscapePlayground (слой «Cyclopean 3D» из
-TileShapePlayground, откуда портировался рендер, удалён после переноса в
+SDFGeneratedLandscape, откуда портировался рендер, удалён после переноса в
 редактор; Landscape3dPlayground удалён).
 Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +

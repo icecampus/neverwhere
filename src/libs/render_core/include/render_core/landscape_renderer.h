@@ -33,7 +33,7 @@ struct CliffShadowField {
 
 // Presentation params of a raised (3D) slice atlas: the top is lifted by
 // `height` and cliff walls are generated around the land contour
-// (TileShapePlayground port).
+// (SDFGeneratedLandscape port).
 struct RaisedParams {
     float height = 32.0f;      // pixels the top is lifted (y offset)
     bool rockWalls = true;     // true: FastNoise rock walls; false: simple flat walls

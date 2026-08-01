@@ -144,7 +144,7 @@
   свой scalar-field + surface nets конвейер (~1.6 с на поле, watertight,
   z-buffer вместо painter) — другая весовая категория; сейчас он живёт в
   `highground_core` (`cliff_field.h`/`surface_nets.h`) и как кисть «Cliff 3D»
-  в TileShapePlayground, см. `docs/TECHNICAL_STACK.md`.
+  в SDFGeneratedLandscape, см. `docs/TECHNICAL_STACK.md`.
 
 ### Текстурирование стен
 

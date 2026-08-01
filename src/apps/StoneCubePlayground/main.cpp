@@ -1,7 +1,7 @@
 // StoneCubePlayground — incubation playground for the "cube made of stones"
 // generator (principles from iq's "Voronoi - rocks", see
 // docs/reference/shadertoy). SDF + raymarch now; the idea develops here:
-// C++ SDF twin -> surface-nets mesh (highground_core) -> TileShapePlayground
+// C++ SDF twin -> surface-nets mesh (highground_core) -> SDFGeneratedLandscape
 // -> editor tool.
 //
 // Single-source GLSL (#version 330) with the GLCORE backend on every desktop

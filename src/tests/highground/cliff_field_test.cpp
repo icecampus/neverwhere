@@ -87,7 +87,7 @@ TEST(CliffField, DemoShapePipeline) {
 
 TEST(CliffField, RectangularRegion) {
     // The demo shape embedded into a wider (9x7) node grid: the injected grid
-    // may be rectangular (a brush bbox in TileShapePlayground), and the wider
+    // may be rectangular (a brush bbox in SDFGeneratedLandscape), and the wider
     // zero margin must not change the extraction. (A node pattern that yields
     // stubborn saddle storms can still leave regStats.remaining > 0 — the
     // regularization heuristic is iterative and not guaranteed to converge on
@@ -113,7 +113,7 @@ TEST(CliffField, RectangularRegion) {
 }
 
 TEST(CliffField, CoarseBlockShape) {
-    // TileShapePlayground smoke scenario: a solid 4x4 block of on-nodes in a
+    // SDFGeneratedLandscape smoke scenario: a solid 4x4 block of on-nodes in a
     // 6x6 grid (1-cell zero margin), sampled coarse (cellSize 0.09) for speed.
     // Regression: two adjacent saddle faces used to flip-flop their shared
     // corner on every pass, leaving regStats.remaining = 2 at any pass budget.

@@ -3,7 +3,7 @@
 
 #include <QVariantMap>
 
-// Cyclopean3D asset (TileShapePlayground "Cyclopean 3D" brush port): no
+// Cyclopean3D asset (SDFGeneratedLandscape "Cyclopean 3D" brush port): no
 // atlas — the landscape_mesh composer params (Cyclopean wall style) from the
 // "cyclopean3d" payload in index.json. Lives on the CyclopeanLandscape layer;
 // its Landscape tiles encode the vertex nodes (same tileIndex convention as

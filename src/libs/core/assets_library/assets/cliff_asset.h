@@ -3,7 +3,7 @@
 
 #include <QVariantMap>
 
-// Cliff3D asset (TileShapePlayground "Cliff 3D" brush port): no atlas — the
+// Cliff3D asset (SDFGeneratedLandscape "Cliff 3D" brush port): no atlas — the
 // whole cliff-field generator parameter set + shading palette from the
 // "cliff3d" payload in index.json. Lives on the CliffLandscape layer; its
 // Landscape tiles encode the vertex nodes (same tileIndex convention as

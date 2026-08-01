@@ -1,7 +1,7 @@
 #pragma once
 #include "assets_library/assets/slice_asset.h"
 
-// Shape3D asset (TileShapePlayground port): a slice atlas whose Landscape
+// Shape3D asset (SDFGeneratedLandscape port): a slice atlas whose Landscape
 // tiles are rendered raised (offset top + cliff walls). Lives on the
 // RaisedLandscape layer; presentation params come from the "shape3d"
 // payload in index.json.

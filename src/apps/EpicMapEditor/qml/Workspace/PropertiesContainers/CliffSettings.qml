@@ -33,7 +33,7 @@ Rectangle
     // activeAsset right after the asset switches cliff -> non-cliff).
     property var params: (asset && asset.isCliff3d) ? asset.cliffParams() : ({})
 
-    // [key, label, from, to, stepSize] — ranges mirror the TileShapePlayground
+    // [key, label, from, to, stepSize] — ranges mirror the SDFGeneratedLandscape
     // ImGui panel.
     property var sections: [
         {

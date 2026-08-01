@@ -1,6 +1,6 @@
 // Cyclopean pass (cyclopean3d assets): landscape_mesh solid-mask plateau with
 // Cyclopean-style walls, built from the vertex-node grid encoded in
-// CyclopeanLandscape layer tiles. Port of the TileShapePlayground
+// CyclopeanLandscape layer tiles. Port of the SDFGeneratedLandscape
 // "Cyclopean 3D" wall-mesh pass (AtlasRenderer::rebuildWallMeshCache) into
 // the shared world render.
 //

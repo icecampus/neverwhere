@@ -32,7 +32,7 @@ Rectangle
     // not order independent binding updates).
     property var params: (asset && asset.isCyclopean3d) ? asset.cyclopeanParams() : ({})
 
-    // [key, label, from, to, stepSize] — ranges mirror the TileShapePlayground
+    // [key, label, from, to, stepSize] — ranges mirror the SDFGeneratedLandscape
     // ImGui panel.
     property var sections: [
         {

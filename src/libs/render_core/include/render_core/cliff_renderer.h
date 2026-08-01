@@ -1,5 +1,5 @@
 // Cliff pass (cliff3d assets): surface-nets cliffs from the vertex-node grid
-// encoded in CliffLandscape layer tiles. Port of the TileShapePlayground cliff
+// encoded in CliffLandscape layer tiles. Port of the SDFGeneratedLandscape cliff
 // pass (AtlasRenderer) into the shared world render.
 //
 // Differences from the playground original:
@@ -35,7 +35,7 @@ namespace render_core {
 
 // Shading palette/light of a cliff3d asset (uniforms only — edits apply
 // instantly, no mesh rebuild). Mirrors BaseData::Cliff3dShadingData and the
-// TileShapePlayground ShadingParams.
+// SDFGeneratedLandscape ShadingParams.
 struct CliffShading {
     float lightAzimuth = 2.23f;   // radians
     float lightElevation = 0.85f; // radians

@@ -5,7 +5,7 @@
 //
 // Pure pipeline like highground.h: node grid + FieldParams -> sampled field,
 // no Qt/GPU. The node grid is injected (CliffFieldPlayground's hardcoded
-// pattern, TileShapePlayground's brush), so the region shape is data-driven.
+// pattern, SDFGeneratedLandscape's brush), so the region shape is data-driven.
 #pragma once
 
 #include <cstdint>

@@ -393,7 +393,7 @@ void CyclopeanRenderer::rebuildMesh(
         request.fadeWallDisplacementAtBottom = false;
 
         // Single-level plateau: the level height equals the plateau top (same
-        // convention as the TileShapePlayground wall-mesh pass).
+        // convention as the SDFGeneratedLandscape wall-mesh pass).
         landscape_mesh::MeshBuildSettings settings;
         settings.cellSize = 1.0f;
         settings.levelHeight = params.raisedHeight;

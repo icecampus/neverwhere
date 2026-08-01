@@ -1,6 +1,6 @@
 // landscape_mesh::solidMaskFromNodes — vertex-node grid -> cell solid-mask,
 // plus the single-level composeSolidMaskMesh pipeline it feeds (the
-// TileShapePlayground "Cyclopean 3D" layer path).
+// SDFGeneratedLandscape "Cyclopean 3D" layer path).
 #include <cstdint>
 #include <vector>
 

@@ -14,7 +14,7 @@ namespace render_core {
 namespace {
 
 // ---------------------------------------------------------------------------
-// Shaders (ported from TileShapePlayground's AtlasRenderer cliff pass; the VS
+// Shaders (ported from SDFGeneratedLandscape's AtlasRenderer cliff pass; the VS
 // additionally applies the camera and normalizes z from the raw ground fieldY
 // via z_range — the raised-pass depth convention).
 // ---------------------------------------------------------------------------

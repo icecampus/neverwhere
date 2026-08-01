@@ -39,7 +39,7 @@ namespace BaseData
     };
 
     // Shape3D: slice atlas + raised presentation params (ported from
-    // TileShapePlayground). Objects are plain Landscape tiles on the
+    // SDFGeneratedLandscape). Objects are plain Landscape tiles on the
     // RaisedLandscape layer; these params drive the renderer only.
     struct Shape3dAssetData
     {
@@ -55,7 +55,7 @@ namespace BaseData
             thumbnail, atlas, topTexture, raisedHeight, rockWalls, rockAmplitude, rockBevel);
     };
 
-    // Cliff3D shading palette/light (mirror of the TileShapePlayground
+    // Cliff3D shading palette/light (mirror of the SDFGeneratedLandscape
     // ShadingParams; uniforms only — no geometry rebuild on change).
     struct Cliff3dShadingData
     {
