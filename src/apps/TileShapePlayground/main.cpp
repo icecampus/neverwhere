@@ -70,6 +70,21 @@ std::filesystem::path g_dataRoot;
 std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
+// Control panel: pinned to the left edge, full height. The scene canvas
+// starts at the panel's right edge — camera and mouse work in canvas-local
+// coordinates (canvas origin = panel width in logical pixels).
+constexpr float kPanelWidth = 340.0f;
+
+float panelWidth() {
+    return g_state.imgui_ok ? kPanelWidth : 0.0f;
+}
+
+glm::vec2 canvasSize() {
+    return {
+        std::max(static_cast<float>(sapp_width()) - panelWidth(), 0.0f),
+        static_cast<float>(sapp_height())};
+}
+
 // Brush palette: independent layers sharing one canvas. Each keeps its
 // own node grid and presentation (2D grass / 2D yellow / cliff or stone
 // scalar-field).
@@ -246,7 +261,8 @@ void paintDemoPattern() {
 }
 
 void updateHover() {
-    const glm::vec2 world = g_camera.screenToWorld({g_state.mouseX, g_state.mouseY});
+    const glm::vec2 world =
+        g_camera.screenToWorld({g_state.mouseX - panelWidth(), g_state.mouseY});
     const glm::ivec2 node = g_iso.fieldToNode(world);
     if (g_layers[0].brush.isNodeEditable(node)) {
         g_hoverNode = node;
@@ -322,12 +338,13 @@ void init() {
         g_stoneTopTexMix = 0.0f;
     }
 
-    centerCamera(sapp_width(), sapp_height());
+    const glm::vec2 canvas = canvasSize();
+    centerCamera(static_cast<int>(canvas.x), static_cast<int>(canvas.y));
     if (g_demoNode) {
         const glm::vec2 nodePos = g_iso.nodeToField({10, 10});
         g_camera.zoom = 2.0f;
-        g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - nodePos.x * g_camera.zoom;
-        g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - nodePos.y * g_camera.zoom;
+        g_camera.offset.x = canvas.x * 0.5f - nodePos.x * g_camera.zoom;
+        g_camera.offset.y = canvas.y * 0.5f - nodePos.y * g_camera.zoom;
     }
     if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty()) {
         // Deterministic framing for screenshot comparisons.
@@ -342,19 +359,23 @@ void init() {
             worldCenter = acc / static_cast<float>(g_cliCliffNodes.size());
         }
         g_camera.zoom = g_cliZoom.value_or(1.0f);
-        g_camera.offset.x = static_cast<float>(sapp_width()) * 0.5f - worldCenter.x * g_camera.zoom;
-        g_camera.offset.y = static_cast<float>(sapp_height()) * 0.5f - worldCenter.y * g_camera.zoom;
+        g_camera.offset.x = canvas.x * 0.5f - worldCenter.x * g_camera.zoom;
+        g_camera.offset.y = canvas.y * 0.5f - worldCenter.y * g_camera.zoom;
     }
 }
 
 void drawImGui(int w, int h) {
-    ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(340.0f, 260.0f), ImGuiCond_Once);
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(kPanelWidth, static_cast<float>(h)), ImGuiCond_Always);
 
-    const glm::vec2 world = g_camera.screenToWorld({g_state.mouseX, g_state.mouseY});
+    const glm::vec2 world =
+        g_camera.screenToWorld({g_state.mouseX - panelWidth(), g_state.mouseY});
     const glm::ivec2 cell = g_iso.fieldToMap(world);
 
-    ImGui::Begin("TileShapePlayground");
+    ImGui::Begin(
+        "TileShapePlayground",
+        nullptr,
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
     ImGui::Text("Vertex land brush");
     ImGui::Text("LMB paint  |  Ctrl+LMB erase  |  RMB pan  |  wheel zoom");
     ImGui::Separator();
@@ -493,7 +514,7 @@ void drawImGui(int w, int h) {
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset camera")) {
-        centerCamera(w, h);
+        centerCamera(w - static_cast<int>(panelWidth()), h);
     }
     ImGui::End();
 }
@@ -534,6 +555,18 @@ void frame() {
     pass.action = action;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
+
+    // The scene renders only into the canvas right of the panel. Viewport
+    // and scissor take framebuffer pixels; sokol_imgui resets both to the
+    // full framebuffer for its own draws, so no restore is needed.
+    const int panelPx = static_cast<int>(panelWidth());
+    const int canvasW = std::max(w - panelPx, 0);
+    const float dpi = sapp_dpi_scale();
+    const int vpX = static_cast<int>(std::lround(panelPx * dpi));
+    const int vpW = static_cast<int>(std::lround(canvasW * dpi));
+    const int vpH = static_cast<int>(std::lround(h * dpi));
+    sg_apply_viewport(vpX, 0, vpW, vpH, true);
+    sg_apply_scissor_rect(vpX, 0, vpW, vpH, true);
 
     PaintLayerView views[4];
     for (int i = 0; i < 4; ++i) {
@@ -604,7 +637,7 @@ void frame() {
         4,
         g_iso,
         g_camera,
-        w,
+        canvasW,
         h,
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value(),
@@ -705,9 +738,10 @@ void event(const sapp_event* ev) {
         const float zoomFactor = (delta > 0.0f) ? 1.1f : 0.9f;
         const float oldZoom = g_camera.zoom;
         float newZoom = std::clamp(oldZoom * zoomFactor, 0.15f, 3.0f);
-        const float mapX = (ev->mouse_x - g_camera.offset.x) / oldZoom;
+        const float mouseX = ev->mouse_x - panelWidth();
+        const float mapX = (mouseX - g_camera.offset.x) / oldZoom;
         const float mapY = (ev->mouse_y - g_camera.offset.y) / oldZoom;
-        g_camera.offset.x = ev->mouse_x - mapX * newZoom;
+        g_camera.offset.x = mouseX - mapX * newZoom;
         g_camera.offset.y = ev->mouse_y - mapY * newZoom;
         g_camera.zoom = newZoom;
         break;
