@@ -307,7 +307,7 @@ bool runTestScenario() {
     if (rectangleOk && landscapeOk && outwardOk && litNormalsOk && singleQuadLabOk && wallSeriesLabOk && cliffWallOk && cyclopeanWallStyleOk && quadLabGpuOk) {
         if (outwardWarn) {
             spdlog::warn(
-                "TEST WARN MeshGenerationPlayground outward orientation: rectangle fail/warn/minDot={}/{}/{:.4f}, landscape fail/warn/minDot={}/{}/{:.4f}",
+                "TEST WARN PolygonalGeneratedLandscapePlayground outward orientation: rectangle fail/warn/minDot={}/{}/{:.4f}, landscape fail/warn/minDot={}/{}/{:.4f}",
                 rectangleOrientation.outwardFailCount,
                 rectangleOrientation.outwardWarnCount,
                 rectangleOrientation.minWallOutwardDot,
@@ -316,7 +316,7 @@ bool runTestScenario() {
                 landscapeOrientation.minWallOutwardDot);
         }
         spdlog::info(
-            "TEST PASS MeshGenerationPlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, sunShadow min/max={:.4f}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, sunShadow min/max={:.4f}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+            "TEST PASS PolygonalGeneratedLandscapePlayground pipeline: rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, sunShadow min/max={:.4f}/{:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, sunShadow min/max={:.4f}/{:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
             g_rectModel.topQuadCount,
             g_rectModel.cliffWallQuadCount,
             g_rectModel.beveledSegmentCount,
@@ -344,7 +344,7 @@ bool runTestScenario() {
     }
 
     spdlog::error(
-        "TEST FAIL MeshGenerationPlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, singleQuadLabOk={}, wallSeriesLabOk={}, cliffWallOk={}, cyclopeanWallStyleOk={}, quadLabGpuOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
+        "TEST FAIL PolygonalGeneratedLandscapePlayground pipeline: rectangleOk={}, landscapeOk={}, outwardOk={}, litNormalsOk={}, singleQuadLabOk={}, wallSeriesLabOk={}, cliffWallOk={}, cyclopeanWallStyleOk={}, quadLabGpuOk={}, rectangle quads={}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, landscape tiles surface/walls/unique={}/{}/{}, bevel/caps={}/{}, outward fail/warn/minDot={}/{}/{:.4f}, lit minHintDot={:.4f}, maxAdjacentLevelDelta={}, seams checked/mismatch/maxGap={}/{}/{:.4f}",
         rectangleOk,
         landscapeOk,
         outwardOk,

@@ -1493,14 +1493,14 @@ bool warmupProductionPreviewRenderer() {
     }
 
     if (ok && g_gpuPreviewRenderer.validOutput()) {
-        spdlog::info("TEST PASS MeshGenerationPlayground GPU preview renderer warmup: quads={}, output={}x{}",
+        spdlog::info("TEST PASS PolygonalGeneratedLandscapePlayground GPU preview renderer warmup: quads={}, output={}x{}",
             renderQuads.size(),
             (int)warmupSize.x,
             (int)warmupSize.y);
         return true;
     }
 
-    spdlog::error("TEST FAIL MeshGenerationPlayground GPU preview renderer warmup: quads={}, outputValid={}",
+    spdlog::error("TEST FAIL PolygonalGeneratedLandscapePlayground GPU preview renderer warmup: quads={}, outputValid={}",
         renderQuads.size(),
         g_gpuPreviewRenderer.validOutput());
     return false;

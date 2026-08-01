@@ -271,7 +271,7 @@ int main(int argc, char* argv[]) {
 
     meshgen_playground::setupLogger(argv[0]);
 
-    spdlog::info("main: MeshGenerationPlayground starting");
+    spdlog::info("main: PolygonalGeneratedLandscapePlayground starting");
     spdlog::info("main: build config: C++20, SOKOL_D3D11={}, SOKOL_METAL={}, SOKOL_GLCORE={}, SOKOL_GLES3={}",
 #if defined(SOKOL_D3D11)
         "YES"
@@ -306,7 +306,7 @@ int main(int argc, char* argv[]) {
     desc.width = 1280;
     desc.height = 720;
     desc.sample_count = 1;
-    desc.window_title = "MeshGenerationPlayground";
+    desc.window_title = "PolygonalGeneratedLandscapePlayground";
     desc.high_dpi = true;
 #if defined(_WIN32)
     desc.win32.console_utf8 = true;

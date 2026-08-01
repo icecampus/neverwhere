@@ -795,7 +795,7 @@ void drawUi() {
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoBringToFrontOnFocus;
 
-    ImGui::Begin("MeshGenerationPlayground", nullptr, rootFlags);
+    ImGui::Begin("PolygonalGeneratedLandscapePlayground", nullptr, rootFlags);
 
     if (ImGui::BeginTabBar("ScenarioTabs", ImGuiTabBarFlags_None)) {
         if (ImGui::BeginTabItem("Debug Scene")) {

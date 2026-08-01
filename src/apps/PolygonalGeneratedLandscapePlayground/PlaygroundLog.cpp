@@ -54,7 +54,7 @@ void setupLogger(const char* argv0) {
         std::filesystem::create_directories(logDir);
 
         std::string timestamp = formatTimestamp("%Y%m%d_%H%M%S");
-        std::string logFileName = "MeshGenerationPlayground_" + timestamp + ".json.log";
+        std::string logFileName = "PolygonalGeneratedLandscapePlayground_" + timestamp + ".json.log";
         std::filesystem::path logPath = logDir / logFileName;
 
         auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();

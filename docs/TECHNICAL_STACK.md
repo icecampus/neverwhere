@@ -308,7 +308,7 @@ FS-униформ), кэш per-asset по контент-хэшу с debounce 0.
 `world_frame_builder`; `ensureCyclopeanAsset` пробрасывает параметры в обоих).
 Панель параметров — `CyclopeanSettings.qml` (секции Height/Rock, условие
 видимости — булево `Asset.isCyclopean3d`). Песочницы для отладки алгоритма —
-MeshGenerationPlayground и Landscape3dPlayground (слой «Cyclopean 3D» из
+PolygonalGeneratedLandscapePlayground и Landscape3dPlayground (слой «Cyclopean 3D» из
 TileShapePlayground, откуда портировался рендер, удалён после переноса в
 редактор).
 Ассеты `shape3d`

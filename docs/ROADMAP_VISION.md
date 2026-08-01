@@ -42,7 +42,7 @@
 > (`WorldRenderer` — фасад единого рендера мира: `LandscapeRenderer` + `SpriteRenderer`
 > + `OverlayRenderer`), клиент `EpicGameClient` на этом ядре (паритет с редактором),
 > анализ тайлов в `docs/TILE_RESOLUTION_ANALYSIS.md`, плюс песочницы
-> (`Landscape3dPlayground`, `MeshGenerationPlayground`, `SplattingPlayground`).
+> (`Landscape3dPlayground`, `PolygonalGeneratedLandscapePlayground`, `SplattingPlayground`).
 > **Поднятая 3D-земля `[есть]`:** порт TileShapePlayground — ассеты `shape3d`
 > (атлас + `raisedHeight`/RockWalls-параметры) рисуются `Shape3dPencil` на слое
 > `RaisedLandscape` (vertex-centric, своя сетка нод); рендер — стены + верх со
