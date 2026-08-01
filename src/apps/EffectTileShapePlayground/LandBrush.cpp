@@ -4,6 +4,24 @@
 
 #include <topology_core/diamond_isometry.h>
 
+float diamondNodeFill(const std::array<bool, 4>& nodeMask, glm::vec2 diamond) {
+    const float wL = std::max(0.0f, -diamond.x);
+    const float wR = std::max(0.0f, diamond.x);
+    const float wU = std::max(0.0f, -diamond.y);
+    const float wD = std::max(0.0f, diamond.y);
+    const float sum = wL + wR + wU + wD;
+    const float l = nodeMask[0] ? 1.0f : 0.0f;
+    const float u = nodeMask[1] ? 1.0f : 0.0f;
+    const float r = nodeMask[2] ? 1.0f : 0.0f;
+    const float d = nodeMask[3] ? 1.0f : 0.0f;
+    if (sum <= 1e-6f) {
+        // The centre is where every wedge meets and the weights vanish; the
+        // mean is the only value that does not favour one of them.
+        return 0.25f * (l + u + r + d);
+    }
+    return (wL * l + wR * r + wU * u + wD * d) / sum;
+}
+
 void LandBrush::reset(int width, int height) {
     m_width = std::clamp(width, 4, 96);
     m_height = std::clamp(height, 4, 96);

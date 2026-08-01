@@ -6,6 +6,8 @@
 
 #include <landscape_core/landscape_logic.h>
 
+#include "LandBrush.h"
+
 namespace {
 
 constexpr int kCols = 4;
@@ -95,21 +97,7 @@ void rasterizeTile(std::vector<std::uint8_t>& rgba, int tileIndex, const std::ar
                 continue;
             }
 
-            const float wL = std::max(0.0f, -hx);
-            const float wR = std::max(0.0f, hx);
-            const float wU = std::max(0.0f, -hy);
-            const float wD = std::max(0.0f, hy);
-            const float sum = wL + wR + wU + wD;
-            if (sum <= 1e-6f) {
-                continue;
-            }
-
-            const float val =
-                (wL * (mask[0] ? 1.0f : 0.0f) + wR * (mask[2] ? 1.0f : 0.0f) +
-                    wU * (mask[1] ? 1.0f : 0.0f) + wD * (mask[3] ? 1.0f : 0.0f)) /
-                sum;
-
-            if (val < 0.5f) {
+            if (diamondNodeFill(mask, {hx, hy}) < 0.5f) {
                 continue;
             }
 

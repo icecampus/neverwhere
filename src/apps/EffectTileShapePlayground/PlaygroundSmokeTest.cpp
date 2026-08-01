@@ -15,6 +15,7 @@
 
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
+#include "SceneStitch.h"
 
 bool runTileShapeSmokeTest() {
     LandBrush brush;
@@ -225,6 +226,116 @@ bool runTileShapeSmokeTest() {
         }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + cliff/stone field pipelines");
+    // --- Scene stitching CPU half: the contact-AO distance field and the
+    // orthographic sun frame. Both feed the shaders, so a silent regression
+    // here shows up only as "the shadow moved a bit" on a screenshot.
+    {
+        LandBrush b;
+        b.reset(24, 24);
+        for (int y = 10; y <= 13; ++y) {
+            for (int x = 10; x <= 13; ++x) {
+                b.setNode({x, y}, true);
+            }
+        }
+        const LandBrush* brushes[1] = {&b};
+        const ContactAoField ao = buildContactAoField(brushes, 1, 4, 4);
+        if (ao.empty() || ao.width != (24 + 8) * 4 || ao.height != (24 + 8) * 4) {
+            spdlog::error("TEST FAIL TileShape: AO field {}x{} (empty={})", ao.width, ao.height,
+                ao.empty());
+            return false;
+        }
+        // Inside the footprint the distance is zero and it grows monotonically
+        // as we walk away from the near edge along +x.
+        if (ao.distanceAt(11.5f, 11.5f) > 0.01f) {
+            spdlog::error("TEST FAIL TileShape: AO distance inside the footprint is {:.3f}",
+                ao.distanceAt(11.5f, 11.5f));
+            return false;
+        }
+        // Half-lit cells count as half: cell (13, 11) has only its Left and Up
+        // nodes on, so the far half of that same cell is already outside the
+        // footprint. Whole-cell coverage would report zero across all of it and
+        // the AO ring would trace cell borders instead of the wall.
+        if (ao.distanceAt(13.25f, 11.5f) > 0.01f) {
+            spdlog::error("TEST FAIL TileShape: solid half of a half-lit cell reads {:.3f}",
+                ao.distanceAt(13.25f, 11.5f));
+            return false;
+        }
+        const float emptyHalf = ao.distanceAt(13.75f, 11.5f);
+        if (emptyHalf < 0.1f || emptyHalf > 0.8f) {
+            spdlog::error("TEST FAIL TileShape: empty half of a half-lit cell reads {:.3f}, "
+                          "expected a fraction of a cell", emptyHalf);
+            return false;
+        }
+        float prev = -1.0f;
+        for (float d = 0.0f; d <= 6.0f; d += 0.25f) {
+            const float cur = ao.distanceAt(14.0f + d, 11.5f);
+            if (cur < prev - 1e-4f) {
+                spdlog::error("TEST FAIL TileShape: AO distance not monotonic at +{:.2f} "
+                              "({:.3f} after {:.3f})", d, cur, prev);
+                return false;
+            }
+            prev = cur;
+        }
+        if (prev < kAoMaxDistanceCells - 0.01f) {
+            spdlog::error("TEST FAIL TileShape: AO distance saturates at {:.3f}, expected {:.3f}",
+                prev, kAoMaxDistanceCells);
+            return false;
+        }
+        // Empty brush -> empty field (the renderer falls back to "no AO").
+        LandBrush blank;
+        blank.reset(24, 24);
+        const LandBrush* blankList[1] = {&blank};
+        if (!buildContactAoField(blankList, 1, 4, 4).empty()) {
+            spdlog::error("TEST FAIL TileShape: AO field of an empty brush is not empty");
+            return false;
+        }
+
+        const glm::vec3 boxMin{-3.0f, 0.0f, -3.0f};
+        const glm::vec3 boxMax{27.0f, 1.5f, 27.0f};
+        const SunBasis basis = buildSunBasis(glm::normalize(glm::vec3{0.6f, 0.7f, -0.4f}),
+            boxMin, boxMax);
+        if (!basis.valid) {
+            spdlog::error("TEST FAIL TileShape: sun basis is invalid");
+            return false;
+        }
+        const float ortho = std::abs(glm::dot(basis.right, basis.up)) +
+            std::abs(glm::dot(basis.right, basis.dir)) + std::abs(glm::dot(basis.up, basis.dir));
+        const float unit = std::abs(glm::length(basis.right) - 1.0f) +
+            std::abs(glm::length(basis.up) - 1.0f) + std::abs(glm::length(basis.dir) - 1.0f);
+        if (ortho > 1e-4f || unit > 1e-4f) {
+            spdlog::error("TEST FAIL TileShape: sun basis not orthonormal (ortho {:.6f}, unit {:.6f})",
+                ortho, unit);
+            return false;
+        }
+        // Every corner of the light volume has to land inside the shadow map.
+        for (int corner = 0; corner < 8; ++corner) {
+            const glm::vec3 c{
+                (corner & 1) ? boxMax.x : boxMin.x,
+                (corner & 2) ? boxMax.y : boxMin.y,
+                (corner & 4) ? boxMax.z : boxMin.z};
+            const glm::vec3 sc = basis.project(c);
+            if (sc.x < -1e-4f || sc.x > 1.0f + 1e-4f || sc.y < -1e-4f || sc.y > 1.0f + 1e-4f ||
+                sc.z < -1e-4f || sc.z > 1.0f + 1e-4f) {
+                spdlog::error("TEST FAIL TileShape: light volume corner ({},{},{}) projects to "
+                              "({:.3f},{:.3f},{:.3f})", c.x, c.y, c.z, sc.x, sc.y, sc.z);
+                return false;
+            }
+        }
+        // Raising a point towards the sun must bring it closer to the light.
+        const glm::vec3 low = basis.project({12.0f, 0.0f, 12.0f});
+        const glm::vec3 high = basis.project({12.0f, 1.5f, 12.0f});
+        if (high.z >= low.z) {
+            spdlog::error("TEST FAIL TileShape: shadow depth does not decrease with height "
+                          "({:.4f} -> {:.4f})", low.z, high.z);
+            return false;
+        }
+        if (isoHeightToWorld(64.0f, 32.0f, 96.0f) <= 0.0f) {
+            spdlog::error("TEST FAIL TileShape: iso height scale is not positive");
+            return false;
+        }
+    }
+
+    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + cliff/stone field "
+                 "pipelines + contact AO field + sun basis");
     return true;
 }
