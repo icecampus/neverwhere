@@ -254,6 +254,117 @@ fragment float4 _main(VsOut in [[stage_in]], constant FsParams& fs [[buffer(0)]]
 )";
 
 // ---------------------------------------------------------------------------
+// GLSL (порт MSL-версий: uniform-блоки -> отдельные uniform, имена в lower_case,
+// список членов блока продублирован в glsl_uniforms у sg_shader_desc)
+// ---------------------------------------------------------------------------
+
+static const char* vs_src_glsl = R"(
+#version 330
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 normal;
+layout(location=2) in float groove;
+uniform mat4 mvp;
+out vec3 v_world;
+out vec3 v_normal;
+out float v_groove;
+void main() {
+    gl_Position = mvp * vec4(pos, 1.0);
+    v_world = pos;
+    v_normal = normal;
+    v_groove = groove;
+}
+)";
+
+static const char* fs_src_glsl = R"(
+#version 330
+in vec3 v_world;
+in vec3 v_normal;
+in float v_groove;
+out vec4 frag_color;
+uniform vec4 light_dir;
+uniform vec4 cam_pos;
+uniform vec4 dark_color;
+uniform vec4 gold_color;
+uniform vec4 grass_a;
+uniform vec4 grass_b;
+uniform vec4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
+uniform vec4 params1; // x: spec power, y: gamma, z: wrap backlight, w: unused
+
+vec4 hashv4v3(vec3 p) {
+    vec3 chash = vec3(37.0, 39.0, 41.0);
+    return fract(sin(vec4(dot(p, chash), dot(p + vec3(1.0, 0.0, 0.0), chash),
+        dot(p + vec3(0.0, 1.0, 0.0), chash), dot(p + vec3(0.0, 0.0, 1.0), chash))) * 43758.54);
+}
+
+float noisefv3(vec3 p) {
+    vec3 ip = floor(p);
+    vec3 fp = fract(p);
+    fp *= fp * (3.0 - 2.0 * fp);
+    vec4 t = mix(hashv4v3(ip), hashv4v3(ip + vec3(0.0, 0.0, 1.0)), fp.z);
+    return mix(mix(t.x, t.y, fp.x), mix(t.z, t.w, fp.x), fp.y);
+}
+
+float fbm3(vec3 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int i = 0; i < 5; i++) {
+        f += a * noisefv3(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+vec2 hashv2v2(vec2 p) {
+    vec2 chash = vec2(37.0, 39.0);
+    return fract(sin(vec2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(vec2 p) {
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(0.0, 1.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(vec2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; j++) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+void main() {
+    vec3 n = normalize(v_normal);
+    vec3 p = v_world;
+    // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
+    float f = fbm3(32.0 * p);
+    float shell = 1.0 - smoothstep(0.005, 0.05, v_groove);
+    vec3 gold = gold_color.rgb + vec3(1.0, 0.9, 0.4) * step(params0.x, f);
+    vec3 rock = mix(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
+    // Grassy flat tops (omphalos idObj==2 style).
+    float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
+    vec3 grass = mix(grass_a.rgb, grass_b.rgb, gm);
+    float topMask = smoothstep(0.7, 0.9, n.y);
+    vec3 base = mix(rock, grass, topMask);
+    // Cheap sun lambert + wrap ambient + spec.
+    vec3 l = normalize(light_dir.xyz);
+    vec3 rd = normalize(p - cam_pos.xyz);
+    float ndl = dot(n, l);
+    vec3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
+        params0.z * max(ndl, 0.0));
+    float specAmt = mix(0.05, params0.w, shell) * (1.0 - topMask);
+    col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
+    frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(params1.y)), 1.0);
+}
+)";
+
+// ---------------------------------------------------------------------------
 // HLSL (ручной порт MSL-версий; mix -> lerp, fract -> frac,
 // splat-конструкторы floatN(scalar) -> cast, entry-функции — main)
 // ---------------------------------------------------------------------------
@@ -673,6 +784,9 @@ void init() {
         shdDesc.attrs[i].hlsl_sem_name = "TEXCOORD";
         shdDesc.attrs[i].hlsl_sem_index = (std::uint8_t)i;
     }
+#elif defined(SOKOL_GLCORE)
+    shdDesc.vertex_func.source = vs_src_glsl;
+    shdDesc.fragment_func.source = fs_src_glsl;
 #else
     shdDesc.vertex_func.source = vs_src_msl;
     shdDesc.fragment_func.source = fs_src_msl;
@@ -681,10 +795,20 @@ void init() {
     shdDesc.uniform_blocks[0].size = sizeof(VsParams);
     shdDesc.uniform_blocks[0].hlsl_register_b_n = 0;
     shdDesc.uniform_blocks[0].msl_buffer_n = 0;
+    shdDesc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "mvp";
+    shdDesc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_MAT4;
     shdDesc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
     shdDesc.uniform_blocks[1].size = sizeof(FsParams);
     shdDesc.uniform_blocks[1].hlsl_register_b_n = 0;
     shdDesc.uniform_blocks[1].msl_buffer_n = 0;
+    {
+        const char* fsNames[8] = {"light_dir", "cam_pos", "dark_color", "gold_color",
+            "grass_a", "grass_b", "params0", "params1"};
+        for (int i = 0; i < 8; ++i) {
+            shdDesc.uniform_blocks[1].glsl_uniforms[i].glsl_name = fsNames[i];
+            shdDesc.uniform_blocks[1].glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
+        }
+    }
     shdDesc.label = "cliff-shader";
     sg_shader shader = sg_make_shader(&shdDesc);
 
