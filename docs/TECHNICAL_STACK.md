@@ -307,10 +307,10 @@ FS-униформ), кэш per-asset по контент-хэшу с debounce 0.
 `WorldFrame.cyclopeanTiles` (редактор — `ModelFrameSource`, клиент/play-таб —
 `world_frame_builder`; `ensureCyclopeanAsset` пробрасывает параметры в обоих).
 Панель параметров — `CyclopeanSettings.qml` (секции Height/Rock, условие
-видимости — булево `Asset.isCyclopean3d`). Песочницы для отладки алгоритма —
-PolygonalGeneratedLandscapePlayground и Landscape3dPlayground (слой «Cyclopean 3D» из
+видимости — булево `Asset.isCyclopean3d`). Песочница для отладки алгоритма —
+PolygonalGeneratedLandscapePlayground (слой «Cyclopean 3D» из
 TileShapePlayground, откуда портировался рендер, удалён после переноса в
-редактор).
+редактор; Landscape3dPlayground удалён).
 Ассеты `shape3d`
 (`Shape3dAsset : SliceAsset`, payload `"shape3d"` в index.json: атлас 4×6 +
 `raisedHeight`/`rockWalls`/`rockAmplitude`/`rockBevel`, опц. `topTexture` —
