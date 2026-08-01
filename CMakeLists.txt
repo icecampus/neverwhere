@@ -83,6 +83,7 @@ enable_testing()
 
 add_subdirectory(src/libs)
 add_subdirectory(src/apps)
+add_subdirectory(src/landscape_playgrounds)
 add_subdirectory(src/tests)
 add_subdirectory(src/refs)
 
