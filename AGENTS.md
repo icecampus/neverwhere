@@ -188,6 +188,8 @@ MCP-обёртка: серверы `neverwhere-editor` (macOS) / `neverwhere-edi
 
 `src/landscape_playgrounds/SDFGeneratedLandscape` раздвоён: **SDFGeneratedLandscape** — чистый стенд отладки генерации геометрии (состояние до эффектов стыковки), **HighgroundWithEffects** — форк с эффектами стыка (общее солнце, контактное AO, shadow map, материалы стыка, grass underlay; также HiDPI-фикс сцены в точках). Геометрические кисти («Cliff 3D», «Stone 3D») и конвейеры одинаковы в обоих; эффекты — только в Effect-версии.
 
+У SDFGeneratedLandscape есть плоский слой «Texture 2D»: ландшафт из любой тайлящейся текстуры (`resources/textures`, подхват всех png/jpg на старте). Текстура **не нарезается** на per-tile кусочки атласа (кусочки не сойдутся на стыках) — цвет сэмплится непрерывно в мировых (field) координатах (`v_world * tiling`, REPEAT-сэмплер, как `top_tex` у клифов), а Yellow-маска Flat-атласа работает stencil (alpha) + множитель рельефа кромки (fill 210 / edge 120, нормировка ×255/210, отключается чекбоксом). Реализация — world-UV режим плоского прохода `AtlasRenderer` (юниформа `tex_params`, per-range), слоты `loadTilingTextureFromFile`; CLI `--tex-nodes=` / `--tex-tiling=`. `--shot` там портируемый (glReadPixels, как у Effect-версии).
+
 Хайграунд «висел в воздухе»: земля рисовалась сырой текстурой рядом с освещённым мешем, без единого света, теней и AO. Сейчас оба пасса живут в одной световой модели (`AtlasRenderer` + `SceneStitch.h/.cpp`):
 
 - **Кадр — два этапа.** `AtlasRenderer::prepare(SceneFrame)` (перестройка меш-кэшей, AO-поле, shadow-пасс) вызывается **до** открытия swapchain-пасса, `render(SceneFrame)` — внутри него. Offscreen-пасс внутри swapchain-пасса открыть нельзя, поэтому разделение обязательное.

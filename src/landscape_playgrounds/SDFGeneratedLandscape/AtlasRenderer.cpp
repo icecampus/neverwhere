@@ -18,6 +18,7 @@ static const char* kTexVsGlsl = R"(
 layout(location=0) in vec2 pos;
 layout(location=1) in vec2 uv;
 out vec2 v_uv;
+out vec2 v_world;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
@@ -26,17 +27,32 @@ void main() {
     vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
     gl_Position = vec4(clip, 0.0, 1.0);
     v_uv = uv;
+    v_world = pos;
 }
 )";
 
 static const char* kTexFsGlsl = R"(
 #version 330
 in vec2 v_uv;
+in vec2 v_world;
 out vec4 frag_color;
 uniform sampler2D atlas_tex;
+uniform sampler2D tiling_tex;
+uniform vec4 tex_params;
 void main() {
-    frag_color = texture(atlas_tex, v_uv);
-    if (frag_color.a < 0.05) discard;
+    vec4 mask = texture(atlas_tex, v_uv);
+    if (mask.a < 0.05) discard;
+    vec3 rgb = mask.rgb;
+    if (tex_params.x > 0.5) {
+        // World-space tiling: the texture flows continuously across cells
+        // (there are no per-tile cuts to mismatch), the atlas tile only
+        // clips the shape and keeps its edge darkening (fill 210/255,
+        // edge 120/255 -> normalize by 255/210).
+        rgb = texture(tiling_tex, v_world * tex_params.y).rgb;
+        float shade = clamp(mask.r * 1.2143, 0.0, 1.0);
+        rgb *= mix(1.0, shade, tex_params.z);
+    }
+    frag_color = vec4(rgb, mask.a);
 }
 )";
 
@@ -78,6 +94,7 @@ struct VSIn {
 struct VSOut {
     float4 pos: SV_Position;
     float2 uv: TEXCOORD0;
+    float2 world: TEXCOORD1;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -87,21 +104,34 @@ VSOut main(VSIn inp) {
     clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
     o.pos = float4(clip, 0.0, 1.0);
     o.uv = inp.uv;
+    o.world = inp.pos;
     return o;
 }
 )";
 
 static const char* kTexFsHlsl = R"(
 Texture2D atlas_tex: register(t0);
+Texture2D tiling_tex: register(t1);
 SamplerState smp: register(s0);
+SamplerState tiling_smp: register(s1);
+cbuffer fs_params: register(b0) {
+    float4 tex_params;
+};
 struct PSIn {
     float4 pos: SV_Position;
     float2 uv: TEXCOORD0;
+    float2 world: TEXCOORD1;
 };
 float4 main(PSIn inp): SV_Target {
-    float4 c = atlas_tex.Sample(smp, inp.uv);
-    if (c.a < 0.05) discard;
-    return c;
+    float4 mask = atlas_tex.Sample(smp, inp.uv);
+    if (mask.a < 0.05) discard;
+    float3 rgb = mask.rgb;
+    if (tex_params.x > 0.5) {
+        rgb = tiling_tex.Sample(tiling_smp, inp.world * tex_params.y).rgb;
+        float shade = clamp(mask.r * 1.2143, 0.0, 1.0);
+        rgb *= lerp(1.0, shade, tex_params.z);
+    }
+    return float4(rgb, mask.a);
 }
 )";
 
@@ -161,6 +191,7 @@ struct VSIn {
 struct VSOut {
     float4 pos [[position]];
     float2 uv;
+    float2 world;
 };
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
@@ -172,6 +203,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
     );
     o.pos = float4(clip, 0.0, 1.0);
     o.uv = in.uv;
+    o.world = in.pos;
     return o;
 }
 )";
@@ -180,19 +212,33 @@ static const char* kTexFsMsl = R"(
 #include <metal_stdlib>
 using namespace metal;
 
+struct FsParams {
+    float4 tex_params;
+};
+
 struct PSIn {
     float4 pos [[position]];
     float2 uv;
+    float2 world;
 };
 
 fragment float4 _main(PSIn in [[stage_in]],
+                      constant FsParams& params [[buffer(1)]],
                       texture2d<float> atlas_tex [[texture(0)]],
-                      sampler smp [[sampler(0)]]) {
-    float4 c = atlas_tex.sample(smp, in.uv);
-    if (c.a < 0.05) {
+                      texture2d<float> tiling_tex [[texture(1)]],
+                      sampler smp [[sampler(0)]],
+                      sampler tiling_smp [[sampler(1)]]) {
+    float4 mask = atlas_tex.sample(smp, in.uv);
+    if (mask.a < 0.05) {
         discard_fragment();
     }
-    return c;
+    float3 rgb = mask.rgb;
+    if (params.tex_params.x > 0.5) {
+        rgb = tiling_tex.sample(tiling_smp, in.world * params.tex_params.y).rgb;
+        float shade = clamp(mask.r * 1.2143, 0.0, 1.0);
+        rgb *= mix(1.0, shade, params.tex_params.z);
+    }
+    return float4(rgb, mask.a);
 }
 )";
 
@@ -712,6 +758,17 @@ void fillCliffFsUniformDesc(sg_shader_uniform_block* block) {
     }
 }
 
+void fillTexFsUniformDesc(sg_shader_uniform_block* block) {
+    block->stage = SG_SHADERSTAGE_FRAGMENT;
+    block->size = sizeof(AtlasRenderer::TexFsParams);
+    block->hlsl_register_b_n = 0;
+    block->msl_buffer_n = 1;
+    block->wgsl_group0_binding_n = 1;
+    block->spirv_set0_binding_n = 1;
+    block->glsl_uniforms[0].glsl_name = "tex_params";
+    block->glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+}
+
 } // namespace
 
 void AtlasRenderer::init() {
@@ -798,6 +855,10 @@ void AtlasRenderer::shutdown() {
     }
     destroySlot(m_slots[0]);
     destroySlot(m_slots[1]);
+    for (AtlasSlot& slot : m_tilingSlots) {
+        destroySlot(slot);
+    }
+    m_tilingSlots.clear();
     m_ready = false;
 }
 
@@ -883,6 +944,46 @@ bool AtlasRenderer::loadTopTextureFromFile(const std::string& path) {
     }
     spdlog::info("AtlasRenderer: loaded top texture {} ({}x{})", path, w, h);
     return true;
+}
+
+int AtlasRenderer::loadTilingTextureFromFile(const std::string& path) {
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+    if (!pixels || w <= 0 || h <= 0) {
+        spdlog::error("AtlasRenderer: failed to load tiling texture '{}': {}", path, stbi_failure_reason());
+        if (pixels) {
+            stbi_image_free(pixels);
+        }
+        return -1;
+    }
+
+    AtlasSlot slot;
+    sg_image_desc desc = {};
+    desc.width = w;
+    desc.height = h;
+    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.data.mip_levels[0].ptr = pixels;
+    desc.data.mip_levels[0].size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    desc.label = "tileshape-tiling-tex";
+    slot.image = sg_make_image(&desc);
+    stbi_image_free(pixels);
+    if (slot.image.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_image failed (tiling texture {})", path);
+        return -1;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = slot.image;
+    slot.view = sg_make_view(&viewDesc);
+    if (slot.view.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_view failed (tiling texture {})", path);
+        sg_destroy_image(slot.image);
+        return -1;
+    }
+
+    m_tilingSlots.push_back(slot);
+    spdlog::info("AtlasRenderer: loaded tiling texture {} ({}x{}) as slot {}", path, w, h, m_tilingSlots.size() - 1);
+    return static_cast<int>(m_tilingSlots.size()) - 1;
 }
 
 bool AtlasRenderer::loadAtlasFromFile(AtlasKind kind, const std::string& path, int cols, int rows) {
@@ -1055,11 +1156,15 @@ void AtlasRenderer::render(
     });
 
     // Flat palette layers paint into the shared textured buffer; each range
-    // is drawn with the layer's own atlas.
+    // is drawn with the layer's own atlas (and, for textured layers, with
+    // its tiling texture sampled in world coordinates under the mask).
     struct TexRange {
         int base = 0;
         int count = 0;
         AtlasKind atlas = AtlasKind::Grass;
+        int tilingTex = -1;
+        float tilingScale = 0.0f; // repeats per field unit
+        float edgeShade = 1.0f;
     };
     std::vector<TexRange> flatRanges;
     std::vector<TexVertex> texVerts;
@@ -1076,6 +1181,13 @@ void AtlasRenderer::render(
         TexRange range;
         range.base = static_cast<int>(texVerts.size());
         range.atlas = layer.atlas;
+        if (layer.tilingTex >= 0 &&
+            layer.tilingTex < static_cast<int>(m_tilingSlots.size()) &&
+            m_tilingSlots[layer.tilingTex].view.id != SG_INVALID_ID) {
+            range.tilingTex = layer.tilingTex;
+            range.tilingScale = layer.tilingRepeats / std::max(iso.dims.cellWidth, 1.0f);
+            range.edgeShade = layer.tilingEdgeShade;
+        }
         for (const auto& [z, cell] : drawOrder) {
             (void)z;
             const auto type = layer.brush->cellTypeAt(cell);
@@ -1138,10 +1250,20 @@ void AtlasRenderer::render(
         bind.vertex_buffers[0] = m_texVbuf;
         bind.views[0] = slot.view;
         bind.samplers[0] = m_sampler;
+        // Tiling texture slot: the cliff top texture doubles as the
+        // always-valid placeholder when the layer has none (unsampled then).
+        bind.views[1] = range.tilingTex >= 0 ? m_tilingSlots[range.tilingTex].view : m_topTexView;
+        bind.samplers[1] = m_topTexSampler;
+
+        TexFsParams texFs{};
+        texFs.values[0] = range.tilingTex >= 0 ? 1.0f : 0.0f;
+        texFs.values[1] = range.tilingScale;
+        texFs.values[2] = range.edgeShade;
 
         sg_apply_pipeline(m_texPip);
         sg_apply_bindings(&bind);
         sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+        sg_apply_uniforms(1, sg_range{&texFs, sizeof(texFs)});
         sg_draw(range.base, range.count, 1);
     };
 
@@ -1390,6 +1512,7 @@ void AtlasRenderer::ensurePipelines() {
         shd.fragment_func.source = kTexFsGlsl;
 #endif
         fillVsUniformDesc(&shd.uniform_blocks[0]);
+        fillTexFsUniformDesc(&shd.uniform_blocks[1]);
 
         shd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
         shd.views[0].texture.image_type = SG_IMAGETYPE_2D;
@@ -1399,6 +1522,14 @@ void AtlasRenderer::ensurePipelines() {
         shd.views[0].texture.wgsl_group1_binding_n = 0;
         shd.views[0].texture.spirv_set1_binding_n = 0;
 
+        shd.views[1].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        shd.views[1].texture.image_type = SG_IMAGETYPE_2D;
+        shd.views[1].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        shd.views[1].texture.hlsl_register_t_n = 1;
+        shd.views[1].texture.msl_texture_n = 1;
+        shd.views[1].texture.wgsl_group1_binding_n = 2;
+        shd.views[1].texture.spirv_set1_binding_n = 2;
+
         shd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
         shd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
         shd.samplers[0].hlsl_register_s_n = 0;
@@ -1406,10 +1537,22 @@ void AtlasRenderer::ensurePipelines() {
         shd.samplers[0].wgsl_group1_binding_n = 1;
         shd.samplers[0].spirv_set1_binding_n = 1;
 
+        shd.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+        shd.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        shd.samplers[1].hlsl_register_s_n = 1;
+        shd.samplers[1].msl_sampler_n = 1;
+        shd.samplers[1].wgsl_group1_binding_n = 3;
+        shd.samplers[1].spirv_set1_binding_n = 3;
+
         shd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
         shd.texture_sampler_pairs[0].view_slot = 0;
         shd.texture_sampler_pairs[0].sampler_slot = 0;
         shd.texture_sampler_pairs[0].glsl_name = "atlas_tex";
+
+        shd.texture_sampler_pairs[1].stage = SG_SHADERSTAGE_FRAGMENT;
+        shd.texture_sampler_pairs[1].view_slot = 1;
+        shd.texture_sampler_pairs[1].sampler_slot = 1;
+        shd.texture_sampler_pairs[1].glsl_name = "tiling_tex";
 
         m_texShd = sg_make_shader(&shd);
 

@@ -65,6 +65,13 @@ struct PaintLayerView {
     bool stone = false;
     const stone_gen::StoneFieldParams* stoneParams = nullptr; // used when stone == true
     const CliffFsParams* shadingOverride = nullptr;           // per-layer palette (stone)
+    // Flat tiles only: draw the layer with a tiling texture instead of the
+    // atlas color. The texture is sampled continuously in world (field)
+    // coordinates — no per-tile cuts, so any tiling texture stays seamless —
+    // while the atlas tile keeps working as the alpha mask (+ edge shading).
+    int tilingTex = -1;          // slot from loadTilingTextureFromFile, -1 = off
+    float tilingRepeats = 1.0f;  // texture repeats per cell width
+    float tilingEdgeShade = 1.0f; // keep the mask's edge darkening (0 = flat)
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;
@@ -106,6 +113,13 @@ public:
         float camera_zoom;
     };
 
+    // FS uniforms of the flat-tile pass (16 bytes): x = color mode
+    // (0 = atlas color, 1 = world-space tiling texture), y = tiling scale
+    // (repeats per field unit), z = mask edge-shading strength, w = unused.
+    struct TexFsParams {
+        float values[4];
+    };
+
     void init();
     void shutdown();
 
@@ -121,6 +135,11 @@ public:
     // top plane; strength/tiling go through CliffFsParams.params2.zw).
     // Until a file is loaded a 1x1 white placeholder is bound.
     bool loadTopTextureFromFile(const std::string& path);
+
+    // Tiling texture for flat layers (PaintLayerView::tilingTex): sampled in
+    // world coordinates under the atlas-tile alpha mask. Returns the slot
+    // index for PaintLayerView::tilingTex, or -1 on failure.
+    int loadTilingTextureFromFile(const std::string& path);
 
     void render(
         const PaintLayerView* layers,
@@ -225,6 +244,9 @@ private:
     std::vector<CliffCache> m_cliffCaches;
 
     AtlasSlot m_slots[2]{};
+    // Tiling textures for flat layers (world-space UV under the atlas mask);
+    // sampled with the REPEAT m_topTexSampler.
+    std::vector<AtlasSlot> m_tilingSlots;
 
     int m_atlasCols = 4;
     int m_atlasRows = 6;

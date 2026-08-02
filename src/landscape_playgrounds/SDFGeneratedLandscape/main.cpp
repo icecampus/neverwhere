@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 #include <spdlog/spdlog.h>
@@ -40,6 +42,13 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 #include <util/sokol_imgui.h>
+
+// On Windows the GDI capture path owns this implementation
+// (PlaygroundScreenshotWin32.cpp); elsewhere the GL readback below does.
+#if !defined(_WIN32)
+    #define STB_IMAGE_WRITE_IMPLEMENTATION
+#endif
+#include <stb_image_write.h>
 
 namespace {
 
@@ -100,22 +109,35 @@ glm::vec2 canvasSize() {
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
 // own node grid and presentation (2D grass / 2D yellow / cliff or stone
-// scalar-field).
+// scalar-field / 2D free tiling texture under the yellow masks).
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
     bool cliff;
     bool stone;
+    bool textured;
     const char* name;
 };
 
-PaintLayer g_layers[4] = {
-    {{}, AtlasKind::Grass, false, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, false, "Yellow 2D"},
-    {{}, AtlasKind::Flat, true, false, "Cliff 3D"},
-    {{}, AtlasKind::Flat, false, true, "Stone 3D"},
+constexpr int kLayerCount = 5;
+constexpr int kTexLayerIndex = 4;
+
+PaintLayer g_layers[kLayerCount] = {
+    {{}, AtlasKind::Grass, false, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::Flat, true, false, false, "Cliff 3D"},
+    {{}, AtlasKind::Flat, false, true, false, "Stone 3D"},
+    {{}, AtlasKind::Flat, false, false, true, "Texture 2D"},
 };
 int g_activeLayer = 0;
+// Texture 2D layer: tiling textures found in resources/textures (renderer
+// slot per file), the current pick, tiling density and edge shading.
+std::vector<std::string> g_texNames;
+std::vector<int> g_texSlots;
+int g_texChoice = -1;
+float g_texTiling = 1.0f;
+bool g_texEdgeShade = true;
+std::optional<float> g_cliTexTiling;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
 cliff::FieldParams g_cliffParams;
@@ -208,13 +230,16 @@ bool g_demoNode = false;
 // --- Visual debug CLI (headless screenshot comparisons vs the editor) ---
 // --no-ui                      hide the ImGui panel (clean captures)
 // --cliff-nodes=x,y;x,y;...    paint these nodes on the cliff layer
+// --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
+// --tex-tiling=R               Texture 2D repeats per cell width (default 1.0)
 // --zoom=Z                     camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy               camera center in cell coords
 //                              (default: bbox center of --cliff-nodes)
 // --shot=path.png              capture the window client area to a PNG after
-//                              the caches settle, then quit (Win32)
+//                              the caches settle, then quit
 bool g_noUi = false;
 std::vector<glm::ivec2> g_cliCliffNodes;
+std::vector<glm::ivec2> g_cliTexNodes;
 std::optional<float> g_cliZoom;
 std::optional<glm::vec2> g_cliCenter;
 std::string g_shotPath;
@@ -250,7 +275,7 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 }
 
 // Painted programmatically in --demo mode: a cliff blob plus a stone blob
-// plus grass/yellow flat strokes — used for visual verification.
+// plus grass/yellow/textured flat strokes — used for visual verification.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
         for (int x = 15; x <= 18; ++x) {
@@ -270,6 +295,11 @@ void paintDemoPattern() {
     }
     for (int x = 13; x <= 16; ++x) {
         g_layers[1].brush.setNode({x, 16}, true);
+    }
+    for (int y = 3; y <= 6; ++y) {
+        for (int x = 14; x <= 17; ++x) {
+            g_layers[kTexLayerIndex].brush.setNode({x, y}, true);
+        }
     }
 }
 
@@ -320,6 +350,9 @@ void init() {
     for (const glm::ivec2& node : g_cliCliffNodes) {
         g_layers[2].brush.setNode(node, true);
     }
+    for (const glm::ivec2& node : g_cliTexNodes) {
+        g_layers[kTexLayerIndex].brush.setNode(node, true);
+    }
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
     if (g_dataRoot.empty()) {
@@ -349,6 +382,36 @@ void init() {
     const auto topTexPath = g_dataRoot / "resources" / "textures" / "grass.png";
     if (!g_renderer.loadTopTextureFromFile(topTexPath.string())) {
         g_stoneTopTexMix = 0.0f;
+    }
+
+    // Texture 2D layer: every image in resources/textures becomes a
+    // paintable landscape material (world-space UV under the yellow masks).
+    {
+        const auto texDir = g_dataRoot / "resources" / "textures";
+        std::error_code ec;
+        std::vector<std::filesystem::path> files;
+        for (const auto& entry : std::filesystem::directory_iterator(texDir, ec)) {
+            const std::string ext = entry.path().extension().string();
+            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
+                files.push_back(entry.path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+        for (const auto& file : files) {
+            const int slot = g_renderer.loadTilingTextureFromFile(file.string());
+            if (slot >= 0) {
+                g_texNames.push_back(file.filename().string());
+                g_texSlots.push_back(slot);
+            }
+        }
+        if (!g_texNames.empty()) {
+            g_texChoice = 0;
+        } else {
+            spdlog::warn("SDFGeneratedLandscape: no tiling textures found in {}", texDir.string());
+        }
+    }
+    if (g_cliTexTiling) {
+        g_texTiling = *g_cliTexTiling;
     }
 
     const glm::vec2 canvas = canvasSize();
@@ -394,11 +457,36 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     ImGui::Text("Brush palette:");
-    for (int i = 0; i < 4; ++i) {
-        if (i > 0) {
+    for (int i = 0; i < kLayerCount; ++i) {
+        if (i > 0 && i != kTexLayerIndex) {
             ImGui::SameLine();
         }
         ImGui::RadioButton(g_layers[i].name, &g_activeLayer, i);
+    }
+    if (g_layers[g_activeLayer].textured) {
+        // Flat tiles drawn with a tiling texture sampled in world (field)
+        // coordinates: the texture flows continuously across cells, so any
+        // tiling image stays seamless; the yellow mask clips the shape and
+        // optionally keeps its edge darkening.
+        if (g_texNames.empty()) {
+            ImGui::TextDisabled("No textures found in resources/textures");
+        } else {
+            const char* current = (g_texChoice >= 0) ? g_texNames[g_texChoice].c_str() : "<none>";
+            if (ImGui::BeginCombo("Texture", current)) {
+                for (int i = 0; i < static_cast<int>(g_texNames.size()); ++i) {
+                    const bool selected = (i == g_texChoice);
+                    if (ImGui::Selectable(g_texNames[i].c_str(), selected)) {
+                        g_texChoice = i;
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SliderFloat("Tex tiling", &g_texTiling, 0.25f, 8.0f, "%.2f rep/cell");
+            ImGui::Checkbox("Edge shading", &g_texEdgeShade);
+        }
     }
     if (g_layers[g_activeLayer].cliff) {
         // Scalar-field surface nets: edits are debounced (0.3 s) into a full
@@ -512,7 +600,7 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d",
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d, %s %d",
         g_layers[0].name,
         g_layers[0].brush.onNodeCount(),
         g_layers[1].name,
@@ -520,7 +608,9 @@ void drawImGui(int w, int h) {
         g_layers[2].name,
         g_layers[2].brush.onNodeCount(),
         g_layers[3].name,
-        g_layers[3].brush.onNodeCount());
+        g_layers[3].brush.onNodeCount(),
+        g_layers[4].name,
+        g_layers[4].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -530,6 +620,35 @@ void drawImGui(int w, int h) {
         centerCamera(w - static_cast<int>(panelWidth()), h);
     }
     ImGui::End();
+}
+
+// Portable --shot capture. Win32 grabs the window through GDI; everywhere else
+// we read the GL default framebuffer back, which is why this lives in the TU
+// that owns SOKOL_IMPL — glad must never be pulled into a translation unit
+// that already has sokol's GL headers (documented Linux trap).
+bool capturePlaygroundPng(const char* path) {
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    const int width = sapp_width();
+    const int height = sapp_height();
+    if (!path || path[0] == '\0' || width <= 0 || height <= 0) {
+        return false;
+    }
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    // GL's origin is bottom-left, PNG rows run top-down.
+    stbi_flip_vertically_on_write(1);
+    const int ok = stbi_write_png(path, width, height, 4, pixels.data(), width * 4);
+    stbi_flip_vertically_on_write(0);
+    if (!ok) {
+        spdlog::error("capturePlaygroundPng: stbi_write_png failed for {}", path);
+        return false;
+    }
+    spdlog::info("capturePlaygroundPng: saved {}x{} to {}", width, height, path);
+    return true;
+#else
+    return captureWindowClientPng(path);
+#endif
 }
 
 void frame() {
@@ -584,8 +703,8 @@ void frame() {
     sg_apply_viewport(vpX, 0, vpW, vpH, true);
     sg_apply_scissor_rect(vpX, 0, vpW, vpH, true);
 
-    PaintLayerView views[4];
-    for (int i = 0; i < 4; ++i) {
+    PaintLayerView views[kLayerCount];
+    for (int i = 0; i < kLayerCount; ++i) {
         views[i].brush = &g_layers[i].brush;
         views[i].atlas = g_layers[i].atlas;
         views[i].cliff = g_layers[i].cliff;
@@ -593,6 +712,12 @@ void frame() {
         views[i].stone = g_layers[i].stone;
         views[i].stoneParams = &g_stoneParams;
         views[i].cliffHeightScale = g_layers[i].stone ? g_stoneHeightScale : g_cliffHeightScale;
+        if (g_layers[i].textured && g_texChoice >= 0 &&
+            g_texChoice < static_cast<int>(g_texSlots.size())) {
+            views[i].tilingTex = g_texSlots[g_texChoice];
+            views[i].tilingRepeats = g_texTiling;
+            views[i].tilingEdgeShade = g_texEdgeShade ? 1.0f : 0.0f;
+        }
     }
 
     // Cliff shading uniforms: palette/light from the UI state; the view
@@ -642,7 +767,7 @@ void frame() {
     stoneFs.params2[1] = g_stoneRimShade;
     stoneFs.params2[2] = g_stoneTopTexMix;
     stoneFs.params2[3] = g_stoneTopTexTiles;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < kLayerCount; ++i) {
         if (g_layers[i].stone) {
             views[i].shadingOverride = &stoneFs;
         }
@@ -650,7 +775,7 @@ void frame() {
 
     g_renderer.render(
         views,
-        4,
+        kLayerCount,
         g_iso,
         g_camera,
         canvasW,
@@ -670,7 +795,7 @@ void frame() {
     // Headless capture: wait until the debounced caches had time to rebuild,
     // grab the window client area and quit.
     if (!g_shotPath.empty() && g_state.frame_index >= 120) {
-        if (captureWindowClientPng(g_shotPath.c_str())) {
+        if (capturePlaygroundPng(g_shotPath.c_str())) {
             spdlog::info("SDFGeneratedLandscape: screenshot saved to {}", g_shotPath);
         } else {
             spdlog::error("SDFGeneratedLandscape: screenshot capture failed ({})", g_shotPath);
@@ -794,6 +919,12 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--cliff-nodes=", 0) == 0) {
             g_cliCliffNodes = parseNodesArg(arg.substr(14));
+        }
+        if (arg.rfind("--tex-nodes=", 0) == 0) {
+            g_cliTexNodes = parseNodesArg(arg.substr(12));
+        }
+        if (arg.rfind("--tex-tiling=", 0) == 0) {
+            g_cliTexTiling = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
         if (arg.rfind("--shot=", 0) == 0) {
             g_shotPath = arg.substr(7);
