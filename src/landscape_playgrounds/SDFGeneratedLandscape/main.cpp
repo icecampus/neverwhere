@@ -70,9 +70,23 @@ std::filesystem::path g_dataRoot;
 std::optional<glm::ivec2> g_hoverNode;
 bool g_ctrlDown = false;
 
+// --- Units -----------------------------------------------------------------
+// sokol_app reports the framebuffer in pixels and mouse positions in those
+// same pixels, while ImGui — and with it the panel width — is laid out in
+// logical points. This app keeps the whole scene in points too and converts
+// exactly once, at the viewport: that way a HiDPI display only buys sharpness
+// and does not move the cursor away from what it paints.
+float dpiScale() {
+    return std::max(sapp_dpi_scale(), 0.01f);
+}
+
+glm::vec2 windowSize() {
+    return {sapp_widthf() / dpiScale(), sapp_heightf() / dpiScale()};
+}
+
 // Control panel: pinned to the left edge, full height. The scene canvas
 // starts at the panel's right edge — camera and mouse work in canvas-local
-// coordinates (canvas origin = panel width in logical pixels).
+// coordinates (canvas origin = panel width in logical points).
 constexpr float kPanelWidth = 340.0f;
 
 float panelWidth() {
@@ -80,9 +94,8 @@ float panelWidth() {
 }
 
 glm::vec2 canvasSize() {
-    return {
-        std::max(static_cast<float>(sapp_width()) - panelWidth(), 0.0f),
-        static_cast<float>(sapp_height())};
+    const glm::vec2 window = windowSize();
+    return {std::max(window.x - panelWidth(), 0.0f), window.y};
 }
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
@@ -529,16 +542,20 @@ void frame() {
         return;
     }
 
-    const int w = sapp_width();
-    const int h = sapp_height();
+    const float dpi = dpiScale();
+    const glm::vec2 window = windowSize();
+    const int w = static_cast<int>(std::lround(window.x));
+    const int h = static_cast<int>(std::lround(window.y));
     updateHover();
 
     if (g_state.imgui_ok) {
+        // simgui_new_frame() wants the framebuffer size and does the division
+        // by dpi_scale itself; everything downstream of it is in points.
         simgui_frame_desc_t fd = {};
-        fd.width = w;
-        fd.height = h;
+        fd.width = sapp_width();
+        fd.height = sapp_height();
         fd.delta_time = g_state.dt;
-        fd.dpi_scale = sapp_dpi_scale();
+        fd.dpi_scale = dpi;
         simgui_new_frame(&fd);
         drawImGui(w, h);
     }
@@ -556,13 +573,12 @@ void frame() {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
-    // The scene renders only into the canvas right of the panel. Viewport
-    // and scissor take framebuffer pixels; sokol_imgui resets both to the
-    // full framebuffer for its own draws, so no restore is needed.
-    const int panelPx = static_cast<int>(panelWidth());
-    const int canvasW = std::max(w - panelPx, 0);
-    const float dpi = sapp_dpi_scale();
-    const int vpX = static_cast<int>(std::lround(panelPx * dpi));
+    // The scene renders only into the canvas right of the panel. This is the
+    // one place that leaves logical points for framebuffer pixels; sokol_imgui
+    // resets viewport and scissor to the full framebuffer for its own draws,
+    // so no restore is needed.
+    const int canvasW = std::max(w - static_cast<int>(panelWidth()), 0);
+    const int vpX = static_cast<int>(std::lround(panelWidth() * dpi));
     const int vpW = static_cast<int>(std::lround(canvasW * dpi));
     const int vpH = static_cast<int>(std::lround(h * dpi));
     sg_apply_viewport(vpX, 0, vpW, vpH, true);
@@ -681,8 +697,11 @@ void event(const sapp_event* ev) {
         simgui_handle_event(ev);
     }
 
-    g_state.mouseX = ev->mouse_x;
-    g_state.mouseY = ev->mouse_y;
+    // sokol_app hands out framebuffer pixels; the rest of the app is in
+    // points, so this is where the cursor enters that frame. Nothing below may
+    // read ev->mouse_x directly.
+    g_state.mouseX = ev->mouse_x / dpiScale();
+    g_state.mouseY = ev->mouse_y / dpiScale();
 
     if (ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP) {
         if (ev->key_code == SAPP_KEYCODE_LEFT_CONTROL || ev->key_code == SAPP_KEYCODE_RIGHT_CONTROL) {
@@ -707,8 +726,8 @@ void event(const sapp_event* ev) {
             applyBrushAtMouse();
         } else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.dragging = true;
-            g_state.dragStartX = ev->mouse_x;
-            g_state.dragStartY = ev->mouse_y;
+            g_state.dragStartX = g_state.mouseX;
+            g_state.dragStartY = g_state.mouseY;
             g_state.camStartX = g_camera.offset.x;
             g_state.camStartY = g_camera.offset.y;
         }
@@ -726,8 +745,8 @@ void event(const sapp_event* ev) {
             applyBrushAtMouse();
         }
         if (g_state.dragging) {
-            g_camera.offset.x = g_state.camStartX + (ev->mouse_x - g_state.dragStartX);
-            g_camera.offset.y = g_state.camStartY + (ev->mouse_y - g_state.dragStartY);
+            g_camera.offset.x = g_state.camStartX + (g_state.mouseX - g_state.dragStartX);
+            g_camera.offset.y = g_state.camStartY + (g_state.mouseY - g_state.dragStartY);
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_SCROLL: {
@@ -738,11 +757,11 @@ void event(const sapp_event* ev) {
         const float zoomFactor = (delta > 0.0f) ? 1.1f : 0.9f;
         const float oldZoom = g_camera.zoom;
         float newZoom = std::clamp(oldZoom * zoomFactor, 0.15f, 3.0f);
-        const float mouseX = ev->mouse_x - panelWidth();
+        const float mouseX = g_state.mouseX - panelWidth();
         const float mapX = (mouseX - g_camera.offset.x) / oldZoom;
-        const float mapY = (ev->mouse_y - g_camera.offset.y) / oldZoom;
+        const float mapY = (g_state.mouseY - g_camera.offset.y) / oldZoom;
         g_camera.offset.x = mouseX - mapX * newZoom;
-        g_camera.offset.y = ev->mouse_y - mapY * newZoom;
+        g_camera.offset.y = g_state.mouseY - mapY * newZoom;
         g_camera.zoom = newZoom;
         break;
     }
