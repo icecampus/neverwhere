@@ -1,4 +1,4 @@
-﻿#include "MeshPreview.h"
+#include "MeshPreview.h"
 
 #include "MeshBridge.h"
 #include "QuadLabGpuRenderer.h"
@@ -206,6 +206,19 @@ ImTextureID textureId(const PreviewTexture& texture) {
 
 ImTextureID textureId(sg_view view, sg_sampler sampler) {
     return (ImTextureID)simgui_imtextureid_with_sampler(view, sampler);
+}
+
+// Offscreen render targets have a bottom-left origin on the GL backends
+// (sg_features().origin_top_left == false) and a top-left origin on
+// D3D11/Metal. ImGui UVs assume top-left, so on GL the target must be drawn
+// with flipped V or it shows upside down (and shader-space pan then feels
+// inverted against the cursor).
+void addRenderTargetImage(ImDrawList* drawList, ImTextureID texture, const ImVec2& pMin, const ImVec2& pMax) {
+    if (sg_query_features().origin_top_left) {
+        drawList->AddImage(texture, pMin, pMax);
+    } else {
+        drawList->AddImage(texture, pMin, pMax, {0.0f, 1.0f}, {1.0f, 0.0f});
+    }
 }
 
 // Minimal scanner for a numeric value following "key": in a flat JSON file.
@@ -1784,7 +1797,8 @@ void drawLandscapeMesh3dPreview(const LandscapeBowlSettings& settings, const Lan
     }
 
     if (renderedWithGpu && g_gpuPreviewRenderer.validOutput()) {
-        drawList->AddImage(
+        addRenderTargetImage(
+            drawList,
             textureId(g_gpuPreviewRenderer.outputView(), g_gpuPreviewRenderer.outputSampler()),
             origin,
             {origin.x + viewportSize.x, origin.y + viewportSize.y});
@@ -1981,7 +1995,8 @@ void drawMeshQuadsPreview(
     const bool renderedWithGpu = g_quadLabGpuRenderer.render(quads, camera, options, renderWidth, renderHeight);
 
     if (renderedWithGpu && g_quadLabGpuRenderer.validOutput()) {
-        drawList->AddImage(
+        addRenderTargetImage(
+            drawList,
             textureId(g_quadLabGpuRenderer.outputView(), g_quadLabGpuRenderer.outputSampler()),
             origin,
             {origin.x + viewportSize.x, origin.y + viewportSize.y});
