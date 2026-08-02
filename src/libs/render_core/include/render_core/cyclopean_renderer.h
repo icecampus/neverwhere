@@ -54,6 +54,12 @@ public:
     // debounced rebuild.
     void ensureCyclopeanAsset(const std::string& assetUuid, const CyclopeanParams& params);
 
+    // Read access for the contact-AO footprint (only tiles of a registered
+    // asset produce geometry — and only those cast contact AO).
+    bool hasAsset(const std::string& assetUuid) const {
+        return assets.find(assetUuid) != assets.end();
+    }
+
     // Draw the cyclopean tiles (CyclopeanLandscape layer content). Tiles
     // whose assetUuid was never ensured are skipped. `nowSec` drives the edit
     // debounce (heavy mesh rebuilds run at most 0.3 s after the last edit).

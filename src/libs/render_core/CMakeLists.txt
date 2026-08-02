@@ -39,12 +39,15 @@ nw_add_lib_sources(
         src/world_frame_builder.cpp
         include/render_core/mesh_preview_renderer.h
         src/mesh_preview_renderer.cpp
+        include/render_core/scene_stitch.h
+        src/scene_stitch.cpp
     LIBS
         glm::glm-header-only
         topology_core
         landscape_core
         landscape_mesh
         highground_core
+        stone_gen
         game_data
         spdlog::spdlog_header_only
 )

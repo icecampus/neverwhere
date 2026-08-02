@@ -15,7 +15,8 @@ namespace AssetTypes
         slice,
         shape3d,
         cliff3d,
-        cyclopean3d
+        cyclopean3d,
+        stone3d
     };
     Q_ENUM_NS(Type);
 }
@@ -164,6 +165,81 @@ namespace BaseData
             cornerBevel, wallSubdivH, wallSubdivV);
     };
 
+    // Stone3D: the stone-field generator parameter set (base slab = mirror of
+    // cliff::FieldParams, stone carve = mirror of stone_gen::StoneFieldParams)
+    // + shading palette. No atlas — objects are plain Landscape tiles on the
+    // StoneLandscape layer whose tileIndex encodes the vertex nodes; these
+    // params drive the renderer. Field names shared by FieldParams and
+    // StoneFieldParams (blurPasses, grooveMaskWidth, fbmAmplitude,
+    // fbmFrequency) live in a single slot with the StoneFieldParams defaults.
+    struct Stone3dAssetData
+    {
+        std::string thumbnail; // optional palette preview
+        std::string topTexture; // optional: tiled texture for the flat tops (world-space uv)
+        float raisedHeight{96.0f}; // field px per 1.0 plateau height (heightScale)
+
+        // Base slab (defaults = cliff::FieldParams; its grooves/fbm stay
+        // unused by the stone field; ground slab off — the underlay is
+        // authored separately).
+        float cellSize{0.045f};
+        float padding{0.5f};
+        float plateauHeight{1.0f};
+        float d2Scale{0.5f};
+        int blurRadiusCells{3};
+        int blurPasses{2};
+        float edgeRadius{0.04f};
+        float grooveMaskWidth{0.25f};
+        float grooveFadeK{1.0f};
+        float grooveRimFade{0.12f};
+        float fbmAmplitude{0.02f};
+        float fbmFrequency{4.0f};
+        int fbmOctaves{2};
+        float groundDepth{0.3f};
+        float groundMargin{0.35f};
+        float groundRounding{0.1f};
+        bool groundEnabled{false};
+        float groovePeriod{0.4f};
+        float groovePhase{0.1f};
+        float grooveDepthMax{0.1f};
+        float grooveSmooth{0.02f};
+        std::array<std::array<float, 2>, 3> grooveAngles{{
+            {0.6283185f, 0.0f},       // pi/5
+            {2.1991149f, 0.5654867f}, // 2.1*pi/3, 0.9*pi/5
+            {-2.1467550f, 0.6911504f} // -2.05*pi/3, 1.1*pi/5
+        }};
+
+        // Stone carve (defaults = stone_gen::StoneFieldParams).
+        float voroScale{2.0f};
+        float cellJitter{1.0f};
+        float grooveDepth{0.08f};
+        float grooveK{2.5f};
+        float seed{0.0f};
+        bool flatTop{true};
+        float flatTopLo{0.55f};
+        float flatTopHi{0.85f};
+        float rimWidth{0.35f};
+        float rimBulge{1.0f};
+        float rimNotch{0.04f};
+
+        Cliff3dShadingData shading;
+        // Stone shading extras (uniforms only): grass reflection fade on the
+        // walls, rim gradient strength on the flat top, top texture mix and
+        // tiling.
+        float grassFade{0.12f};
+        float rimShade{1.0f};
+        float topTexMix{1.0f};
+        float topTexTiles{1.0f};
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Stone3dAssetData,
+            thumbnail, topTexture, raisedHeight, cellSize, padding, plateauHeight, d2Scale,
+            blurRadiusCells, blurPasses, edgeRadius, grooveMaskWidth, grooveFadeK,
+            grooveRimFade, fbmAmplitude, fbmFrequency, fbmOctaves, groundDepth,
+            groundMargin, groundRounding, groundEnabled, groovePeriod, groovePhase,
+            grooveDepthMax, grooveSmooth, grooveAngles, voroScale, cellJitter,
+            grooveDepth, grooveK, seed, flatTop, flatTopLo, flatTopHi, rimWidth,
+            rimBulge, rimNotch, shading, grassFade, rimShade, topTexMix, topTexTiles);
+    };
+
     //Asset
     struct AssetData
     {
@@ -178,6 +254,7 @@ namespace BaseData
         std::optional<Shape3dAssetData> shape3dData;
         std::optional<Cliff3dAssetData> cliff3dData;
         std::optional<Cyclopean3dAssetData> cyclopean3dData;
+        std::optional<Stone3dAssetData> stone3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

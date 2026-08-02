@@ -89,6 +89,90 @@ render_core::CyclopeanParams cyclopeanParamsFromAssetData(const BaseData::Cyclop
     return params;
 }
 
+// BaseData -> render_core parameter conversion for stone3d assets (the
+// runtime's world_frame_builder has its own game_data twin). The mesh params
+// ride in CliffParams::stoneField; CliffParams::field stays unused.
+render_core::CliffParams stoneParamsFromAssetData(const BaseData::Stone3dAssetData& d) {
+    render_core::CliffParams params;
+    params.heightScale = d.raisedHeight;
+    stone_gen::StoneFieldParams stone;
+    // Base slab (mirror of cliff::FieldParams; its grooves/fbm stay unused by
+    // the stone field, the ground slab stays off by the data default).
+    cliff::FieldParams& f = stone.base;
+    f.cellSize = d.cellSize;
+    f.padding = d.padding;
+    f.plateauHeight = d.plateauHeight;
+    f.d2Scale = d.d2Scale;
+    f.blurRadiusCells = d.blurRadiusCells;
+    f.blurPasses = d.blurPasses;
+    f.edgeRadius = d.edgeRadius;
+    f.grooveMaskWidth = d.grooveMaskWidth;
+    f.grooveFadeK = d.grooveFadeK;
+    f.grooveRimFade = d.grooveRimFade;
+    f.fbmAmplitude = d.fbmAmplitude;
+    f.fbmFrequency = d.fbmFrequency;
+    f.fbmOctaves = d.fbmOctaves;
+    f.groundDepth = d.groundDepth;
+    f.groundMargin = d.groundMargin;
+    f.groundRounding = d.groundRounding;
+    f.groundEnabled = d.groundEnabled;
+    f.groovePeriod = d.groovePeriod;
+    f.groovePhase = d.groovePhase;
+    f.grooveDepthMax = d.grooveDepthMax;
+    f.grooveSmooth = d.grooveSmooth;
+    f.grooveAngles[0][0] = d.grooveAngles[0][0];
+    f.grooveAngles[0][1] = d.grooveAngles[0][1];
+    f.grooveAngles[1][0] = d.grooveAngles[1][0];
+    f.grooveAngles[1][1] = d.grooveAngles[1][1];
+    f.grooveAngles[2][0] = d.grooveAngles[2][0];
+    f.grooveAngles[2][1] = d.grooveAngles[2][1];
+    // Stone carve. The shared slots (blurPasses, grooveMaskWidth,
+    // fbmAmplitude, fbmFrequency) feed both the base slab above and the stone
+    // field's own carve band / fbm / sampled-field blur.
+    stone.voroScale = d.voroScale;
+    stone.cellJitter = d.cellJitter;
+    stone.grooveDepth = d.grooveDepth;
+    stone.grooveK = d.grooveK;
+    stone.grooveMaskWidth = d.grooveMaskWidth;
+    stone.fbmAmplitude = d.fbmAmplitude;
+    stone.fbmFrequency = d.fbmFrequency;
+    stone.seed = d.seed;
+    stone.blurPasses = d.blurPasses;
+    stone.flatTopLo = d.flatTopLo;
+    stone.flatTopHi = d.flatTopHi;
+    stone.rimWidth = d.rimWidth;
+    stone.rimBulge = d.rimBulge;
+    stone.rimNotch = d.rimNotch;
+    stone.flatTop = d.flatTop;
+    params.stoneField = stone;
+    render_core::CliffShading& s = params.shading;
+    s.lightAzimuth = d.shading.lightAzimuth;
+    s.lightElevation = d.shading.lightElevation;
+    s.darkColor = d.shading.darkColor;
+    s.goldColor = d.shading.goldColor;
+    s.grassA = d.shading.grassA;
+    s.grassB = d.shading.grassB;
+    s.veinThreshold = d.shading.veinThreshold;
+    s.ambient = d.shading.ambient;
+    s.diffuse = d.shading.diffuse;
+    s.backLight = d.shading.backLight;
+    s.specStrength = d.shading.specStrength;
+    s.specPower = d.shading.specPower;
+    s.gamma = d.shading.gamma;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    s.texScale = d.topTexTiles; // stone top tiling lives in the extras, not in shading.texScale
+    // Stone shading extras: the flat-top plane (boulders above it keep the
+    // wall palette), the below-plane grass fade, the rim gradient strength
+    // and the top texture mix.
+    params.stonePlaneY = d.plateauHeight + d.edgeRadius;
+    params.stoneGrassFade = d.grassFade;
+    params.stoneRimShade = d.rimShade;
+    params.stoneTopTexMix = d.topTexMix;
+    return params;
+}
+
 } // namespace
 
 void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
@@ -96,6 +180,7 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.raisedTiles.clear();
     outFrame.cliffTiles.clear();
     outFrame.cyclopeanTiles.clear();
+    outFrame.stoneTiles.clear();
     outFrame.sprites.clear();
 
     if (!m_mapModel) return;
@@ -157,6 +242,21 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         });
     }
 
+    // StoneLandscape layer -> stone tiles (Stone3d assets, voronoi-carved
+    // surface-nets plateau sharing the cliff pass).
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::StoneLandscape)) {
+        layer->iterate([&outFrame](GameObject& obj) {
+            const BaseData::GameObject data = obj.getData();
+            if (data.type != GameObjectTypes::Landscape || !data.landscapeData) return;
+
+            render_core::LandscapeTile t;
+            t.cell = data.position;
+            t.assetUuid = boost::uuids::to_string(data.assetUuid);
+            t.tileIndex = data.landscapeData->tileIndex;
+            outFrame.stoneTiles.push_back(std::move(t));
+        });
+    }
+
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
         LayerModel* layer = m_mapModel->layer(layerType);
@@ -182,6 +282,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
     for (const auto& t : frame.raisedTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cliffTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -215,6 +316,15 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
             // Cyclopean tiles: landscape_mesh composer params (no atlas —
             // geometry comes from the solid-mask composer).
             renderer.ensureCyclopeanAsset(uuid, cyclopeanParamsFromAssetData(*data.cyclopean3dData));
+        }
+        if (data.stone3dData) {
+            // Stone tiles: the full stone-field generator + shading parameter
+            // set (no atlas — geometry comes from the stone field).
+            render_core::CliffParams params = stoneParamsFromAssetData(*data.stone3dData);
+            if (!data.stone3dData->topTexture.empty()) {
+                params.topTexturePath = data.root() / data.stone3dData->topTexture;
+            }
+            renderer.ensureStoneAsset(uuid, params);
         }
         if (data.sliceData) {
             // Editor convention: landscape atlases are split into 4x6 tiles.

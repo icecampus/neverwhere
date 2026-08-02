@@ -10,6 +10,7 @@
 
 #include "render_core/sokol_config.h"
 #include "render_core/texture_atlas.h"
+#include "render_core/scene_stitch.h"
 
 #include "topology_core/camera2d.h"
 #include "topology_core/diamond_isometry.h"
@@ -22,13 +23,14 @@ struct LandscapeTile {
     std::size_t tileIndex = 0;
 };
 
-// Contact-shadow field: per vertex-node darkening (0..1) spilled by nearby
-// cliffs. Built from the cliff tiles (same vertex-node lattice), sampled by
-// the base landscape pass at quad corners — the cliff foot's bottom blend
-// continues onto the underlay, stitching the transition.
-struct CliffShadowField {
-    std::unordered_map<std::uint64_t, float> nodeDarken; // nodeKey -> 0..1
-    bool empty() const { return nodeDarken.empty(); }
+// Ground stitching context of the flat landscape pass: the shared sun/tone
+// uniform block plus the contact-AO field texture (R8, distance to the
+// highground footprint). Owned by the WorldRenderer, rebuilt in its prepare();
+// the ground pass binds it every frame.
+struct GroundStitchContext {
+    sg_view aoView{SG_INVALID_ID};
+    sg_sampler aoSampler{SG_INVALID_ID};
+    SceneStitchParams params{};
 };
 
 // Presentation params of a raised (3D) slice atlas: the top is lifted by
@@ -61,13 +63,17 @@ public:
     // shade; when empty, walls keep the plain baked-color look.
     void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {}, const std::filesystem::path& wallTexturePath = {});
 
+    // Flat ground pass. The pass is stitch-aware: every fragment sits at one
+    // constant depth behind the whole scene (tiles keep resolving against
+    // each other by painter order, the 3D passes always win) and shades with
+    // the shared sun/tone + the contact AO from the stitch context.
     void render(
         const std::vector<LandscapeTile>& tiles,
         const topology_core::DiamondIsometry& iso,
         const topology_core::Camera2D& camera,
         int viewWidth,
         int viewHeight,
-        const CliffShadowField* cliffShadow = nullptr);
+        const GroundStitchContext& groundStitch);
 
     // Raised landscape: per-cell cliff walls (rock or simple flat) plus the
     // lifted tops. With a depth attachment (depthFormat != NONE at init) the
@@ -91,6 +97,15 @@ private:
         float pos[2];
         float uv[2];
         float color[4];
+    };
+
+    // Flat ground pass vertex: field-space position (screen-transformed CPU
+    // side), atlas uv and the world (map-cell) position the stitch shading
+    // samples the AO field with. The depth is a shader constant.
+    struct GroundVertex {
+        float pos[2];
+        float uv[2];
+        float world[2];
     };
 
     // Untextured pos+color vertex for the wall pipeline.
@@ -156,6 +171,11 @@ private:
     sg_bindings bind{};
     sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
 
+    // Stitched flat ground pass (own pipeline/shaders: sun + contact-AO
+    // fragment shader, constant-depth vertex shader, GroundVertex layout).
+    sg_pipeline groundPip{SG_INVALID_ID};
+    sg_shader groundShd{SG_INVALID_ID};
+
     sg_pipeline wallPip{SG_INVALID_ID};
     sg_shader wallShd{SG_INVALID_ID};
     sg_buffer raisedVbuf{SG_INVALID_ID};
@@ -183,6 +203,7 @@ private:
     std::unordered_map<std::string, AtlasGpu> atlases;
     std::unordered_map<std::string, RaisedAtlasGpu> raisedAtlases;
 
+    std::vector<GroundVertex> scratchGroundVerts;
     std::vector<Vertex> scratchVerts;
     std::vector<DrawGroup> scratchDraws;
     std::vector<Vertex> scratchRaisedVerts;
@@ -196,19 +217,29 @@ private:
 
     // One atlas tile quad in FIELD space (6 verts); yOffset shifts the quad in
     // world pixels (raised tops pass -height). Screen transform happens at
-    // batch emission after the depth sort. cliffShadow (base ground pass
-    // only): per-corner darkening from the cliff contact-shadow field.
+    // batch emission after the depth sort.
     void appendAtlasQuad(
         std::vector<Vertex>& out,
         const AtlasGpu& atlas,
         const topology_core::DiamondIsometry& iso,
         const glm::ivec2& cell,
         std::size_t tileIndex,
-        float yOffset,
-        const CliffShadowField* cliffShadow = nullptr) const;
+        float yOffset) const;
+
+    // One flat ground tile quad (6 verts): field-space position + atlas uv +
+    // the world (map-cell) corner positions for the stitch shading. The
+    // camera transform happens at emission, the world coords stay untouched.
+    void appendGroundQuad(
+        std::vector<GroundVertex>& out,
+        const AtlasGpu& atlas,
+        const topology_core::DiamondIsometry& iso,
+        const glm::ivec2& cell,
+        std::size_t tileIndex) const;
 
     void ensurePipeline();
     void destroyPipeline();
+    void ensureGroundPipeline();
+    void destroyGroundPipeline();
     void ensureWallPipeline();
     void destroyWallPipeline();
     void ensureDepthPipelines();

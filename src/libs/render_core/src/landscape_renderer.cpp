@@ -128,6 +128,173 @@ fragment float4 _main(PSIn in [[stage_in]],
 }
 )";
 
+// ---------------------------------------------------------------------------
+// Stitched flat ground pass (scene stitch port from HighgroundWithEffects):
+// the tile quad carries the world (map-cell) position, sits at one constant
+// depth behind the whole scene and shades with the shared sun/tone + the
+// contact-AO distance field. Tiles tie under LESS_EQUAL and keep resolving
+// against each other by painter order; the 3D passes (raised/cliff/stone,
+// all closer) always win.
+// ---------------------------------------------------------------------------
+
+static const char* ground_vs_src_glsl = R"(
+#version 330
+layout(location=0) in vec2 pos;
+layout(location=1) in vec2 uv0;
+layout(location=2) in vec2 world;
+out vec2 v_uv;
+out vec2 v_world;
+uniform vec2 view_size;
+void main() {
+    vec2 clip_pos = vec2(
+        (pos.x / view_size.x) * 2.0 - 1.0,
+        1.0 - (pos.y / view_size.y) * 2.0
+    );
+    // Constant depth behind the whole scene (HighgroundWithEffects'
+    // kGroundDepth): the z-range convention maps visible content to ~0.5.
+    gl_Position = vec4(clip_pos, 0.999, 1.0);
+    v_uv = uv0;
+    v_world = world;
+}
+)";
+
+static const char* ground_fs_src_glsl = R"(
+#version 330
+in vec2 v_uv;
+in vec2 v_world;
+out vec4 frag_color;
+uniform vec4 sun_dir;
+uniform vec4 stitch0; // ground ambient, diffuse, gamma, unused
+uniform vec4 stitch1; // unused, unused, AO strength, AO radius (cells)
+uniform vec4 ao_rect; // xy: AO field origin (cells), zw: 1 / field extent
+uniform sampler2D tex;
+uniform sampler2D ao_tex;
+void main() {
+    vec4 t = texture(tex, v_uv);
+    // One sun, one ambient, one gamma with the cliff pass: the ground drawn
+    // as a raw texture next to a lit mesh is what read as a collage. Flat
+    // ground faces straight up, so ndl is the sun's y.
+    vec3 l = normalize(sun_dir.xyz);
+    float light = stitch0.x + stitch0.y * max(l.y, 0.0);
+    // Contact AO: the R8 field holds the distance to the highground footprint
+    // normalized by 4 cells (kAoMaxDistanceCells).
+    vec2 aoUv = (v_world - ao_rect.xy) * ao_rect.zw;
+    float aoDist = textureLod(ao_tex, aoUv, 0.0).r * 4.0;
+    float ao = mix(1.0 - stitch1.z, 1.0, smoothstep(0.0, max(stitch1.w, 1e-3), aoDist));
+    vec3 col = t.rgb * (light * ao);
+    frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(stitch0.z)), t.a);
+}
+)";
+
+static const char* ground_vs_src_hlsl = R"(
+cbuffer vs_params: register(b0) { float2 view_size; };
+struct VSIn { float2 pos: TEXCOORD0; float2 uv0: TEXCOORD1; float2 world: TEXCOORD2; };
+struct VSOut { float4 pos: SV_Position; float2 uv0: TEXCOORD0; float2 world: TEXCOORD1; };
+VSOut main(VSIn inp) {
+    VSOut o;
+    float2 clip;
+    clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
+    clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
+    // Constant depth behind the whole scene (see the GLSL variant).
+    o.pos = float4(clip, 0.999, 1.0);
+    o.uv0 = inp.uv0;
+    o.world = inp.world;
+    return o;
+}
+)";
+
+static const char* ground_fs_src_hlsl = R"(
+cbuffer stitch_params: register(b0) {
+    float4 sun_dir;
+    float4 stitch0; // ground ambient, diffuse, gamma, unused
+    float4 stitch1; // unused, unused, AO strength, AO radius (cells)
+    float4 ao_rect; // xy: AO field origin (cells), zw: 1 / field extent
+};
+Texture2D tex0: register(t0);
+SamplerState smp0: register(s0);
+Texture2D ao_tex: register(t1);
+SamplerState ao_smp: register(s1);
+struct PSIn { float4 pos: SV_Position; float2 uv0: TEXCOORD0; float2 world: TEXCOORD1; };
+float4 main(PSIn inp): SV_Target0 {
+    float4 t = tex0.Sample(smp0, inp.uv0);
+    float3 l = normalize(sun_dir.xyz);
+    float light = stitch0.x + stitch0.y * max(l.y, 0.0);
+    float2 aoUv = (inp.world - ao_rect.xy) * ao_rect.zw;
+    float aoDist = ao_tex.SampleLevel(ao_smp, aoUv, 0).r * 4.0;
+    float ao = lerp(1.0 - stitch1.z, 1.0, smoothstep(0.0, max(stitch1.w, 1e-3), aoDist));
+    float3 col = t.rgb * (light * ao);
+    return float4(pow(saturate(col), (float3)stitch0.z), t.a);
+}
+)";
+
+static const char* ground_vs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+};
+
+struct VSIn {
+    float2 pos [[attribute(0)]];
+    float2 uv0 [[attribute(1)]];
+    float2 world [[attribute(2)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float2 uv0;
+    float2 world;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 clip = float2(
+        (in.pos.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (in.pos.y / params.view_size.y) * 2.0
+    );
+    // Constant depth behind the whole scene (see the GLSL variant).
+    o.pos = float4(clip, 0.999, 1.0);
+    o.uv0 = in.uv0;
+    o.world = in.world;
+    return o;
+}
+)";
+
+static const char* ground_fs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct StitchParams {
+    float4 sun_dir;
+    float4 stitch0; // ground ambient, diffuse, gamma, unused
+    float4 stitch1; // unused, unused, AO strength, AO radius (cells)
+    float4 ao_rect; // xy: AO field origin (cells), zw: 1 / field extent
+};
+
+struct PSIn {
+    float4 pos [[position]];
+    float2 uv0;
+    float2 world;
+};
+
+fragment float4 _main(PSIn in [[stage_in]],
+                      constant StitchParams& st [[buffer(1)]],
+                      texture2d<float> tex0 [[texture(0)]],
+                      sampler smp0 [[sampler(0)]],
+                      texture2d<float> ao_tex [[texture(1)]],
+                      sampler ao_smp [[sampler(1)]]) {
+    float4 t = tex0.sample(smp0, in.uv0);
+    float3 l = normalize(st.sun_dir.xyz);
+    float light = st.stitch0.x + st.stitch0.y * max(l.y, 0.0);
+    float2 aoUv = (in.world - st.ao_rect.xy) * st.ao_rect.zw;
+    float aoDist = ao_tex.sample(ao_smp, aoUv, level(0)).r * 4.0;
+    float ao = mix(1.0 - st.stitch1.z, 1.0, smoothstep(0.0, max(st.stitch1.w, 1e-3), aoDist));
+    float3 col = t.rgb * (light * ao);
+    return float4(pow(saturate(col), float3(st.stitch0.z)), t.a);
+}
+)";
+
 // Untextured pos+color shaders for the cliff wall pipeline (same vertex
 // layout as OverlayRenderer, triangles instead of lines).
 static const char* wall_vs_src_glsl = R"(
@@ -459,7 +626,6 @@ out vec2 v_normal;
 uniform vec2 view_size;
 uniform vec2 z_range;
 uniform vec2 tri_params;
-uniform vec2 _pad0;
 void main() {
     vec2 clip_pos = vec2(
         (pos.x / view_size.x) * 2.0 - 1.0,
@@ -474,7 +640,7 @@ void main() {
 )";
 
 static const char* tri_depth_wall_vs_src_hlsl = R"(
-cbuffer vs_params: register(b0) { float2 view_size; float2 z_range; float2 tri_params; float2 _pad0; };
+cbuffer vs_params: register(b0) { float2 view_size; float2 z_range; float2 tri_params; };
 struct VSIn { float3 pos: TEXCOORD0; float4 color0: TEXCOORD1; float3 tcoord: TEXCOORD2; float2 normal: TEXCOORD3; };
 struct VSOut { float4 pos: SV_Position; float4 color0: TEXCOORD0; float2 uv1: TEXCOORD1; float2 uv2: TEXCOORD2; float2 normal: TEXCOORD3; };
 VSOut main(VSIn inp) {
@@ -499,7 +665,6 @@ struct VsParams {
     float2 view_size;
     float2 z_range;
     float2 tri_params;
-    float2 _pad0;
 };
 
 struct VSIn {
@@ -606,6 +771,7 @@ constexpr float kWallTexScale = 1.0f / 256.0f;
 void LandscapeRenderer::init(sg_pixel_format depthFormat_) {
     depthFormat = depthFormat_;
     ensurePipeline();
+    ensureGroundPipeline();
     ensureWallPipeline();
     if (depthFormat != SG_PIXELFORMAT_NONE) {
         // A real depth attachment: the raised pass can resolve its internal
@@ -614,9 +780,10 @@ void LandscapeRenderer::init(sg_pixel_format depthFormat_) {
     }
     ensureTriWallPipelines();
 
-    // Dynamic vertex buffer for many quads (6 vertices per tile)
+    // Dynamic vertex buffer for many quads (6 vertices per tile) — the flat
+    // ground pass streams GroundVertex now.
     sg_buffer_desc buf_desc = {};
-    buf_desc.size = 6 * 65536 * (int)sizeof(Vertex);
+    buf_desc.size = 6 * 65536 * (int)sizeof(GroundVertex);
     buf_desc.usage.dynamic_update = true;
     buf_desc.label = "landscape-verts";
     vbuf = sg_make_buffer(&buf_desc);
@@ -679,6 +846,7 @@ void LandscapeRenderer::shutdown() {
         triWallVbuf.id = SG_INVALID_ID;
     }
     destroyPipeline();
+    destroyGroundPipeline();
     destroyWallPipeline();
     destroyDepthPipelines();
     destroyTriWallPipelines();
@@ -760,6 +928,124 @@ void LandscapeRenderer::destroyPipeline() {
     if (pip.id != SG_INVALID_ID) {
         sg_destroy_pipeline(pip);
         pip.id = SG_INVALID_ID;
+    }
+}
+
+void LandscapeRenderer::ensureGroundPipeline() {
+    if (groundPip.id != SG_INVALID_ID) return;
+
+    sg_shader_desc shd_desc = {};
+    // Same backend split as the other pipelines.
+    if (sg_query_backend() == SG_BACKEND_D3D11) {
+        shd_desc.vertex_func.source = ground_vs_src_hlsl;
+        shd_desc.fragment_func.source = ground_fs_src_hlsl;
+        for (int i = 0; i < 3; ++i) {
+            shd_desc.attrs[i].hlsl_sem_name = "TEXCOORD";
+            shd_desc.attrs[i].hlsl_sem_index = i;
+        }
+    } else if (sg_query_backend() == SG_BACKEND_METAL_MACOS) {
+        shd_desc.vertex_func.source = ground_vs_src_msl;
+        shd_desc.fragment_func.source = ground_fs_src_msl;
+    } else {
+        shd_desc.vertex_func.source = ground_vs_src_glsl;
+        shd_desc.fragment_func.source = ground_fs_src_glsl;
+    }
+
+    // VS: view size (slot 0).
+    shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+    shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
+    shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[0].msl_buffer_n = 0;
+    shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
+    shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+
+    // FS: the FULL scene stitch block (slot 1) — the ground pass is the one
+    // that samples the AO field, so unlike the cliff pass it gets ao_rect too.
+    shd_desc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.uniform_blocks[1].size = sizeof(SceneStitchParams);
+    shd_desc.uniform_blocks[1].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[1].msl_buffer_n = 1;
+    shd_desc.uniform_blocks[1].wgsl_group0_binding_n = 1;
+    shd_desc.uniform_blocks[1].spirv_set0_binding_n = 1;
+    const char* stitchNames[4] = {"sun_dir", "stitch0", "stitch1", "ao_rect"};
+    for (int i = 0; i < 4; ++i) {
+        shd_desc.uniform_blocks[1].glsl_uniforms[i].glsl_name = stitchNames[i];
+        shd_desc.uniform_blocks[1].glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
+    }
+
+    // Atlas texture (slot 0) + contact-AO field (slot 1, R8 — filterable).
+    shd_desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.views[0].texture.image_type = SG_IMAGETYPE_2D;
+    shd_desc.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd_desc.views[0].texture.hlsl_register_t_n = 0;
+    shd_desc.views[0].texture.msl_texture_n = 0;
+    shd_desc.views[0].texture.wgsl_group1_binding_n = 0;
+    shd_desc.views[0].texture.spirv_set1_binding_n = 0;
+    shd_desc.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[0].hlsl_register_s_n = 0;
+    shd_desc.samplers[0].msl_sampler_n = 0;
+    shd_desc.samplers[0].wgsl_group1_binding_n = 1;
+    shd_desc.samplers[0].spirv_set1_binding_n = 1;
+    shd_desc.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.texture_sampler_pairs[0].view_slot = 0;
+    shd_desc.texture_sampler_pairs[0].sampler_slot = 0;
+    shd_desc.texture_sampler_pairs[0].glsl_name = "tex";
+
+    shd_desc.views[1].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.views[1].texture.image_type = SG_IMAGETYPE_2D;
+    shd_desc.views[1].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd_desc.views[1].texture.hlsl_register_t_n = 1;
+    shd_desc.views[1].texture.msl_texture_n = 1;
+    shd_desc.views[1].texture.wgsl_group1_binding_n = 2;
+    shd_desc.views[1].texture.spirv_set1_binding_n = 2;
+    shd_desc.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[1].hlsl_register_s_n = 1;
+    shd_desc.samplers[1].msl_sampler_n = 1;
+    shd_desc.samplers[1].wgsl_group1_binding_n = 3;
+    shd_desc.samplers[1].spirv_set1_binding_n = 3;
+    shd_desc.texture_sampler_pairs[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.texture_sampler_pairs[1].view_slot = 1;
+    shd_desc.texture_sampler_pairs[1].sampler_slot = 1;
+    shd_desc.texture_sampler_pairs[1].glsl_name = "ao_tex";
+
+    groundShd = sg_make_shader(&shd_desc);
+
+    sg_pipeline_desc pip_desc = {};
+    pip_desc.shader = groundShd;
+    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2; // pos
+    pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2; // uv
+    pip_desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT2; // world
+    pip_desc.colors[0].blend.enabled = true;
+    pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+    pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+    pip_desc.depth.pixel_format = depthFormat;
+    if (depthFormat != SG_PIXELFORMAT_NONE) {
+        // The ground joins the z-buffer at one constant depth behind
+        // everything (see the vertex shader): tiles tie under LESS_EQUAL and
+        // keep their painter order, the 3D passes always overdraw.
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.write_enabled = true;
+    } else {
+        pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+        pip_desc.depth.write_enabled = false;
+    }
+    pip_desc.label = "landscape-ground-pipeline";
+    groundPip = sg_make_pipeline(&pip_desc);
+}
+
+void LandscapeRenderer::destroyGroundPipeline() {
+    if (groundPip.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(groundPip);
+        groundPip.id = SG_INVALID_ID;
+    }
+    if (groundShd.id != SG_INVALID_ID) {
+        sg_destroy_shader(groundShd);
+        groundShd.id = SG_INVALID_ID;
     }
 }
 
@@ -943,7 +1229,7 @@ void LandscapeRenderer::ensureTriWallPipelines() {
 
     // Same backend split as the other pipelines. The painter variant uses a
     // {view_size, tri_params} block (16 bytes), the depth variant grows to
-    // {view_size, z_range, tri_params, pad} (32 bytes).
+    // {view_size, z_range, tri_params} (24 bytes).
     const auto fillTriShaderDesc = [](sg_shader_desc& desc, bool depth) {
         if (sg_query_backend() == SG_BACKEND_D3D11) {
             desc.vertex_func.source = depth ? tri_depth_wall_vs_src_hlsl : tri_wall_vs_src_hlsl;
@@ -961,7 +1247,7 @@ void LandscapeRenderer::ensureTriWallPipelines() {
         }
 
         desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
-        desc.uniform_blocks[0].size = depth ? sizeof(float) * 8 : sizeof(float) * 4;
+        desc.uniform_blocks[0].size = depth ? sizeof(float) * 6 : sizeof(float) * 4;
         desc.uniform_blocks[0].hlsl_register_b_n = 0;
         desc.uniform_blocks[0].msl_buffer_n = 0;
         desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
@@ -976,13 +1262,6 @@ void LandscapeRenderer::ensureTriWallPipelines() {
         }
         desc.uniform_blocks[0].glsl_uniforms[slot].glsl_name = "tri_params";
         desc.uniform_blocks[0].glsl_uniforms[slot].type = SG_UNIFORMTYPE_FLOAT2;
-        ++slot;
-        if (depth) {
-            // The 32-byte block (view_size, z_range, tri_params, pad) must be
-            // fully covered by the declared GLSL uniforms (GL validation).
-            desc.uniform_blocks[0].glsl_uniforms[slot].glsl_name = "_pad0";
-            desc.uniform_blocks[0].glsl_uniforms[slot].type = SG_UNIFORMTYPE_FLOAT2;
-        }
 
         desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
         desc.views[0].texture.image_type = SG_IMAGETYPE_2D;
@@ -1122,8 +1401,7 @@ void LandscapeRenderer::appendAtlasQuad(
     const topology_core::DiamondIsometry& iso,
     const glm::ivec2& cell,
     std::size_t tileIndex,
-    float yOffset,
-    const CliffShadowField* cliffShadow) const {
+    float yOffset) const {
 
     // Field-space quad centered on the cell; the camera transform (zoom scales
     // positions and sizes together) happens at emission into the frame buffer.
@@ -1133,31 +1411,56 @@ void LandscapeRenderer::appendAtlasQuad(
 
     const TileUV uv = atlas.atlas.tileUv(tileIndex);
 
-    // Cliff contact shadow: darken each corner by the nearest lattice node.
-    // The quad corners sit exactly on lattice nodes when the tile matches the
-    // cell size (fieldToNode snaps to the nearest one either way).
-    float shTL = 1.0f, shTR = 1.0f, shBL = 1.0f, shBR = 1.0f;
-    if (cliffShadow && !cliffShadow->nodeDarken.empty()) {
-        const auto shadeAt = [&iso, cliffShadow](const glm::vec2& pos) {
-            const auto it = cliffShadow->nodeDarken.find(nodeKey(iso.fieldToNode(pos)));
-            return it != cliffShadow->nodeDarken.end() ? 1.0f - it->second : 1.0f;
-        };
-        shTL = shadeAt(tl);
-        shTR = shadeAt({br.x, tl.y});
-        shBL = shadeAt({tl.x, br.y});
-        shBR = shadeAt(br);
-    }
-
     const float a = 1.0f;
 
     // 2 triangles (TL, TR, BL) (BL, TR, BR)
-    out.push_back({{tl.x, tl.y}, {uv.uv0.x, uv.uv0.y}, {shTL, shTL, shTL, a}});
-    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {shTR, shTR, shTR, a}});
-    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {shBL, shBL, shBL, a}});
+    out.push_back({{tl.x, tl.y}, {uv.uv0.x, uv.uv0.y}, {1.0f, 1.0f, 1.0f, a}});
+    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {1.0f, 1.0f, 1.0f, a}});
+    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {1.0f, 1.0f, 1.0f, a}});
 
-    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {shBL, shBL, shBL, a}});
-    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {shTR, shTR, shTR, a}});
-    out.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {shBR, shBR, shBR, a}});
+    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {1.0f, 1.0f, 1.0f, a}});
+    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {1.0f, 1.0f, 1.0f, a}});
+    out.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {1.0f, 1.0f, 1.0f, a}});
+}
+
+void LandscapeRenderer::appendGroundQuad(
+    std::vector<GroundVertex>& out,
+    const AtlasGpu& atlas,
+    const topology_core::DiamondIsometry& iso,
+    const glm::ivec2& cell,
+    std::size_t tileIndex) const {
+
+    // Same field-space quad as the legacy path; the camera transform happens
+    // at emission into the frame buffer.
+    const glm::vec2 center = iso.mapToField(cell);
+    const glm::vec2 tl = center - atlas.tileSize * 0.5f;
+    const glm::vec2 br = center + atlas.tileSize * 0.5f;
+
+    const TileUV uv = atlas.atlas.tileUv(tileIndex);
+
+    // World (map-cell) coords of the quad corners: the inverse of the cliff
+    // stream's placement (nodeToField — no +halfH on y), so the ground shades
+    // in the very frame the highground mesh lives in.
+    const float halfW = iso.dims.cellWidth * 0.5f;
+    const float halfH = iso.dims.cellSize().y * 0.5f;
+    const auto worldFromField = [halfW, halfH](const glm::vec2& f) {
+        const float diff = (f.x - halfW) / halfW; // mapX - mapZ
+        const float sum = f.y / halfH;            // mapX + mapZ
+        return glm::vec2{0.5f * (sum + diff), 0.5f * (sum - diff)};
+    };
+    const glm::vec2 wTL = worldFromField(tl);
+    const glm::vec2 wTR = worldFromField({br.x, tl.y});
+    const glm::vec2 wBL = worldFromField({tl.x, br.y});
+    const glm::vec2 wBR = worldFromField(br);
+
+    // 2 triangles (TL, TR, BL) (BL, TR, BR)
+    out.push_back({{tl.x, tl.y}, {uv.uv0.x, uv.uv0.y}, {wTL.x, wTL.y}});
+    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {wTR.x, wTR.y}});
+    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {wBL.x, wBL.y}});
+
+    out.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {wBL.x, wBL.y}});
+    out.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {wTR.x, wTR.y}});
+    out.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {wBR.x, wBR.y}});
 }
 
 void LandscapeRenderer::render(
@@ -1166,10 +1469,10 @@ void LandscapeRenderer::render(
     const topology_core::Camera2D& camera,
     int viewWidth,
     int viewHeight,
-    const CliffShadowField* cliffShadow) {
+    const GroundStitchContext& groundStitch) {
 
     if (tiles.empty()) return;
-    if (pip.id == SG_INVALID_ID || vbuf.id == SG_INVALID_ID) return;
+    if (groundPip.id == SG_INVALID_ID || vbuf.id == SG_INVALID_ID) return;
 
     // Group tiles by atlas uuid (bind texture per group)
     std::unordered_map<std::string, std::vector<const LandscapeTile*>> groups;
@@ -1181,7 +1484,7 @@ void LandscapeRenderer::render(
     // Build one merged vertex stream: sokol allows only ONE sg_update_buffer
     // per buffer per frame, so all atlas groups go into a single update and
     // are drawn as per-group vertex ranges with their own texture binding.
-    scratchVerts.clear();
+    scratchGroundVerts.clear();
     scratchDraws.clear();
 
     for (auto& [uuid, group] : groups) {
@@ -1198,31 +1501,39 @@ void LandscapeRenderer::render(
             return za < zb;
         });
 
-        const int baseVertex = (int)scratchVerts.size();
+        const int baseVertex = (int)scratchGroundVerts.size();
 
         for (const LandscapeTile* t : group) {
-            appendAtlasQuad(scratchVerts, atlas, iso, t->cell, t->tileIndex, 0.0f, cliffShadow);
+            appendGroundQuad(scratchGroundVerts, atlas, iso, t->cell, t->tileIndex);
         }
 
-        scratchDraws.push_back({&atlas.atlas, baseVertex, (int)scratchVerts.size() - baseVertex});
+        scratchDraws.push_back({&atlas.atlas, baseVertex, (int)scratchGroundVerts.size() - baseVertex});
     }
 
-    if (scratchVerts.empty()) return;
+    if (scratchGroundVerts.empty()) return;
 
-    // Field -> screen (camera zoom scales positions and quad sizes together).
-    for (Vertex& v : scratchVerts) {
+    // Field -> screen (camera zoom scales positions and quad sizes together);
+    // the world (map-cell) attribute is screen-independent and stays.
+    for (GroundVertex& v : scratchGroundVerts) {
         const glm::vec2 s = camera.worldToScreen({v.pos[0], v.pos[1]});
         v.pos[0] = s.x;
         v.pos[1] = s.y;
     }
 
-    sg_range range = { scratchVerts.data(), scratchVerts.size() * sizeof(Vertex) };
+    sg_range range = { scratchGroundVerts.data(), scratchGroundVerts.size() * sizeof(GroundVertex) };
     sg_update_buffer(vbuf, &range);
 
-    sg_apply_pipeline(pip);
+    sg_apply_pipeline(groundPip);
     float vs_params[2] = {(float)viewWidth, (float)viewHeight};
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(0, &uniform_range);
+    // Scene stitch block (sun/tone + AO rect), shared with the cliff pass.
+    sg_range stitch_range = { &groundStitch.params, sizeof(SceneStitchParams) };
+    sg_apply_uniforms(1, &stitch_range);
+
+    // The AO field binding is constant across the atlas groups.
+    bind.views[1] = groundStitch.aoView;
+    bind.samplers[1] = groundStitch.aoSampler;
 
     for (const DrawGroup& draw : scratchDraws) {
         bind.views[0] = draw.texture->sgView();
@@ -1505,15 +1816,13 @@ void LandscapeRenderer::renderRaised(
         };
         sg_range uniform_range = { &vs_params, sizeof(vs_params) };
 
-        // Triplanar walls: same block + tex scale (32 bytes total).
-        float tri_vs_params[8] = {
+        // Triplanar walls: same block + tex scale (24 bytes total).
+        float tri_vs_params[6] = {
             (float)viewWidth,
             (float)viewHeight,
             groundCenterY + 100000.0f,
             1.0f / 200000.0f,
             kWallTexScale,
-            0.0f,
-            0.0f,
             0.0f,
         };
         sg_range tri_uniform_range = { &tri_vs_params, sizeof(tri_vs_params) };

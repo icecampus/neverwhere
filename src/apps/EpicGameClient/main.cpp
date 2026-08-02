@@ -236,6 +236,9 @@ static void frame(void) {
     sg_pass pass = {};
     pass.action = action;
     pass.swapchain = sglue_swapchain();
+    // Offscreen world work (contact-AO field rebuild) — before the pass is
+    // begun (texture re-creation is not allowed inside a pass).
+    g_worldRenderer.prepare(g_frame, stm_sec(now));
     sg_begin_pass(&pass);
     // World rendering (editor parity: landscape + sprites + overlays)
     g_worldRenderer.render(g_frame, g_iso, g_camera, w, h, stm_sec(now));

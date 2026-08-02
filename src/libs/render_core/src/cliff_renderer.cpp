@@ -24,10 +24,12 @@ static const char* cliff_vs_src_glsl = R"(
 layout(location=0) in vec3 pos;
 layout(location=1) in vec3 normal;
 layout(location=2) in float groove;
-layout(location=3) in vec3 world;
+layout(location=3) in float rim;
+layout(location=4) in vec3 world;
 out vec3 v_normal;
 out float v_groove;
 out vec3 v_world;
+out float v_rim;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform vec2 z_range;
@@ -39,6 +41,7 @@ void main() {
     v_normal = normal;
     v_groove = groove;
     v_world = world;
+    v_rim = rim;
 }
 )";
 
@@ -47,8 +50,8 @@ static const char* cliff_fs_src_glsl = R"(
 in vec3 v_normal;
 in float v_groove;
 in vec3 v_world;
+in float v_rim;
 out vec4 frag_color;
-uniform vec4 light_dir;
 uniform vec4 view_dir;
 uniform vec4 dark_color;
 uniform vec4 gold_color;
@@ -58,6 +61,19 @@ uniform vec4 params0;
 uniform vec4 params1;
 uniform vec4 params2;
 uniform vec4 params3;
+uniform vec4 params4;
+uniform vec4 params5;
+uniform vec4 params6;
+uniform vec4 params7;
+uniform vec4 params8;
+// Scene stitch core (slot 2): the shared sun + the ground's tone/AO. The two
+// vec4 after sun_dir ride one array on purpose: stitch[0] is ground-only data
+// (the cliff pass keeps its own palette tone), and a GL driver drops unused
+// NAMED uniforms — sokol then reports a missing block member every startup.
+// An array is atomic: element [1] is used (wall-foot AO), so the whole block
+// stays live.
+uniform vec4 sun_dir;
+uniform vec4 stitch[2]; // [0]: ground ambient/diffuse/gamma; [1]: --, AO strength, AO radius
 uniform sampler2D top_tex;
 
 vec4 hashv4v3(vec3 p) {
@@ -117,24 +133,58 @@ void main() {
     float shell = 1.0 - smoothstep(0.005, 0.05, v_groove);
     vec3 gold = gold_color.rgb + vec3(1.0, 0.9, 0.4) * step(params0.x, f);
     vec3 rock = mix(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Flat tops: tiled texture (slight uv wobble against visible tiling) or
-    // the procedural grassA/grassB mix when the asset has no top texture.
+    // Flat tops: tiled texture (slight uv wobble against visible tiling, seam
+    // UV rotation params8.w) or the procedural grassA/grassB mix when the
+    // asset has no top texture. params4.w tunes the texture strength (stone
+    // layers; 1 for plain cliffs — identical to the untinted textured top).
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
-    vec2 tuv = p.xz * params1.w + 0.06 * vec2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
+    float ca = cos(params8.w);
+    float sa = sin(params8.w);
+    vec2 topXZ = vec2(ca * p.x - sa * p.z, sa * p.x + ca * p.z);
+    vec2 tuv = topXZ * params1.w + 0.06 * vec2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
     vec3 texCol = texture(top_tex, tuv).rgb;
-    vec3 grass = (params2.w > 0.5) ? texCol * (0.85 + 0.3 * gm) : mix(grass_a.rgb, grass_b.rgb, gm);
+    vec3 procGrass = mix(grass_a.rgb, grass_b.rgb, gm);
+    vec3 grass = (params2.w > 0.5) ? mix(procGrass, texCol * (0.85 + 0.3 * gm), params4.w) : procGrass;
+    // Seam: the plateau shares the grass with the ground; its own tint keeps
+    // the two from reading as one continuous plane (white = neutral).
+    grass *= params8.rgb;
     // Noise-distorted rim: the top creeps down the wall irregularly.
     float rim = 0.22 * fbm2(6.0 * p.xz);
     float topMask = smoothstep(0.7 - rim, 0.9 - rim, n.y);
+    // Rim stitch shading (stone layers only, params4.x = top plane Y, 0 =
+    // off): boulders above the plane keep the wall palette; below the plane
+    // the grass yields to stone gradually over params4.y — the flat top and
+    // the shallow rim scoops stay grassy; the baked rim weight turns the top
+    // stony towards the wall (params4.z = strength).
+    if (params4.x > 0.0) {
+        float stone = max(step(params4.x + 0.01, p.y),
+            smoothstep(0.0, max(params4.y, 1e-4), params4.x - p.y));
+        stone = max(stone, clamp(v_rim * params4.z, 0.0, 1.0));
+        topMask *= 1.0 - stone;
+    }
     vec3 base = mix(rock, grass, topMask);
     // Sediment strata bands on the walls.
     base *= 1.0 - params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
-    // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
-    vec3 l = normalize(light_dir.xyz);
+    // Seam: lift the plateau tone off the ground plane (params3.y, 1 = neutral).
+    base *= mix(1.0, params3.y, topMask);
+    // Seam: grass bounce from below, cool sky on the upward faces — the stone
+    // and the ground palettes need something in common to share a scene. The
+    // band is the playground's default skirt height x4 (skirt not ported).
+    float low = 1.0 - smoothstep(0.0, 0.56, p.y - params5.z);
+    base = mix(base, base * params6.rgb, low * params6.w);
+    base = mix(base, base * params7.rgb, clamp(n.y, 0.0, 1.0) * params7.w);
+    // Cheap sun lambert + wrap ambient + spec; the iso view direction is
+    // constant. The sun is the shared scene sun — the very vector the ground
+    // is lit by (the per-asset azimuth/elevation are gone).
+    vec3 l = normalize(sun_dir.xyz);
     vec3 rd = view_dir.xyz;
     float ndl = dot(n, l);
+    // Seam: baked wall proximity darkens the plateau edge, so the top stops
+    // looking pasted onto the walls (params5.x = strength, 0 = off; plain
+    // cliffs carry no rim attribute and stay untouched).
+    float rimAo = 1.0 - clamp(v_rim * params5.x, 0.0, 1.0);
     vec3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
-        params0.z * max(ndl, 0.0));
+        params0.z * max(ndl, 0.0)) * rimAo;
     float specAmt = mix(0.05, params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
     // Bottom blend: darken + a faint soil-green cast, so the wall foot merges
@@ -143,6 +193,13 @@ void main() {
     float bf = smoothstep(0.0, params2.y, hf);
     col *= mix(1.0 - params2.x, 1.0, bf);
     col = mix(col * vec3(0.85, 1.0, 0.8), col, bf);
+    // The wall's own contact AO, sharing the ground's strength (stitch1.z):
+    // the foot of the wall sees no more sky than the grass it stands in, and
+    // leaving it lit while the ground darkens draws the seam instead of
+    // hiding it. params5.w is the reach up the wall, 0 turns it off.
+    float footAo = 1.0 - stitch[1].z * step(1e-4, params5.w)
+        * (1.0 - smoothstep(0.0, max(params5.w, 1e-4), p.y - params5.z));
+    col *= footAo;
     frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(params1.y)), 1.0);
 }
 )";
@@ -158,13 +215,15 @@ struct VSIn {
     float3 pos: TEXCOORD0;
     float3 normal: TEXCOORD1;
     float groove: TEXCOORD2;
-    float3 world: TEXCOORD3;
+    float rim: TEXCOORD3;
+    float3 world: TEXCOORD4;
 };
 struct VSOut {
     float4 pos: SV_Position;
     float3 normal: TEXCOORD0;
     float groove: TEXCOORD1;
     float3 world: TEXCOORD2;
+    float rim: TEXCOORD3;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -176,13 +235,13 @@ VSOut main(VSIn inp) {
     o.normal = inp.normal;
     o.groove = inp.groove;
     o.world = inp.world;
+    o.rim = inp.rim;
     return o;
 }
 )";
 
 static const char* cliff_fs_src_hlsl = R"(
 cbuffer fs_params: register(b0) {
-    float4 light_dir;
     float4 view_dir;
     float4 dark_color;
     float4 gold_color;
@@ -191,7 +250,18 @@ cbuffer fs_params: register(b0) {
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
     float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: tex scale
     float4 params2; // x: bottom darken, y: bottom band, z: plateau top, w: use texture
-    float4 params3; // x: strata strength
+    float4 params3; // x: strata strength, y: seam top brightness
+    float4 params4; // x: stone plane Y (0=off), y: stone grass fade, z: stone rim shade, w: stone top tex mix
+    float4 params5; // seam: x: rim contact AO, y: height->world, z: ground plane Y, w: AO wall fade
+    float4 params6; // seam: xyz: bounce tint, w: bounce strength
+    float4 params7; // seam: xyz: sky tint, w: sky strength
+    float4 params8; // seam: xyz: plateau top tint, w: top UV rotation
+};
+// Scene stitch core (shared sun + ground tone/AO; stitch0 is ground-only).
+cbuffer stitch_params: register(b1) {
+    float4 sun_dir;
+    float4 stitch0;
+    float4 stitch1;
 };
 Texture2D top_tex: register(t0);
 SamplerState top_tex_smp: register(s0);
@@ -250,6 +320,7 @@ struct PSIn {
     float3 normal: TEXCOORD0;
     float groove: TEXCOORD1;
     float3 world: TEXCOORD2;
+    float rim: TEXCOORD3;
 };
 
 float4 main(PSIn inp): SV_Target {
@@ -260,23 +331,51 @@ float4 main(PSIn inp): SV_Target {
     float shell = 1.0 - smoothstep(0.005, 0.05, inp.groove);
     float3 gold = gold_color.rgb + float3(1.0, 0.9, 0.4) * step(params0.x, f);
     float3 rock = lerp(dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Flat tops: tiled texture (uv wobble) or the procedural grass mix.
+    // Flat tops: tiled texture (uv wobble, seam UV rotation params8.w) or the
+    // procedural grass mix. params4.w tunes the texture strength (stone
+    // layers; 1 for plain cliffs).
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
-    float2 tuv = p.xz * params1.w + 0.06 * float2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
+    float ca = cos(params8.w);
+    float sa = sin(params8.w);
+    float2 topXZ = float2(ca * p.x - sa * p.z, sa * p.x + ca * p.z);
+    float2 tuv = topXZ * params1.w + 0.06 * float2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
     float3 texCol = top_tex.Sample(top_tex_smp, tuv).rgb;
-    float3 grass = (params2.w > 0.5) ? texCol * (0.85 + 0.3 * gm) : lerp(grass_a.rgb, grass_b.rgb, gm);
+    float3 procGrass = lerp(grass_a.rgb, grass_b.rgb, gm);
+    float3 grass = (params2.w > 0.5) ? lerp(procGrass, texCol * (0.85 + 0.3 * gm), params4.w) : procGrass;
+    // Seam: the plateau's own tint keeps it apart from the ground (white = neutral).
+    grass *= params8.rgb;
     // Noise-distorted rim: the top creeps down the wall irregularly.
     float rim = 0.22 * fbm2(6.0 * p.xz);
     float topMask = smoothstep(0.7 - rim, 0.9 - rim, n.y);
+    // Rim stitch shading (stone layers only, params4.x = top plane Y, 0 =
+    // off): boulders above the plane keep the wall palette; below the plane
+    // the grass yields to stone gradually over params4.y; the baked rim
+    // weight turns the top stony towards the wall (params4.z = strength).
+    if (params4.x > 0.0) {
+        float stone = max(step(params4.x + 0.01, p.y),
+            smoothstep(0.0, max(params4.y, 1e-4), params4.x - p.y));
+        stone = max(stone, clamp(inp.rim * params4.z, 0.0, 1.0));
+        topMask *= 1.0 - stone;
+    }
     float3 base = lerp(rock, grass, topMask);
     // Sediment strata bands on the walls.
     base *= 1.0 - params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
-    // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
-    float3 l = normalize(light_dir.xyz);
+    // Seam: lift the plateau tone off the ground plane (params3.y, 1 = neutral).
+    base *= lerp(1.0, params3.y, topMask);
+    // Seam: grass bounce from below, cool sky on the upward faces. The band
+    // is the playground's default skirt height x4 (skirt not ported).
+    float low = 1.0 - smoothstep(0.0, 0.56, p.y - params5.z);
+    base = lerp(base, base * params6.rgb, low * params6.w);
+    base = lerp(base, base * params7.rgb, saturate(n.y) * params7.w);
+    // Cheap sun lambert + wrap ambient + spec; the iso view direction is
+    // constant. The sun is the shared scene sun (stitch core).
+    float3 l = normalize(sun_dir.xyz);
     float3 rd = view_dir.xyz;
     float ndl = dot(n, l);
+    // Seam: baked wall proximity darkens the plateau edge (params5.x, 0 = off).
+    float rimAo = 1.0 - clamp(inp.rim * params5.x, 0.0, 1.0);
     float3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
-        params0.z * max(ndl, 0.0));
+        params0.z * max(ndl, 0.0)) * rimAo;
     float specAmt = lerp(0.05, params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
     // Bottom blend: darken + a faint soil-green cast toward the underlay.
@@ -284,6 +383,11 @@ float4 main(PSIn inp): SV_Target {
     float bf = smoothstep(0.0, params2.y, hf);
     col *= lerp(1.0 - params2.x, 1.0, bf);
     col = lerp(col * float3(0.85, 1.0, 0.8), col, bf);
+    // The wall's own contact AO, sharing the ground's strength (stitch1.z);
+    // params5.w is its reach up the wall, 0 turns it off.
+    float footAo = 1.0 - stitch1.z * step(1e-4, params5.w)
+        * (1.0 - smoothstep(0.0, max(params5.w, 1e-4), p.y - params5.z));
+    col *= footAo;
     return float4(pow(clamp(col, 0.0, 1.0), (float3)params1.y), 1.0);
 }
 )";
@@ -303,7 +407,8 @@ struct VSIn {
     float3 pos [[attribute(0)]];
     float3 normal [[attribute(1)]];
     float groove [[attribute(2)]];
-    float3 world [[attribute(3)]];
+    float rim [[attribute(3)]];
+    float3 world [[attribute(4)]];
 };
 
 struct VSOut {
@@ -311,6 +416,7 @@ struct VSOut {
     float3 normal;
     float groove;
     float3 world;
+    float rim;
 };
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
@@ -324,6 +430,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
     o.normal = in.normal;
     o.groove = in.groove;
     o.world = in.world;
+    o.rim = in.rim;
     return o;
 }
 )";
@@ -333,7 +440,6 @@ static const char* cliff_fs_src_msl = R"(
 using namespace metal;
 
 struct FsParams {
-    float4 light_dir;
     float4 view_dir;
     float4 dark_color;
     float4 gold_color;
@@ -342,7 +448,19 @@ struct FsParams {
     float4 params0; // x: vein threshold, y: ambient, z: diffuse, w: spec strength
     float4 params1; // x: spec power, y: gamma, z: wrap backlight, w: tex scale
     float4 params2; // x: bottom darken, y: bottom band, z: plateau top, w: use texture
-    float4 params3; // x: strata strength
+    float4 params3; // x: strata strength, y: seam top brightness
+    float4 params4; // x: stone plane Y (0=off), y: stone grass fade, z: stone rim shade, w: stone top tex mix
+    float4 params5; // seam: x: rim contact AO, y: height->world, z: ground plane Y, w: AO wall fade
+    float4 params6; // seam: xyz: bounce tint, w: bounce strength
+    float4 params7; // seam: xyz: sky tint, w: sky strength
+    float4 params8; // seam: xyz: plateau top tint, w: top UV rotation
+};
+
+// Scene stitch core (shared sun + ground tone/AO; stitch0 is ground-only).
+struct StitchCore {
+    float4 sun_dir;
+    float4 stitch0;
+    float4 stitch1;
 };
 
 float4 hashv4v3(float3 p) {
@@ -399,9 +517,11 @@ struct PSIn {
     float3 normal;
     float groove;
     float3 world;
+    float rim;
 };
 
 fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
+                      constant StitchCore& st [[buffer(2)]],
                       texture2d<float> top_tex [[texture(0)]],
                       sampler top_tex_smp [[sampler(0)]]) {
     float3 n = normalize(in.normal);
@@ -411,23 +531,51 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
     float shell = 1.0 - smoothstep(0.005, 0.05, in.groove);
     float3 gold = fs.gold_color.rgb + float3(1.0, 0.9, 0.4) * step(fs.params0.x, f);
     float3 rock = mix(fs.dark_color.rgb, gold, shell) * (1.0 - 0.3 * f);
-    // Flat tops: tiled texture (uv wobble) or the procedural grass mix.
+    // Flat tops: tiled texture (uv wobble, seam UV rotation params8.w) or the
+    // procedural grass mix. params4.w tunes the texture strength (stone
+    // layers; 1 for plain cliffs).
     float gm = smoothstep(0.4, 0.6, fbm2(2.0 * p.xz));
-    float2 tuv = p.xz * fs.params1.w + 0.06 * float2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
+    float ca = cos(fs.params8.w);
+    float sa = sin(fs.params8.w);
+    float2 topXZ = float2(ca * p.x - sa * p.z, sa * p.x + ca * p.z);
+    float2 tuv = topXZ * fs.params1.w + 0.06 * float2(fbm2(3.1 * p.xz), fbm2(2.7 * p.zx + 5.0));
     float3 texCol = top_tex.sample(top_tex_smp, tuv).rgb;
-    float3 grass = (fs.params2.w > 0.5) ? texCol * (0.85 + 0.3 * gm) : mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
+    float3 procGrass = mix(fs.grass_a.rgb, fs.grass_b.rgb, gm);
+    float3 grass = (fs.params2.w > 0.5) ? mix(procGrass, texCol * (0.85 + 0.3 * gm), fs.params4.w) : procGrass;
+    // Seam: the plateau's own tint keeps it apart from the ground (white = neutral).
+    grass *= fs.params8.rgb;
     // Noise-distorted rim: the top creeps down the wall irregularly.
     float rim = 0.22 * fbm2(6.0 * p.xz);
     float topMask = smoothstep(0.7 - rim, 0.9 - rim, n.y);
+    // Rim stitch shading (stone layers only, params4.x = top plane Y, 0 =
+    // off): boulders above the plane keep the wall palette; below the plane
+    // the grass yields to stone gradually over params4.y; the baked rim
+    // weight turns the top stony towards the wall (params4.z = strength).
+    if (fs.params4.x > 0.0) {
+        float stone = max(step(fs.params4.x + 0.01, p.y),
+            smoothstep(0.0, max(fs.params4.y, 1e-4), fs.params4.x - p.y));
+        stone = max(stone, clamp(in.rim * fs.params4.z, 0.0, 1.0));
+        topMask *= 1.0 - stone;
+    }
     float3 base = mix(rock, grass, topMask);
     // Sediment strata bands on the walls.
     base *= 1.0 - fs.params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
-    // Cheap sun lambert + wrap ambient + spec; the iso view direction is constant.
-    float3 l = normalize(fs.light_dir.xyz);
+    // Seam: lift the plateau tone off the ground plane (params3.y, 1 = neutral).
+    base *= mix(1.0, fs.params3.y, topMask);
+    // Seam: grass bounce from below, cool sky on the upward faces. The band
+    // is the playground's default skirt height x4 (skirt not ported).
+    float low = 1.0 - smoothstep(0.0, 0.56, p.y - fs.params5.z);
+    base = mix(base, base * fs.params6.rgb, low * fs.params6.w);
+    base = mix(base, base * fs.params7.rgb, clamp(n.y, 0.0, 1.0) * fs.params7.w);
+    // Cheap sun lambert + wrap ambient + spec; the iso view direction is
+    // constant. The sun is the shared scene sun (stitch core).
+    float3 l = normalize(st.sun_dir.xyz);
     float3 rd = fs.view_dir.xyz;
     float ndl = dot(n, l);
+    // Seam: baked wall proximity darkens the plateau edge (params5.x, 0 = off).
+    float rimAo = 1.0 - clamp(in.rim * fs.params5.x, 0.0, 1.0);
     float3 col = base * (fs.params0.y + fs.params1.z * max(-ndl, 0.0) +
-        fs.params0.z * max(ndl, 0.0));
+        fs.params0.z * max(ndl, 0.0)) * rimAo;
     float specAmt = mix(0.05, fs.params0.w, shell) * (1.0 - topMask);
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params1.x);
     // Bottom blend: darken + a faint soil-green cast toward the underlay.
@@ -435,6 +583,11 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
     float bf = smoothstep(0.0, fs.params2.y, hf);
     col *= mix(1.0 - fs.params2.x, 1.0, bf);
     col = mix(col * float3(0.85, 1.0, 0.8), col, bf);
+    // The wall's own contact AO, sharing the ground's strength (stitch1.z);
+    // params5.w is its reach up the wall, 0 turns it off.
+    float footAo = 1.0 - st.stitch1.z * step(1e-4, fs.params5.w)
+        * (1.0 - smoothstep(0.0, max(fs.params5.w, 1e-4), p.y - fs.params5.z));
+    col *= footAo;
     return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), 1.0);
 }
 )";
@@ -456,7 +609,7 @@ void fillVsUniformDesc(sg_shader_uniform_block* block, std::size_t size) {
     block->glsl_uniforms[3].type = SG_UNIFORMTYPE_FLOAT;
 }
 
-// Cliff fragment block (palette/light): slot 1, after the vertex block.
+// Cliff fragment block (palette/light + seam): slot 1, after the vertex block.
 void fillFsUniformDesc(sg_shader_uniform_block* block, std::size_t size) {
     block->stage = SG_SHADERSTAGE_FRAGMENT;
     block->size = size;
@@ -464,12 +617,33 @@ void fillFsUniformDesc(sg_shader_uniform_block* block, std::size_t size) {
     block->msl_buffer_n = 1;
     block->wgsl_group0_binding_n = 1;
     block->spirv_set0_binding_n = 1;
-    const char* names[10] = {"light_dir", "view_dir", "dark_color", "gold_color",
-        "grass_a", "grass_b", "params0", "params1", "params2", "params3"};
-    for (int i = 0; i < 10; ++i) {
+    const char* names[14] = {"view_dir", "dark_color", "gold_color",
+        "grass_a", "grass_b", "params0", "params1", "params2", "params3",
+        "params4", "params5", "params6", "params7", "params8"};
+    for (int i = 0; i < 14; ++i) {
         block->glsl_uniforms[i].glsl_name = names[i];
         block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
     }
+}
+
+// Scene stitch core block (shared sun + ground tone/AO): slot 2 — the core
+// only (kStitchCoreBytes, no ao_rect): the cliff pass never samples the AO
+// field, and a GL driver drops unused uniforms, which sokol then reports as
+// a missing block member every startup.
+void fillStitchUniformDesc(sg_shader_uniform_block* block, std::size_t size) {
+    block->stage = SG_SHADERSTAGE_FRAGMENT;
+    block->size = size;
+    block->hlsl_register_b_n = 1;
+    block->msl_buffer_n = 2;
+    block->wgsl_group0_binding_n = 2;
+    block->spirv_set0_binding_n = 2;
+    block->glsl_uniforms[0].glsl_name = "sun_dir";
+    block->glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+    // The two stitch vec4 after sun_dir ride one array — see the shader
+    // comment (a GL driver drops unused named uniforms; an array is atomic).
+    block->glsl_uniforms[1].glsl_name = "stitch";
+    block->glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT4;
+    block->glsl_uniforms[1].array_count = 2;
 }
 
 // FNV-1a over the content key (tiles + field params); scalar-by-scalar so
@@ -522,11 +696,37 @@ struct CliffComponent {
     std::vector<const LandscapeTile*> tiles;
 };
 
-// Content key of a region: the field params + the sorted node set. The same
-// node set hashes identically every frame, so an untouched region keeps its
-// cache entry; a local edit changes only its own component's key.
-std::uint64_t regionKey(std::vector<glm::ivec2> nodes, const cliff::FieldParams& params) {
-    std::uint64_t h = hashFieldParams(params);
+// Plateau height of the active generator (stone assets keep it in the stone
+// field's base slab; CliffParams::field is unused then).
+float plateauHeightOf(const CliffParams& params) {
+    return params.stoneField ? params.stoneField->base.plateauHeight : params.field.plateauHeight;
+}
+
+// Content key of a region: the generator params + the sorted node set. The
+// same node set hashes identically every frame, so an untouched region keeps
+// its cache entry; a local edit changes only its own component's key.
+std::uint64_t regionKey(std::vector<glm::ivec2> nodes, const CliffParams& params) {
+    // Stone regions key on the stone field (base slab + carve params), cliff
+    // regions on the cliff field params.
+    std::uint64_t h = hashFieldParams(params.stoneField ? params.stoneField->base : params.field);
+    if (params.stoneField) {
+        const stone_gen::StoneFieldParams& p = *params.stoneField;
+        hashFloat(h, p.voroScale);
+        hashFloat(h, p.cellJitter);
+        hashFloat(h, p.grooveDepth);
+        hashFloat(h, p.grooveK);
+        hashFloat(h, p.grooveMaskWidth);
+        hashFloat(h, p.fbmAmplitude);
+        hashFloat(h, p.fbmFrequency);
+        hashFloat(h, p.seed);
+        hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.blurPasses)));
+        hashFloat(h, p.flatTopLo);
+        hashFloat(h, p.flatTopHi);
+        hashFloat(h, p.rimWidth);
+        hashFloat(h, p.rimBulge);
+        hashFloat(h, p.rimNotch);
+        hashCombine(h, p.flatTop ? 1ULL : 0ULL);
+    }
     std::sort(nodes.begin(), nodes.end(), [](const glm::ivec2& a, const glm::ivec2& b) {
         if (a.y != b.y) return a.y < b.y;
         return a.x < b.x;
@@ -648,12 +848,13 @@ void CliffRenderer::ensurePipeline() {
         shd_desc.vertex_func.source = cliff_vs_src_glsl;
         shd_desc.fragment_func.source = cliff_fs_src_glsl;
     }
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         shd_desc.attrs[i].hlsl_sem_name = "TEXCOORD";
         shd_desc.attrs[i].hlsl_sem_index = i;
     }
     fillVsUniformDesc(&shd_desc.uniform_blocks[0], sizeof(CliffVsParams));
     fillFsUniformDesc(&shd_desc.uniform_blocks[1], sizeof(CliffFsParams));
+    fillStitchUniformDesc(&shd_desc.uniform_blocks[2], kStitchCoreBytes);
     // Top texture (slot 0, fragment stage; same triplet shape as the sprite pass).
     shd_desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
     shd_desc.views[0].texture.image_type = SG_IMAGETYPE_2D;
@@ -679,7 +880,8 @@ void CliffRenderer::ensurePipeline() {
     pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3; // pos
     pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3; // normal
     pip_desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT;  // groove
-    pip_desc.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT3; // world
+    pip_desc.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT;  // rim
+    pip_desc.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT3; // world
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pip_desc.depth.pixel_format = depthFormat;
     pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
@@ -740,7 +942,8 @@ void CliffRenderer::render(
     const topology_core::Camera2D& camera,
     int viewWidth,
     int viewHeight,
-    double nowSec) {
+    double nowSec,
+    const CliffStitchContext& stitch) {
 
     if (pip.id == SG_INVALID_ID || tiles.empty()) return;
 
@@ -765,14 +968,11 @@ void CliffRenderer::render(
     vs.camera_zoom = camera.zoom;
 
     // Shading uniforms from the *current* asset params — palette edits are
-    // instant and never touch the caches.
-    const auto buildFs = [&iso](const CliffParams& params, bool useTexture) {
+    // instant and never touch the caches. The sun is NOT per-asset anymore:
+    // the shared scene sun rides the stitch core block (slot 2).
+    const auto buildFs = [&iso, &stitch](const CliffParams& params, bool useTexture) {
         const CliffShading& s = params.shading;
         CliffFsParams fs{};
-        const float lightCe = std::cos(s.lightElevation);
-        fs.lightDir[0] = lightCe * std::sin(s.lightAzimuth);
-        fs.lightDir[1] = std::sin(s.lightElevation);
-        fs.lightDir[2] = lightCe * std::cos(s.lightAzimuth);
         // Constant iso view direction (viewer -> scene), mirrors the playground.
         const float halfH = iso.dims.cellSize().y * 0.5f;
         const float viewY = 2.0f * halfH / std::max(params.heightScale, 1.0f);
@@ -794,11 +994,35 @@ void CliffRenderer::render(
         fs.params1[3] = s.texScale;
         fs.params2[0] = s.bottomDarken;
         fs.params2[1] = s.bottomBand;
-        fs.params2[2] = params.field.plateauHeight;
+        fs.params2[2] = plateauHeightOf(params);
         fs.params2[3] = useTexture ? 1.0f : 0.0f;
         fs.params3[0] = s.strataStrength;
+        fs.params3[1] = stitch.seam.topBrightness;
+        // Stone shading extras (all-neutral for plain cliffs: gate off, rim
+        // shade off, top texture at full strength).
+        fs.params4[0] = params.stonePlaneY;
+        fs.params4[1] = params.stoneGrassFade;
+        fs.params4[2] = params.stoneRimShade;
+        fs.params4[3] = params.stoneTopTexMix;
+        // Seam block (see the CliffFsParams comment for the playground
+        // mapping). params5.y (height -> world) is filled for parity/shadow
+        // port; the v1 shader does not consume it.
+        fs.params5[0] = stitch.seam.rimContactAo;
+        fs.params5[1] = isoHeightToWorld(iso.dims.cellWidth * 0.5f, halfH, params.heightScale);
+        fs.params5[2] = 0.0f; // ground plane Y — the mesh sink is not ported
+        fs.params5[3] = stitch.aoWallFade;
+        std::memcpy(fs.params6, stitch.seam.bounceTint, sizeof(stitch.seam.bounceTint));
+        fs.params6[3] = stitch.seam.bounceStrength;
+        std::memcpy(fs.params7, stitch.seam.skyTint, sizeof(stitch.seam.skyTint));
+        fs.params7[3] = stitch.seam.skyStrength;
+        std::memcpy(fs.params8, stitch.seam.topTint, sizeof(stitch.seam.topTint));
+        fs.params8[3] = stitch.seam.topRotation;
         return fs;
     };
+
+    // Stitch core block (48 bytes: sun + ground tone/AO) — shared with the
+    // ground pass, uploaded to FS slot 2.
+    const sg_range stitchRange = { &stitch.params, kStitchCoreBytes };
 
     // Prototype silhouette for pending groups: a flat tile diamond at ground
     // level, shaded by the same FS palette (normal up, no carve -> grass top).
@@ -807,7 +1031,7 @@ void CliffRenderer::render(
         const float halfW = iso.dims.cellWidth * 0.5f;
         const float halfH = iso.dims.cellSize().y * 0.5f;
         const auto v = [](float px, float py, float wx, float wz) {
-            return CliffVertex{{px, py, py}, {0.0f, 1.0f, 0.0f}, 0.0f, {wx, 0.0f, wz}};
+            return CliffVertex{{px, py, py}, {0.0f, 1.0f, 0.0f}, 0.0f, 0.0f, {wx, 0.0f, wz}};
         };
         const float cx = static_cast<float>(cell.x);
         const float cy = static_cast<float>(cell.y);
@@ -854,7 +1078,7 @@ void CliffRenderer::render(
         keys.reserve(components.size());
         std::unordered_set<std::uint64_t> liveKeys;
         for (const CliffComponent& comp : components) {
-            const std::uint64_t key = regionKey(comp.nodes, params.field);
+            const std::uint64_t key = regionKey(comp.nodes, params);
             keys.push_back(key);
             liveKeys.insert(key);
         }
@@ -878,7 +1102,7 @@ void CliffRenderer::render(
             for (auto& [key, region] : asset.regions) {
                 if (!region.pending) {
                     projectRegionStream(region, iso, params.heightScale, params.flareAmount,
-                        params.flareBand, params.field.plateauHeight);
+                        params.flareBand, plateauHeightOf(params));
                     const std::size_t bytes = region.stream.size() * sizeof(CliffVertex);
                     if (bytes > 0) {
                         if (region.vbufSize < bytes) {
@@ -912,8 +1136,7 @@ void CliffRenderer::render(
                     region.pendingSince = nowSec;
                 }
                 if ((nowSec - region.pendingSince) > 0.3) {
-                    rebuildRegion(region, comp.nodes, iso, params.field, params.heightScale,
-                        params.flareAmount, params.flareBand);
+                    rebuildRegion(region, comp.nodes, iso, params);
                     region.pending = false;
                 }
             }
@@ -948,6 +1171,7 @@ void CliffRenderer::render(
             sg_apply_bindings(&bind);
             sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
             sg_apply_uniforms(1, sg_range{&fs, sizeof(fs)});
+            sg_apply_uniforms(2, &stitchRange);
             sg_draw(0, static_cast<int>(region.stream.size()), 1);
         }
     }
@@ -978,6 +1202,7 @@ void CliffRenderer::render(
                 sg_apply_bindings(&bind);
                 sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
                 sg_apply_uniforms(1, sg_range{&fs, sizeof(fs)});
+                sg_apply_uniforms(2, &stitchRange);
                 sg_draw(range.base, range.count, 1);
             }
         }
@@ -988,10 +1213,7 @@ void CliffRenderer::rebuildRegion(
     RegionCache& region,
     const std::vector<glm::ivec2>& componentNodes,
     const topology_core::DiamondIsometry& iso,
-    const cliff::FieldParams& fieldParams,
-    float heightScale,
-    float flareAmount,
-    float flareBand) {
+    const CliffParams& params) {
 
     // Full path for ONE connected region: nodes -> bbox field -> regularize
     // -> surface nets (the other regions of the same asset stay untouched).
@@ -1019,27 +1241,42 @@ void CliffRenderer::rebuildRegion(
             nodes[static_cast<std::size_t>(n.y - minY) * nodesX + (n.x - minX)] = 1;
         }
 
-        cliff::CliffField field(fieldParams, nodes.data(), nodesX, nodesY);
-        std::vector<float> samples;
-        field.sample(samples);
         cliff::RegularizeStats regStats;
-        cliff::regularizeSigns(field, samples, &regStats);
-        region.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+        if (params.stoneField) {
+            // Stone3d: voronoi-carved slab through the generic field view
+            // (same pipeline as the playground's stone branch; the sampled
+            // field blur against voronoi terracing runs inside sample()).
+            stone_gen::StoneField field(*params.stoneField, nodes.data(), nodesX, nodesY);
+            cliff::ScalarFieldView view = field.view();
+            std::vector<float> samples;
+            field.sample(samples);
+            cliff::regularizeSigns(view, samples, &regStats);
+            region.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+        } else {
+            cliff::CliffField field(params.field, nodes.data(), nodesX, nodesY);
+            std::vector<float> samples;
+            field.sample(samples);
+            cliff::regularizeSigns(field, samples, &regStats);
+            region.mesh = cliff::extractSurfaceNets(field, samples, nullptr);
+        }
         region.origin = {minX, minY};
         const cliff::WatertightReport report = cliff::checkWatertight(region.mesh);
         region.watertight = report.ok();
         if (!report.ok()) {
-            spdlog::warn("CliffRenderer: cliff mesh not watertight ({} bad of {} edges, {} saddles left)",
+            spdlog::warn("CliffRenderer: {} mesh not watertight ({} bad of {} edges, {} saddles left)",
+                params.stoneField ? "stone" : "cliff",
                 report.badEdges, report.undirectedEdges, regStats.remaining);
         }
-        spdlog::info("CliffRenderer: rebuilt region at ({}, {}) — {} nodes, {} tris",
+        spdlog::info("CliffRenderer: rebuilt {} region at ({}, {}) — {} nodes, {} tris",
+            params.stoneField ? "stone" : "cliff",
             minX, minY, componentNodes.size(), region.mesh.indices.size() / 3);
     } else {
         region.mesh = {};
         region.watertight = true;
     }
 
-    projectRegionStream(region, iso, heightScale, flareAmount, flareBand, fieldParams.plateauHeight);
+    projectRegionStream(region, iso, params.heightScale, params.flareAmount, params.flareBand,
+        plateauHeightOf(params));
 
     // Upload the fresh stream.
     const std::size_t bytes = region.stream.size() * sizeof(CliffVertex);
@@ -1105,6 +1342,7 @@ void CliffRenderer::projectRegionStream(
             {fieldX, fieldY - v.py * heightScale, fieldY},
             {v.nx, v.ny, v.nz},
             v.groove,
+            v.rim,
             {mapX, v.py, mapZ}});
     }
 }

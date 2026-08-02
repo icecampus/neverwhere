@@ -29,7 +29,7 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
 
         AssetData asset = j.get<AssetData>();
         asset.indexPath = entry.path();
-        if (!asset.slice && !asset.image && !asset.shape3d && !asset.cliff3d && !asset.cyclopean3d) continue; // nothing renderable
+        if (!asset.slice && !asset.image && !asset.shape3d && !asset.cliff3d && !asset.cyclopean3d && !asset.stone3d) continue; // nothing renderable
 
         AssetIndexEntry idx;
         idx.uuid = asset.uuid;
@@ -76,6 +76,16 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
         if (asset.cyclopean3d) {
             idx.cyclopean3d = true;
             idx.cyclopean = *asset.cyclopean3d;
+        }
+
+        if (asset.stone3d) {
+            idx.stone3d = true;
+            idx.stone = *asset.stone3d;
+            // Shares the entry's texture slot with shape3d/cliff3d (an asset
+            // is one kind or the other).
+            if (!asset.stone3d->topTexture.empty()) {
+                idx.topTexturePath = asset.root() / asset.stone3d->topTexture;
+            }
         }
 
         index.byUuid[idx.uuid] = idx;

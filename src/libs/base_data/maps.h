@@ -33,7 +33,8 @@ namespace LayerTypes
         GameplayInteractive,
         RaisedLandscape,
         CliffLandscape,
-        CyclopeanLandscape
+        CyclopeanLandscape,
+        StoneLandscape
     };
     Q_ENUM_NS(Type);
 }

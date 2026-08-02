@@ -173,6 +173,10 @@ public:
             m_frameSource->ensureFrameAssets(m_frame, m_worldRenderer);
         }
 
+        // Offscreen world work (contact-AO field rebuild) — before the pass
+        // is begun (texture re-creation is not allowed inside a pass).
+        m_worldRenderer.prepare(m_frame, m_time.elapsed() / 1000.0);
+
         sg_pass_action action = {};
         action.colors[0].load_action = SG_LOADACTION_CLEAR;
         // Same background as the MapView.qml Rectangle it replaces.

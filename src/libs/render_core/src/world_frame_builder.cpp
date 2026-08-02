@@ -11,6 +11,7 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     outFrame.raisedTiles.clear();
     outFrame.cliffTiles.clear();
     outFrame.cyclopeanTiles.clear();
+    outFrame.stoneTiles.clear();
     outFrame.sprites.clear();
 
     for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
@@ -59,6 +60,19 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
         t.assetUuid = obj.assetUuid;
         t.tileIndex = obj.landscapeData->tileIndex;
         outFrame.cyclopeanTiles.push_back(std::move(t));
+    }
+
+    // StoneLandscape layer -> stone tiles (Stone3d assets, voronoi-carved
+    // surface-nets plateau sharing the cliff pass).
+    for (const auto& obj : map.layer(game_data::LayerType::StoneLandscape)) {
+        if (obj.type != game_data::GameObjectType::Landscape) continue;
+        if (!obj.landscapeData) continue;
+
+        LandscapeTile t;
+        t.cell = obj.position;
+        t.assetUuid = obj.assetUuid;
+        t.tileIndex = obj.landscapeData->tileIndex;
+        outFrame.stoneTiles.push_back(std::move(t));
     }
 
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
@@ -142,12 +156,97 @@ static CyclopeanParams cyclopeanParamsFromAssetData(const game_data::Cyclopean3d
     return params;
 }
 
+// game_data -> render_core parameter conversion for stone3d assets (the
+// editor's ModelFrameSource has its own BaseData twin). The mesh params ride
+// in CliffParams::stoneField; CliffParams::field stays unused.
+static CliffParams stoneParamsFromAssetData(const game_data::Stone3dAssetData& d) {
+    CliffParams params;
+    params.heightScale = d.raisedHeight;
+    stone_gen::StoneFieldParams stone;
+    // Base slab (mirror of cliff::FieldParams; its grooves/fbm stay unused by
+    // the stone field, the ground slab stays off by the data default).
+    cliff::FieldParams& f = stone.base;
+    f.cellSize = d.cellSize;
+    f.padding = d.padding;
+    f.plateauHeight = d.plateauHeight;
+    f.d2Scale = d.d2Scale;
+    f.blurRadiusCells = d.blurRadiusCells;
+    f.blurPasses = d.blurPasses;
+    f.edgeRadius = d.edgeRadius;
+    f.grooveMaskWidth = d.grooveMaskWidth;
+    f.grooveFadeK = d.grooveFadeK;
+    f.grooveRimFade = d.grooveRimFade;
+    f.fbmAmplitude = d.fbmAmplitude;
+    f.fbmFrequency = d.fbmFrequency;
+    f.fbmOctaves = d.fbmOctaves;
+    f.groundDepth = d.groundDepth;
+    f.groundMargin = d.groundMargin;
+    f.groundRounding = d.groundRounding;
+    f.groundEnabled = d.groundEnabled;
+    f.groovePeriod = d.groovePeriod;
+    f.groovePhase = d.groovePhase;
+    f.grooveDepthMax = d.grooveDepthMax;
+    f.grooveSmooth = d.grooveSmooth;
+    f.grooveAngles[0][0] = d.grooveAngles[0][0];
+    f.grooveAngles[0][1] = d.grooveAngles[0][1];
+    f.grooveAngles[1][0] = d.grooveAngles[1][0];
+    f.grooveAngles[1][1] = d.grooveAngles[1][1];
+    f.grooveAngles[2][0] = d.grooveAngles[2][0];
+    f.grooveAngles[2][1] = d.grooveAngles[2][1];
+    // Stone carve. The shared slots (blurPasses, grooveMaskWidth,
+    // fbmAmplitude, fbmFrequency) feed both the base slab above and the stone
+    // field's own carve band / fbm / sampled-field blur.
+    stone.voroScale = d.voroScale;
+    stone.cellJitter = d.cellJitter;
+    stone.grooveDepth = d.grooveDepth;
+    stone.grooveK = d.grooveK;
+    stone.grooveMaskWidth = d.grooveMaskWidth;
+    stone.fbmAmplitude = d.fbmAmplitude;
+    stone.fbmFrequency = d.fbmFrequency;
+    stone.seed = d.seed;
+    stone.blurPasses = d.blurPasses;
+    stone.flatTopLo = d.flatTopLo;
+    stone.flatTopHi = d.flatTopHi;
+    stone.rimWidth = d.rimWidth;
+    stone.rimBulge = d.rimBulge;
+    stone.rimNotch = d.rimNotch;
+    stone.flatTop = d.flatTop;
+    params.stoneField = stone;
+    CliffShading& s = params.shading;
+    s.lightAzimuth = d.shading.lightAzimuth;
+    s.lightElevation = d.shading.lightElevation;
+    s.darkColor = d.shading.darkColor;
+    s.goldColor = d.shading.goldColor;
+    s.grassA = d.shading.grassA;
+    s.grassB = d.shading.grassB;
+    s.veinThreshold = d.shading.veinThreshold;
+    s.ambient = d.shading.ambient;
+    s.diffuse = d.shading.diffuse;
+    s.backLight = d.shading.backLight;
+    s.specStrength = d.shading.specStrength;
+    s.specPower = d.shading.specPower;
+    s.gamma = d.shading.gamma;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    s.texScale = d.topTexTiles; // stone top tiling lives in the extras, not in shading.texScale
+    // Stone shading extras: the flat-top plane (boulders above it keep the
+    // wall palette), the below-plane grass fade, the rim gradient strength
+    // and the top texture mix.
+    params.stonePlaneY = d.plateauHeight + d.edgeRadius;
+    params.stoneGrassFade = d.grassFade;
+    params.stoneRimShade = d.rimShade;
+    params.stoneTopTexMix = d.topTexMix;
+    return params;
+}
+
 void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame& frame, WorldRenderer& renderer) {
     std::unordered_set<std::string> uniqueAssets;
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.raisedTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cliffTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -173,6 +272,11 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
         }
         if (entry->isCyclopean3d()) {
             renderer.ensureCyclopeanAsset(uuid, cyclopeanParamsFromAssetData(entry->cyclopean));
+        }
+        if (entry->isStone3d()) {
+            CliffParams params = stoneParamsFromAssetData(entry->stone);
+            params.topTexturePath = entry->topTexturePath;
+            renderer.ensureStoneAsset(uuid, params);
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);

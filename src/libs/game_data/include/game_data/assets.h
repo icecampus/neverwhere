@@ -116,6 +116,69 @@ struct Cyclopean3dAssetData {
     int wallSubdivV = 16;
 };
 
+// Stone3D assets — the stone-field generator parameter set (base slab =
+// mirror of cliff::FieldParams, stone carve = mirror of
+// stone_gen::StoneFieldParams; mirror of BaseData::Stone3dAssetData) +
+// shading palette. No atlas; tiles on the StoneLandscape layer encode the
+// vertex nodes. Field names shared by FieldParams and StoneFieldParams
+// (blurPasses, grooveMaskWidth, fbmAmplitude, fbmFrequency) live in a single
+// slot with the StoneFieldParams defaults.
+struct Stone3dAssetData {
+    std::string thumbnail; // optional palette preview
+    std::string topTexture; // optional: tiled texture for the flat tops (world-space uv)
+    float raisedHeight = 96.0f; // field px per 1.0 plateau height (heightScale)
+
+    // Base slab (its grooves/fbm stay unused by the stone field; ground slab
+    // off — the underlay is authored separately).
+    float cellSize = 0.045f;
+    float padding = 0.5f;
+    float plateauHeight = 1.0f;
+    float d2Scale = 0.5f;
+    int blurRadiusCells = 3;
+    int blurPasses = 2;
+    float edgeRadius = 0.04f;
+    float grooveMaskWidth = 0.25f;
+    float grooveFadeK = 1.0f;
+    float grooveRimFade = 0.12f;
+    float fbmAmplitude = 0.02f;
+    float fbmFrequency = 4.0f;
+    int fbmOctaves = 2;
+    float groundDepth = 0.3f;
+    float groundMargin = 0.35f;
+    float groundRounding = 0.1f;
+    bool groundEnabled = false;
+    float groovePeriod = 0.4f;
+    float groovePhase = 0.1f;
+    float grooveDepthMax = 0.1f;
+    float grooveSmooth = 0.02f;
+    std::array<std::array<float, 2>, 3> grooveAngles{{
+        {0.6283185f, 0.0f},
+        {2.1991149f, 0.5654867f},
+        {-2.1467550f, 0.6911504f}
+    }};
+
+    // Stone carve.
+    float voroScale = 2.0f;
+    float cellJitter = 1.0f;
+    float grooveDepth = 0.08f;
+    float grooveK = 2.5f;
+    float seed = 0.0f;
+    bool flatTop = true;
+    float flatTopLo = 0.55f;
+    float flatTopHi = 0.85f;
+    float rimWidth = 0.35f;
+    float rimBulge = 1.0f;
+    float rimNotch = 0.04f;
+
+    Cliff3dShadingData shading;
+    // Stone shading extras: grass reflection fade on the walls, rim gradient
+    // strength on the flat top, top texture mix and tiling.
+    float grassFade = 0.12f;
+    float rimShade = 1.0f;
+    float topTexMix = 1.0f;
+    float topTexTiles = 1.0f;
+};
+
 struct AssetData {
     std::filesystem::path indexPath;
     std::string uuid;
@@ -127,6 +190,7 @@ struct AssetData {
     std::optional<Shape3dAssetData> shape3d;
     std::optional<Cliff3dAssetData> cliff3d;
     std::optional<Cyclopean3dAssetData> cyclopean3d;
+    std::optional<Stone3dAssetData> stone3d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -213,6 +277,50 @@ inline void from_json(const nlohmann::json& j, Cyclopean3dAssetData& d) {
     if (j.contains("wallSubdivV")) j.at("wallSubdivV").get_to(d.wallSubdivV);
 }
 
+inline void from_json(const nlohmann::json& j, Stone3dAssetData& d) {
+    if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("topTexture")) j.at("topTexture").get_to(d.topTexture);
+    if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+    if (j.contains("cellSize")) j.at("cellSize").get_to(d.cellSize);
+    if (j.contains("padding")) j.at("padding").get_to(d.padding);
+    if (j.contains("plateauHeight")) j.at("plateauHeight").get_to(d.plateauHeight);
+    if (j.contains("d2Scale")) j.at("d2Scale").get_to(d.d2Scale);
+    if (j.contains("blurRadiusCells")) j.at("blurRadiusCells").get_to(d.blurRadiusCells);
+    if (j.contains("blurPasses")) j.at("blurPasses").get_to(d.blurPasses);
+    if (j.contains("edgeRadius")) j.at("edgeRadius").get_to(d.edgeRadius);
+    if (j.contains("grooveMaskWidth")) j.at("grooveMaskWidth").get_to(d.grooveMaskWidth);
+    if (j.contains("grooveFadeK")) j.at("grooveFadeK").get_to(d.grooveFadeK);
+    if (j.contains("grooveRimFade")) j.at("grooveRimFade").get_to(d.grooveRimFade);
+    if (j.contains("fbmAmplitude")) j.at("fbmAmplitude").get_to(d.fbmAmplitude);
+    if (j.contains("fbmFrequency")) j.at("fbmFrequency").get_to(d.fbmFrequency);
+    if (j.contains("fbmOctaves")) j.at("fbmOctaves").get_to(d.fbmOctaves);
+    if (j.contains("groundDepth")) j.at("groundDepth").get_to(d.groundDepth);
+    if (j.contains("groundMargin")) j.at("groundMargin").get_to(d.groundMargin);
+    if (j.contains("groundRounding")) j.at("groundRounding").get_to(d.groundRounding);
+    if (j.contains("groundEnabled")) j.at("groundEnabled").get_to(d.groundEnabled);
+    if (j.contains("groovePeriod")) j.at("groovePeriod").get_to(d.groovePeriod);
+    if (j.contains("groovePhase")) j.at("groovePhase").get_to(d.groovePhase);
+    if (j.contains("grooveDepthMax")) j.at("grooveDepthMax").get_to(d.grooveDepthMax);
+    if (j.contains("grooveSmooth")) j.at("grooveSmooth").get_to(d.grooveSmooth);
+    if (j.contains("grooveAngles")) j.at("grooveAngles").get_to(d.grooveAngles);
+    if (j.contains("voroScale")) j.at("voroScale").get_to(d.voroScale);
+    if (j.contains("cellJitter")) j.at("cellJitter").get_to(d.cellJitter);
+    if (j.contains("grooveDepth")) j.at("grooveDepth").get_to(d.grooveDepth);
+    if (j.contains("grooveK")) j.at("grooveK").get_to(d.grooveK);
+    if (j.contains("seed")) j.at("seed").get_to(d.seed);
+    if (j.contains("flatTop")) j.at("flatTop").get_to(d.flatTop);
+    if (j.contains("flatTopLo")) j.at("flatTopLo").get_to(d.flatTopLo);
+    if (j.contains("flatTopHi")) j.at("flatTopHi").get_to(d.flatTopHi);
+    if (j.contains("rimWidth")) j.at("rimWidth").get_to(d.rimWidth);
+    if (j.contains("rimBulge")) j.at("rimBulge").get_to(d.rimBulge);
+    if (j.contains("rimNotch")) j.at("rimNotch").get_to(d.rimNotch);
+    if (j.contains("shading")) d.shading = j["shading"].get<Cliff3dShadingData>();
+    if (j.contains("grassFade")) j.at("grassFade").get_to(d.grassFade);
+    if (j.contains("rimShade")) j.at("rimShade").get_to(d.rimShade);
+    if (j.contains("topTexMix")) j.at("topTexMix").get_to(d.topTexMix);
+    if (j.contains("topTexTiles")) j.at("topTexTiles").get_to(d.topTexTiles);
+}
+
 inline void from_json(const nlohmann::json& j, AssetData& a) {
     j.at("uuid").get_to(a.uuid);
     // pivot may be omitted in older assets; default (0,0)
@@ -230,6 +338,7 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     else if (layerStr == "RaisedLandscape") a.layerType = LayerType::RaisedLandscape;
     else if (layerStr == "CliffLandscape") a.layerType = LayerType::CliffLandscape;
     else if (layerStr == "CyclopeanLandscape") a.layerType = LayerType::CyclopeanLandscape;
+    else if (layerStr == "StoneLandscape") a.layerType = LayerType::StoneLandscape;
 
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
@@ -249,6 +358,10 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("cyclopean3d") && !j["cyclopean3d"].is_null()) {
         a.cyclopean3d = j["cyclopean3d"].get<Cyclopean3dAssetData>();
+    }
+
+    if (j.contains("stone3d") && !j["stone3d"].is_null()) {
+        a.stone3d = j["stone3d"].get<Stone3dAssetData>();
     }
 }
 
@@ -284,11 +397,17 @@ struct AssetIndexEntry {
     bool cyclopean3d = false;
     Cyclopean3dAssetData cyclopean;
 
+    // Stone3D (stone-field) assets — voronoi-carved surface-nets plateau, no
+    // atlas; the full generator + shading parameter set rides along.
+    bool stone3d = false;
+    Stone3dAssetData stone;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
     bool isShape3d() const { return shape3d; }
     bool isCliff3d() const { return cliff3d; }
     bool isCyclopean3d() const { return cyclopean3d; }
+    bool isStone3d() const { return stone3d; }
 };
 
 struct AssetIndex {

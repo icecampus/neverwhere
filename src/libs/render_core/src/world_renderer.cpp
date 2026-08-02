@@ -1,6 +1,7 @@
 #include "render_core/world_renderer.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include "atlas_tile_types.h"
 
@@ -8,45 +9,12 @@ namespace render_core {
 
 namespace {
 
-// Contact-shadow field for the base landscape pass: every "on" cliff node
-// darkens itself and its 2-ring neighbourhood on the same vertex lattice the
-// underlay tiles sample at their quad corners. Strength comes from the
-// asset's shading.bottomDarken (the wall-foot blend), so the spill matches
-// the wall's own bottom darkening. Ring weights fall off quadratically.
-void buildCliffShadowField(
-    const std::vector<LandscapeTile>& cliffTiles,
-    const CliffRenderer& cliffRenderer,
-    CliffShadowField& out) {
-
-    out.nodeDarken.clear();
-    if (cliffTiles.empty()) return;
-
-    constexpr float kRingWeights[3] = {1.0f, 0.55f, 0.28f};
-    const auto add = [&out](const glm::ivec2& node, float value) {
-        float& slot = out.nodeDarken[nodeKey(node)];
-        slot = std::max(slot, value);
-    };
-
-    for (const LandscapeTile& t : cliffTiles) {
-        const CliffParams* params = cliffRenderer.findAsset(t.assetUuid);
-        if (!params) continue;
-        const float strength = params->shading.bottomDarken;
-        if (strength <= 0.0f) continue;
-
-        const auto mask = landscape_core::tileTypeToNodeMask(tileTypeFromAtlasIndex(t.tileIndex));
-        const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t.cell);
-        for (int i = 0; i < 4; ++i) {
-            if (!mask[i]) continue;
-            const glm::ivec2 n = corners[i];
-            for (int dy = -2; dy <= 2; ++dy) {
-                for (int dx = -2; dx <= 2; ++dx) {
-                    const int ring = std::max(std::abs(dx), std::abs(dy));
-                    add({n.x + dx, n.y + dy}, strength * kRingWeights[ring]);
-                }
-            }
-        }
-    }
-}
+// Contact AO field resolution (HighgroundWithEffects): 8 texels per cell —
+// the falloff is a fraction of a cell wide, and at 4 the bilinear ramp spans
+// under two texels and shows the chamfer transform's diagonal staircase —
+// plus a 4-cell margin (the AO reach) around the map bbox.
+constexpr int kAoTexelsPerCell = 8;
+constexpr int kAoMarginCells = 4;
 
 } // namespace
 
@@ -56,6 +24,31 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
     cyclopeanRenderer.init(depthFormat);
     spriteRenderer.init(depthFormat);
     overlayRenderer.init(depthFormat);
+
+    // Contact AO: the sampler + the 1x1 "nothing nearby" placeholder, so the
+    // ground binding is complete even before the first prepare().
+    sg_sampler_desc smp_desc = {};
+    smp_desc.min_filter = SG_FILTER_LINEAR;
+    smp_desc.mag_filter = SG_FILTER_LINEAR;
+    smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+    smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+    smp_desc.label = "world-ao-smp";
+    m_aoSampler = sg_make_sampler(&smp_desc);
+
+    const std::uint8_t far = 255;
+    sg_image_desc img_desc = {};
+    img_desc.width = 1;
+    img_desc.height = 1;
+    img_desc.pixel_format = SG_PIXELFORMAT_R8;
+    img_desc.data.mip_levels[0].ptr = &far;
+    img_desc.data.mip_levels[0].size = sizeof(far);
+    img_desc.label = "world-ao-placeholder";
+    m_aoImage = sg_make_image(&img_desc);
+    sg_view_desc view_desc = {};
+    view_desc.texture.image = m_aoImage;
+    m_aoView = sg_make_view(&view_desc);
+
+    m_stitchParams = buildStitchParams(stitch, m_aoField);
 }
 
 void WorldRenderer::shutdown() {
@@ -64,6 +57,19 @@ void WorldRenderer::shutdown() {
     cyclopeanRenderer.shutdown();
     cliffRenderer.shutdown();
     landscapeRenderer.shutdown();
+
+    if (m_aoView.id != SG_INVALID_ID) {
+        sg_destroy_view(m_aoView);
+        m_aoView = {};
+    }
+    if (m_aoImage.id != SG_INVALID_ID) {
+        sg_destroy_image(m_aoImage);
+        m_aoImage = {};
+    }
+    if (m_aoSampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(m_aoSampler);
+        m_aoSampler = {};
+    }
 }
 
 void WorldRenderer::ensureLandscapeAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows) {
@@ -82,8 +88,104 @@ void WorldRenderer::ensureCyclopeanAsset(const std::string& assetUuid, const Cyc
     cyclopeanRenderer.ensureCyclopeanAsset(assetUuid, params);
 }
 
+void WorldRenderer::ensureStoneAsset(const std::string& assetUuid, const CliffParams& params) {
+    // Stone3d shares the cliff renderer (stone field + stone shading extras
+    // ride inside CliffParams).
+    cliffRenderer.ensureStoneAsset(assetUuid, params);
+}
+
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
     spriteRenderer.ensureImage(assetUuid, imagePath, widthCells, pivot);
+}
+
+void WorldRenderer::prepare(const WorldFrame& frame, double /*nowSec*/) {
+    // Union node footprint of the highground layers. Only the layers that
+    // actually produce height cast contact AO, and only tiles of a registered
+    // asset (a tile without geometry casts nothing). Tiles carry the same
+    // vertex-node encoding the renderers decode (atlas_tile_types.h).
+    std::unordered_set<std::uint64_t> onNodes;
+    int maxX = -1;
+    int maxY = -1;
+    const auto addTiles = [&](const std::vector<LandscapeTile>& tiles, const auto& assetKnown) {
+        for (const LandscapeTile& t : tiles) {
+            if (!assetKnown(t.assetUuid)) continue;
+            const auto mask = landscape_core::tileTypeToNodeMask(tileTypeFromAtlasIndex(t.tileIndex));
+            const auto corners = topology_core::DiamondIsometry::cellCornerNodes(t.cell);
+            for (int i = 0; i < 4; ++i) {
+                if (!mask[i]) continue;
+                onNodes.insert(nodeKey(corners[i]));
+                maxX = std::max(maxX, corners[i].x);
+                maxY = std::max(maxY, corners[i].y);
+            }
+        }
+    };
+    const auto cliffKnown = [this](const std::string& uuid) {
+        return cliffRenderer.findAsset(uuid) != nullptr;
+    };
+    addTiles(frame.cliffTiles, cliffKnown);
+    addTiles(frame.stoneTiles, cliffKnown);
+    addTiles(frame.cyclopeanTiles, [this](const std::string& uuid) {
+        return cyclopeanRenderer.hasAsset(uuid);
+    });
+
+    // Content key: the sorted on-node set — the same content hashes
+    // identically every frame, an edit rehashes and rebuilds the field.
+    std::vector<std::uint64_t> sorted(onNodes.begin(), onNodes.end());
+    std::sort(sorted.begin(), sorted.end());
+    std::uint64_t key = 1469598103934665603ULL;
+    for (const std::uint64_t k : sorted) {
+        key ^= k;
+        key *= 1099511628211ULL;
+    }
+
+    if (key != m_aoKey) {
+        m_aoKey = key;
+
+        m_aoField = ContactAoField{};
+        if (!onNodes.empty()) {
+            AoFootprint fp;
+            fp.nodesX = maxX + 1;
+            fp.nodesY = maxY + 1;
+            fp.nodeOn = [&onNodes](int x, int y) {
+                return onNodes.find(nodeKey({x, y})) != onNodes.end();
+            };
+            buildContactAoField(&fp, 1, kAoTexelsPerCell, kAoMarginCells, m_aoField);
+        }
+
+        // (Re)upload the field texture; an empty field falls back to the 1x1
+        // "nothing nearby" placeholder (any uv clamps to "far").
+        if (m_aoView.id != SG_INVALID_ID) {
+            sg_destroy_view(m_aoView);
+            m_aoView = {};
+        }
+        if (m_aoImage.id != SG_INVALID_ID) {
+            sg_destroy_image(m_aoImage);
+            m_aoImage = {};
+        }
+        const std::uint8_t far = 255;
+        sg_image_desc img_desc = {};
+        img_desc.pixel_format = SG_PIXELFORMAT_R8;
+        if (m_aoField.empty()) {
+            img_desc.width = 1;
+            img_desc.height = 1;
+            img_desc.data.mip_levels[0].ptr = &far;
+            img_desc.data.mip_levels[0].size = sizeof(far);
+            img_desc.label = "world-ao-placeholder";
+        } else {
+            img_desc.width = m_aoField.width;
+            img_desc.height = m_aoField.height;
+            img_desc.data.mip_levels[0].ptr = m_aoField.texels.data();
+            img_desc.data.mip_levels[0].size = m_aoField.texels.size();
+            img_desc.label = "world-ao-field";
+        }
+        m_aoImage = sg_make_image(&img_desc);
+        sg_view_desc view_desc = {};
+        view_desc.texture.image = m_aoImage;
+        m_aoView = sg_make_view(&view_desc);
+    }
+
+    // The sun/tone/AO block is cheap — settings edits apply every frame.
+    m_stitchParams = buildStitchParams(stitch, m_aoField);
 }
 
 void WorldRenderer::appendCellDiamond(std::vector<LineSegment>& lines, const glm::vec2& center, const glm::vec2& halfSize, const glm::vec4& color) const {
@@ -107,11 +209,13 @@ void WorldRenderer::render(
     int viewHeight,
     double nowSec) {
 
-    // Cliff contact shadow on the underlay (built even when empty — the pass
-    // checks emptiness and skips the per-corner lookup).
-    CliffShadowField cliffShadow;
-    buildCliffShadowField(frame.cliffTiles, cliffRenderer, cliffShadow);
-    landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight, &cliffShadow);
+    // Flat ground: stitched with the highground — shared sun/tone block plus
+    // the contact-AO field texture from prepare().
+    GroundStitchContext groundStitch;
+    groundStitch.aoView = m_aoView;
+    groundStitch.aoSampler = m_aoSampler;
+    groundStitch.params = m_stitchParams;
+    landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight, groundStitch);
 
     // Grid overlay: above the water and the flat ground, but UNDER the 3D
     // world (raised walls / cliffs / sprites overdraw it — no depth write
@@ -143,7 +247,22 @@ void WorldRenderer::render(
     overlayRenderer.render(scratchLines, viewWidth, viewHeight);
 
     landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
-    cliffRenderer.render(frame.cliffTiles, iso, camera, viewWidth, viewHeight, nowSec);
+
+    // Cliff/stone passes: shared sun via the stitch core block + the seam
+    // materials. The wall-foot AO shares the ground's AO switch. Both tile
+    // sets go through ONE render call: they share the pipeline, the cache
+    // machinery and its per-frame scratch buffers — two calls in one frame
+    // would update the prototype-silhouette buffer twice, and sokol allows
+    // only one sg_update_buffer per buffer per frame.
+    CliffStitchContext cliffStitch;
+    cliffStitch.params = m_stitchParams;
+    cliffStitch.seam = seam;
+    cliffStitch.aoWallFade = stitch.aoEnabled ? stitch.aoWallFade : 0.0f;
+    scratchCliffStoneTiles.clear();
+    scratchCliffStoneTiles.reserve(frame.cliffTiles.size() + frame.stoneTiles.size());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.cliffTiles.begin(), frame.cliffTiles.end());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.stoneTiles.begin(), frame.stoneTiles.end());
+    cliffRenderer.render(scratchCliffStoneTiles, iso, camera, viewWidth, viewHeight, nowSec, cliffStitch);
     cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
     spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
 

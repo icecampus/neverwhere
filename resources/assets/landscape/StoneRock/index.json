@@ -1,0 +1,98 @@
+{
+    "stone3d": {
+        "blurPasses": 2,
+        "blurRadiusCells": 3,
+        "cellJitter": 1.0,
+        "cellSize": 0.04500000178813934,
+        "d2Scale": 0.5,
+        "edgeRadius": 0.03999999910593033,
+        "fbmAmplitude": 0.019999999552965164,
+        "fbmFrequency": 4.0,
+        "fbmOctaves": 2,
+        "flatTop": true,
+        "flatTopHi": 0.8500000238418579,
+        "flatTopLo": 0.550000011920929,
+        "grassFade": 0.11999999731779099,
+        "grooveAngles": [
+            [
+                0.6283184885978699,
+                0.0
+            ],
+            [
+                2.1991147994995117,
+                0.56548672914505
+            ],
+            [
+                -2.1467549800872803,
+                0.691150426864624
+            ]
+        ],
+        "grooveDepth": 0.07999999821186066,
+        "grooveDepthMax": 0.10000000149011612,
+        "grooveFadeK": 1.0,
+        "grooveK": 2.5,
+        "grooveMaskWidth": 0.25,
+        "groovePeriod": 0.4000000059604645,
+        "groovePhase": 0.10000000149011612,
+        "grooveRimFade": 0.11999999731779099,
+        "grooveSmooth": 0.019999999552965164,
+        "groundDepth": 0.30000001192092896,
+        "groundEnabled": false,
+        "groundMargin": 0.3499999940395355,
+        "groundRounding": 0.10000000149011612,
+        "padding": 0.5,
+        "plateauHeight": 1.0,
+        "raisedHeight": 96.0,
+        "rimBulge": 1.0,
+        "rimNotch": 0.03999999910593033,
+        "rimShade": 1.0,
+        "rimWidth": 0.3499999940395355,
+        "seed": 0.0,
+        "shading": {
+            "ambient": 0.3499999940395355,
+            "backLight": 0.10000000149011612,
+            "bottomBand": 0.35,
+            "bottomDarken": 0.55,
+            "darkColor": [
+                0.1599999964237213,
+                0.1599999964237213,
+                0.18000000715255737
+            ],
+            "diffuse": 0.75,
+            "gamma": 0.8500000238418579,
+            "goldColor": [
+                0.550000011920929,
+                0.5299999713897705,
+                0.47999998927116394
+            ],
+            "grassA": [
+                0.4000000059604645,
+                0.6200000047683716,
+                0.3499999940395355
+            ],
+            "grassB": [
+                0.6000000238418579,
+                0.6499999761581421,
+                0.4000000059604645
+            ],
+            "lightAzimuth": 2.2300000190734863,
+            "lightElevation": 0.8500000238418579,
+            "specPower": 24.0,
+            "specStrength": 0.5,
+            "strataStrength": 0.0,
+            "texScale": 1.0,
+            "veinThreshold": 0.800000011920929
+        },
+        "thumbnail": "thumbnail.png",
+        "topTexture": "../../../textures/grass.png",
+        "topTexMix": 1.0,
+        "topTexTiles": 1.0,
+        "voroScale": 2.0
+    },
+    "layerType": "StoneLandscape",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "uuid": "3b7e2a9d-6f4c-4d8e-a1b5-9c0e2f7d5a41"
+}
