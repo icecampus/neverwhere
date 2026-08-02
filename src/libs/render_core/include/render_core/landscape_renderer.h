@@ -63,6 +63,12 @@ public:
     // shade; when empty, walls keep the plain baked-color look.
     void ensureRaisedAtlas(const std::string& assetUuid, const std::filesystem::path& atlasPath, int cols, int rows, const RaisedParams& params, const std::filesystem::path& topTexturePath = {}, const std::filesystem::path& wallTexturePath = {});
 
+    // Read access for the stitch footprint: only tiles of a registered raised
+    // asset produce height and cast contact AO.
+    bool hasRaisedAtlas(const std::string& assetUuid) const {
+        return raisedAtlases.find(assetUuid) != raisedAtlases.end();
+    }
+
     // Flat ground pass. The pass is stitch-aware: every fragment sits at one
     // constant depth behind the whole scene (tiles keep resolving against
     // each other by painter order, the 3D passes always win) and shades with

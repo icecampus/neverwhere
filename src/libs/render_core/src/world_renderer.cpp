@@ -100,9 +100,10 @@ void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::f
 
 void WorldRenderer::prepare(const WorldFrame& frame, double /*nowSec*/) {
     // Union node footprint of the highground layers. Only the layers that
-    // actually produce height cast contact AO, and only tiles of a registered
-    // asset (a tile without geometry casts nothing). Tiles carry the same
-    // vertex-node encoding the renderers decode (atlas_tile_types.h).
+    // actually produce height cast contact AO (raised 3D land included), and
+    // only tiles of a registered asset (a tile without geometry casts
+    // nothing). Tiles carry the same vertex-node encoding the renderers
+    // decode (atlas_tile_types.h).
     std::unordered_set<std::uint64_t> onNodes;
     int maxX = -1;
     int maxY = -1;
@@ -126,6 +127,9 @@ void WorldRenderer::prepare(const WorldFrame& frame, double /*nowSec*/) {
     addTiles(frame.stoneTiles, cliffKnown);
     addTiles(frame.cyclopeanTiles, [this](const std::string& uuid) {
         return cyclopeanRenderer.hasAsset(uuid);
+    });
+    addTiles(frame.raisedTiles, [this](const std::string& uuid) {
+        return landscapeRenderer.hasRaisedAtlas(uuid);
     });
 
     // Content key: the sorted on-node set — the same content hashes
