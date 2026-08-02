@@ -46,11 +46,9 @@ void main() {
     if (tex_params.x > 0.5) {
         // World-space tiling: the texture flows continuously across cells
         // (there are no per-tile cuts to mismatch), the atlas tile only
-        // clips the shape and keeps its edge darkening (fill 210/255,
-        // edge 120/255 -> normalize by 255/210).
+        // clips the shape — no per-cell edge outlines, the terrain reads
+        // as one continuous surface.
         rgb = texture(tiling_tex, v_world * tex_params.y).rgb;
-        float shade = clamp(mask.r * 1.2143, 0.0, 1.0);
-        rgb *= mix(1.0, shade, tex_params.z);
     }
     frag_color = vec4(rgb, mask.a);
 }
@@ -128,8 +126,6 @@ float4 main(PSIn inp): SV_Target {
     float3 rgb = mask.rgb;
     if (tex_params.x > 0.5) {
         rgb = tiling_tex.Sample(tiling_smp, inp.world * tex_params.y).rgb;
-        float shade = clamp(mask.r * 1.2143, 0.0, 1.0);
-        rgb *= lerp(1.0, shade, tex_params.z);
     }
     return float4(rgb, mask.a);
 }
@@ -235,8 +231,6 @@ fragment float4 _main(PSIn in [[stage_in]],
     float3 rgb = mask.rgb;
     if (params.tex_params.x > 0.5) {
         rgb = tiling_tex.sample(tiling_smp, in.world * params.tex_params.y).rgb;
-        float shade = clamp(mask.r * 1.2143, 0.0, 1.0);
-        rgb *= mix(1.0, shade, params.tex_params.z);
     }
     return float4(rgb, mask.a);
 }
@@ -1164,7 +1158,6 @@ void AtlasRenderer::render(
         AtlasKind atlas = AtlasKind::Grass;
         int tilingTex = -1;
         float tilingScale = 0.0f; // repeats per field unit
-        float edgeShade = 1.0f;
     };
     std::vector<TexRange> flatRanges;
     std::vector<TexVertex> texVerts;
@@ -1186,7 +1179,6 @@ void AtlasRenderer::render(
             m_tilingSlots[layer.tilingTex].view.id != SG_INVALID_ID) {
             range.tilingTex = layer.tilingTex;
             range.tilingScale = layer.tilingRepeats / std::max(iso.dims.cellWidth, 1.0f);
-            range.edgeShade = layer.tilingEdgeShade;
         }
         for (const auto& [z, cell] : drawOrder) {
             (void)z;
@@ -1258,7 +1250,6 @@ void AtlasRenderer::render(
         TexFsParams texFs{};
         texFs.values[0] = range.tilingTex >= 0 ? 1.0f : 0.0f;
         texFs.values[1] = range.tilingScale;
-        texFs.values[2] = range.edgeShade;
 
         sg_apply_pipeline(m_texPip);
         sg_apply_bindings(&bind);

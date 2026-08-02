@@ -68,10 +68,9 @@ struct PaintLayerView {
     // Flat tiles only: draw the layer with a tiling texture instead of the
     // atlas color. The texture is sampled continuously in world (field)
     // coordinates — no per-tile cuts, so any tiling texture stays seamless —
-    // while the atlas tile keeps working as the alpha mask (+ edge shading).
+    // while the atlas tile keeps working as the alpha mask only.
     int tilingTex = -1;          // slot from loadTilingTextureFromFile, -1 = off
     float tilingRepeats = 1.0f;  // texture repeats per cell width
-    float tilingEdgeShade = 1.0f; // keep the mask's edge darkening (0 = flat)
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;
@@ -115,7 +114,7 @@ public:
 
     // FS uniforms of the flat-tile pass (16 bytes): x = color mode
     // (0 = atlas color, 1 = world-space tiling texture), y = tiling scale
-    // (repeats per field unit), z = mask edge-shading strength, w = unused.
+    // (repeats per field unit), z/w = unused.
     struct TexFsParams {
         float values[4];
     };

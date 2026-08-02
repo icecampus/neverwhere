@@ -131,12 +131,11 @@ PaintLayer g_layers[kLayerCount] = {
 };
 int g_activeLayer = 0;
 // Texture 2D layer: tiling textures found in resources/textures (renderer
-// slot per file), the current pick, tiling density and edge shading.
+// slot per file), the current pick and tiling density.
 std::vector<std::string> g_texNames;
 std::vector<int> g_texSlots;
 int g_texChoice = -1;
 float g_texTiling = 1.0f;
-bool g_texEdgeShade = true;
 std::optional<float> g_cliTexTiling;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
@@ -466,8 +465,8 @@ void drawImGui(int w, int h) {
     if (g_layers[g_activeLayer].textured) {
         // Flat tiles drawn with a tiling texture sampled in world (field)
         // coordinates: the texture flows continuously across cells, so any
-        // tiling image stays seamless; the yellow mask clips the shape and
-        // optionally keeps its edge darkening.
+        // tiling image stays seamless; the yellow mask only clips the shape
+        // (alpha) — no per-cell edge outlines, one continuous surface.
         if (g_texNames.empty()) {
             ImGui::TextDisabled("No textures found in resources/textures");
         } else {
@@ -485,7 +484,6 @@ void drawImGui(int w, int h) {
                 ImGui::EndCombo();
             }
             ImGui::SliderFloat("Tex tiling", &g_texTiling, 0.25f, 8.0f, "%.2f rep/cell");
-            ImGui::Checkbox("Edge shading", &g_texEdgeShade);
         }
     }
     if (g_layers[g_activeLayer].cliff) {
@@ -716,7 +714,6 @@ void frame() {
             g_texChoice < static_cast<int>(g_texSlots.size())) {
             views[i].tilingTex = g_texSlots[g_texChoice];
             views[i].tilingRepeats = g_texTiling;
-            views[i].tilingEdgeShade = g_texEdgeShade ? 1.0f : 0.0f;
         }
     }
 
