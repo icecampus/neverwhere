@@ -72,6 +72,16 @@ macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`
   - Например, Sokol подключён через overlay, чтобы держать `util/sokol_imgui.h` совместимым с актуальным Dear ImGui из vcpkg.
 - При добавлении зависимости: обновить `vcpkg.json` → `find_package(...)` → прилинковать импортированный target в `LIBS` у соответствующего `nw_add_...`.
 
+#### Binary cache (сетевой)
+
+Все configure-пресеты в `CMakePresets.json` читают зависимости из общего HTTP binary cache (`https://cache.blackbox9.cc:9443`, readwrite) — чистая конфигурация после wipe `_intermediate_64` восстанавливает весь closure за ~2 минуты вместо полной пересборки. Авторизация **не хранится в репозитории**: пресет подставляет `$env{NEVERWHERE_VCPKG_CACHE_AUTH}`, поэтому на каждой машине нужен экспорт (shell profile / CI secret):
+
+```bash
+export NEVERWHERE_VCPKG_CACHE_AUTH="Authorization: Basic <base64(user:pass)>"
+```
+
+Переменная не установлена — не страшно: чтение из кэша даст 401 → vcpkg считает это промахом и собирает локально (push при этом тоже не пройдёт). Подстановка `$env{}` работает только при запуске configure через пресет (`build_mac.sh`/`build_linux.sh`/`cmake --preset ...`); ZERO_CHECK-переконфигурация изнутри IDE берёт env процесса сборки.
+
 ### Индексация для IDE/clangd (Serena MCP, clangd LSP)
 
 Основной флоу — Visual Studio generator, который **не** умеет эмиттить `compile_commands.json` (это ограничение CMake, не баг). Для Serena/clangd есть отдельный Ninja-preset, который только конфигурирует (не собирает).

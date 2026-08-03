@@ -9,7 +9,7 @@
       "generator": "Visual Studio 17 2022",
       "architecture": { "value": "x64", "strategy": "set" },
       "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+        "VCPKG_BINARY_SOURCES": "clear;http,https://cache.blackbox9.cc:9443/{name}/{version}/{triplet}/{sha},readwrite,$env{NEVERWHERE_VCPKG_CACHE_AUTH}"
       },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
@@ -29,7 +29,7 @@
       "binaryDir": "${sourceDir}/_b-em",
       "generator": "Ninja Multi-Config",
       "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+        "VCPKG_BINARY_SOURCES": "clear;http,https://cache.blackbox9.cc:9443/{name}/{version}/{triplet}/{sha},readwrite,$env{NEVERWHERE_VCPKG_CACHE_AUTH}"
       },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
@@ -43,7 +43,7 @@
       "binaryDir": "${sourceDir}/_intermediate_ide",
       "generator": "Ninja",
       "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+        "VCPKG_BINARY_SOURCES": "clear;http,https://cache.blackbox9.cc:9443/{name}/{version}/{triplet}/{sha},readwrite,$env{NEVERWHERE_VCPKG_CACHE_AUTH}"
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -60,7 +60,7 @@
       "binaryDir": "${sourceDir}/_intermediate_64",
       "generator": "Xcode",
       "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+        "VCPKG_BINARY_SOURCES": "clear;http,https://cache.blackbox9.cc:9443/{name}/{version}/{triplet}/{sha},readwrite,$env{NEVERWHERE_VCPKG_CACHE_AUTH}"
       },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
@@ -74,7 +74,7 @@
       "binaryDir": "${sourceDir}/_intermediate_ide",
       "generator": "Ninja",
       "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+        "VCPKG_BINARY_SOURCES": "clear;http,https://cache.blackbox9.cc:9443/{name}/{version}/{triplet}/{sha},readwrite,$env{NEVERWHERE_VCPKG_CACHE_AUTH}"
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -90,7 +90,7 @@
       "binaryDir": "${sourceDir}/_int_linux",
       "generator": "Ninja",
       "environment": {
-        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+        "VCPKG_BINARY_SOURCES": "clear;http,https://cache.blackbox9.cc:9443/{name}/{version}/{triplet}/{sha},readwrite,$env{NEVERWHERE_VCPKG_CACHE_AUTH}"
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
