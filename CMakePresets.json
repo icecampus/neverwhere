@@ -8,6 +8,9 @@
       "binaryDir": "${sourceDir}/_intermediate_64",
       "generator": "Visual Studio 17 2022",
       "architecture": { "value": "x64", "strategy": "set" },
+      "environment": {
+        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+      },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
@@ -25,6 +28,9 @@
       "displayName": "Emscripten",
       "binaryDir": "${sourceDir}/_b-em",
       "generator": "Ninja Multi-Config",
+      "environment": {
+        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+      },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/toolchain/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
@@ -36,6 +42,9 @@
       "displayName": "Ninja (IDE indexing only, emits compile_commands.json)",
       "binaryDir": "${sourceDir}/_intermediate_ide",
       "generator": "Ninja",
+      "environment": {
+        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
@@ -50,6 +59,9 @@
       "displayName": "macOS (Xcode, arm64-osx)",
       "binaryDir": "${sourceDir}/_intermediate_64",
       "generator": "Xcode",
+      "environment": {
+        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+      },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "arm64-osx",
@@ -61,6 +73,9 @@
       "displayName": "macOS Ninja (IDE indexing only, emits compile_commands.json)",
       "binaryDir": "${sourceDir}/_intermediate_ide",
       "generator": "Ninja",
+      "environment": {
+        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
@@ -74,6 +89,9 @@
       "displayName": "Linux (Ninja, x64-linux)",
       "binaryDir": "${sourceDir}/_int_linux",
       "generator": "Ninja",
+      "environment": {
+        "VCPKG_BINARY_SOURCES": "clear;http,http://192.168.1.201:8088/{name}/{version}/{triplet}/{sha},readwrite"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/vcpkg/scripts/buildsystems/vcpkg.cmake",
