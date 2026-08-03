@@ -80,7 +80,7 @@ macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`
 export NEVERWHERE_VCPKG_CACHE_AUTH="Authorization: Basic <base64(user:pass)>"
 ```
 
-Переменная не установлена — не страшно: чтение из кэша даст 401 → vcpkg считает это промахом и собирает локально (push при этом тоже не пройдёт). Подстановка `$env{}` работает только при запуске configure через пресет (`build_mac.sh`/`build_linux.sh`/`cmake --preset ...`); ZERO_CHECK-переконфигурация изнутри IDE берёт env процесса сборки.
+Переменная не установлена — не страшно: конфигурация не падает; чтение из кэша работает и без авторизации (GET на сервере открыт, проверено 2026-08-03 из LAN — см. `docs/VCPKG_CACHE.md`), но push не пройдёт: машина сможет потреблять кеш, но не пополнять. Подстановка `$env{}` работает только при запуске configure через пресет (`build_mac.sh`/`build_linux.sh`/`cmake --preset ...`); ZERO_CHECK-переконфигурация изнутри IDE берёт env процесса сборки.
 
 ### Индексация для IDE/clangd (Serena MCP, clangd LSP)
 

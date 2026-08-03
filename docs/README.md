@@ -10,6 +10,7 @@
 | [VERTEX_CENTRIC_LANDSCAPE.md](./VERTEX_CENTRIC_LANDSCAPE.md) | Vertex-centric landscape: data model, 16-tile masks, pipeline, code map |
 | [HIGHGROUND_RESEARCH.md](./HIGHGROUND_RESEARCH.md) | Highground generation research: WC3/SC2/OpenRCT2 cliffs, marching squares, terraces, 2.5D sorting |
 | [SDF_TO_MESH_PLAYBOOK.md](./SDF_TO_MESH_PLAYBOOK.md) | Playbook: porting a shadertoy SDF demo into engine mesh geometry (C++ twin, surface nets, procedural material, pitfalls) |
+| [VCPKG_CACHE.md](./VCPKG_CACHE.md) | Shared vcpkg binary cache on BlackBox9: wired into CMakePresets, per-machine auth via NEVERWHERE_VCPKG_CACHE_AUTH, seeding new triplets |
 
 ## Reference library
 
