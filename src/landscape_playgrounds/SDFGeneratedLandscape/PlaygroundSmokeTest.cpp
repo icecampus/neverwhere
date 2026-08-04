@@ -90,6 +90,59 @@ bool runTileShapeSmokeTest() {
         return false;
     }
 
+    // --- Tagged painting (multi-texture layer): per-node tags, displacement,
+    // idempotence, majority cell resolution. Cell (2,2) corners in vote
+    // order: Left (2,3), Up (2,2), Right (3,2), Down (3,3).
+    {
+        LandBrush b;
+        b.reset(8, 8);
+        const std::uint8_t tagA = 1; // raw tags (tiling slot + 1 by convention)
+        const std::uint8_t tagB = 3;
+
+        b.setNode({2, 2}, true, tagA); // Up
+        if (b.cellTagAt({2, 2}) != tagA || b.nodeTag({2, 2}) != tagA) {
+            spdlog::error("TEST FAIL TileShape: single tagged node, cell tag {}",
+                b.cellTagAt({2, 2}));
+            return false;
+        }
+
+        b.setNode({3, 3}, true, tagB); // Down: 1xA vs 1xB tie -> corner order wins (Up)
+        if (b.cellTagAt({2, 2}) != tagA) {
+            spdlog::error("TEST FAIL TileShape: tag tie must resolve in corner order, got {}",
+                b.cellTagAt({2, 2}));
+            return false;
+        }
+
+        b.setNode({2, 3}, true, tagB); // Left: 2xB vs 1xA -> majority B
+        if (b.cellTagAt({2, 2}) != tagB) {
+            spdlog::error("TEST FAIL TileShape: majority tag, got {}", b.cellTagAt({2, 2}));
+            return false;
+        }
+
+        // Repainting an on-node with another tag displaces it (a real change,
+        // version bumps) even though the on-state stays the same.
+        const std::uint64_t v0 = b.version();
+        if (!b.setNode({2, 3}, true, tagA) || b.cellTagAt({2, 2}) != tagA || b.version() <= v0) {
+            spdlog::error("TEST FAIL TileShape: tag displacement on a painted node");
+            return false;
+        }
+        // Same state + same tag is a no-op.
+        if (b.setNode({2, 3}, true, tagA)) {
+            spdlog::error("TEST FAIL TileShape: idempotent tagged paint reported a change");
+            return false;
+        }
+        // Erasing clears the tag; a plain untagged paint resets it to 0.
+        if (!b.setNode({3, 3}, false) || b.nodeTag({3, 3}) != 0) {
+            spdlog::error("TEST FAIL TileShape: erase must clear the node tag");
+            return false;
+        }
+        b.setNode({3, 3}, true, tagB);
+        if (!b.setNode({3, 3}, true) || b.nodeTag({3, 3}) != 0) {
+            spdlog::error("TEST FAIL TileShape: untagged repaint must reset the tag");
+            return false;
+        }
+    }
+
     const FlatAtlasImage flat = generateFlatAtlas();
     if (flat.width != 256 || flat.height != 384 || flat.rgba.size() != 256u * 384u * 4u) {
         spdlog::error("TEST FAIL TileShape: flat atlas size {}x{} (bytes {})",
@@ -225,6 +278,6 @@ bool runTileShapeSmokeTest() {
         }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + flat atlas generator + cliff/stone field pipelines");
+    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone field pipelines");
     return true;
 }

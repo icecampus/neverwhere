@@ -8,6 +8,7 @@ void LandBrush::reset(int width, int height) {
     m_width = std::clamp(width, 4, 96);
     m_height = std::clamp(height, 4, 96);
     m_nodes.assign(static_cast<std::size_t>(m_width + 1) * static_cast<std::size_t>(m_height + 1), 0);
+    m_tags.assign(m_nodes.size(), 0);
     m_cellTypes.assign(
         static_cast<std::size_t>(m_width) * static_cast<std::size_t>(m_height),
         landscape_core::LandscapeTileType::Unknown);
@@ -16,6 +17,7 @@ void LandBrush::reset(int width, int height) {
 
 void LandBrush::clear() {
     std::fill(m_nodes.begin(), m_nodes.end(), 0);
+    std::fill(m_tags.begin(), m_tags.end(), 0);
     refreshAllCells();
     ++m_version;
 }
@@ -29,22 +31,37 @@ bool LandBrush::nodeIsOn(glm::ivec2 node) const {
 }
 
 bool LandBrush::setNode(glm::ivec2 node, bool on) {
+    return setNode(node, on, 0);
+}
+
+bool LandBrush::setNode(glm::ivec2 node, bool on, std::uint8_t tag) {
     if (!isNodeEditable(node)) {
         return false;
     }
 
-    std::uint8_t& current = m_nodes[static_cast<std::size_t>(nodeIndex(node))];
+    const std::size_t index = static_cast<std::size_t>(nodeIndex(node));
+    std::uint8_t& current = m_nodes[index];
+    std::uint8_t& currentTag = m_tags[index];
     const std::uint8_t next = on ? 1 : 0;
-    if (current == next) {
+    const std::uint8_t nextTag = on ? tag : 0;
+    if (current == next && currentTag == nextTag) {
         return false;
     }
 
     current = next;
+    currentTag = nextTag;
     for (const glm::ivec2 cell : affectedCells(node)) {
         refreshCell(cell);
     }
     ++m_version;
     return true;
+}
+
+std::uint8_t LandBrush::nodeTag(glm::ivec2 node) const {
+    if (!nodeInBounds(node)) {
+        return 0;
+    }
+    return m_tags[static_cast<std::size_t>(nodeIndex(node))];
 }
 
 landscape_core::LandscapeTileType LandBrush::cellTypeAt(glm::ivec2 cell) const {
@@ -70,6 +87,35 @@ std::array<bool, 4> LandBrush::nodeMaskAt(glm::ivec2 cell) const {
 
 std::array<glm::ivec2, 4> LandBrush::affectedCells(glm::ivec2 node) const {
     return topology_core::DiamondIsometry::nodeNeighbourCells(node);
+}
+
+int LandBrush::cellTagAt(glm::ivec2 cell) const {
+    if (!cellInBounds(cell)) {
+        return 0;
+    }
+
+    const auto corners = topology_core::DiamondIsometry::cellCornerNodes(cell);
+    // Majority vote among the on-nodes; strictly-greater keeps the first
+    // candidate, so ties resolve in corner order (Left, Up, Right, Down).
+    int bestCount = 0;
+    std::uint8_t bestTag = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!nodeIsOn(corners[i])) {
+            continue;
+        }
+        const std::uint8_t tag = nodeTag(corners[i]);
+        int count = 0;
+        for (int j = 0; j < 4; ++j) {
+            if (nodeIsOn(corners[j]) && nodeTag(corners[j]) == tag) {
+                ++count;
+            }
+        }
+        if (count > bestCount) {
+            bestCount = count;
+            bestTag = tag;
+        }
+    }
+    return bestTag;
 }
 
 int LandBrush::atlasIndexByType(landscape_core::LandscapeTileType type) {

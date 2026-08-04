@@ -20,10 +20,19 @@ public:
     bool isNodeEditable(glm::ivec2 node) const;
     bool nodeIsOn(glm::ivec2 node) const;
     bool setNode(glm::ivec2 node, bool on);
+    // Tagged paint: the node carries an opaque payload (multi-texture layer:
+    // tiling slot + 1, 0 = untagged). Repainting an on-node with another tag
+    // displaces it (counts as a change); erasing clears the tag.
+    bool setNode(glm::ivec2 node, bool on, std::uint8_t tag);
+    std::uint8_t nodeTag(glm::ivec2 node) const;
 
     landscape_core::LandscapeTileType cellTypeAt(glm::ivec2 cell) const;
     std::array<bool, 4> nodeMaskAt(glm::ivec2 cell) const;
     std::array<glm::ivec2, 4> affectedCells(glm::ivec2 node) const;
+
+    // Majority raw tag among the cell's on-nodes (ties broken in corner order
+    // Left/Up/Right/Down); 0 when no on-node carries a tag.
+    int cellTagAt(glm::ivec2 cell) const;
 
     // Atlas tile index matching SliceAsset::subTileIndexByType (Grass 4x6 atlas).
     static int atlasIndexByType(landscape_core::LandscapeTileType type);
@@ -47,5 +56,6 @@ private:
     int m_height = 0;
     std::uint64_t m_version = 0;
     std::vector<std::uint8_t> m_nodes;
+    std::vector<std::uint8_t> m_tags; // parallel to m_nodes, meaningful where on
     std::vector<landscape_core::LandscapeTileType> m_cellTypes;
 };

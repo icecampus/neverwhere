@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <map>
 
 #include <spdlog/spdlog.h>
 
@@ -1169,6 +1170,43 @@ void AtlasRenderer::render(
         // silhouette instantly while the field mesh rebuilds (debounced), and
         // the finished mesh covers them by depth afterwards.
         if (!layer.brush) {
+            continue;
+        }
+        if (layer.multiTexture) {
+            // Multi-texture layer: group surface cells by their node tag
+            // (raw tag = tiling slot + 1, so 0 maps to -1 = untagged,
+            // mask-only fallback), one draw range per slot. Cells never
+            // overlap, so the range order inside the layer is irrelevant;
+            // the painter z-order is kept within each range.
+            std::map<int, std::vector<glm::ivec2>> cellsBySlot;
+            for (const auto& [z, cell] : drawOrder) {
+                (void)z;
+                const auto type = layer.brush->cellTypeAt(cell);
+                if (!landscape_core::tileTypeHasSurface(type)) {
+                    continue;
+                }
+                cellsBySlot[layer.brush->cellTagAt(cell) - 1].push_back(cell);
+            }
+            for (const auto& [slot, cells] : cellsBySlot) {
+                TexRange range;
+                range.base = static_cast<int>(texVerts.size());
+                range.atlas = layer.atlas;
+                if (slot >= 0 && slot < static_cast<int>(m_tilingSlots.size()) &&
+                    m_tilingSlots[slot].view.id != SG_INVALID_ID) {
+                    range.tilingTex = slot;
+                    range.tilingScale = layer.tilingRepeats / std::max(iso.dims.cellWidth, 1.0f);
+                }
+                for (const glm::ivec2 cell : cells) {
+                    const int idx = LandBrush::atlasIndexByType(layer.brush->cellTypeAt(cell));
+                    if (idx >= 0) {
+                        appendTileQuad(texVerts, iso, cell, idx);
+                    }
+                }
+                range.count = static_cast<int>(texVerts.size()) - range.base;
+                if (range.count > 0) {
+                    flatRanges.push_back(range);
+                }
+            }
             continue;
         }
         TexRange range;

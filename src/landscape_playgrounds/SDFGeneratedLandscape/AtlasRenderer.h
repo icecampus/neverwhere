@@ -71,6 +71,11 @@ struct PaintLayerView {
     // while the atlas tile keeps working as the alpha mask only.
     int tilingTex = -1;          // slot from loadTilingTextureFromFile, -1 = off
     float tilingRepeats = 1.0f;  // texture repeats per cell width
+    // Multi-texture layer: the texture is chosen PER CELL from the node tags
+    // (LandBrush tag = tiling slot + 1, 0 = untagged → mask-only fallback),
+    // so several textures coexist in one layer and displace each other.
+    // Overrides tilingTex; tilingRepeats stays shared by the whole layer.
+    bool multiTexture = false;
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;

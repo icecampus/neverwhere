@@ -109,7 +109,9 @@ glm::vec2 canvasSize() {
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
 // own node grid and presentation (2D grass / 2D yellow / cliff or stone
-// scalar-field / 2D free tiling texture under the yellow masks).
+// scalar-field / 2D tiling textures under the yellow masks). The Texture 2D
+// layer keeps a per-node texture tag, so several textures coexist in the
+// one layer and displace each other on repaint.
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
@@ -131,7 +133,8 @@ PaintLayer g_layers[kLayerCount] = {
 };
 int g_activeLayer = 0;
 // Texture 2D layer: tiling textures found in resources/textures (renderer
-// slot per file), the current pick and tiling density.
+// slot per file), the active paint tool index and the tiling density
+// shared by the whole layer.
 std::vector<std::string> g_texNames;
 std::vector<int> g_texSlots;
 int g_texChoice = -1;
@@ -215,12 +218,28 @@ void centerCamera(int viewW, int viewH) {
     g_camera.offset.y = static_cast<float>(viewH) * 0.5f - world.y * g_camera.zoom;
 }
 
+// LandBrush tag convention of the Texture 2D layer: renderer tiling slot + 1
+// (0 = untagged → mask-only fallback). The renderer resolves each cell's
+// texture from its corner nodes (majority vote, see LandBrush::cellTagAt).
+std::uint8_t texLayerTagFor(int choice) {
+    if (choice >= 0 && choice < static_cast<int>(g_texSlots.size())) {
+        return static_cast<std::uint8_t>(g_texSlots[choice] + 1);
+    }
+    return 0;
+}
+
 void applyBrushAtMouse() {
     if (!g_hoverNode) {
         return;
     }
     const bool on = !g_ctrlDown && !g_state.eraseMode;
-    activeBrush().setNode(*g_hoverNode, on);
+    // Textured painting tags the node with the active texture; repainting a
+    // node with another texture displaces the old one (same shared layer).
+    if (on && g_layers[g_activeLayer].textured) {
+        activeBrush().setNode(*g_hoverNode, true, texLayerTagFor(g_texChoice));
+    } else {
+        activeBrush().setNode(*g_hoverNode, on);
+    }
 }
 
 bool g_demoPattern = false;
@@ -230,6 +249,7 @@ bool g_demoNode = false;
 // --no-ui                      hide the ImGui panel (clean captures)
 // --cliff-nodes=x,y;x,y;...    paint these nodes on the cliff layer
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
+//                              (tagged with the first loaded texture)
 // --tex-tiling=R               Texture 2D repeats per cell width (default 1.0)
 // --zoom=Z                     camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy               camera center in cell coords
@@ -274,7 +294,8 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 }
 
 // Painted programmatically in --demo mode: a cliff blob plus a stone blob
-// plus grass/yellow/textured flat strokes — used for visual verification.
+// plus grass/yellow flat strokes and two textured blobs in DIFFERENT
+// textures — used for visual verification of the multi-texture layer.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
         for (int x = 15; x <= 18; ++x) {
@@ -295,9 +316,14 @@ void paintDemoPattern() {
     for (int x = 13; x <= 16; ++x) {
         g_layers[1].brush.setNode({x, 16}, true);
     }
+    const std::uint8_t tagA = texLayerTagFor(0);
+    const std::uint8_t tagB = texLayerTagFor(g_texNames.size() > 1 ? 1 : 0);
     for (int y = 3; y <= 6; ++y) {
-        for (int x = 14; x <= 17; ++x) {
-            g_layers[kTexLayerIndex].brush.setNode({x, y}, true);
+        for (int x = 14; x <= 15; ++x) {
+            g_layers[kTexLayerIndex].brush.setNode({x, y}, true, tagA);
+        }
+        for (int x = 16; x <= 17; ++x) {
+            g_layers[kTexLayerIndex].brush.setNode({x, y}, true, tagB);
         }
     }
 }
@@ -339,18 +365,6 @@ void init() {
     g_renderer.init();
     for (PaintLayer& layer : g_layers) {
         layer.brush.reset(24, 24);
-    }
-    if (g_demoPattern) {
-        paintDemoPattern();
-    }
-    if (g_demoNode) {
-        g_layers[0].brush.setNode({10, 10}, true);
-    }
-    for (const glm::ivec2& node : g_cliCliffNodes) {
-        g_layers[2].brush.setNode(node, true);
-    }
-    for (const glm::ivec2& node : g_cliTexNodes) {
-        g_layers[kTexLayerIndex].brush.setNode(node, true);
     }
 
     g_dataRoot = findDataRootUpwards(std::filesystem::current_path());
@@ -413,6 +427,21 @@ void init() {
         g_texTiling = *g_cliTexTiling;
     }
 
+    // Painted after the texture load: textured strokes tag each node with
+    // its renderer tiling slot, so the slots must exist first.
+    if (g_demoPattern) {
+        paintDemoPattern();
+    }
+    if (g_demoNode) {
+        g_layers[0].brush.setNode({10, 10}, true);
+    }
+    for (const glm::ivec2& node : g_cliCliffNodes) {
+        g_layers[2].brush.setNode(node, true);
+    }
+    for (const glm::ivec2& node : g_cliTexNodes) {
+        g_layers[kTexLayerIndex].brush.setNode(node, true, texLayerTagFor(g_texChoice));
+    }
+
     const glm::vec2 canvas = canvasSize();
     centerCamera(static_cast<int>(canvas.x), static_cast<int>(canvas.y));
     if (g_demoNode) {
@@ -426,12 +455,16 @@ void init() {
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
-        } else {
+        } else if (!g_cliCliffNodes.empty()) {
             glm::vec2 acc(0.0f);
             for (const glm::ivec2& node : g_cliCliffNodes) {
                 acc += g_iso.nodeToField(node);
             }
             worldCenter = acc / static_cast<float>(g_cliCliffNodes.size());
+        } else {
+            // Zoom without an explicit center: the map middle (centerCamera).
+            const glm::ivec2 mid{g_layers[0].brush.width() / 2, g_layers[0].brush.height() / 2};
+            worldCenter = g_iso.mapToField(mid);
         }
         g_camera.zoom = g_cliZoom.value_or(1.0f);
         g_camera.offset.x = canvas.x * 0.5f - worldCenter.x * g_camera.zoom;
@@ -457,34 +490,41 @@ void drawImGui(int w, int h) {
 
     ImGui::Text("Brush palette:");
     for (int i = 0; i < kLayerCount; ++i) {
-        if (i > 0 && i != kTexLayerIndex) {
-            ImGui::SameLine();
+        if (i == kTexLayerIndex) {
+            continue; // rendered as the texture tool group below
         }
-        ImGui::RadioButton(g_layers[i].name, &g_activeLayer, i);
+        if (ImGui::Selectable(g_layers[i].name, g_activeLayer == i)) {
+            g_activeLayer = i;
+        }
+    }
+    // Texture 2D: ONE layer whose palette tools are the texture files.
+    // Each painted node keeps its texture as a LandBrush tag — strokes in
+    // different textures coexist, and repainting displaces the old texture.
+    if (ImGui::TreeNodeEx(
+            "tex-tools",
+            ImGuiTreeNodeFlags_DefaultOpen,
+            "%s (%d)",
+            g_layers[kTexLayerIndex].name,
+            static_cast<int>(g_texNames.size()))) {
+        if (g_texNames.empty()) {
+            ImGui::TextDisabled("No textures found in resources/textures");
+        }
+        for (int i = 0; i < static_cast<int>(g_texNames.size()); ++i) {
+            const bool selected = (g_activeLayer == kTexLayerIndex && g_texChoice == i);
+            if (ImGui::Selectable(g_texNames[i].c_str(), selected)) {
+                g_activeLayer = kTexLayerIndex;
+                g_texChoice = i;
+            }
+        }
+        ImGui::TreePop();
     }
     if (g_layers[g_activeLayer].textured) {
         // Flat tiles drawn with a tiling texture sampled in world (field)
         // coordinates: the texture flows continuously across cells, so any
         // tiling image stays seamless; the yellow mask only clips the shape
         // (alpha) — no per-cell edge outlines, one continuous surface.
-        if (g_texNames.empty()) {
-            ImGui::TextDisabled("No textures found in resources/textures");
-        } else {
-            const char* current = (g_texChoice >= 0) ? g_texNames[g_texChoice].c_str() : "<none>";
-            if (ImGui::BeginCombo("Texture", current)) {
-                for (int i = 0; i < static_cast<int>(g_texNames.size()); ++i) {
-                    const bool selected = (i == g_texChoice);
-                    if (ImGui::Selectable(g_texNames[i].c_str(), selected)) {
-                        g_texChoice = i;
-                    }
-                    if (selected) {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::SliderFloat("Tex tiling", &g_texTiling, 0.25f, 8.0f, "%.2f rep/cell");
-        }
+        // The tiling density is shared by every texture of the layer.
+        ImGui::SliderFloat("Tex tiling", &g_texTiling, 0.25f, 8.0f, "%.2f rep/cell");
     }
     if (g_layers[g_activeLayer].cliff) {
         // Scalar-field surface nets: edits are debounced (0.3 s) into a full
@@ -710,9 +750,10 @@ void frame() {
         views[i].stone = g_layers[i].stone;
         views[i].stoneParams = &g_stoneParams;
         views[i].cliffHeightScale = g_layers[i].stone ? g_stoneHeightScale : g_cliffHeightScale;
-        if (g_layers[i].textured && g_texChoice >= 0 &&
-            g_texChoice < static_cast<int>(g_texSlots.size())) {
-            views[i].tilingTex = g_texSlots[g_texChoice];
+        if (g_layers[i].textured) {
+            // Multi-texture layer: each cell's texture comes from its node
+            // tags (LandBrush::cellTagAt), the tiling density is shared.
+            views[i].multiTexture = true;
             views[i].tilingRepeats = g_texTiling;
         }
     }
@@ -789,9 +830,10 @@ void frame() {
     sg_end_pass();
     sg_commit();
 
-    // Headless capture: wait until the debounced caches had time to rebuild,
-    // grab the window client area and quit.
-    if (!g_shotPath.empty() && g_state.frame_index >= 120) {
+    // Headless capture: wait until the debounced caches had time to rebuild
+    // (wall clock — on fast machines 120 frames pass well under the 0.3 s
+    // debounce), grab the window client area and quit.
+    if (!g_shotPath.empty() && g_state.frame_index >= 120 && stm_sec(stm_now()) >= 1.0) {
         if (capturePlaygroundPng(g_shotPath.c_str())) {
             spdlog::info("SDFGeneratedLandscape: screenshot saved to {}", g_shotPath);
         } else {
