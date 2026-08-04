@@ -80,6 +80,8 @@ struct PaintLayerView {
     float blendSharpness = 1.0f;  // weight exponent: > 1 narrows the blend band
     float blendNoise = 0.0f;      // organic edge wobble strength (0 = straight)
     float blendNoiseScale = 4.0f; // noise repeats per cell width
+    float edgeFade = 0.2f;        // soft edge into empty space: feather width
+                                  // around the fill = 0.5 iso (0 = hard cut)
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;
@@ -125,7 +127,7 @@ public:
     // (0 = atlas color, 1 = world-space tiling array), y = tiling scale
     // (repeats per field unit), z/w = unused; blend_params x = weight
     // sharpness, y = edge noise strength, z = noise scale (per field unit),
-    // w = unused.
+    // w = empty-edge feather width around the fill = 0.5 iso (0 = hard cut).
     struct TexFsParams {
         float values[4];
         float blend[4];
@@ -185,6 +187,9 @@ private:
         // vertex). Pure cells are simply (1,0,0,0) over one layer.
         float layers[4];
         float weights[4];
+        // Fill weight (1 at on-nodes, 0 at off-nodes, interpolated): drives
+        // the soft coverage fade into empty space. Constant 1 for quads.
+        float fill;
     };
 
     // Cached scalar-field derivative of a brush: the extracted surface-nets
@@ -245,7 +250,8 @@ private:
         glm::ivec2 cell,
         int tileIndex,
         const float layers[4],
-        const glm::vec4 cornerWeights[4]);
+        const glm::vec4 cornerWeights[4],
+        const float cornerFill[4]);
     void appendDiamondOutline(
         std::vector<ColorVertex>& out,
         const topology_core::DiamondIsometry& iso,

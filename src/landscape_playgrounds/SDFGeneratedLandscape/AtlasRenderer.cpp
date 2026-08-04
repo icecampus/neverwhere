@@ -19,10 +19,12 @@ layout(location=0) in vec2 pos;
 layout(location=1) in vec2 uv;
 layout(location=2) in vec4 layers;
 layout(location=3) in vec4 weights;
+layout(location=4) in float fill;
 out vec2 v_uv;
 out vec2 v_world;
 out vec4 v_layers;
 out vec4 v_weights;
+out float v_fill;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
@@ -34,6 +36,7 @@ void main() {
     v_world = pos;
     v_layers = layers;
     v_weights = weights;
+    v_fill = fill;
 }
 )";
 
@@ -43,6 +46,7 @@ in vec2 v_uv;
 in vec2 v_world;
 in vec4 v_layers;
 in vec4 v_weights;
+in float v_fill;
 out vec4 frag_color;
 uniform sampler2D atlas_tex;
 uniform sampler2DArray tiling_array;
@@ -75,8 +79,8 @@ float fbm2(vec2 p) {
 
 void main() {
     vec4 mask = texture(atlas_tex, v_uv);
-    if (mask.a < 0.05) discard;
     vec3 rgb = mask.rgb;
+    float alpha = mask.a;
     if (tex_params.x > 0.5) {
         // World-space tiling: the texture flows continuously across cells
         // (there are no per-tile cuts to mismatch), the atlas tile only
@@ -85,15 +89,16 @@ void main() {
         // the interpolated corner weights; in the blend zone the weights
         // are sharpened and wobbled by fbm noise for an organic edge (the
         // wobble is gated by w*(1-w), so pure interiors stay untouched).
+        float n = 0.0;
+        if (blend_params.y > 0.0) {
+            n = fbm2(v_world * blend_params.z) - 0.5;
+        }
         vec4 w = max(v_weights, 0.0);
         float sw = w.x + w.y + w.z + w.w;
         if (sw > 1e-4) {
             vec2 tuv = v_world * tex_params.y;
             w = pow(w, vec4(max(blend_params.x, 0.05)));
-            if (blend_params.y > 0.0) {
-                float n = fbm2(v_world * blend_params.z) - 0.5;
-                w += n * blend_params.y * w * (1.0 - w);
-            }
+            w += n * blend_params.y * w * (1.0 - w);
             w = max(w, 0.0);
             w /= max(w.x + w.y + w.z + w.w, 1e-4);
             rgb = w.x * texture(tiling_array, vec3(tuv, v_layers.x)).rgb
@@ -101,8 +106,18 @@ void main() {
                 + w.z * texture(tiling_array, vec3(tuv, v_layers.z)).rgb
                 + w.w * texture(tiling_array, vec3(tuv, v_layers.w)).rgb;
         }
+        // Soft edge into empty space: the fill weight (1 at on-nodes, 0 at
+        // off-nodes) fades coverage around the 0.5 iso — the same line the
+        // atlas mask used to cut at — with the same noise wobble, so the
+        // region contour feathers out instead of stepping hard.
+        float feather = max(blend_params.w, 1e-3);
+        float fill = clamp(v_fill + n * blend_params.y * v_fill * (1.0 - v_fill), 0.0, 1.0);
+        alpha = smoothstep(0.5 - feather, 0.5 + feather, fill);
+        if (alpha < 0.004) discard;
+    } else {
+        if (mask.a < 0.05) discard;
     }
-    frag_color = vec4(rgb, mask.a);
+    frag_color = vec4(rgb, alpha);
 }
 )";
 
@@ -142,6 +157,7 @@ struct VSIn {
     float2 uv: TEXCOORD1;
     float4 layers: TEXCOORD2;
     float4 weights: TEXCOORD3;
+    float fill: TEXCOORD4;
 };
 struct VSOut {
     float4 pos: SV_Position;
@@ -149,6 +165,7 @@ struct VSOut {
     float2 world: TEXCOORD1;
     float4 layers: TEXCOORD2;
     float4 weights: TEXCOORD3;
+    float fill: TEXCOORD4;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -161,6 +178,7 @@ VSOut main(VSIn inp) {
     o.world = inp.pos;
     o.layers = inp.layers;
     o.weights = inp.weights;
+    o.fill = inp.fill;
     return o;
 }
 )";
@@ -180,6 +198,7 @@ struct PSIn {
     float2 world: TEXCOORD1;
     float4 layers: TEXCOORD2;
     float4 weights: TEXCOORD3;
+    float fill: TEXCOORD4;
 };
 
 float2 hashv2v2(float2 p) {
@@ -208,19 +227,20 @@ float fbm2(float2 p) {
 
 float4 main(PSIn inp): SV_Target {
     float4 mask = atlas_tex.Sample(smp, inp.uv);
-    if (mask.a < 0.05) discard;
     float3 rgb = mask.rgb;
+    float alpha = mask.a;
     if (tex_params.x > 0.5) {
-        // World-space tiling + candidate blend: see the GLSL variant.
+        // World-space tiling + candidate blend + soft empty edge: see GLSL.
+        float n = 0.0;
+        if (blend_params.y > 0.0) {
+            n = fbm2(inp.world * blend_params.z) - 0.5;
+        }
         float4 w = max(inp.weights, 0.0);
         float sw = w.x + w.y + w.z + w.w;
         if (sw > 1e-4) {
             float2 tuv = inp.world * tex_params.y;
             w = pow(w, (float4)max(blend_params.x, 0.05));
-            if (blend_params.y > 0.0) {
-                float n = fbm2(inp.world * blend_params.z) - 0.5;
-                w += n * blend_params.y * w * (1.0 - w);
-            }
+            w += n * blend_params.y * w * (1.0 - w);
             w = max(w, 0.0);
             w /= max(w.x + w.y + w.z + w.w, 1e-4);
             rgb = w.x * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.x)).rgb
@@ -228,8 +248,14 @@ float4 main(PSIn inp): SV_Target {
                 + w.z * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.z)).rgb
                 + w.w * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.w)).rgb;
         }
+        float feather = max(blend_params.w, 1e-3);
+        float fill = clamp(inp.fill + n * blend_params.y * inp.fill * (1.0 - inp.fill), 0.0, 1.0);
+        alpha = smoothstep(0.5 - feather, 0.5 + feather, fill);
+        if (alpha < 0.004) discard;
+    } else {
+        if (mask.a < 0.05) discard;
     }
-    return float4(rgb, mask.a);
+    return float4(rgb, alpha);
 }
 )";
 
@@ -286,6 +312,7 @@ struct VSIn {
     float2 uv [[attribute(1)]];
     float4 layers [[attribute(2)]];
     float4 weights [[attribute(3)]];
+    float fill [[attribute(4)]];
 };
 
 struct VSOut {
@@ -294,6 +321,7 @@ struct VSOut {
     float2 world;
     float4 layers;
     float4 weights;
+    float fill;
 };
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
@@ -308,6 +336,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
     o.world = in.pos;
     o.layers = in.layers;
     o.weights = in.weights;
+    o.fill = in.fill;
     return o;
 }
 )";
@@ -327,6 +356,7 @@ struct PSIn {
     float2 world;
     float4 layers;
     float4 weights;
+    float fill;
 };
 
 float2 hashv2v2(float2 p) {
@@ -360,21 +390,20 @@ fragment float4 _main(PSIn in [[stage_in]],
                       sampler smp [[sampler(0)]],
                       sampler tiling_smp [[sampler(1)]]) {
     float4 mask = atlas_tex.sample(smp, in.uv);
-    if (mask.a < 0.05) {
-        discard_fragment();
-    }
     float3 rgb = mask.rgb;
+    float alpha = mask.a;
     if (params.tex_params.x > 0.5) {
-        // World-space tiling + candidate blend: see the GLSL variant.
+        // World-space tiling + candidate blend + soft empty edge: see GLSL.
+        float n = 0.0;
+        if (params.blend_params.y > 0.0) {
+            n = fbm2(in.world * params.blend_params.z) - 0.5;
+        }
         float4 w = max(in.weights, 0.0);
         float sw = w.x + w.y + w.z + w.w;
         if (sw > 1e-4) {
             float2 tuv = in.world * params.tex_params.y;
             w = pow(w, float4(max(params.blend_params.x, 0.05)));
-            if (params.blend_params.y > 0.0) {
-                float n = fbm2(in.world * params.blend_params.z) - 0.5;
-                w += n * params.blend_params.y * w * (1.0 - w);
-            }
+            w += n * params.blend_params.y * w * (1.0 - w);
             w = max(w, 0.0);
             w /= max(w.x + w.y + w.z + w.w, 1e-4);
             rgb = w.x * tiling_array.sample(tiling_smp, tuv, uint(in.layers.x)).rgb
@@ -382,8 +411,18 @@ fragment float4 _main(PSIn in [[stage_in]],
                 + w.z * tiling_array.sample(tiling_smp, tuv, uint(in.layers.z)).rgb
                 + w.w * tiling_array.sample(tiling_smp, tuv, uint(in.layers.w)).rgb;
         }
+        float feather = max(params.blend_params.w, 1e-3);
+        float fill = clamp(in.fill + n * params.blend_params.y * in.fill * (1.0 - in.fill), 0.0, 1.0);
+        alpha = smoothstep(0.5 - feather, 0.5 + feather, fill);
+        if (alpha < 0.004) {
+            discard_fragment();
+        }
+    } else {
+        if (mask.a < 0.05) {
+            discard_fragment();
+        }
     }
-    return float4(rgb, mask.a);
+    return float4(rgb, alpha);
 }
 )";
 
@@ -1314,10 +1353,10 @@ void AtlasRenderer::appendTileQuad(
 
     const float L[4] = {baseLayer, 0.0f, 0.0f, 0.0f};
     const float W[4] = {1.0f, 0.0f, 0.0f, 0.0f};
-    const TexVertex tl{x0, y0, uv.x, uv.y, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
-    const TexVertex tr{x1, y0, uv.z, uv.y, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
-    const TexVertex br{x1, y1, uv.z, uv.w, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
-    const TexVertex bl{x0, y1, uv.x, uv.w, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
+    const TexVertex tl{x0, y0, uv.x, uv.y, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}, 1.0f};
+    const TexVertex tr{x1, y0, uv.z, uv.y, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}, 1.0f};
+    const TexVertex br{x1, y1, uv.z, uv.w, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}, 1.0f};
+    const TexVertex bl{x0, y1, uv.x, uv.w, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}, 1.0f};
 
     out.push_back(tl);
     out.push_back(tr);
@@ -1333,12 +1372,15 @@ void AtlasRenderer::appendTileFan(
     glm::ivec2 cell,
     int tileIndex,
     const float layers[4],
-    const glm::vec4 cornerWeights[4]) {
+    const glm::vec4 cornerWeights[4],
+    const float cornerFill[4]) {
 
     // Same square-frame UV mapping as appendTileQuad, but tessellated as a
     // fan over the cell diamond (center + the 4 corner node positions), so
     // the texture weights sit exactly on the nodes and interpolate
-    // continuously across shared edges of neighboring cells.
+    // continuously across shared edges of neighboring cells. The fill
+    // weight rides the same interpolation and fades the coverage into
+    // empty space in the FS.
     const glm::vec4 uv = atlasUvRect(tileIndex);
     const glm::vec2 center = iso.mapToField(cell);
     const float side = iso.dims.cellWidth;
@@ -1349,23 +1391,25 @@ void AtlasRenderer::appendTileFan(
             uv.x + (p.x - (center.x - half)) / side * (uv.z - uv.x),
             uv.y + (p.y - (center.y - half)) / side * (uv.w - uv.y)};
     };
-    const auto makeVert = [&](glm::vec2 p, glm::vec4 w) -> TexVertex {
+    const auto makeVert = [&](glm::vec2 p, glm::vec4 w, float fill) -> TexVertex {
         const glm::vec2 t = uvAt(p);
         return TexVertex{
             p.x, p.y, t.x, t.y,
             {layers[0], layers[1], layers[2], layers[3]},
-            {w.x, w.y, w.z, w.w}};
+            {w.x, w.y, w.z, w.w},
+            fill};
     };
 
     const auto corners = iso.cellDiamondCorners(cell); // Left, Up, Right, Down
     const glm::vec4 centerWeights =
         (cornerWeights[0] + cornerWeights[1] + cornerWeights[2] + cornerWeights[3]) * 0.25f;
+    const float centerFill = (cornerFill[0] + cornerFill[1] + cornerFill[2] + cornerFill[3]) * 0.25f;
 
     for (int i = 0; i < 4; ++i) {
         const int next = (i + 1) % 4;
-        out.push_back(makeVert(center, centerWeights));
-        out.push_back(makeVert(corners[i], cornerWeights[i]));
-        out.push_back(makeVert(corners[next], cornerWeights[next]));
+        out.push_back(makeVert(center, centerWeights, centerFill));
+        out.push_back(makeVert(corners[i], cornerWeights[i], cornerFill[i]));
+        out.push_back(makeVert(corners[next], cornerWeights[next], cornerFill[next]));
     }
 }
 
@@ -1447,6 +1491,7 @@ void AtlasRenderer::render(
         float blendSharpness = 1.0f;
         float blendNoise = 0.0f;
         float blendNoiseScale = 0.0f; // per field unit
+        float edgeFade = 0.0f;        // feather width around the fill = 0.5 iso
     };
     std::vector<TexRange> flatRanges;
     std::vector<TexVertex> texVerts;
@@ -1465,6 +1510,8 @@ void AtlasRenderer::render(
             // is a diamond fan whose corner vertices carry one-hot weights
             // over the cell's candidate textures (LandBrush::cellTextureBlend)
             // — neighboring textures blend smoothly across the shared nodes.
+            // The corner fill weights (on/off) ride along and feather the
+            // region contour into empty space in the FS.
             TexRange range;
             range.base = static_cast<int>(texVerts.size());
             range.atlas = layer.atlas;
@@ -1473,6 +1520,7 @@ void AtlasRenderer::render(
             range.blendSharpness = layer.blendSharpness;
             range.blendNoise = layer.blendNoise;
             range.blendNoiseScale = layer.blendNoiseScale / std::max(iso.dims.cellWidth, 1.0f);
+            range.edgeFade = layer.edgeFade;
             for (const auto& [z, cell] : drawOrder) {
                 (void)z;
                 const auto type = layer.brush->cellTypeAt(cell);
@@ -1486,7 +1534,11 @@ void AtlasRenderer::render(
                 float cellLayers[4];
                 glm::vec4 cornerWeights[4];
                 layer.brush->cellTextureBlend(cell, cellLayers, cornerWeights);
-                appendTileFan(texVerts, iso, cell, idx, cellLayers, cornerWeights);
+                const std::array<bool, 4> mask = layer.brush->nodeMaskAt(cell);
+                const float cornerFill[4] = {
+                    mask[0] ? 1.0f : 0.0f, mask[1] ? 1.0f : 0.0f,
+                    mask[2] ? 1.0f : 0.0f, mask[3] ? 1.0f : 0.0f};
+                appendTileFan(texVerts, iso, cell, idx, cellLayers, cornerWeights, cornerFill);
             }
             range.count = static_cast<int>(texVerts.size()) - range.base;
             if (range.count > 0) {
@@ -1573,6 +1625,7 @@ void AtlasRenderer::render(
         texFs.blend[0] = range.blendSharpness;
         texFs.blend[1] = range.blendNoise;
         texFs.blend[2] = range.blendNoiseScale;
+        texFs.blend[3] = range.edgeFade;
 
         sg_apply_pipeline(m_texPip);
         sg_apply_bindings(&bind);
@@ -1814,7 +1867,7 @@ void AtlasRenderer::ensurePipelines() {
 #if defined(SOKOL_D3D11)
         shd.vertex_func.source = kTexVsHlsl;
         shd.fragment_func.source = kTexFsHlsl;
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             shd.attrs[i].hlsl_sem_name = "TEXCOORD";
             shd.attrs[i].hlsl_sem_index = i;
         }
@@ -1876,6 +1929,7 @@ void AtlasRenderer::ensurePipelines() {
         pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
         pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
         pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4;
+        pip.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT;
         pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip.colors[0].blend.enabled = true;
         pip.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;

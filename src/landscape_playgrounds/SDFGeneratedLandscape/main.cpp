@@ -142,10 +142,11 @@ float g_texTiling = 1.0f;
 std::optional<float> g_cliTexTiling;
 // Multi-texture blend (uniform-only, instant): weight sharpness (> 1
 // narrows the blend band), organic edge wobble strength (0 = straight
-// gradient) and the noise density.
+// gradient), the noise density and the soft fade into empty space.
 float g_texBlendSharpness = 1.0f;
 float g_texBlendNoise = 0.9f;
 float g_texBlendNoiseScale = 4.0f;
+float g_texEdgeFade = 0.2f;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
 cliff::FieldParams g_cliffParams;
@@ -543,6 +544,7 @@ void drawImGui(int w, int h) {
         ImGui::SliderFloat("Blend sharpness", &g_texBlendSharpness, 0.5f, 3.0f, "%.2f");
         ImGui::SliderFloat("Blend noise", &g_texBlendNoise, 0.0f, 3.0f, "%.2f");
         ImGui::SliderFloat("Noise scale", &g_texBlendNoiseScale, 1.0f, 16.0f, "%.1f rep/cell");
+        ImGui::SliderFloat("Edge fade", &g_texEdgeFade, 0.0f, 0.5f, "%.2f feather");
     }
     if (g_layers[g_activeLayer].cliff) {
         // Scalar-field surface nets: edits are debounced (0.3 s) into a full
@@ -771,12 +773,14 @@ void frame() {
         if (g_layers[i].textured) {
             // Multi-texture layer: diamond-fan cells whose corner nodes carry
             // texture weights (LandBrush::cellTextureBlend); the FS blends
-            // up to 4 candidate textures per cell with an organic noise edge.
+            // up to 4 candidate textures per cell with an organic noise edge
+            // and feathers the region contour into empty space.
             views[i].multiTexture = true;
             views[i].tilingRepeats = g_texTiling;
             views[i].blendSharpness = g_texBlendSharpness;
             views[i].blendNoise = g_texBlendNoise;
             views[i].blendNoiseScale = g_texBlendNoiseScale;
+            views[i].edgeFade = g_texEdgeFade;
         }
     }
 
