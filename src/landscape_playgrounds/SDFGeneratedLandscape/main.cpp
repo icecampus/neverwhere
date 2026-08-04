@@ -140,6 +140,12 @@ std::vector<int> g_texSlots;
 int g_texChoice = -1;
 float g_texTiling = 1.0f;
 std::optional<float> g_cliTexTiling;
+// Multi-texture blend (uniform-only, instant): weight sharpness (> 1
+// narrows the blend band), organic edge wobble strength (0 = straight
+// gradient) and the noise density.
+float g_texBlendSharpness = 1.0f;
+float g_texBlendNoise = 0.9f;
+float g_texBlendNoiseScale = 4.0f;
 // Cliff layer: scalar-field params (heavy, debounced mesh rebuild) and the
 // shading palette (uniforms only, instant). Mirrors CliffFieldPlayground.
 cliff::FieldParams g_cliffParams;
@@ -294,8 +300,8 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 }
 
 // Painted programmatically in --demo mode: a cliff blob plus a stone blob
-// plus grass/yellow flat strokes and two textured blobs in DIFFERENT
-// textures — used for visual verification of the multi-texture layer.
+// plus grass/yellow flat strokes and a textured strip of three DIFFERENT
+// textures side by side — used to verify the multi-texture layer blends.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
         for (int x = 15; x <= 18; ++x) {
@@ -316,14 +322,15 @@ void paintDemoPattern() {
     for (int x = 13; x <= 16; ++x) {
         g_layers[1].brush.setNode({x, 16}, true);
     }
-    const std::uint8_t tagA = texLayerTagFor(0);
-    const std::uint8_t tagB = texLayerTagFor(g_texNames.size() > 1 ? 1 : 0);
+    const std::uint8_t colTags[4] = {
+        texLayerTagFor(0),
+        texLayerTagFor(g_texNames.size() > 1 ? 1 : 0),
+        texLayerTagFor(g_texNames.size() > 2 ? 2 : 0),
+        texLayerTagFor(0),
+    };
     for (int y = 3; y <= 6; ++y) {
-        for (int x = 14; x <= 15; ++x) {
-            g_layers[kTexLayerIndex].brush.setNode({x, y}, true, tagA);
-        }
-        for (int x = 16; x <= 17; ++x) {
-            g_layers[kTexLayerIndex].brush.setNode({x, y}, true, tagB);
+        for (int x = 14; x <= 17; ++x) {
+            g_layers[kTexLayerIndex].brush.setNode({x, y}, true, colTags[x - 14]);
         }
     }
 }
@@ -398,7 +405,8 @@ void init() {
     }
 
     // Texture 2D layer: every image in resources/textures becomes a
-    // paintable landscape material (world-space UV under the yellow masks).
+    // paintable landscape material (one tiling array layer each; world-space
+    // UV under the yellow masks).
     {
         const auto texDir = g_dataRoot / "resources" / "textures";
         std::error_code ec;
@@ -410,11 +418,17 @@ void init() {
             }
         }
         std::sort(files.begin(), files.end());
+        std::vector<std::string> paths;
+        paths.reserve(files.size());
         for (const auto& file : files) {
-            const int slot = g_renderer.loadTilingTextureFromFile(file.string());
-            if (slot >= 0) {
-                g_texNames.push_back(file.filename().string());
-                g_texSlots.push_back(slot);
+            paths.push_back(file.string());
+        }
+        std::vector<int> fileLayers;
+        g_renderer.buildTilingTextureArray(paths, &fileLayers);
+        for (size_t i = 0; i < files.size(); ++i) {
+            if (i < fileLayers.size() && fileLayers[i] >= 0) {
+                g_texNames.push_back(files[i].filename().string());
+                g_texSlots.push_back(fileLayers[i]);
             }
         }
         if (!g_texNames.empty()) {
@@ -519,12 +533,16 @@ void drawImGui(int w, int h) {
         ImGui::TreePop();
     }
     if (g_layers[g_activeLayer].textured) {
-        // Flat tiles drawn with a tiling texture sampled in world (field)
-        // coordinates: the texture flows continuously across cells, so any
+        // Flat tiles drawn with tiling textures sampled in world (field)
+        // coordinates: a texture flows continuously across cells, so any
         // tiling image stays seamless; the yellow mask only clips the shape
         // (alpha) — no per-cell edge outlines, one continuous surface.
-        // The tiling density is shared by every texture of the layer.
+        // Neighboring textures blend via the per-node corner weights
+        // (diamond fan); the settings below are shared by the whole layer.
         ImGui::SliderFloat("Tex tiling", &g_texTiling, 0.25f, 8.0f, "%.2f rep/cell");
+        ImGui::SliderFloat("Blend sharpness", &g_texBlendSharpness, 0.5f, 3.0f, "%.2f");
+        ImGui::SliderFloat("Blend noise", &g_texBlendNoise, 0.0f, 3.0f, "%.2f");
+        ImGui::SliderFloat("Noise scale", &g_texBlendNoiseScale, 1.0f, 16.0f, "%.1f rep/cell");
     }
     if (g_layers[g_activeLayer].cliff) {
         // Scalar-field surface nets: edits are debounced (0.3 s) into a full
@@ -751,10 +769,14 @@ void frame() {
         views[i].stoneParams = &g_stoneParams;
         views[i].cliffHeightScale = g_layers[i].stone ? g_stoneHeightScale : g_cliffHeightScale;
         if (g_layers[i].textured) {
-            // Multi-texture layer: each cell's texture comes from its node
-            // tags (LandBrush::cellTagAt), the tiling density is shared.
+            // Multi-texture layer: diamond-fan cells whose corner nodes carry
+            // texture weights (LandBrush::cellTextureBlend); the FS blends
+            // up to 4 candidate textures per cell with an organic noise edge.
             views[i].multiTexture = true;
             views[i].tilingRepeats = g_texTiling;
+            views[i].blendSharpness = g_texBlendSharpness;
+            views[i].blendNoise = g_texBlendNoise;
+            views[i].blendNoiseScale = g_texBlendNoiseScale;
         }
     }
 

@@ -34,6 +34,17 @@ public:
     // Left/Up/Right/Down); 0 when no on-node carries a tag.
     int cellTagAt(glm::ivec2 cell) const;
 
+    // Multi-texture blend data of a cell: the distinct tags of its on-nodes
+    // as texture array layers (tag - 1) in first-seen corner order
+    // [Left, Up, Right, Down], plus a one-hot weight vector per corner
+    // (weight[k] = 1 when the corner's tag matches candidate k). Corners
+    // that are off or untagged take the first candidate's slot so the
+    // interpolation stays inside the blend (their region is masked away
+    // anyway). Returns the candidate count; 0 = untagged cell, render as
+    // mask-color fallback. Layers/weights are constant-per-cell except the
+    // corner weights, so neighboring cells sharing a node stay continuous.
+    int cellTextureBlend(glm::ivec2 cell, float layers[4], glm::vec4 cornerWeights[4]) const;
+
     // Atlas tile index matching SliceAsset::subTileIndexByType (Grass 4x6 atlas).
     static int atlasIndexByType(landscape_core::LandscapeTileType type);
 

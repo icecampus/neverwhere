@@ -143,6 +143,44 @@ bool runTileShapeSmokeTest() {
         }
     }
 
+    // --- Multi-texture blend data (LandBrush::cellTextureBlend): candidate
+    // layers in first-seen corner order, one-hot corner weights, untagged
+    // fallback. Cell (2,2) corners: Left (2,3), Up (2,2), Right (3,2),
+    // Down (3,3).
+    {
+        float layers[4];
+        glm::vec4 w[4];
+        const glm::vec4 e0{1.0f, 0.0f, 0.0f, 0.0f};
+        const glm::vec4 e1{0.0f, 1.0f, 0.0f, 0.0f};
+
+        // Untagged cell: no candidates, zero weights (mask-color fallback).
+        LandBrush b0;
+        b0.reset(8, 8);
+        b0.setNode({2, 2}, true);
+        if (b0.cellTextureBlend({2, 2}, layers, w) != 0 ||
+            w[0] != glm::vec4(0.0f) || w[1] != glm::vec4(0.0f)) {
+            spdlog::error("TEST FAIL TileShape: untagged cell must have no blend candidates");
+            return false;
+        }
+
+        LandBrush b;
+        b.reset(8, 8);
+        b.setNode({2, 3}, true, 3); // Left -> layer 2, first-seen candidate 0
+        b.setNode({2, 2}, true, 1); // Up -> layer 0, candidate 1
+        b.setNode({3, 2}, true, 1); // Right -> layer 0
+        // Down is off: masked away, falls back to the first candidate's slot.
+        const int nc = b.cellTextureBlend({2, 2}, layers, w);
+        if (nc != 2 || layers[0] != 2.0f || layers[1] != 0.0f) {
+            spdlog::error("TEST FAIL TileShape: blend candidates {} -> ({}, {})",
+                nc, layers[0], layers[1]);
+            return false;
+        }
+        if (w[0] != e0 || w[1] != e1 || w[2] != e1 || w[3] != e0) {
+            spdlog::error("TEST FAIL TileShape: corner blend weights mismatch");
+            return false;
+        }
+    }
+
     const FlatAtlasImage flat = generateFlatAtlas();
     if (flat.width != 256 || flat.height != 384 || flat.rgba.size() != 256u * 384u * 4u) {
         spdlog::error("TEST FAIL TileShape: flat atlas size {}x{} (bytes {})",

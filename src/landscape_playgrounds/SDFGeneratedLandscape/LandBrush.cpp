@@ -118,6 +118,53 @@ int LandBrush::cellTagAt(glm::ivec2 cell) const {
     return bestTag;
 }
 
+int LandBrush::cellTextureBlend(glm::ivec2 cell, float layers[4], glm::vec4 cornerWeights[4]) const {
+    for (int k = 0; k < 4; ++k) {
+        layers[k] = 0.0f;
+        cornerWeights[k] = glm::vec4(0.0f);
+    }
+    if (!cellInBounds(cell)) {
+        return 0;
+    }
+
+    const auto corners = topology_core::DiamondIsometry::cellCornerNodes(cell);
+    int count = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!nodeIsOn(corners[i])) {
+            continue;
+        }
+        const int layer = static_cast<int>(nodeTag(corners[i])) - 1;
+        if (layer < 0) {
+            continue;
+        }
+        bool seen = false;
+        for (int k = 0; k < count; ++k) {
+            if (static_cast<int>(layers[k]) == layer) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen && count < 4) {
+            layers[count++] = static_cast<float>(layer);
+        }
+    }
+    if (count == 0) {
+        return 0;
+    }
+    for (int i = 0; i < 4; ++i) {
+        const int layer = nodeIsOn(corners[i]) ? static_cast<int>(nodeTag(corners[i])) - 1 : -1;
+        int slot = 0;
+        for (int k = 0; k < count && layer >= 0; ++k) {
+            if (static_cast<int>(layers[k]) == layer) {
+                slot = k;
+                break;
+            }
+        }
+        cornerWeights[i][slot] = 1.0f;
+    }
+    return count;
+}
+
 int LandBrush::atlasIndexByType(landscape_core::LandscapeTileType type) {
     using T = landscape_core::LandscapeTileType;
     switch (type) {

@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <map>
 
 #include <spdlog/spdlog.h>
 
@@ -18,8 +17,12 @@ static const char* kTexVsGlsl = R"(
 #version 330
 layout(location=0) in vec2 pos;
 layout(location=1) in vec2 uv;
+layout(location=2) in vec4 layers;
+layout(location=3) in vec4 weights;
 out vec2 v_uv;
 out vec2 v_world;
+out vec4 v_layers;
+out vec4 v_weights;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
@@ -29,6 +32,8 @@ void main() {
     gl_Position = vec4(clip, 0.0, 1.0);
     v_uv = uv;
     v_world = pos;
+    v_layers = layers;
+    v_weights = weights;
 }
 )";
 
@@ -36,10 +41,38 @@ static const char* kTexFsGlsl = R"(
 #version 330
 in vec2 v_uv;
 in vec2 v_world;
+in vec4 v_layers;
+in vec4 v_weights;
 out vec4 frag_color;
 uniform sampler2D atlas_tex;
-uniform sampler2D tiling_tex;
+uniform sampler2DArray tiling_array;
 uniform vec4 tex_params;
+uniform vec4 blend_params;
+
+vec2 hashv2v2(vec2 p) {
+    vec2 chash = vec2(37.0, 39.0);
+    return fract(sin(vec2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(vec2 p) {
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(1.0, 0.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(vec2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; ++j) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
 void main() {
     vec4 mask = texture(atlas_tex, v_uv);
     if (mask.a < 0.05) discard;
@@ -48,8 +81,26 @@ void main() {
         // World-space tiling: the texture flows continuously across cells
         // (there are no per-tile cuts to mismatch), the atlas tile only
         // clips the shape — no per-cell edge outlines, the terrain reads
-        // as one continuous surface.
-        rgb = texture(tiling_tex, v_world * tex_params.y).rgb;
+        // as one continuous surface. Up to 4 candidate textures blend via
+        // the interpolated corner weights; in the blend zone the weights
+        // are sharpened and wobbled by fbm noise for an organic edge (the
+        // wobble is gated by w*(1-w), so pure interiors stay untouched).
+        vec4 w = max(v_weights, 0.0);
+        float sw = w.x + w.y + w.z + w.w;
+        if (sw > 1e-4) {
+            vec2 tuv = v_world * tex_params.y;
+            w = pow(w, vec4(max(blend_params.x, 0.05)));
+            if (blend_params.y > 0.0) {
+                float n = fbm2(v_world * blend_params.z) - 0.5;
+                w += n * blend_params.y * w * (1.0 - w);
+            }
+            w = max(w, 0.0);
+            w /= max(w.x + w.y + w.z + w.w, 1e-4);
+            rgb = w.x * texture(tiling_array, vec3(tuv, v_layers.x)).rgb
+                + w.y * texture(tiling_array, vec3(tuv, v_layers.y)).rgb
+                + w.z * texture(tiling_array, vec3(tuv, v_layers.z)).rgb
+                + w.w * texture(tiling_array, vec3(tuv, v_layers.w)).rgb;
+        }
     }
     frag_color = vec4(rgb, mask.a);
 }
@@ -89,11 +140,15 @@ cbuffer vs_params: register(b0) {
 struct VSIn {
     float2 pos: TEXCOORD0;
     float2 uv: TEXCOORD1;
+    float4 layers: TEXCOORD2;
+    float4 weights: TEXCOORD3;
 };
 struct VSOut {
     float4 pos: SV_Position;
     float2 uv: TEXCOORD0;
     float2 world: TEXCOORD1;
+    float4 layers: TEXCOORD2;
+    float4 weights: TEXCOORD3;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -104,29 +159,75 @@ VSOut main(VSIn inp) {
     o.pos = float4(clip, 0.0, 1.0);
     o.uv = inp.uv;
     o.world = inp.pos;
+    o.layers = inp.layers;
+    o.weights = inp.weights;
     return o;
 }
 )";
 
 static const char* kTexFsHlsl = R"(
 Texture2D atlas_tex: register(t0);
-Texture2D tiling_tex: register(t1);
+Texture2DArray tiling_array: register(t1);
 SamplerState smp: register(s0);
 SamplerState tiling_smp: register(s1);
 cbuffer fs_params: register(b0) {
     float4 tex_params;
+    float4 blend_params;
 };
 struct PSIn {
     float4 pos: SV_Position;
     float2 uv: TEXCOORD0;
     float2 world: TEXCOORD1;
+    float4 layers: TEXCOORD2;
+    float4 weights: TEXCOORD3;
 };
+
+float2 hashv2v2(float2 p) {
+    float2 chash = float2(37.0, 39.0);
+    return frac(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = frac(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
+    return lerp(t.x, t.y, fp.x);
+}
+
+float fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; ++j) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
 float4 main(PSIn inp): SV_Target {
     float4 mask = atlas_tex.Sample(smp, inp.uv);
     if (mask.a < 0.05) discard;
     float3 rgb = mask.rgb;
     if (tex_params.x > 0.5) {
-        rgb = tiling_tex.Sample(tiling_smp, inp.world * tex_params.y).rgb;
+        // World-space tiling + candidate blend: see the GLSL variant.
+        float4 w = max(inp.weights, 0.0);
+        float sw = w.x + w.y + w.z + w.w;
+        if (sw > 1e-4) {
+            float2 tuv = inp.world * tex_params.y;
+            w = pow(w, (float4)max(blend_params.x, 0.05));
+            if (blend_params.y > 0.0) {
+                float n = fbm2(inp.world * blend_params.z) - 0.5;
+                w += n * blend_params.y * w * (1.0 - w);
+            }
+            w = max(w, 0.0);
+            w /= max(w.x + w.y + w.z + w.w, 1e-4);
+            rgb = w.x * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.x)).rgb
+                + w.y * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.y)).rgb
+                + w.z * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.z)).rgb
+                + w.w * tiling_array.Sample(tiling_smp, float3(tuv, inp.layers.w)).rgb;
+        }
     }
     return float4(rgb, mask.a);
 }
@@ -183,12 +284,16 @@ struct VsParams {
 struct VSIn {
     float2 pos [[attribute(0)]];
     float2 uv [[attribute(1)]];
+    float4 layers [[attribute(2)]];
+    float4 weights [[attribute(3)]];
 };
 
 struct VSOut {
     float4 pos [[position]];
     float2 uv;
     float2 world;
+    float4 layers;
+    float4 weights;
 };
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
@@ -201,6 +306,8 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
     o.pos = float4(clip, 0.0, 1.0);
     o.uv = in.uv;
     o.world = in.pos;
+    o.layers = in.layers;
+    o.weights = in.weights;
     return o;
 }
 )";
@@ -211,18 +318,45 @@ using namespace metal;
 
 struct FsParams {
     float4 tex_params;
+    float4 blend_params;
 };
 
 struct PSIn {
     float4 pos [[position]];
     float2 uv;
     float2 world;
+    float4 layers;
+    float4 weights;
 };
+
+float2 hashv2v2(float2 p) {
+    float2 chash = float2(37.0, 39.0);
+    return fract(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; ++j) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
 
 fragment float4 _main(PSIn in [[stage_in]],
                       constant FsParams& params [[buffer(1)]],
                       texture2d<float> atlas_tex [[texture(0)]],
-                      texture2d<float> tiling_tex [[texture(1)]],
+                      texture2d_array<float> tiling_array [[texture(1)]],
                       sampler smp [[sampler(0)]],
                       sampler tiling_smp [[sampler(1)]]) {
     float4 mask = atlas_tex.sample(smp, in.uv);
@@ -231,7 +365,23 @@ fragment float4 _main(PSIn in [[stage_in]],
     }
     float3 rgb = mask.rgb;
     if (params.tex_params.x > 0.5) {
-        rgb = tiling_tex.sample(tiling_smp, in.world * params.tex_params.y).rgb;
+        // World-space tiling + candidate blend: see the GLSL variant.
+        float4 w = max(in.weights, 0.0);
+        float sw = w.x + w.y + w.z + w.w;
+        if (sw > 1e-4) {
+            float2 tuv = in.world * params.tex_params.y;
+            w = pow(w, float4(max(params.blend_params.x, 0.05)));
+            if (params.blend_params.y > 0.0) {
+                float n = fbm2(in.world * params.blend_params.z) - 0.5;
+                w += n * params.blend_params.y * w * (1.0 - w);
+            }
+            w = max(w, 0.0);
+            w /= max(w.x + w.y + w.z + w.w, 1e-4);
+            rgb = w.x * tiling_array.sample(tiling_smp, tuv, uint(in.layers.x)).rgb
+                + w.y * tiling_array.sample(tiling_smp, tuv, uint(in.layers.y)).rgb
+                + w.z * tiling_array.sample(tiling_smp, tuv, uint(in.layers.z)).rgb
+                + w.w * tiling_array.sample(tiling_smp, tuv, uint(in.layers.w)).rgb;
+        }
     }
     return float4(rgb, mask.a);
 }
@@ -762,6 +912,40 @@ void fillTexFsUniformDesc(sg_shader_uniform_block* block) {
     block->spirv_set0_binding_n = 1;
     block->glsl_uniforms[0].glsl_name = "tex_params";
     block->glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+    block->glsl_uniforms[1].glsl_name = "blend_params";
+    block->glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT4;
+}
+
+// Bilinear RGBA resample (texture array slices must share one size).
+void resampleRgbaBilinear(
+    const std::uint8_t* src,
+    int sw,
+    int sh,
+    std::uint8_t* dst,
+    int dw,
+    int dh) {
+
+    for (int y = 0; y < dh; ++y) {
+        const float gy = (static_cast<float>(y) + 0.5f) * static_cast<float>(sh) / static_cast<float>(dh) - 0.5f;
+        const int y0 = std::clamp(static_cast<int>(std::floor(gy)), 0, sh - 1);
+        const int y1 = std::min(y0 + 1, sh - 1);
+        const float fy = std::clamp(gy - static_cast<float>(y0), 0.0f, 1.0f);
+        for (int x = 0; x < dw; ++x) {
+            const float gx = (static_cast<float>(x) + 0.5f) * static_cast<float>(sw) / static_cast<float>(dw) - 0.5f;
+            const int x0 = std::clamp(static_cast<int>(std::floor(gx)), 0, sw - 1);
+            const int x1 = std::min(x0 + 1, sw - 1);
+            const float fx = std::clamp(gx - static_cast<float>(x0), 0.0f, 1.0f);
+            for (int c = 0; c < 4; ++c) {
+                const float s00 = static_cast<float>(src[(static_cast<size_t>(y0) * sw + x0) * 4 + c]);
+                const float s10 = static_cast<float>(src[(static_cast<size_t>(y0) * sw + x1) * 4 + c]);
+                const float s01 = static_cast<float>(src[(static_cast<size_t>(y1) * sw + x0) * 4 + c]);
+                const float s11 = static_cast<float>(src[(static_cast<size_t>(y1) * sw + x1) * 4 + c]);
+                const float v = (s00 * (1.0f - fx) + s10 * fx) * (1.0f - fy) + (s01 * (1.0f - fx) + s11 * fx) * fy;
+                dst[(static_cast<size_t>(y) * dw + x) * 4 + c] =
+                    static_cast<std::uint8_t>(std::clamp(std::lround(v), 0l, 255l));
+            }
+        }
+    }
 }
 
 } // namespace
@@ -812,6 +996,23 @@ void AtlasRenderer::init() {
     topView.texture.image = m_topTexImage;
     m_topTexView = sg_make_view(&topView);
 
+    // Placeholder tiling array (one 1x1 white layer): keeps the flat-pass
+    // bindings valid until buildTilingTextureArray runs.
+    sg_image_desc arrImg = {};
+    arrImg.type = SG_IMAGETYPE_ARRAY;
+    arrImg.width = 1;
+    arrImg.height = 1;
+    arrImg.num_slices = 1;
+    arrImg.pixel_format = SG_PIXELFORMAT_RGBA8;
+    arrImg.data.mip_levels[0].ptr = &white;
+    arrImg.data.mip_levels[0].size = sizeof(white);
+    arrImg.label = "tileshape-tiling-array-placeholder";
+    m_tilingArray.image = sg_make_image(&arrImg);
+    sg_view_desc arrView = {};
+    arrView.texture.image = m_tilingArray.image;
+    m_tilingArray.view = sg_make_view(&arrView);
+    m_tilingArrayLayers = 1;
+
     m_ready = true;
 }
 
@@ -850,10 +1051,8 @@ void AtlasRenderer::shutdown() {
     }
     destroySlot(m_slots[0]);
     destroySlot(m_slots[1]);
-    for (AtlasSlot& slot : m_tilingSlots) {
-        destroySlot(slot);
-    }
-    m_tilingSlots.clear();
+    destroySlot(m_tilingArray);
+    m_tilingArrayLayers = 0;
     m_ready = false;
 }
 
@@ -941,44 +1140,84 @@ bool AtlasRenderer::loadTopTextureFromFile(const std::string& path) {
     return true;
 }
 
-int AtlasRenderer::loadTilingTextureFromFile(const std::string& path) {
-    int w = 0, h = 0, comp = 0;
-    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
-    if (!pixels || w <= 0 || h <= 0) {
-        spdlog::error("AtlasRenderer: failed to load tiling texture '{}': {}", path, stbi_failure_reason());
-        if (pixels) {
-            stbi_image_free(pixels);
+int AtlasRenderer::buildTilingTextureArray(const std::vector<std::string>& paths, std::vector<int>* outLayers) {
+    struct CpuTex {
+        int w = 0;
+        int h = 0;
+        std::vector<std::uint8_t> rgba;
+    };
+    std::vector<CpuTex> loaded;
+    std::vector<int> fileLayer(paths.size(), -1);
+    int maxDim = 64;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        int w = 0, h = 0, comp = 0;
+        stbi_uc* pixels = stbi_load(paths[i].c_str(), &w, &h, &comp, 4);
+        if (!pixels || w <= 0 || h <= 0) {
+            spdlog::error("AtlasRenderer: failed to load tiling texture '{}': {}", paths[i], stbi_failure_reason());
+            if (pixels) {
+                stbi_image_free(pixels);
+            }
+            continue;
         }
-        return -1;
+        CpuTex tex;
+        tex.w = w;
+        tex.h = h;
+        tex.rgba.assign(pixels, pixels + static_cast<size_t>(w) * h * 4);
+        stbi_image_free(pixels);
+        fileLayer[i] = static_cast<int>(loaded.size());
+        maxDim = std::max(maxDim, std::max(w, h));
+        loaded.push_back(std::move(tex));
+    }
+    if (outLayers) {
+        *outLayers = fileLayer;
+    }
+    if (loaded.empty()) {
+        return 0;
     }
 
-    AtlasSlot slot;
+    // All slices share one size (array constraint): the largest source
+    // dimension, clamped to a sane range for a paint texture.
+    const int size = std::clamp(maxDim, 64, 1024);
+    std::vector<std::uint8_t> slices(static_cast<size_t>(size) * size * 4 * loaded.size());
+    for (size_t i = 0; i < loaded.size(); ++i) {
+        resampleRgbaBilinear(
+            loaded[i].rgba.data(),
+            loaded[i].w,
+            loaded[i].h,
+            slices.data() + i * static_cast<size_t>(size) * size * 4,
+            size,
+            size);
+    }
+
     sg_image_desc desc = {};
-    desc.width = w;
-    desc.height = h;
+    desc.type = SG_IMAGETYPE_ARRAY;
+    desc.width = size;
+    desc.height = size;
+    desc.num_slices = static_cast<int>(loaded.size());
     desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    desc.data.mip_levels[0].ptr = pixels;
-    desc.data.mip_levels[0].size = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
-    desc.label = "tileshape-tiling-tex";
-    slot.image = sg_make_image(&desc);
-    stbi_image_free(pixels);
-    if (slot.image.id == SG_INVALID_ID) {
-        spdlog::error("AtlasRenderer: sg_make_image failed (tiling texture {})", path);
-        return -1;
+    desc.data.mip_levels[0].ptr = slices.data();
+    desc.data.mip_levels[0].size = slices.size();
+    desc.label = "tileshape-tiling-array";
+    sg_image image = sg_make_image(&desc);
+    if (image.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_image failed (tiling array)");
+        return 0;
     }
-
     sg_view_desc viewDesc = {};
-    viewDesc.texture.image = slot.image;
-    slot.view = sg_make_view(&viewDesc);
-    if (slot.view.id == SG_INVALID_ID) {
-        spdlog::error("AtlasRenderer: sg_make_view failed (tiling texture {})", path);
-        sg_destroy_image(slot.image);
-        return -1;
+    viewDesc.texture.image = image;
+    sg_view view = sg_make_view(&viewDesc);
+    if (view.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_view failed (tiling array)");
+        sg_destroy_image(image);
+        return 0;
     }
 
-    m_tilingSlots.push_back(slot);
-    spdlog::info("AtlasRenderer: loaded tiling texture {} ({}x{}) as slot {}", path, w, h, m_tilingSlots.size() - 1);
-    return static_cast<int>(m_tilingSlots.size()) - 1;
+    destroySlot(m_tilingArray);
+    m_tilingArray.image = image;
+    m_tilingArray.view = view;
+    m_tilingArrayLayers = static_cast<int>(loaded.size());
+    spdlog::info("AtlasRenderer: tiling array {}x{} x{} layers from {} files", size, size, loaded.size(), paths.size());
+    return m_tilingArrayLayers;
 }
 
 bool AtlasRenderer::loadAtlasFromFile(AtlasKind kind, const std::string& path, int cols, int rows) {
@@ -1056,7 +1295,8 @@ void AtlasRenderer::appendTileQuad(
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
     int tileIndex,
-    float yOffset) {
+    float yOffset,
+    float baseLayer) {
 
     // Atlas tiles are square frames containing a 2:1 isometric diamond base
     // (plus grass sticking up). Display as a SQUARE of side cellWidth so the
@@ -1072,10 +1312,12 @@ void AtlasRenderer::appendTileQuad(
     const float y0 = center.y - half + yOffset;
     const float y1 = center.y + half + yOffset;
 
-    const TexVertex tl{x0, y0, uv.x, uv.y};
-    const TexVertex tr{x1, y0, uv.z, uv.y};
-    const TexVertex br{x1, y1, uv.z, uv.w};
-    const TexVertex bl{x0, y1, uv.x, uv.w};
+    const float L[4] = {baseLayer, 0.0f, 0.0f, 0.0f};
+    const float W[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+    const TexVertex tl{x0, y0, uv.x, uv.y, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
+    const TexVertex tr{x1, y0, uv.z, uv.y, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
+    const TexVertex br{x1, y1, uv.z, uv.w, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
+    const TexVertex bl{x0, y1, uv.x, uv.w, {L[0], L[1], L[2], L[3]}, {W[0], W[1], W[2], W[3]}};
 
     out.push_back(tl);
     out.push_back(tr);
@@ -1083,6 +1325,48 @@ void AtlasRenderer::appendTileQuad(
     out.push_back(tl);
     out.push_back(br);
     out.push_back(bl);
+}
+
+void AtlasRenderer::appendTileFan(
+    std::vector<TexVertex>& out,
+    const topology_core::DiamondIsometry& iso,
+    glm::ivec2 cell,
+    int tileIndex,
+    const float layers[4],
+    const glm::vec4 cornerWeights[4]) {
+
+    // Same square-frame UV mapping as appendTileQuad, but tessellated as a
+    // fan over the cell diamond (center + the 4 corner node positions), so
+    // the texture weights sit exactly on the nodes and interpolate
+    // continuously across shared edges of neighboring cells.
+    const glm::vec4 uv = atlasUvRect(tileIndex);
+    const glm::vec2 center = iso.mapToField(cell);
+    const float side = iso.dims.cellWidth;
+    const float half = side * 0.5f;
+
+    const auto uvAt = [&](glm::vec2 p) -> glm::vec2 {
+        return {
+            uv.x + (p.x - (center.x - half)) / side * (uv.z - uv.x),
+            uv.y + (p.y - (center.y - half)) / side * (uv.w - uv.y)};
+    };
+    const auto makeVert = [&](glm::vec2 p, glm::vec4 w) -> TexVertex {
+        const glm::vec2 t = uvAt(p);
+        return TexVertex{
+            p.x, p.y, t.x, t.y,
+            {layers[0], layers[1], layers[2], layers[3]},
+            {w.x, w.y, w.z, w.w}};
+    };
+
+    const auto corners = iso.cellDiamondCorners(cell); // Left, Up, Right, Down
+    const glm::vec4 centerWeights =
+        (cornerWeights[0] + cornerWeights[1] + cornerWeights[2] + cornerWeights[3]) * 0.25f;
+
+    for (int i = 0; i < 4; ++i) {
+        const int next = (i + 1) % 4;
+        out.push_back(makeVert(center, centerWeights));
+        out.push_back(makeVert(corners[i], cornerWeights[i]));
+        out.push_back(makeVert(corners[next], cornerWeights[next]));
+    }
 }
 
 void AtlasRenderer::appendDiamondOutline(
@@ -1152,17 +1436,21 @@ void AtlasRenderer::render(
 
     // Flat palette layers paint into the shared textured buffer; each range
     // is drawn with the layer's own atlas (and, for textured layers, with
-    // its tiling texture sampled in world coordinates under the mask).
+    // the tiling array sampled in world coordinates under the mask).
     struct TexRange {
         int base = 0;
         int count = 0;
         AtlasKind atlas = AtlasKind::Grass;
-        int tilingTex = -1;
+        bool textured = false;
+        float baseLayer = 0.0f;   // single-texture mode: array layer for the whole range
         float tilingScale = 0.0f; // repeats per field unit
+        float blendSharpness = 1.0f;
+        float blendNoise = 0.0f;
+        float blendNoiseScale = 0.0f; // per field unit
     };
     std::vector<TexRange> flatRanges;
     std::vector<TexVertex> texVerts;
-    texVerts.reserve(static_cast<std::size_t>(mapW * mapH * 6 * layerCount));
+    texVerts.reserve(static_cast<std::size_t>(mapW * mapH * 12 * layerCount));
 
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
@@ -1173,49 +1461,45 @@ void AtlasRenderer::render(
             continue;
         }
         if (layer.multiTexture) {
-            // Multi-texture layer: group surface cells by their node tag
-            // (raw tag = tiling slot + 1, so 0 maps to -1 = untagged,
-            // mask-only fallback), one draw range per slot. Cells never
-            // overlap, so the range order inside the layer is irrelevant;
-            // the painter z-order is kept within each range.
-            std::map<int, std::vector<glm::ivec2>> cellsBySlot;
+            // Multi-texture layer: ONE range for the whole layer. Each cell
+            // is a diamond fan whose corner vertices carry one-hot weights
+            // over the cell's candidate textures (LandBrush::cellTextureBlend)
+            // — neighboring textures blend smoothly across the shared nodes.
+            TexRange range;
+            range.base = static_cast<int>(texVerts.size());
+            range.atlas = layer.atlas;
+            range.textured = true;
+            range.tilingScale = layer.tilingRepeats / std::max(iso.dims.cellWidth, 1.0f);
+            range.blendSharpness = layer.blendSharpness;
+            range.blendNoise = layer.blendNoise;
+            range.blendNoiseScale = layer.blendNoiseScale / std::max(iso.dims.cellWidth, 1.0f);
             for (const auto& [z, cell] : drawOrder) {
                 (void)z;
                 const auto type = layer.brush->cellTypeAt(cell);
                 if (!landscape_core::tileTypeHasSurface(type)) {
                     continue;
                 }
-                cellsBySlot[layer.brush->cellTagAt(cell) - 1].push_back(cell);
+                const int idx = LandBrush::atlasIndexByType(type);
+                if (idx < 0) {
+                    continue;
+                }
+                float cellLayers[4];
+                glm::vec4 cornerWeights[4];
+                layer.brush->cellTextureBlend(cell, cellLayers, cornerWeights);
+                appendTileFan(texVerts, iso, cell, idx, cellLayers, cornerWeights);
             }
-            for (const auto& [slot, cells] : cellsBySlot) {
-                TexRange range;
-                range.base = static_cast<int>(texVerts.size());
-                range.atlas = layer.atlas;
-                if (slot >= 0 && slot < static_cast<int>(m_tilingSlots.size()) &&
-                    m_tilingSlots[slot].view.id != SG_INVALID_ID) {
-                    range.tilingTex = slot;
-                    range.tilingScale = layer.tilingRepeats / std::max(iso.dims.cellWidth, 1.0f);
-                }
-                for (const glm::ivec2 cell : cells) {
-                    const int idx = LandBrush::atlasIndexByType(layer.brush->cellTypeAt(cell));
-                    if (idx >= 0) {
-                        appendTileQuad(texVerts, iso, cell, idx);
-                    }
-                }
-                range.count = static_cast<int>(texVerts.size()) - range.base;
-                if (range.count > 0) {
-                    flatRanges.push_back(range);
-                }
+            range.count = static_cast<int>(texVerts.size()) - range.base;
+            if (range.count > 0) {
+                flatRanges.push_back(range);
             }
             continue;
         }
         TexRange range;
         range.base = static_cast<int>(texVerts.size());
         range.atlas = layer.atlas;
-        if (layer.tilingTex >= 0 &&
-            layer.tilingTex < static_cast<int>(m_tilingSlots.size()) &&
-            m_tilingSlots[layer.tilingTex].view.id != SG_INVALID_ID) {
-            range.tilingTex = layer.tilingTex;
+        if (layer.tilingTex >= 0 && layer.tilingTex < m_tilingArrayLayers) {
+            range.textured = true;
+            range.baseLayer = static_cast<float>(layer.tilingTex);
             range.tilingScale = layer.tilingRepeats / std::max(iso.dims.cellWidth, 1.0f);
         }
         for (const auto& [z, cell] : drawOrder) {
@@ -1226,7 +1510,7 @@ void AtlasRenderer::render(
             }
             const int idx = LandBrush::atlasIndexByType(type);
             if (idx >= 0) {
-                appendTileQuad(texVerts, iso, cell, idx);
+                appendTileQuad(texVerts, iso, cell, idx, 0.0f, range.baseLayer);
             }
         }
         range.count = static_cast<int>(texVerts.size()) - range.base;
@@ -1280,14 +1564,15 @@ void AtlasRenderer::render(
         bind.vertex_buffers[0] = m_texVbuf;
         bind.views[0] = slot.view;
         bind.samplers[0] = m_sampler;
-        // Tiling texture slot: the cliff top texture doubles as the
-        // always-valid placeholder when the layer has none (unsampled then).
-        bind.views[1] = range.tilingTex >= 0 ? m_tilingSlots[range.tilingTex].view : m_topTexView;
+        bind.views[1] = m_tilingArray.view;
         bind.samplers[1] = m_topTexSampler;
 
         TexFsParams texFs{};
-        texFs.values[0] = range.tilingTex >= 0 ? 1.0f : 0.0f;
+        texFs.values[0] = range.textured ? 1.0f : 0.0f;
         texFs.values[1] = range.tilingScale;
+        texFs.blend[0] = range.blendSharpness;
+        texFs.blend[1] = range.blendNoise;
+        texFs.blend[2] = range.blendNoiseScale;
 
         sg_apply_pipeline(m_texPip);
         sg_apply_bindings(&bind);
@@ -1529,10 +1814,10 @@ void AtlasRenderer::ensurePipelines() {
 #if defined(SOKOL_D3D11)
         shd.vertex_func.source = kTexVsHlsl;
         shd.fragment_func.source = kTexFsHlsl;
-        shd.attrs[0].hlsl_sem_name = "TEXCOORD";
-        shd.attrs[0].hlsl_sem_index = 0;
-        shd.attrs[1].hlsl_sem_name = "TEXCOORD";
-        shd.attrs[1].hlsl_sem_index = 1;
+        for (int i = 0; i < 4; ++i) {
+            shd.attrs[i].hlsl_sem_name = "TEXCOORD";
+            shd.attrs[i].hlsl_sem_index = i;
+        }
 #elif defined(SOKOL_METAL)
         shd.vertex_func.source = kTexVsMsl;
         shd.fragment_func.source = kTexFsMsl;
@@ -1552,7 +1837,7 @@ void AtlasRenderer::ensurePipelines() {
         shd.views[0].texture.spirv_set1_binding_n = 0;
 
         shd.views[1].texture.stage = SG_SHADERSTAGE_FRAGMENT;
-        shd.views[1].texture.image_type = SG_IMAGETYPE_2D;
+        shd.views[1].texture.image_type = SG_IMAGETYPE_ARRAY;
         shd.views[1].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
         shd.views[1].texture.hlsl_register_t_n = 1;
         shd.views[1].texture.msl_texture_n = 1;
@@ -1581,7 +1866,7 @@ void AtlasRenderer::ensurePipelines() {
         shd.texture_sampler_pairs[1].stage = SG_SHADERSTAGE_FRAGMENT;
         shd.texture_sampler_pairs[1].view_slot = 1;
         shd.texture_sampler_pairs[1].sampler_slot = 1;
-        shd.texture_sampler_pairs[1].glsl_name = "tiling_tex";
+        shd.texture_sampler_pairs[1].glsl_name = "tiling_array";
 
         m_texShd = sg_make_shader(&shd);
 
@@ -1589,6 +1874,8 @@ void AtlasRenderer::ensurePipelines() {
         pip.shader = m_texShd;
         pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
         pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+        pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
+        pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4;
         pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip.colors[0].blend.enabled = true;
         pip.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;

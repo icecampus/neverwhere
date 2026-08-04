@@ -69,13 +69,17 @@ struct PaintLayerView {
     // atlas color. The texture is sampled continuously in world (field)
     // coordinates — no per-tile cuts, so any tiling texture stays seamless —
     // while the atlas tile keeps working as the alpha mask only.
-    int tilingTex = -1;          // slot from loadTilingTextureFromFile, -1 = off
+    int tilingTex = -1;          // tiling array layer, -1 = off
     float tilingRepeats = 1.0f;  // texture repeats per cell width
-    // Multi-texture layer: the texture is chosen PER CELL from the node tags
-    // (LandBrush tag = tiling slot + 1, 0 = untagged → mask-only fallback),
-    // so several textures coexist in one layer and displace each other.
-    // Overrides tilingTex; tilingRepeats stays shared by the whole layer.
+    // Multi-texture layer: each cell is a diamond fan (center + the 4 corner
+    // nodes) whose vertices carry one-hot weights over the cell's candidate
+    // textures (LandBrush::cellTextureBlend), so neighboring textures blend
+    // smoothly across the shared nodes. Overrides tilingTex; tilingRepeats
+    // and the blend settings stay shared by the whole layer.
     bool multiTexture = false;
+    float blendSharpness = 1.0f;  // weight exponent: > 1 narrows the blend band
+    float blendNoise = 0.0f;      // organic edge wobble strength (0 = straight)
+    float blendNoiseScale = 4.0f; // noise repeats per cell width
 };
 
 // Fragment-shader uniforms of the cliff pass (palette/light, 16-byte blocks;
@@ -117,11 +121,14 @@ public:
         float camera_zoom;
     };
 
-    // FS uniforms of the flat-tile pass (16 bytes): x = color mode
-    // (0 = atlas color, 1 = world-space tiling texture), y = tiling scale
-    // (repeats per field unit), z/w = unused.
+    // FS uniforms of the flat-tile pass (32 bytes): tex_params x = color mode
+    // (0 = atlas color, 1 = world-space tiling array), y = tiling scale
+    // (repeats per field unit), z/w = unused; blend_params x = weight
+    // sharpness, y = edge noise strength, z = noise scale (per field unit),
+    // w = unused.
     struct TexFsParams {
         float values[4];
+        float blend[4];
     };
 
     void init();
@@ -140,10 +147,13 @@ public:
     // Until a file is loaded a 1x1 white placeholder is bound.
     bool loadTopTextureFromFile(const std::string& path);
 
-    // Tiling texture for flat layers (PaintLayerView::tilingTex): sampled in
-    // world coordinates under the atlas-tile alpha mask. Returns the slot
-    // index for PaintLayerView::tilingTex, or -1 on failure.
-    int loadTilingTextureFromFile(const std::string& path);
+    // Tiling texture array for flat layers (PaintLayerView::tilingTex /
+    // multiTexture): every file becomes one array layer (its index = the
+    // layer the LandBrush tags point at), sampled in world coordinates under
+    // the atlas-tile alpha mask. Files are resampled to a shared size (array
+    // slices must match). outLayers (optional) reports per-file the array
+    // layer or -1 when the file failed to load. Returns the layer count.
+    int buildTilingTextureArray(const std::vector<std::string>& paths, std::vector<int>* outLayers = nullptr);
 
     void render(
         const PaintLayerView* layers,
@@ -170,6 +180,11 @@ private:
     struct TexVertex {
         float x, y;
         float u, v;
+        // Tiling array blend: candidate layer indices (constant per cell —
+        // interpolation must not mix them) and their weights (vary per
+        // vertex). Pure cells are simply (1,0,0,0) over one layer.
+        float layers[4];
+        float weights[4];
     };
 
     // Cached scalar-field derivative of a brush: the extracted surface-nets
@@ -218,7 +233,19 @@ private:
         const topology_core::DiamondIsometry& iso,
         glm::ivec2 cell,
         int tileIndex,
-        float yOffset = 0.0f);
+        float yOffset = 0.0f,
+        float baseLayer = 0.0f);
+    // Diamond fan of a multi-texture cell: center + the 4 corner node
+    // positions (corner order Left/Up/Right/Down), 4 triangles. The center
+    // weight is the corner average; the UVs reproduce the square-frame
+    // mapping of appendTileQuad, so the atlas mask works unchanged.
+    void appendTileFan(
+        std::vector<TexVertex>& out,
+        const topology_core::DiamondIsometry& iso,
+        glm::ivec2 cell,
+        int tileIndex,
+        const float layers[4],
+        const glm::vec4 cornerWeights[4]);
     void appendDiamondOutline(
         std::vector<ColorVertex>& out,
         const topology_core::DiamondIsometry& iso,
@@ -248,9 +275,11 @@ private:
     std::vector<CliffCache> m_cliffCaches;
 
     AtlasSlot m_slots[2]{};
-    // Tiling textures for flat layers (world-space UV under the atlas mask);
-    // sampled with the REPEAT m_topTexSampler.
-    std::vector<AtlasSlot> m_tilingSlots;
+    // Tiling texture array for flat layers (world-space UV under the atlas
+    // mask); sampled with the REPEAT m_topTexSampler. Placeholder 1x1x1
+    // white until buildTilingTextureArray succeeds.
+    AtlasSlot m_tilingArray{};
+    int m_tilingArrayLayers = 0;
 
     int m_atlasCols = 4;
     int m_atlasRows = 6;
