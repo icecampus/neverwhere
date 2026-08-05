@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.20.0 FATAL_ERROR)
 include(cmake/utils.cmake)
 
 project(Neverwhere VERSION 0.1.0 LANGUAGES CXX C)
+if(APPLE)
+    # Standalone sokol-приложения компилируют main.cpp как Objective-C++
+    # (nw_configure_sokol_app); Ninja/Makefile-генераторы требуют явного
+    # включения языка (Xcode включает его сам).
+    enable_language(OBJCXX)
+endif()
 print_header("Neverwhere")
 check_preprocessor_configuration()
 configure_common_param()

@@ -85,6 +85,12 @@
       }
     },
     {
+      "name": "macos-clion",
+      "displayName": "CLion (Ninja, arm64-osx, Debug)",
+      "inherits": "macos-index",
+      "binaryDir": "${sourceDir}/_int_clion"
+    },
+    {
       "name": "linux",
       "displayName": "Linux (Ninja, x64-linux)",
       "binaryDir": "${sourceDir}/_int_linux",
@@ -108,6 +114,7 @@
     { "name": "emscripten-release", "configurePreset": "emscripten", "configuration": "Release" },
     { "name": "macos-debug", "configurePreset": "macos", "configuration": "Debug" },
     { "name": "macos-release", "configurePreset": "macos", "configuration": "Release" },
+    { "name": "macos-clion-debug", "configurePreset": "macos-clion" },
     { "name": "linux-debug", "configurePreset": "linux" }
   ]
 }

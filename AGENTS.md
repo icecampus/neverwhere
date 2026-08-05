@@ -51,6 +51,7 @@ macOS-флоу — Xcode generator + CMake Presets, та же `_intermediate_64`
 
 - Конфигурация: `./build_mac.sh` (обёртка над `cmake --preset macos`). Первая конфигурация собирает все vcpkg-зависимости (включая Qt) — занимает ~1–2 часа.
 - Сборка из CLI: `cmake --build --preset macos-debug --target EpicMapEditor`.
+- **CLion:** пресет `macos-clion` (Ninja, `_int_clion`, Debug + compile_commands) — CLion не поддерживает Xcode-генератор основного пресета. `macos-index` (`_intermediate_ide`) оставлен под индексацию Serena/clangd, в IDE его не используем.
 - Бинарники: `_intermediate_64/src/apps/<App>/Debug/<App>` (command-line executables, не .app).
 - Smoke-проверки: `EpicGameClient --smoke`, `EpicMapEditor --smoke`; юнит-тесты — `_intermediate_64/src/tests/Debug/neverwhere_tests`.
 - **RttrPlayground на macOS не собирается** (vcpkg-порт rttr не поддерживает osx; его CMakeLists возвращается сразу на не-Windows).
