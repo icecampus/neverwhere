@@ -257,6 +257,12 @@ private:
         const topology_core::DiamondIsometry& iso,
         glm::ivec2 cell,
         glm::vec4 color);
+    // Solid diamond of a cell (2 triangles) for the hover footprint tint.
+    void appendDiamondFill(
+        std::vector<ColorVertex>& out,
+        const topology_core::DiamondIsometry& iso,
+        glm::ivec2 cell,
+        glm::vec4 color);
     void appendNodeMarker(
         std::vector<ColorVertex>& out,
         const topology_core::DiamondIsometry& iso,
@@ -265,6 +271,7 @@ private:
 
     sg_pipeline m_texPip{};
     sg_pipeline m_colorPip{};
+    sg_pipeline m_colorTriPip{};
     sg_pipeline m_cliffPip{};
     sg_shader m_texShd{};
     sg_shader m_colorShd{};

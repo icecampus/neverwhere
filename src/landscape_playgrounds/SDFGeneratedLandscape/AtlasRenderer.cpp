@@ -1428,6 +1428,20 @@ void AtlasRenderer::appendDiamondOutline(
     }
 }
 
+void AtlasRenderer::appendDiamondFill(
+    std::vector<ColorVertex>& out,
+    const topology_core::DiamondIsometry& iso,
+    glm::ivec2 cell,
+    glm::vec4 color) {
+
+    const auto corners = iso.cellDiamondCorners(cell); // Left, Up, Right, Down
+    const int tris[6] = {0, 1, 2, 0, 2, 3};
+    for (const int idx : tris) {
+        const glm::vec2 p = corners[idx];
+        out.push_back({p.x, p.y, color.r, color.g, color.b, color.a});
+    }
+}
+
 void AtlasRenderer::appendNodeMarker(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
@@ -1580,18 +1594,44 @@ void AtlasRenderer::render(
     const float zFar = groundCenterY + 100000.0f;
     const float zScale = 1.0f / 200000.0f;
 
-    std::vector<ColorVertex> lineVerts;
-    lineVerts.reserve(static_cast<std::size_t>(mapW * mapH * 8 + 16));
+    // Overlay stream: hover fill triangles first (own draw call on the
+    // triangle pipeline), then all the line vertices — one buffer upload
+    // feeds both draws.
+    std::vector<ColorVertex> overlayVerts;
+    overlayVerts.reserve(static_cast<std::size_t>(mapW * mapH * 8 + 64));
+
+    int fillVertCount = 0;
+    if (hasHover) {
+        // Brush footprint preview: a click rewrites exactly the four cells
+        // touching the hovered node (LandBrush::affectedCells), so tint those
+        // diamonds. Cells outside the map (edge/corner nodes) simply drop out.
+        const glm::vec4 cellFill{1.0f, 0.75f, 0.25f, 0.15f};
+        for (const glm::ivec2 cell : topology_core::DiamondIsometry::nodeNeighbourCells(hoverNode)) {
+            if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
+                continue;
+            }
+            appendDiamondFill(overlayVerts, iso, cell, cellFill);
+        }
+        fillVertCount = static_cast<int>(overlayVerts.size());
+    }
 
     const glm::vec4 gridColor{0.45f, 0.48f, 0.52f, 0.55f};
     for (int y = 0; y < mapH; ++y) {
         for (int x = 0; x < mapW; ++x) {
-            appendDiamondOutline(lineVerts, iso, {x, y}, gridColor);
+            appendDiamondOutline(overlayVerts, iso, {x, y}, gridColor);
         }
     }
 
     if (hasHover) {
-        appendNodeMarker(lineVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f});
+        // Footprint outlines go over the grid, the node marker on top.
+        const glm::vec4 cellEdge{1.0f, 0.75f, 0.25f, 0.85f};
+        for (const glm::ivec2 cell : topology_core::DiamondIsometry::nodeNeighbourCells(hoverNode)) {
+            if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
+                continue;
+            }
+            appendDiamondOutline(overlayVerts, iso, cell, cellEdge);
+        }
+        appendNodeMarker(overlayVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f});
     }
 
     VsParams vsParams{};
@@ -1638,8 +1678,10 @@ void AtlasRenderer::render(
         drawAtlasRange(range);
     }
 
-    if (!lineVerts.empty()) {
-        sg_update_buffer(m_colorVbuf, sg_range{lineVerts.data(), lineVerts.size() * sizeof(ColorVertex)});
+    // One upload for both overlay draws (sokol allows a single buffer update
+    // per frame): hover fill triangles first, grid/outline lines after them.
+    if (!overlayVerts.empty()) {
+        sg_update_buffer(m_colorVbuf, sg_range{overlayVerts.data(), overlayVerts.size() * sizeof(ColorVertex)});
     }
 
     // Cliff/stone layers: scalar-field surface nets from the same nodes, drawn
@@ -1719,14 +1761,23 @@ void AtlasRenderer::render(
         }
     }
 
-    if (!lineVerts.empty()) {
+    if (!overlayVerts.empty()) {
         sg_bindings bind{};
         bind.vertex_buffers[0] = m_colorVbuf;
 
-        sg_apply_pipeline(m_colorPip);
-        sg_apply_bindings(&bind);
-        sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
-        sg_draw(0, static_cast<int>(lineVerts.size()), 1);
+        if (fillVertCount > 0) {
+            sg_apply_pipeline(m_colorTriPip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+            sg_draw(0, fillVertCount, 1);
+        }
+        const int lineVertCount = static_cast<int>(overlayVerts.size()) - fillVertCount;
+        if (lineVertCount > 0) {
+            sg_apply_pipeline(m_colorPip);
+            sg_apply_bindings(&bind);
+            sg_apply_uniforms(0, sg_range{&vsParams, sizeof(vsParams)});
+            sg_draw(fillVertCount, lineVertCount, 1);
+        }
     }
 }
 
@@ -1969,6 +2020,11 @@ void AtlasRenderer::ensurePipelines() {
         pip.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         pip.label = "tileshape-color-pip";
         m_colorPip = sg_make_pipeline(&pip);
+
+        // Same color stream as triangles: translucent hover footprint fill.
+        pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+        pip.label = "tileshape-color-tri-pip";
+        m_colorTriPip = sg_make_pipeline(&pip);
     }
 
     // Cliff pass (scalar-field surface nets): baked depth + field-space
@@ -2037,6 +2093,10 @@ void AtlasRenderer::destroyPipelines() {
     if (m_colorPip.id != SG_INVALID_ID) {
         sg_destroy_pipeline(m_colorPip);
         m_colorPip = {};
+    }
+    if (m_colorTriPip.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(m_colorTriPip);
+        m_colorTriPip = {};
     }
     if (m_cliffPip.id != SG_INVALID_ID) {
         sg_destroy_pipeline(m_cliffPip);
