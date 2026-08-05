@@ -1,4 +1,4 @@
-﻿#include "GameView.h"
+#include "GameView.h"
 #include "EcsModel.h"
 #include "graphics/lib.h"
 #include <spdlog/spdlog.h>
@@ -166,6 +166,11 @@ public:
         gl->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         gl->glDisable(GL_DEPTH_TEST);
         gl->glDisable(GL_CULL_FACE);
+        // sokol's GLCORE backend hard-enables GL_FRAMEBUFFER_SRGB at the
+        // start of every offscreen pass and never restores it; on macOS the
+        // sRGB-encoded window drawable then double-converts everything Qt
+        // draws afterwards (the whole window washes out).
+        gl->glDisable(GL_FRAMEBUFFER_SRGB);
 
     }
 

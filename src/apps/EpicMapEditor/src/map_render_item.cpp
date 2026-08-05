@@ -218,6 +218,14 @@ public:
         gl->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         gl->glDisable(GL_DEPTH_TEST);
         gl->glDisable(GL_CULL_FACE);
+        // sokol's GLCORE backend hard-enables GL_FRAMEBUFFER_SRGB at the
+        // start of every offscreen pass (the "crude hack" in the sokol_gfx
+        // begin_pass) and never restores it. On macOS the window drawable is
+        // sRGB-encoded, so everything Qt draws after our pass (the whole UI
+        // plus the map FBO itself) gets a second linear->sRGB conversion and
+        // the window washes out. Windows/Linux default framebuffers are
+        // LINEAR-encoded, so the flag is a no-op there.
+        gl->glDisable(GL_FRAMEBUFFER_SRGB);
     }
 
     QOpenGLFramebufferObject* createFramebufferObject(const QSize& size) override {
