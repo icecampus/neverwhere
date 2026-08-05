@@ -8,6 +8,7 @@
 #include "assets/cliff_asset.h"
 #include "assets/cyclopean_asset.h"
 #include "assets/stone_asset.h"
+#include "assets/texture_asset.h"
 #include "assets_pack_model.h"
 #include "base_data/lib.h"
 
@@ -74,6 +75,13 @@ void AssetsLoader::loadAsset(const BaseData::AssetData& assetData, AssetsPackMod
     if (assetData.stone3dData.has_value() )
     {
         auto asset = std::make_unique<StoneAsset>(pack);
+        asset->load(assetData);
+        pack->addElement(std::move(asset));
+    }
+
+    if (assetData.texture2dData.has_value() )
+    {
+        auto asset = std::make_unique<TextureAsset>(pack);
         asset->load(assetData);
         pack->addElement(std::move(asset));
     }

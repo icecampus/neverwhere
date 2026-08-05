@@ -16,7 +16,8 @@ namespace AssetTypes
         shape3d,
         cliff3d,
         cyclopean3d,
-        stone3d
+        stone3d,
+        texture2d
     };
     Q_ENUM_NS(Type);
 }
@@ -240,6 +241,20 @@ namespace BaseData
             rimBulge, rimNotch, shading, grassFade, rimShade, topTexMix, topTexTiles);
     };
 
+    // Texture2D: tiling-texture landscape brush (multi-texture blend layer).
+    // No atlas — objects are plain Landscape tiles on the TextureLandscape
+    // layer whose tileIndex encodes the vertex nodes (same convention as
+    // slice/raised); the texture file + tiling drive the renderer.
+    struct Texture2dAssetData
+    {
+        std::string thumbnail;
+        std::string texture;          // tiling texture file, relative to the bundle root
+        float tilingRepeats{1.0f};    // texture repeats per cell width
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Texture2dAssetData,
+            thumbnail, texture, tilingRepeats);
+    };
+
     //Asset
     struct AssetData
     {
@@ -255,6 +270,7 @@ namespace BaseData
         std::optional<Cliff3dAssetData> cliff3dData;
         std::optional<Cyclopean3dAssetData> cyclopean3dData;
         std::optional<Stone3dAssetData> stone3dData;
+        std::optional<Texture2dAssetData> texture2dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

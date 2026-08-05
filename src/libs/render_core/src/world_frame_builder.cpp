@@ -12,6 +12,7 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     outFrame.cliffTiles.clear();
     outFrame.cyclopeanTiles.clear();
     outFrame.stoneTiles.clear();
+    outFrame.textureTiles.clear();
     outFrame.sprites.clear();
 
     for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
@@ -73,6 +74,19 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
         t.assetUuid = obj.assetUuid;
         t.tileIndex = obj.landscapeData->tileIndex;
         outFrame.stoneTiles.push_back(std::move(t));
+    }
+
+    // TextureLandscape layer -> texture tiles (Texture2d assets, tiling
+    // world-UV textures blending across shared nodes).
+    for (const auto& obj : map.layer(game_data::LayerType::TextureLandscape)) {
+        if (obj.type != game_data::GameObjectType::Landscape) continue;
+        if (!obj.landscapeData) continue;
+
+        LandscapeTile t;
+        t.cell = obj.position;
+        t.assetUuid = obj.assetUuid;
+        t.tileIndex = obj.landscapeData->tileIndex;
+        outFrame.textureTiles.push_back(std::move(t));
     }
 
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
@@ -247,6 +261,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
     for (const auto& t : frame.cliffTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -277,6 +292,9 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
             CliffParams params = stoneParamsFromAssetData(entry->stone);
             params.topTexturePath = entry->topTexturePath;
             renderer.ensureStoneAsset(uuid, params);
+        }
+        if (entry->isTexture2d()) {
+            renderer.ensureTextureAsset(uuid, entry->texturePath, entry->textureData.tilingRepeats);
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);

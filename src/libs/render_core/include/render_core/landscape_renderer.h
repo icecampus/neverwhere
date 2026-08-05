@@ -43,6 +43,15 @@ struct RaisedParams {
     float bevel = 0.3f;        // convex-corner bevel fraction
 };
 
+// Blend behaviour of the texture-2D pass (uniforms only, live-tunable;
+// SDFGeneratedLandscape "Texture 2D" layer defaults).
+struct TextureBlendParams {
+    float sharpness = 1.0f;  // weight exponent: > 1 narrows the blend band
+    float noise = 0.9f;      // organic edge wobble strength (0 = straight gradient)
+    float noiseScale = 4.0f; // noise repeats per cell
+    float edgeFade = 0.2f;   // feather width around the fill = 0.5 iso (0 = hard cut)
+};
+
 class LandscapeRenderer {
 public:
     // depthFormat must match the pass the renderer draws into:
@@ -98,6 +107,29 @@ public:
         int viewWidth,
         int viewHeight);
 
+    // Register a texture-2D asset (tiling world-UV texture for the texture
+    // landscape layer): the file joins the shared texture array, the asset
+    // gets a stable slice index. tilingRepeats = texture repeats per cell.
+    void ensureTextureAsset(
+        const std::string& assetUuid,
+        const std::filesystem::path& texturePath,
+        float tilingRepeats);
+
+    // Texture-2D flat pass (SDFGeneratedLandscape "Texture 2D" port): each
+    // cell is a diamond fan (center + the 4 corner nodes) whose corners carry
+    // one-hot weights over the cell's candidate textures (see
+    // texture_blend.h), so neighboring textures blend smoothly across the
+    // shared nodes and the region contour feathers into empty space. Ground
+    // level: same constant depth and stitch shading as the flat ground pass.
+    void renderTexture(
+        const std::vector<LandscapeTile>& tiles,
+        const topology_core::DiamondIsometry& iso,
+        const topology_core::Camera2D& camera,
+        int viewWidth,
+        int viewHeight,
+        const GroundStitchContext& groundStitch,
+        const TextureBlendParams& blendParams);
+
 private:
     struct Vertex {
         float pos[2];
@@ -118,6 +150,19 @@ private:
     struct WallVertex {
         float pos[2];
         float color[4];
+    };
+
+    // Texture-2D pass vertex: screen position (camera applied at emission,
+    // ground-pass style), world (map-cell) position for the world-UV tiling
+    // and the stitch AO, per-cell candidate array slices with their tiling
+    // densities, one-hot corner weights and the on/off fill weight.
+    struct TextureVertex {
+        float pos[2];
+        float world[2];
+        float layers[4];
+        float weights[4];
+        float tiling[4];
+        float fill;
     };
 
     // Z-buffered raised pass: pos.xy is screen space, pos.z is the raw
@@ -206,10 +251,31 @@ private:
     sg_shader triDepthWallShd{SG_INVALID_ID};
     sg_buffer triWallVbuf{SG_INVALID_ID};
 
+    // Texture-2D pass: own pipeline/shader/buffer (one sg_update_buffer per
+    // buffer per frame — the ground pass updates vbuf in the same frame) and
+    // the shared tiling-texture array (one slice per registered asset).
+    sg_pipeline texturePip{SG_INVALID_ID};
+    sg_shader textureShd{SG_INVALID_ID};
+    sg_buffer textureVbuf{SG_INVALID_ID};
+    sg_bindings textureBind{};
+    sg_image textureArrayImage{SG_INVALID_ID};
+    sg_view textureArrayView{SG_INVALID_ID};
+    sg_sampler textureArraySampler{SG_INVALID_ID};
+
+    struct TextureAssetEntry {
+        std::filesystem::path path;
+        float tilingRepeats = 1.0f;
+        int slice = -1;
+    };
+    std::unordered_map<std::string, TextureAssetEntry> textureAssets;
+    bool textureArrayDirty = false;
+    void rebuildTextureArray();
+
     std::unordered_map<std::string, AtlasGpu> atlases;
     std::unordered_map<std::string, RaisedAtlasGpu> raisedAtlases;
 
     std::vector<GroundVertex> scratchGroundVerts;
+    std::vector<TextureVertex> scratchTextureVerts;
     std::vector<Vertex> scratchVerts;
     std::vector<DrawGroup> scratchDraws;
     std::vector<Vertex> scratchRaisedVerts;
@@ -246,6 +312,8 @@ private:
     void destroyPipeline();
     void ensureGroundPipeline();
     void destroyGroundPipeline();
+    void ensureTexturePipeline();
+    void destroyTexturePipeline();
     void ensureWallPipeline();
     void destroyWallPipeline();
     void ensureDepthPipelines();

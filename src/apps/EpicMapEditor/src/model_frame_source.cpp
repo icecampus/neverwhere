@@ -181,6 +181,7 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.cliffTiles.clear();
     outFrame.cyclopeanTiles.clear();
     outFrame.stoneTiles.clear();
+    outFrame.textureTiles.clear();
     outFrame.sprites.clear();
 
     if (!m_mapModel) return;
@@ -257,6 +258,21 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         });
     }
 
+    // TextureLandscape layer -> texture tiles (Texture2d assets, tiling
+    // world-UV textures blending across shared nodes).
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::TextureLandscape)) {
+        layer->iterate([&outFrame](GameObject& obj) {
+            const BaseData::GameObject data = obj.getData();
+            if (data.type != GameObjectTypes::Landscape || !data.landscapeData) return;
+
+            render_core::LandscapeTile t;
+            t.cell = data.position;
+            t.assetUuid = boost::uuids::to_string(data.assetUuid);
+            t.tileIndex = data.landscapeData->tileIndex;
+            outFrame.textureTiles.push_back(std::move(t));
+        });
+    }
+
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
         LayerModel* layer = m_mapModel->layer(layerType);
@@ -283,6 +299,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
     for (const auto& t : frame.cliffTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -329,6 +346,11 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
         if (data.sliceData) {
             // Editor convention: landscape atlases are split into 4x6 tiles.
             renderer.ensureLandscapeAtlas(uuid, data.root() / data.sliceData->atlas, 4, 6);
+        }
+        if (data.texture2dData) {
+            // Texture-2D tiles: the tiling texture joins the shared array
+            // (one slice per asset), its tiling density rides in the verts.
+            renderer.ensureTextureAsset(uuid, data.root() / data.texture2dData->texture, data.texture2dData->tilingRepeats);
         }
         if (data.imageData) {
             renderer.ensureSpriteImage(uuid, data.root() / data.imageData->imageFilename, data.imageData->width, data.pivot);

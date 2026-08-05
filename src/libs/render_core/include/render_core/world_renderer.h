@@ -26,6 +26,7 @@ struct WorldFrame {
     std::vector<LandscapeTile> cliffTiles;  // CliffLandscape layer (cliff3d: surface-nets cliffs)
     std::vector<LandscapeTile> cyclopeanTiles; // CyclopeanLandscape layer (cyclopean3d: landscape_mesh walls)
     std::vector<LandscapeTile> stoneTiles;  // StoneLandscape layer (stone3d: voronoi-carved surface-nets plateau, shares the cliff pass)
+    std::vector<LandscapeTile> textureTiles; // TextureLandscape layer (texture2d: tiling world-UV textures, multi-texture blend)
     std::vector<SpriteInstance> sprites;
 
     bool showGrid = true;
@@ -59,12 +60,16 @@ public:
     void ensureCliffAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureCyclopeanAsset(const std::string& assetUuid, const CyclopeanParams& params);
     void ensureStoneAsset(const std::string& assetUuid, const CliffParams& params);
+    void ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 
     // Scene stitching knobs (playground defaults). C++ API only for now (no
     // QML); edits apply from the next prepare().
     SceneStitchSettings stitch;
     SeamParams seam;
+    // Texture-2D layer blend knobs (SDFGeneratedLandscape defaults). C++ API
+    // only for now (no QML); uniforms only, apply instantly.
+    TextureBlendParams textureBlend;
 
     // Offscreen half of the frame: rebuilds the contact-AO field + its R8
     // texture when the highground content (cliff/stone/cyclopean tiles)

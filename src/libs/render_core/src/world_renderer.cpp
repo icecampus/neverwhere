@@ -94,6 +94,10 @@ void WorldRenderer::ensureStoneAsset(const std::string& assetUuid, const CliffPa
     cliffRenderer.ensureStoneAsset(assetUuid, params);
 }
 
+void WorldRenderer::ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats) {
+    landscapeRenderer.ensureTextureAsset(assetUuid, texturePath, tilingRepeats);
+}
+
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
     spriteRenderer.ensureImage(assetUuid, imagePath, widthCells, pivot);
 }
@@ -220,6 +224,10 @@ void WorldRenderer::render(
     groundStitch.aoSampler = m_aoSampler;
     groundStitch.params = m_stitchParams;
     landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight, groundStitch);
+
+    // Texture-2D layer: ground-level too (drawn over the flat ground by
+    // painter order at the same constant depth), before the grid overlay.
+    landscapeRenderer.renderTexture(frame.textureTiles, iso, camera, viewWidth, viewHeight, groundStitch, textureBlend);
 
     // Grid overlay: above the water and the flat ground, but UNDER the 3D
     // world (raised walls / cliffs / sprites overdraw it — no depth write

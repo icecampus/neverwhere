@@ -13,6 +13,9 @@
 #include <highground_core/highground.h>
 #include <landscape_core/landscape_logic.h>
 
+#include "render_core/image_loader.h"
+#include "render_core/texture_blend.h"
+
 #include "atlas_tile_types.h"
 
 namespace render_core {
@@ -292,6 +295,373 @@ fragment float4 _main(PSIn in [[stage_in]],
     float ao = mix(1.0 - st.stitch1.z, 1.0, smoothstep(0.0, max(st.stitch1.w, 1e-3), aoDist));
     float3 col = t.rgb * (light * ao);
     return float4(pow(saturate(col), float3(st.stitch0.z)), t.a);
+}
+)";
+
+// ---------------------------------------------------------------------------
+// Texture-2D pass (SDFGeneratedLandscape "Texture 2D" layer port): a flat
+// ground-level pass where every cell is a diamond fan (center + the 4 corner
+// nodes). The corners carry one-hot weights over the cell's candidate
+// textures (texture_blend.h) and the on/off fill weight, so neighboring
+// textures blend smoothly across the shared nodes and the region contour
+// feathers into empty space. Textures live in one array and sample in world
+// (map-cell) coordinates — continuous, no per-tile cuts. The stitch shading
+// (sun/tone + contact AO) matches the flat ground pass.
+// ---------------------------------------------------------------------------
+
+static const char* texture_vs_src_glsl = R"(
+#version 330
+layout(location=0) in vec2 pos;
+layout(location=1) in vec2 world;
+layout(location=2) in vec4 layers;
+layout(location=3) in vec4 weights;
+layout(location=4) in vec4 tiling;
+layout(location=5) in float fill;
+out vec2 v_world;
+out vec4 v_layers;
+out vec4 v_weights;
+out vec4 v_tiling;
+out float v_fill;
+uniform vec2 view_size;
+void main() {
+    vec2 clip_pos = vec2(
+        (pos.x / view_size.x) * 2.0 - 1.0,
+        1.0 - (pos.y / view_size.y) * 2.0
+    );
+    // Same ground-level constant depth as the flat ground pass.
+    gl_Position = vec4(clip_pos, 0.999, 1.0);
+    v_world = world;
+    v_layers = layers;
+    v_weights = weights;
+    v_tiling = tiling;
+    v_fill = fill;
+}
+)";
+
+static const char* texture_fs_src_glsl = R"(
+#version 330
+in vec2 v_world;
+in vec4 v_layers;
+in vec4 v_weights;
+in vec4 v_tiling;
+in float v_fill;
+out vec4 frag_color;
+uniform vec4 sun_dir;
+uniform vec4 stitch0; // ground ambient, diffuse, gamma, unused
+uniform vec4 stitch1; // unused, unused, AO strength, AO radius (cells)
+uniform vec4 ao_rect; // xy: AO field origin (cells), zw: 1 / field extent
+uniform vec4 blend_params; // weight sharpness, wobble strength, wobble scale (per cell), edge feather
+uniform sampler2DArray tiling_array;
+uniform sampler2D ao_tex;
+
+vec2 hashv2v2(vec2 p) {
+    vec2 chash = vec2(37.0, 39.0);
+    return fract(sin(vec2(dot(p, chash), dot(p + vec2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(vec2 p) {
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    vec2 t = mix(hashv2v2(ip), hashv2v2(ip + vec2(1.0, 0.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(vec2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; ++j) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+void main() {
+    // Up to 4 candidate textures blend via the interpolated corner weights;
+    // in the blend zone the weights are sharpened and wobbled by fbm noise
+    // for an organic edge (the wobble is gated by w*(1-w), so pure interiors
+    // stay untouched). Each texture tiles with its own density.
+    float n = 0.0;
+    if (blend_params.y > 0.0) {
+        n = fbm2(v_world * blend_params.z) - 0.5;
+    }
+    vec4 w = max(v_weights, 0.0);
+    float sw = w.x + w.y + w.z + w.w;
+    vec3 rgb = vec3(0.0);
+    if (sw > 1e-4) {
+        w = pow(w, vec4(max(blend_params.x, 0.05)));
+        w += n * blend_params.y * w * (1.0 - w);
+        w = max(w, 0.0);
+        w /= max(w.x + w.y + w.z + w.w, 1e-4);
+        rgb = w.x * texture(tiling_array, vec3(v_world * v_tiling.x, v_layers.x)).rgb
+            + w.y * texture(tiling_array, vec3(v_world * v_tiling.y, v_layers.y)).rgb
+            + w.z * texture(tiling_array, vec3(v_world * v_tiling.z, v_layers.z)).rgb
+            + w.w * texture(tiling_array, vec3(v_world * v_tiling.w, v_layers.w)).rgb;
+    }
+    // Soft edge into empty space: the fill weight (1 at on-nodes, 0 at
+    // off-nodes) fades coverage around the 0.5 iso with the same noise
+    // wobble, so the region contour feathers out instead of stepping hard.
+    float feather = max(blend_params.w, 1e-3);
+    float fill = clamp(v_fill + n * blend_params.y * v_fill * (1.0 - v_fill), 0.0, 1.0);
+    float alpha = smoothstep(0.5 - feather, 0.5 + feather, fill);
+    if (alpha < 0.004) discard;
+    // One sun, one ambient, one gamma with the flat ground pass; the contact
+    // AO field is shared too (this layer stays ground-level scenery).
+    vec3 l = normalize(sun_dir.xyz);
+    float light = stitch0.x + stitch0.y * max(l.y, 0.0);
+    vec2 aoUv = (v_world - ao_rect.xy) * ao_rect.zw;
+    float aoDist = textureLod(ao_tex, aoUv, 0.0).r * 4.0;
+    float ao = mix(1.0 - stitch1.z, 1.0, smoothstep(0.0, max(stitch1.w, 1e-3), aoDist));
+    vec3 col = rgb * (light * ao);
+    frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(stitch0.z)), alpha);
+}
+)";
+
+static const char* texture_vs_src_hlsl = R"(
+cbuffer vs_params: register(b0) { float2 view_size; };
+struct VSIn {
+    float2 pos: TEXCOORD0;
+    float2 world: TEXCOORD1;
+    float4 layers: TEXCOORD2;
+    float4 weights: TEXCOORD3;
+    float4 tiling: TEXCOORD4;
+    float fill: TEXCOORD5;
+};
+struct VSOut {
+    float4 pos: SV_Position;
+    float2 world: TEXCOORD0;
+    float4 layers: TEXCOORD1;
+    float4 weights: TEXCOORD2;
+    float4 tiling: TEXCOORD3;
+    float fill: TEXCOORD4;
+};
+VSOut main(VSIn inp) {
+    VSOut o;
+    float2 clip;
+    clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
+    clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
+    // Same ground-level constant depth as the flat ground pass.
+    o.pos = float4(clip, 0.999, 1.0);
+    o.world = inp.world;
+    o.layers = inp.layers;
+    o.weights = inp.weights;
+    o.tiling = inp.tiling;
+    o.fill = inp.fill;
+    return o;
+}
+)";
+
+static const char* texture_fs_src_hlsl = R"(
+cbuffer stitch_params: register(b0) {
+    float4 sun_dir;
+    float4 stitch0; // ground ambient, diffuse, gamma, unused
+    float4 stitch1; // unused, unused, AO strength, AO radius (cells)
+    float4 ao_rect; // xy: AO field origin (cells), zw: 1 / field extent
+};
+cbuffer blend_ub: register(b1) {
+    float4 blend_params; // weight sharpness, wobble strength, wobble scale (per cell), edge feather
+};
+Texture2DArray tiling_array: register(t0);
+SamplerState tiling_smp: register(s0);
+Texture2D ao_tex: register(t1);
+SamplerState ao_smp: register(s1);
+struct PSIn {
+    float4 pos: SV_Position;
+    float2 world: TEXCOORD0;
+    float4 layers: TEXCOORD1;
+    float4 weights: TEXCOORD2;
+    float4 tiling: TEXCOORD3;
+    float fill: TEXCOORD4;
+};
+
+float2 hashv2v2(float2 p) {
+    float2 chash = float2(37.0, 39.0);
+    return frac(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = frac(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = lerp(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
+    return lerp(t.x, t.y, fp.x);
+}
+
+float fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; ++j) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+float4 main(PSIn inp): SV_Target0 {
+    // World-space tiling + candidate blend + soft empty edge: see the GLSL variant.
+    float n = 0.0;
+    if (blend_params.y > 0.0) {
+        n = fbm2(inp.world * blend_params.z) - 0.5;
+    }
+    float4 w = max(inp.weights, 0.0);
+    float sw = w.x + w.y + w.z + w.w;
+    float3 rgb = float3(0.0, 0.0, 0.0);
+    if (sw > 1e-4) {
+        w = pow(w, (float4)max(blend_params.x, 0.05));
+        w += n * blend_params.y * w * (1.0 - w);
+        w = max(w, 0.0);
+        w /= max(w.x + w.y + w.z + w.w, 1e-4);
+        rgb = w.x * tiling_array.Sample(tiling_smp, float3(inp.world * inp.tiling.x, inp.layers.x)).rgb
+            + w.y * tiling_array.Sample(tiling_smp, float3(inp.world * inp.tiling.y, inp.layers.y)).rgb
+            + w.z * tiling_array.Sample(tiling_smp, float3(inp.world * inp.tiling.z, inp.layers.z)).rgb
+            + w.w * tiling_array.Sample(tiling_smp, float3(inp.world * inp.tiling.w, inp.layers.w)).rgb;
+    }
+    float feather = max(blend_params.w, 1e-3);
+    float fill = clamp(inp.fill + n * blend_params.y * inp.fill * (1.0 - inp.fill), 0.0, 1.0);
+    float alpha = smoothstep(0.5 - feather, 0.5 + feather, fill);
+    if (alpha < 0.004) discard;
+    float3 l = normalize(sun_dir.xyz);
+    float light = stitch0.x + stitch0.y * max(l.y, 0.0);
+    float2 aoUv = (inp.world - ao_rect.xy) * ao_rect.zw;
+    float aoDist = ao_tex.SampleLevel(ao_smp, aoUv, 0).r * 4.0;
+    float ao = lerp(1.0 - stitch1.z, 1.0, smoothstep(0.0, max(stitch1.w, 1e-3), aoDist));
+    float3 col = rgb * (light * ao);
+    return float4(pow(saturate(col), (float3)stitch0.z), alpha);
+}
+)";
+
+static const char* texture_vs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VsParams {
+    float2 view_size;
+};
+
+struct VSIn {
+    float2 pos [[attribute(0)]];
+    float2 world [[attribute(1)]];
+    float4 layers [[attribute(2)]];
+    float4 weights [[attribute(3)]];
+    float4 tiling [[attribute(4)]];
+    float fill [[attribute(5)]];
+};
+
+struct VSOut {
+    float4 pos [[position]];
+    float2 world;
+    float4 layers;
+    float4 weights;
+    float4 tiling;
+    float fill;
+};
+
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
+    VSOut o;
+    float2 clip = float2(
+        (in.pos.x / params.view_size.x) * 2.0 - 1.0,
+        1.0 - (in.pos.y / params.view_size.y) * 2.0
+    );
+    // Same ground-level constant depth as the flat ground pass.
+    o.pos = float4(clip, 0.999, 1.0);
+    o.world = in.world;
+    o.layers = in.layers;
+    o.weights = in.weights;
+    o.tiling = in.tiling;
+    o.fill = in.fill;
+    return o;
+}
+)";
+
+static const char* texture_fs_src_msl = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct StitchParams {
+    float4 sun_dir;
+    float4 stitch0; // ground ambient, diffuse, gamma, unused
+    float4 stitch1; // unused, unused, AO strength, AO radius (cells)
+    float4 ao_rect; // xy: AO field origin (cells), zw: 1 / field extent
+};
+
+struct BlendParams {
+    float4 blend_params; // weight sharpness, wobble strength, wobble scale (per cell), edge feather
+};
+
+struct PSIn {
+    float4 pos [[position]];
+    float2 world;
+    float4 layers;
+    float4 weights;
+    float4 tiling;
+    float fill;
+};
+
+float2 hashv2v2(float2 p) {
+    float2 chash = float2(37.0, 39.0);
+    return fract(sin(float2(dot(p, chash), dot(p + float2(1.0, 0.0), chash))) * 43758.54);
+}
+
+float noisefv2(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = fract(p);
+    fp = fp * fp * (3.0 - 2.0 * fp);
+    float2 t = mix(hashv2v2(ip), hashv2v2(ip + float2(1.0, 0.0)), fp.y);
+    return mix(t.x, t.y, fp.x);
+}
+
+float fbm2(float2 p) {
+    float f = 0.0;
+    float a = 1.0;
+    for (int j = 0; j < 5; ++j) {
+        f += a * noisefv2(p);
+        a *= 0.5;
+        p *= 2.0;
+    }
+    return f * (1.0 / 1.9375);
+}
+
+fragment float4 _main(PSIn in [[stage_in]],
+                      constant StitchParams& st [[buffer(1)]],
+                      constant BlendParams& bp [[buffer(2)]],
+                      texture2d_array<float> tiling_array [[texture(0)]],
+                      sampler tiling_smp [[sampler(0)]],
+                      texture2d<float> ao_tex [[texture(1)]],
+                      sampler ao_smp [[sampler(1)]]) {
+    // World-space tiling + candidate blend + soft empty edge: see the GLSL variant.
+    float n = 0.0;
+    if (bp.blend_params.y > 0.0) {
+        n = fbm2(in.world * bp.blend_params.z) - 0.5;
+    }
+    float4 w = max(in.weights, 0.0);
+    float sw = w.x + w.y + w.z + w.w;
+    float3 rgb = float3(0.0);
+    if (sw > 1e-4) {
+        w = pow(w, float4(max(bp.blend_params.x, 0.05)));
+        w += n * bp.blend_params.y * w * (1.0 - w);
+        w = max(w, 0.0);
+        w /= max(w.x + w.y + w.z + w.w, 1e-4);
+        rgb = w.x * tiling_array.sample(tiling_smp, in.world * in.tiling.x, uint(in.layers.x)).rgb
+            + w.y * tiling_array.sample(tiling_smp, in.world * in.tiling.y, uint(in.layers.y)).rgb
+            + w.z * tiling_array.sample(tiling_smp, in.world * in.tiling.z, uint(in.layers.z)).rgb
+            + w.w * tiling_array.sample(tiling_smp, in.world * in.tiling.w, uint(in.layers.w)).rgb;
+    }
+    float feather = max(bp.blend_params.w, 1e-3);
+    float fill = clamp(in.fill + n * bp.blend_params.y * in.fill * (1.0 - in.fill), 0.0, 1.0);
+    float alpha = smoothstep(0.5 - feather, 0.5 + feather, fill);
+    if (alpha < 0.004) {
+        discard_fragment();
+    }
+    float3 l = normalize(st.sun_dir.xyz);
+    float light = st.stitch0.x + st.stitch0.y * max(l.y, 0.0);
+    float2 aoUv = (in.world - st.ao_rect.xy) * st.ao_rect.zw;
+    float aoDist = ao_tex.sample(ao_smp, aoUv, level(0)).r * 4.0;
+    float ao = mix(1.0 - st.stitch1.z, 1.0, smoothstep(0.0, max(st.stitch1.w, 1e-3), aoDist));
+    float3 col = rgb * (light * ao);
+    return float4(pow(saturate(col), float3(st.stitch0.z)), alpha);
 }
 )";
 
@@ -779,6 +1149,7 @@ void LandscapeRenderer::init(sg_pixel_format depthFormat_) {
         ensureDepthPipelines();
     }
     ensureTriWallPipelines();
+    ensureTexturePipeline();
 
     // Dynamic vertex buffer for many quads (6 vertices per tile) — the flat
     // ground pass streams GroundVertex now.
@@ -789,6 +1160,41 @@ void LandscapeRenderer::init(sg_pixel_format depthFormat_) {
     vbuf = sg_make_buffer(&buf_desc);
 
     bind.vertex_buffers[0] = vbuf;
+
+    // Texture-2D pass: own stream (12 fan verts per cell) — the ground pass
+    // updates vbuf in the same frame, and sokol allows one update per buffer.
+    sg_buffer_desc texture_buf_desc = {};
+    texture_buf_desc.size = 12 * 16384 * (int)sizeof(TextureVertex);
+    texture_buf_desc.usage.dynamic_update = true;
+    texture_buf_desc.label = "landscape-texture-verts";
+    textureVbuf = sg_make_buffer(&texture_buf_desc);
+
+    textureBind.vertex_buffers[0] = textureVbuf;
+
+    // Placeholder tiling array (one 1x1 white layer) keeps the texture-pass
+    // bindings valid until the first texture asset rebuilds it.
+    const std::uint32_t white = 0xFFFFFFFFu;
+    sg_image_desc array_desc = {};
+    array_desc.type = SG_IMAGETYPE_ARRAY;
+    array_desc.width = 1;
+    array_desc.height = 1;
+    array_desc.num_slices = 1;
+    array_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    array_desc.data.mip_levels[0].ptr = &white;
+    array_desc.data.mip_levels[0].size = sizeof(white);
+    array_desc.label = "landscape-texture-array-placeholder";
+    textureArrayImage = sg_make_image(&array_desc);
+    sg_view_desc array_view_desc = {};
+    array_view_desc.texture.image = textureArrayImage;
+    textureArrayView = sg_make_view(&array_view_desc);
+
+    sg_sampler_desc texture_smp_desc = {};
+    texture_smp_desc.min_filter = SG_FILTER_LINEAR;
+    texture_smp_desc.mag_filter = SG_FILTER_LINEAR;
+    texture_smp_desc.wrap_u = SG_WRAP_REPEAT;
+    texture_smp_desc.wrap_v = SG_WRAP_REPEAT;
+    texture_smp_desc.label = "landscape-texture-array-smp";
+    textureArraySampler = sg_make_sampler(&texture_smp_desc);
 
     // Separate buffers for the raised pass: sokol allows only one
     // sg_update_buffer per buffer per frame, and the flat pass may run in the
@@ -845,8 +1251,26 @@ void LandscapeRenderer::shutdown() {
         sg_destroy_buffer(triWallVbuf);
         triWallVbuf.id = SG_INVALID_ID;
     }
+    if (textureVbuf.id != SG_INVALID_ID) {
+        sg_destroy_buffer(textureVbuf);
+        textureVbuf.id = SG_INVALID_ID;
+    }
+    if (textureArrayView.id != SG_INVALID_ID) {
+        sg_destroy_view(textureArrayView);
+        textureArrayView.id = SG_INVALID_ID;
+    }
+    if (textureArrayImage.id != SG_INVALID_ID) {
+        sg_destroy_image(textureArrayImage);
+        textureArrayImage.id = SG_INVALID_ID;
+    }
+    if (textureArraySampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(textureArraySampler);
+        textureArraySampler.id = SG_INVALID_ID;
+    }
+    textureAssets.clear();
     destroyPipeline();
     destroyGroundPipeline();
+    destroyTexturePipeline();
     destroyWallPipeline();
     destroyDepthPipelines();
     destroyTriWallPipelines();
@@ -1046,6 +1470,136 @@ void LandscapeRenderer::destroyGroundPipeline() {
     if (groundShd.id != SG_INVALID_ID) {
         sg_destroy_shader(groundShd);
         groundShd.id = SG_INVALID_ID;
+    }
+}
+
+void LandscapeRenderer::ensureTexturePipeline() {
+    if (texturePip.id != SG_INVALID_ID) return;
+
+    sg_shader_desc shd_desc = {};
+    if (sg_query_backend() == SG_BACKEND_D3D11) {
+        shd_desc.vertex_func.source = texture_vs_src_hlsl;
+        shd_desc.fragment_func.source = texture_fs_src_hlsl;
+        for (int i = 0; i < 6; ++i) {
+            shd_desc.attrs[i].hlsl_sem_name = "TEXCOORD";
+            shd_desc.attrs[i].hlsl_sem_index = i;
+        }
+    } else if (sg_query_backend() == SG_BACKEND_METAL_MACOS) {
+        shd_desc.vertex_func.source = texture_vs_src_msl;
+        shd_desc.fragment_func.source = texture_fs_src_msl;
+    } else {
+        shd_desc.vertex_func.source = texture_vs_src_glsl;
+        shd_desc.fragment_func.source = texture_fs_src_glsl;
+    }
+
+    // VS: view size (slot 0).
+    shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+    shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
+    shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[0].msl_buffer_n = 0;
+    shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
+    shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
+    shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+
+    // FS slot 1: the FULL scene stitch block (sun/tone + AO rect), same
+    // contract as the flat ground pass.
+    shd_desc.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.uniform_blocks[1].size = sizeof(SceneStitchParams);
+    shd_desc.uniform_blocks[1].hlsl_register_b_n = 0;
+    shd_desc.uniform_blocks[1].msl_buffer_n = 1;
+    shd_desc.uniform_blocks[1].wgsl_group0_binding_n = 1;
+    shd_desc.uniform_blocks[1].spirv_set0_binding_n = 1;
+    const char* stitchNames[4] = {"sun_dir", "stitch0", "stitch1", "ao_rect"};
+    for (int i = 0; i < 4; ++i) {
+        shd_desc.uniform_blocks[1].glsl_uniforms[i].glsl_name = stitchNames[i];
+        shd_desc.uniform_blocks[1].glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
+    }
+
+    // FS slot 2: blend params (TextureBlendParams, one vec4).
+    shd_desc.uniform_blocks[2].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.uniform_blocks[2].size = sizeof(TextureBlendParams);
+    shd_desc.uniform_blocks[2].hlsl_register_b_n = 1;
+    shd_desc.uniform_blocks[2].msl_buffer_n = 2;
+    shd_desc.uniform_blocks[2].wgsl_group0_binding_n = 2;
+    shd_desc.uniform_blocks[2].spirv_set0_binding_n = 2;
+    shd_desc.uniform_blocks[2].glsl_uniforms[0].glsl_name = "blend_params";
+    shd_desc.uniform_blocks[2].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+
+    // Tiling texture array (slot 0) + contact-AO field (slot 1, R8).
+    shd_desc.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.views[0].texture.image_type = SG_IMAGETYPE_ARRAY;
+    shd_desc.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd_desc.views[0].texture.hlsl_register_t_n = 0;
+    shd_desc.views[0].texture.msl_texture_n = 0;
+    shd_desc.views[0].texture.wgsl_group1_binding_n = 0;
+    shd_desc.views[0].texture.spirv_set1_binding_n = 0;
+    shd_desc.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[0].hlsl_register_s_n = 0;
+    shd_desc.samplers[0].msl_sampler_n = 0;
+    shd_desc.samplers[0].wgsl_group1_binding_n = 1;
+    shd_desc.samplers[0].spirv_set1_binding_n = 1;
+    shd_desc.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.texture_sampler_pairs[0].view_slot = 0;
+    shd_desc.texture_sampler_pairs[0].sampler_slot = 0;
+    shd_desc.texture_sampler_pairs[0].glsl_name = "tiling_array";
+
+    shd_desc.views[1].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.views[1].texture.image_type = SG_IMAGETYPE_2D;
+    shd_desc.views[1].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+    shd_desc.views[1].texture.hlsl_register_t_n = 1;
+    shd_desc.views[1].texture.msl_texture_n = 1;
+    shd_desc.views[1].texture.wgsl_group1_binding_n = 2;
+    shd_desc.views[1].texture.spirv_set1_binding_n = 2;
+    shd_desc.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[1].hlsl_register_s_n = 1;
+    shd_desc.samplers[1].msl_sampler_n = 1;
+    shd_desc.samplers[1].wgsl_group1_binding_n = 3;
+    shd_desc.samplers[1].spirv_set1_binding_n = 3;
+    shd_desc.texture_sampler_pairs[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.texture_sampler_pairs[1].view_slot = 1;
+    shd_desc.texture_sampler_pairs[1].sampler_slot = 1;
+    shd_desc.texture_sampler_pairs[1].glsl_name = "ao_tex";
+
+    textureShd = sg_make_shader(&shd_desc);
+
+    sg_pipeline_desc pip_desc = {};
+    pip_desc.shader = textureShd;
+    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2; // pos
+    pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2; // world
+    pip_desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4; // layers
+    pip_desc.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4; // weights
+    pip_desc.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT4; // tiling
+    pip_desc.layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT;  // fill
+    pip_desc.colors[0].blend.enabled = true;
+    pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+    pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+    pip_desc.depth.pixel_format = depthFormat;
+    if (depthFormat != SG_PIXELFORMAT_NONE) {
+        // Ground level, same constant depth as the flat ground pass: texture
+        // cells tie with it under LESS_EQUAL and win by painter order (the
+        // texture pass draws later), the 3D passes stay on top.
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.write_enabled = true;
+    } else {
+        pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+        pip_desc.depth.write_enabled = false;
+    }
+    pip_desc.label = "landscape-texture-pipeline";
+    texturePip = sg_make_pipeline(&pip_desc);
+}
+
+void LandscapeRenderer::destroyTexturePipeline() {
+    if (texturePip.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(texturePip);
+        texturePip.id = SG_INVALID_ID;
+    }
+    if (textureShd.id != SG_INVALID_ID) {
+        sg_destroy_shader(textureShd);
+        textureShd.id = SG_INVALID_ID;
     }
 }
 
@@ -1542,6 +2096,250 @@ void LandscapeRenderer::render(
 
         sg_draw(draw.baseVertex, draw.vertexCount, 1);
     }
+}
+
+void LandscapeRenderer::ensureTextureAsset(
+    const std::string& assetUuid,
+    const std::filesystem::path& texturePath,
+    float tilingRepeats) {
+
+    auto it = textureAssets.find(assetUuid);
+    if (it != textureAssets.end()) {
+        // Live retuning: tiling rides in the vertex stream (no array rebuild);
+        // a texture file swap has to land in the array though.
+        it->second.tilingRepeats = tilingRepeats;
+        if (it->second.path != texturePath) {
+            it->second.path = texturePath;
+            textureArrayDirty = true;
+        }
+        return;
+    }
+    TextureAssetEntry entry;
+    entry.path = texturePath;
+    entry.tilingRepeats = tilingRepeats;
+    entry.slice = static_cast<int>(textureAssets.size());
+    textureAssets.emplace(assetUuid, entry);
+    textureArrayDirty = true;
+}
+
+void LandscapeRenderer::rebuildTextureArray() {
+    textureArrayDirty = false;
+
+    // All array slices share one size (the array constraint): the largest
+    // source dimension, clamped to a sane range for a paint texture.
+    struct Slice {
+        std::string uuid;
+        ImageRGBA8 image;
+    };
+    std::vector<Slice> slices(textureAssets.size());
+    int maxDim = 64;
+    for (const auto& [uuid, entry] : textureAssets) {
+        if (entry.slice < 0 || entry.slice >= static_cast<int>(slices.size())) {
+            continue;
+        }
+        Slice& slot = slices[static_cast<std::size_t>(entry.slice)];
+        slot.uuid = uuid;
+        slot.image = loadImageRGBA8(entry.path);
+        if (slot.image.width <= 0 || slot.image.height <= 0) {
+            spdlog::error("LandscapeRenderer: failed to load tiling texture '{}' — white slice", entry.path.string());
+            slot.image.width = 1;
+            slot.image.height = 1;
+            slot.image.pixels = {255, 255, 255, 255};
+        }
+        maxDim = std::max(maxDim, std::max(slot.image.width, slot.image.height));
+    }
+    if (slices.empty()) {
+        return;
+    }
+
+    const int size = std::clamp(maxDim, 64, 1024);
+    std::vector<std::uint8_t> data(static_cast<std::size_t>(size) * size * 4 * slices.size());
+    for (std::size_t i = 0; i < slices.size(); ++i) {
+        std::uint8_t* dst = data.data() + i * static_cast<std::size_t>(size) * size * 4;
+        const ImageRGBA8& src = slices[i].image;
+        for (int y = 0; y < size; ++y) {
+            // Bilinear resample into the shared slice size.
+            const float gy = (static_cast<float>(y) + 0.5f) * src.height / size - 0.5f;
+            const int y0 = std::clamp(static_cast<int>(std::floor(gy)), 0, src.height - 1);
+            const int y1 = std::min(y0 + 1, src.height - 1);
+            const float fy = std::clamp(gy - static_cast<float>(y0), 0.0f, 1.0f);
+            for (int x = 0; x < size; ++x) {
+                const float gx = (static_cast<float>(x) + 0.5f) * src.width / size - 0.5f;
+                const int x0 = std::clamp(static_cast<int>(std::floor(gx)), 0, src.width - 1);
+                const int x1 = std::min(x0 + 1, src.width - 1);
+                const float fx = std::clamp(gx - static_cast<float>(x0), 0.0f, 1.0f);
+                for (int c = 0; c < 4; ++c) {
+                    const float s00 = static_cast<float>(src.pixels[(static_cast<std::size_t>(y0) * src.width + x0) * 4 + c]);
+                    const float s10 = static_cast<float>(src.pixels[(static_cast<std::size_t>(y0) * src.width + x1) * 4 + c]);
+                    const float s01 = static_cast<float>(src.pixels[(static_cast<std::size_t>(y1) * src.width + x0) * 4 + c]);
+                    const float s11 = static_cast<float>(src.pixels[(static_cast<std::size_t>(y1) * src.width + x1) * 4 + c]);
+                    const float v = (s00 * (1.0f - fx) + s10 * fx) * (1.0f - fy) + (s01 * (1.0f - fx) + s11 * fx) * fy;
+                    dst[(static_cast<std::size_t>(y) * size + x) * 4 + c] =
+                        static_cast<std::uint8_t>(std::clamp(std::lround(v), 0l, 255l));
+                }
+            }
+        }
+    }
+
+    sg_image_desc desc = {};
+    desc.type = SG_IMAGETYPE_ARRAY;
+    desc.width = size;
+    desc.height = size;
+    desc.num_slices = static_cast<int>(slices.size());
+    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.data.mip_levels[0].ptr = data.data();
+    desc.data.mip_levels[0].size = data.size();
+    desc.label = "landscape-texture-array";
+    sg_image image = sg_make_image(&desc);
+    if (image.id == SG_INVALID_ID) {
+        spdlog::error("LandscapeRenderer: sg_make_image failed (texture array)");
+        return;
+    }
+    sg_view_desc view_desc = {};
+    view_desc.texture.image = image;
+    sg_view view = sg_make_view(&view_desc);
+    if (view.id == SG_INVALID_ID) {
+        spdlog::error("LandscapeRenderer: sg_make_view failed (texture array)");
+        sg_destroy_image(image);
+        return;
+    }
+
+    if (textureArrayView.id != SG_INVALID_ID) {
+        sg_destroy_view(textureArrayView);
+    }
+    if (textureArrayImage.id != SG_INVALID_ID) {
+        sg_destroy_image(textureArrayImage);
+    }
+    textureArrayImage = image;
+    textureArrayView = view;
+    spdlog::info("LandscapeRenderer: texture array {}x{} x{} slices", size, size, slices.size());
+}
+
+void LandscapeRenderer::renderTexture(
+    const std::vector<LandscapeTile>& tiles,
+    const topology_core::DiamondIsometry& iso,
+    const topology_core::Camera2D& camera,
+    int viewWidth,
+    int viewHeight,
+    const GroundStitchContext& groundStitch,
+    const TextureBlendParams& blendParams) {
+
+    if (tiles.empty()) return;
+    if (texturePip.id == SG_INVALID_ID || textureVbuf.id == SG_INVALID_ID) return;
+
+    if (textureArrayDirty) {
+        rebuildTextureArray();
+    }
+
+    // Per-cell blend data: the candidate textures of the cell's on corner
+    // nodes (by vote — see texture_blend.h) and the one-hot corner weights.
+    const std::vector<TextureBlendCell> cells = buildTextureBlendCells(tiles);
+
+    // Fan emission: center + 4 corner nodes per cell, in painter order.
+    scratchTextureVerts.clear();
+    std::vector<const TextureBlendCell*> sorted;
+    sorted.reserve(cells.size());
+    for (const TextureBlendCell& cell : cells) {
+        sorted.push_back(&cell);
+    }
+    std::sort(sorted.begin(), sorted.end(), [&](const TextureBlendCell* a, const TextureBlendCell* b) {
+        return iso.zOffset(a->cell) < iso.zOffset(b->cell);
+    });
+
+    const float halfW = iso.dims.cellWidth * 0.5f;
+    const float halfH = iso.dims.cellSize().y * 0.5f;
+    // Field -> world (map-cell) coords, the very frame the flat ground pass
+    // shades in (inverse of nodeToField).
+    const auto worldFromField = [halfW, halfH](const glm::vec2& f) {
+        const float diff = (f.x - halfW) / halfW; // mapX - mapZ
+        const float sum = f.y / halfH;            // mapX + mapZ
+        return glm::vec2{0.5f * (sum + diff), 0.5f * (sum - diff)};
+    };
+
+    const std::size_t maxVerts = 12 * 16384;
+    for (const TextureBlendCell* cellPtr : sorted) {
+        const TextureBlendCell& cell = *cellPtr;
+        // Resolve candidates to array slices/tiling densities; a cell naming
+        // an unregistered asset is skipped (the frame source ensures assets).
+        float layers[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        float tiling[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        bool resolved = true;
+        for (int k = 0; k < cell.candidateCount; ++k) {
+            const auto it = textureAssets.find(cell.candidateUuids[static_cast<std::size_t>(k)]);
+            if (it == textureAssets.end() || it->second.slice < 0) {
+                resolved = false;
+                break;
+            }
+            layers[k] = static_cast<float>(it->second.slice);
+            tiling[k] = it->second.tilingRepeats;
+        }
+        if (!resolved) {
+            continue;
+        }
+        for (int k = cell.candidateCount; k < 4; ++k) {
+            layers[k] = layers[0];
+            tiling[k] = tiling[0];
+        }
+
+        const auto corners = iso.cellDiamondCorners(cell.cell); // Left, Up, Right, Down
+        const glm::vec2 center = iso.mapToField(cell.cell);
+        const glm::vec4 centerWeights =
+            (cell.cornerWeights[0] + cell.cornerWeights[1] + cell.cornerWeights[2] + cell.cornerWeights[3]) * 0.25f;
+        const float centerFill =
+            (cell.cornerFill[0] + cell.cornerFill[1] + cell.cornerFill[2] + cell.cornerFill[3]) * 0.25f;
+
+        const auto makeVert = [&](const glm::vec2& p, const glm::vec4& w, float fill) {
+            const glm::vec2 world = worldFromField(p);
+            return TextureVertex{
+                {p.x, p.y},
+                {world.x, world.y},
+                {layers[0], layers[1], layers[2], layers[3]},
+                {w.x, w.y, w.z, w.w},
+                {tiling[0], tiling[1], tiling[2], tiling[3]},
+                fill};
+        };
+
+        if (scratchTextureVerts.size() + 12 > maxVerts) {
+            spdlog::warn("LandscapeRenderer: texture vertex buffer full, dropping cells");
+            break;
+        }
+        for (int i = 0; i < 4; ++i) {
+            const int next = (i + 1) % 4;
+            scratchTextureVerts.push_back(makeVert(center, centerWeights, centerFill));
+            scratchTextureVerts.push_back(makeVert(corners[i], cell.cornerWeights[i], cell.cornerFill[i]));
+            scratchTextureVerts.push_back(makeVert(corners[next], cell.cornerWeights[next], cell.cornerFill[next]));
+        }
+    }
+
+    if (scratchTextureVerts.empty()) return;
+
+    // Field -> screen (camera zoom scales positions); the world (map-cell)
+    // attribute is screen-independent and stays.
+    for (TextureVertex& v : scratchTextureVerts) {
+        const glm::vec2 s = camera.worldToScreen({v.pos[0], v.pos[1]});
+        v.pos[0] = s.x;
+        v.pos[1] = s.y;
+    }
+
+    sg_range range = { scratchTextureVerts.data(), scratchTextureVerts.size() * sizeof(TextureVertex) };
+    sg_update_buffer(textureVbuf, &range);
+
+    sg_apply_pipeline(texturePip);
+    float vs_params[2] = {(float)viewWidth, (float)viewHeight};
+    sg_range vs_range = { &vs_params, sizeof(vs_params) };
+    sg_apply_uniforms(0, &vs_range);
+    sg_range stitch_range = { &groundStitch.params, sizeof(SceneStitchParams) };
+    sg_apply_uniforms(1, &stitch_range);
+    sg_range blend_range = { &blendParams, sizeof(TextureBlendParams) };
+    sg_apply_uniforms(2, &blend_range);
+
+    textureBind.views[0] = textureArrayView;
+    textureBind.samplers[0] = textureArraySampler;
+    textureBind.views[1] = groundStitch.aoView;
+    textureBind.samplers[1] = groundStitch.aoSampler;
+    sg_apply_bindings(&textureBind);
+
+    sg_draw(0, static_cast<int>(scratchTextureVerts.size()), 1);
 }
 
 void LandscapeRenderer::renderRaised(

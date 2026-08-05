@@ -1,0 +1,13 @@
+{
+    "uuid": "2c7fbd5e-9344-444e-ac5c-0ca44149aa85",
+    "layerType": "TextureLandscape",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "texture2d": {
+        "thumbnail": "thumbnail.png",
+        "texture": "texture.jpg",
+        "tilingRepeats": 1.0
+    }
+}

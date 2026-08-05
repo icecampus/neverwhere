@@ -9,6 +9,7 @@
 #include "landscape/cliff_pencil.h"
 #include "landscape/cyclopean_pencil.h"
 #include "landscape/stone_pencil.h"
+#include "landscape/texture_pencil.h"
 
 
 //AssetToolsModel
@@ -74,6 +75,9 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
 
     assetType2ToolsModel[AssetTypes::stone3d].reset(new AssetToolsModel(this));
     assetType2ToolsModel[AssetTypes::stone3d]->addElement<StonePencil>(this);
+
+    assetType2ToolsModel[AssetTypes::texture2d].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::texture2d]->addElement<TexturePencil>(this);
 
 }
 

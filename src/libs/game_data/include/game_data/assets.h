@@ -179,6 +179,13 @@ struct Stone3dAssetData {
     float topTexTiles = 1.0f;
 };
 
+// Tiling-texture landscape brush (multi-texture blend layer).
+struct Texture2dAssetData {
+    std::string thumbnail;
+    std::string texture;          // tiling texture file, relative to the bundle root
+    float tilingRepeats = 1.0f;   // texture repeats per cell width
+};
+
 struct AssetData {
     std::filesystem::path indexPath;
     std::string uuid;
@@ -191,6 +198,7 @@ struct AssetData {
     std::optional<Cliff3dAssetData> cliff3d;
     std::optional<Cyclopean3dAssetData> cyclopean3d;
     std::optional<Stone3dAssetData> stone3d;
+    std::optional<Texture2dAssetData> texture2d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -321,6 +329,12 @@ inline void from_json(const nlohmann::json& j, Stone3dAssetData& d) {
     if (j.contains("topTexTiles")) j.at("topTexTiles").get_to(d.topTexTiles);
 }
 
+inline void from_json(const nlohmann::json& j, Texture2dAssetData& d) {
+    if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("texture")) j.at("texture").get_to(d.texture);
+    if (j.contains("tilingRepeats")) j.at("tilingRepeats").get_to(d.tilingRepeats);
+}
+
 inline void from_json(const nlohmann::json& j, AssetData& a) {
     j.at("uuid").get_to(a.uuid);
     // pivot may be omitted in older assets; default (0,0)
@@ -339,6 +353,7 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     else if (layerStr == "CliffLandscape") a.layerType = LayerType::CliffLandscape;
     else if (layerStr == "CyclopeanLandscape") a.layerType = LayerType::CyclopeanLandscape;
     else if (layerStr == "StoneLandscape") a.layerType = LayerType::StoneLandscape;
+    else if (layerStr == "TextureLandscape") a.layerType = LayerType::TextureLandscape;
 
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
@@ -362,6 +377,10 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("stone3d") && !j["stone3d"].is_null()) {
         a.stone3d = j["stone3d"].get<Stone3dAssetData>();
+    }
+
+    if (j.contains("texture2d") && !j["texture2d"].is_null()) {
+        a.texture2d = j["texture2d"].get<Texture2dAssetData>();
     }
 }
 
@@ -402,12 +421,19 @@ struct AssetIndexEntry {
     bool stone3d = false;
     Stone3dAssetData stone;
 
+    // Texture2D assets — tiling-texture landscape brush (multi-texture blend
+    // layer), no atlas; the texture path resolves against the bundle root.
+    bool texture2d = false;
+    Texture2dAssetData textureData;
+    std::filesystem::path texturePath;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
     bool isShape3d() const { return shape3d; }
     bool isCliff3d() const { return cliff3d; }
     bool isCyclopean3d() const { return cyclopean3d; }
     bool isStone3d() const { return stone3d; }
+    bool isTexture2d() const { return texture2d; }
 };
 
 struct AssetIndex {

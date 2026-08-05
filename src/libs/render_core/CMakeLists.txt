@@ -24,6 +24,8 @@ nw_add_lib_sources(
         src/texture_atlas.cpp
         include/render_core/landscape_renderer.h
         src/landscape_renderer.cpp
+        include/render_core/texture_blend.h
+        src/texture_blend.cpp
         include/render_core/cliff_renderer.h
         src/cliff_renderer.cpp
         include/render_core/cyclopean_renderer.h
