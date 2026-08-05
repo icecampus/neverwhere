@@ -1090,6 +1090,7 @@ void AtlasRenderer::shutdown() {
     }
     destroySlot(m_slots[0]);
     destroySlot(m_slots[1]);
+    destroySlot(m_slots[2]);
     destroySlot(m_tilingArray);
     m_tilingArrayLayers = 0;
     m_ready = false;
@@ -1303,7 +1304,8 @@ bool AtlasRenderer::loadAtlasFromRgba(
 
     m_atlasCols = cols;
     m_atlasRows = rows;
-    const char* label = (kind == AtlasKind::Flat) ? "flat-atlas" : "rgba-atlas";
+    const char* label =
+        (kind == AtlasKind::Flat) ? "flat-atlas" : (kind == AtlasKind::FlatGreen) ? "flat-green-atlas" : "rgba-atlas";
     const bool ok = uploadSlot(m_slots[static_cast<int>(kind)], rgba, width, height, label);
     if (ok) {
         spdlog::info("AtlasRenderer: uploaded RGBA slot {} ({}x{}, {}x{} tiles)",

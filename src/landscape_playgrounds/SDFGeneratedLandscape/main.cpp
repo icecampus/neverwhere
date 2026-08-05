@@ -108,10 +108,10 @@ glm::vec2 canvasSize() {
 }
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
-// own node grid and presentation (2D grass / 2D yellow / cliff or stone
-// scalar-field / 2D tiling textures under the yellow masks). The Texture 2D
-// layer keeps a per-node texture tag, so several textures coexist in the
-// one layer and displace each other on repaint.
+// own node grid and presentation (2D grass / 2D yellow / 2D green / cliff
+// or stone scalar-field / 2D tiling textures under the yellow masks). The
+// Texture 2D layer keeps a per-node texture tag, so several textures coexist
+// in the one layer and displace each other on repaint.
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
@@ -121,12 +121,15 @@ struct PaintLayer {
     const char* name;
 };
 
-constexpr int kLayerCount = 5;
-constexpr int kTexLayerIndex = 4;
+constexpr int kLayerCount = 6;
+constexpr int kYellowLayerIndex = 1;
+constexpr int kGreenLayerIndex = 2;
+constexpr int kTexLayerIndex = 5;
 
 PaintLayer g_layers[kLayerCount] = {
     {{}, AtlasKind::Grass, false, false, false, "Grass 2D"},
     {{}, AtlasKind::Flat, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::FlatGreen, false, false, false, "Green 2D"},
     {{}, AtlasKind::Flat, true, false, false, "Cliff 3D"},
     {{}, AtlasKind::Flat, false, true, false, "Stone 3D"},
     {{}, AtlasKind::Flat, false, false, true, "Texture 2D"},
@@ -188,6 +191,43 @@ LandBrush& activeBrush() {
     return g_layers[g_activeLayer].brush;
 }
 
+// "Yellow outlines green": the Yellow 2D layer is derived from Green 2D —
+// every off-green node in the 8-neighbourhood of an on-green node becomes
+// yellow. Recomputed wholesale after each green edit (the grid is tiny):
+// painting green grows the outline, erasing green pulls it back. Yellow
+// nodes painted manually away from green are wiped by the next green edit.
+void syncYellowAroundGreen() {
+    LandBrush& green = g_layers[kGreenLayerIndex].brush;
+    LandBrush& yellow = g_layers[kYellowLayerIndex].brush;
+    const int w = green.width();
+    const int h = green.height();
+
+    auto touchesGreen = [&](glm::ivec2 node) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) {
+                    continue;
+                }
+                const glm::ivec2 nb{node.x + dx, node.y + dy};
+                if (nb.x >= 0 && nb.y >= 0 && nb.x <= w && nb.y <= h && green.nodeIsOn(nb)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    for (int y = 1; y < h; ++y) {
+        for (int x = 1; x < w; ++x) {
+            const glm::ivec2 node{x, y};
+            const bool want = !green.nodeIsOn(node) && touchesGreen(node);
+            if (yellow.nodeIsOn(node) != want) {
+                yellow.setNode(node, want);
+            }
+        }
+    }
+}
+
 bool looksLikeDataRoot(const std::filesystem::path& dir) {
     std::error_code ec;
     return std::filesystem::exists(dir / "resources" / "assets" / "landscape" / "Grass" / "atlas.png", ec);
@@ -247,6 +287,9 @@ void applyBrushAtMouse() {
     } else {
         activeBrush().setNode(*g_hoverNode, on);
     }
+    if (g_activeLayer == kGreenLayerIndex) {
+        syncYellowAroundGreen();
+    }
 }
 
 bool g_demoPattern = false;
@@ -301,18 +344,18 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 }
 
 // Painted programmatically in --demo mode: a cliff blob plus a stone blob
-// plus grass/yellow flat strokes and a textured strip of three DIFFERENT
+// plus grass/yellow/green flat strokes and a textured strip of three DIFFERENT
 // textures side by side — used to verify the multi-texture layer blends.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
         for (int x = 15; x <= 18; ++x) {
-            g_layers[2].brush.setNode({x, y}, true);
+            g_layers[3].brush.setNode({x, y}, true);
         }
     }
-    g_layers[2].brush.setNode({14, 15}, true);
+    g_layers[3].brush.setNode({14, 15}, true);
     for (int y = 6; y <= 9; ++y) {
         for (int x = 6; x <= 9; ++x) {
-            g_layers[3].brush.setNode({x, y}, true);
+            g_layers[4].brush.setNode({x, y}, true);
         }
     }
     for (int y = 15; y <= 18; ++y) {
@@ -321,8 +364,14 @@ void paintDemoPattern() {
         }
     }
     for (int x = 13; x <= 16; ++x) {
-        g_layers[1].brush.setNode({x, 16}, true);
+        g_layers[kYellowLayerIndex].brush.setNode({x, 16}, true);
     }
+    // Green stroke adjacent to the yellow one: the sync keeps the manual
+    // yellow row (it touches green) and grows the outline around the rest.
+    for (int x = 13; x <= 16; ++x) {
+        g_layers[kGreenLayerIndex].brush.setNode({x, 17}, true);
+    }
+    syncYellowAroundGreen();
     const std::uint8_t colTags[4] = {
         texLayerTagFor(0),
         texLayerTagFor(g_texNames.size() > 1 ? 1 : 0),
@@ -398,6 +447,20 @@ void init() {
         spdlog::error("SDFGeneratedLandscape: failed to upload generated flat atlas");
     }
 
+    // "Green 2D" layer: the same parametric flat atlas in a grass-green
+    // palette (distinct from the detailed Grass 2D photo atlas).
+    const FlatAtlasPalette greenPalette{110, 175, 70, 45, 95, 35};
+    const FlatAtlasImage flatGreen = generateFlatAtlas(greenPalette);
+    if (!g_renderer.loadAtlasFromRgba(
+            AtlasKind::FlatGreen,
+            flatGreen.rgba.data(),
+            flatGreen.width,
+            flatGreen.height,
+            flatGreen.cols,
+            flatGreen.rows)) {
+        spdlog::error("SDFGeneratedLandscape: failed to upload generated green flat atlas");
+    }
+
     // Tiling texture for the stone/cliff flat tops (mix lives in
     // g_stoneTopTexMix; on failure keep the procedural palette only).
     const auto topTexPath = g_dataRoot / "resources" / "textures" / "grass.png";
@@ -451,7 +514,7 @@ void init() {
         g_layers[0].brush.setNode({10, 10}, true);
     }
     for (const glm::ivec2& node : g_cliCliffNodes) {
-        g_layers[2].brush.setNode(node, true);
+        g_layers[3].brush.setNode(node, true);
     }
     for (const glm::ivec2& node : g_cliTexNodes) {
         g_layers[kTexLayerIndex].brush.setNode(node, true, texLayerTagFor(g_texChoice));
@@ -658,7 +721,7 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d, %s %d",
+    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d, %s %d, %s %d",
         g_layers[0].name,
         g_layers[0].brush.onNodeCount(),
         g_layers[1].name,
@@ -668,10 +731,15 @@ void drawImGui(int w, int h) {
         g_layers[3].name,
         g_layers[3].brush.onNodeCount(),
         g_layers[4].name,
-        g_layers[4].brush.onNodeCount());
+        g_layers[4].brush.onNodeCount(),
+        g_layers[5].name,
+        g_layers[5].brush.onNodeCount());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
+        if (g_activeLayer == kGreenLayerIndex) {
+            syncYellowAroundGreen();
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset camera")) {

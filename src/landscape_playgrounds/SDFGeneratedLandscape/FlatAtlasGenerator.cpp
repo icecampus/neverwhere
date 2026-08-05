@@ -70,15 +70,18 @@ void putPixel(std::vector<std::uint8_t>& rgba, int ax, int ay, std::uint8_t r, s
     rgba[i + 3] = a;
 }
 
-void rasterizeTile(std::vector<std::uint8_t>& rgba, int tileIndex, const std::array<bool, 4>& mask) {
+void rasterizeTile(
+    std::vector<std::uint8_t>& rgba,
+    int tileIndex,
+    const std::array<bool, 4>& mask,
+    const FlatAtlasPalette& palette) {
     const int col = tileIndex % kCols;
     const int row = tileIndex / kCols;
     const int ox = col * kTile;
     const int oy = row * kTile;
 
-    // Fill color (sand/ochre) and edge outline.
-    constexpr std::uint8_t fillR = 210, fillG = 170, fillB = 90;
-    constexpr std::uint8_t edgeR = 120, edgeG = 90, edgeB = 40;
+    const std::uint8_t fillR = palette.fillR, fillG = palette.fillG, fillB = palette.fillB;
+    const std::uint8_t edgeR = palette.edgeR, edgeG = palette.edgeG, edgeB = palette.edgeB;
 
     const float s = static_cast<float>(kTile);
     const float half = s * 0.5f;
@@ -125,7 +128,7 @@ void rasterizeTile(std::vector<std::uint8_t>& rgba, int tileIndex, const std::ar
 
 } // namespace
 
-FlatAtlasImage generateFlatAtlas() {
+FlatAtlasImage generateFlatAtlas(const FlatAtlasPalette& palette) {
     FlatAtlasImage out;
     out.width = kAtlasW;
     out.height = kAtlasH;
@@ -143,7 +146,7 @@ FlatAtlasImage generateFlatAtlas() {
         if (type == landscape_core::LandscapeTileType::Unknown) {
             continue;
         }
-        rasterizeTile(out.rgba, index, landscape_core::tileTypeToNodeMask(type));
+        rasterizeTile(out.rgba, index, landscape_core::tileTypeToNodeMask(type), palette);
     }
 
     return out;

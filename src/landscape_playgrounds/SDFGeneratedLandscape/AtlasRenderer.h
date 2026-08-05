@@ -32,6 +32,7 @@
 enum class AtlasKind : int {
     Grass = 0,
     Flat = 1,
+    FlatGreen = 2,
 };
 
 struct ColorVertex {
@@ -287,7 +288,7 @@ private:
 
     std::vector<CliffCache> m_cliffCaches;
 
-    AtlasSlot m_slots[2]{};
+    AtlasSlot m_slots[3]{};
     // Tiling texture array for flat layers (world-space UV under the atlas
     // mask); sampled with the REPEAT m_topTexSampler. Placeholder 1x1x1
     // white until buildTilingTextureArray succeeds.
