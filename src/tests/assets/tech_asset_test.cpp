@@ -32,6 +32,7 @@ TEST(TechAsset, SetTechParamWritesCanonicalPayload) {
     asset->setTechParam("creaseWidth", 0.0);
     asset->setTechParam("blurPasses", 2);
     asset->setTechParam("groundDepth", 0.1);
+    asset->setTechParam("outlineDepth", 1.0);
     asset->setTechParam("shading.ambient", 0.55);
     asset->setTechParam("shading.darkColor.1", 0.25);
 
@@ -44,6 +45,7 @@ TEST(TechAsset, SetTechParamWritesCanonicalPayload) {
     EXPECT_FLOAT_EQ(d.creaseWidth, 0.0f);
     EXPECT_EQ(d.blurPasses, 2);
     EXPECT_FLOAT_EQ(d.groundDepth, 0.1f);
+    EXPECT_FLOAT_EQ(d.outlineDepth, 1.0f);
     EXPECT_FLOAT_EQ(d.shading.ambient, 0.55f);
     EXPECT_FLOAT_EQ(d.shading.darkColor[1], 0.25f);
 
@@ -57,6 +59,7 @@ TEST(TechAsset, SetTechParamWritesCanonicalPayload) {
     EXPECT_FLOAT_EQ(back.tech3dData->style, 1.0f);
     EXPECT_FLOAT_EQ(back.tech3dData->creaseWidth, 0.0f);
     EXPECT_EQ(back.tech3dData->blurPasses, 2);
+    EXPECT_FLOAT_EQ(back.tech3dData->outlineDepth, 1.0f);
     EXPECT_FLOAT_EQ(back.tech3dData->shading.darkColor[1], 0.25f);
     EXPECT_FLOAT_EQ(back.tech3dData->shading.veinThreshold, 2.0f); // default survived
 }

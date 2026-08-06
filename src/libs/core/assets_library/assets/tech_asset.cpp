@@ -57,6 +57,7 @@ QVariantMap TechAsset::techParams() const
     out["soften"] = d.soften;
     out["creaseWidth"] = d.creaseWidth;
     out["blurPasses"] = d.blurPasses;
+    out["outlineDepth"] = d.outlineDepth;
 
     const BaseData::Cliff3dShadingData& s = d.shading;
     out["shading.lightAzimuth"] = s.lightAzimuth;
@@ -107,6 +108,7 @@ void TechAsset::setTechParam(const QString& name, const QVariant& value)
     else if (name == "soften") d.soften = value.toFloat();
     else if (name == "creaseWidth") d.creaseWidth = value.toFloat();
     else if (name == "blurPasses") d.blurPasses = value.toInt();
+    else if (name == "outlineDepth") d.outlineDepth = value.toFloat();
     else if (name == "shading.lightAzimuth") s.lightAzimuth = value.toFloat();
     else if (name == "shading.lightElevation") s.lightElevation = value.toFloat();
     else if (name == "shading.veinThreshold") s.veinThreshold = value.toFloat();

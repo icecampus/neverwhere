@@ -739,6 +739,7 @@ std::uint64_t regionKey(std::vector<glm::ivec2> nodes, const CliffParams& params
         hashFloat(h, p.style);
         hashFloat(h, p.soften);
         hashFloat(h, p.creaseWidth);
+        hashFloat(h, p.outlineDepth);
         hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.blurPasses)));
     }
     std::sort(nodes.begin(), nodes.end(), [](const glm::ivec2& a, const glm::ivec2& b) {
@@ -1233,7 +1234,10 @@ void CliffRenderer::rebuildRegion(
     // -> surface nets (the other regions of the same asset stay untouched).
     if (!componentNodes.empty()) {
         // Field over the component bbox + a one-cell margin (the blurred
-        // outline must not cross the field border).
+        // outline must not cross the field border). Tech with the shoreline
+        // outline enabled needs a second ring: the auto-derived outline
+        // nodes spread one cell past the land.
+        const int margin = (params.techField && params.techField->outlineDepth > 0.0f) ? 2 : 1;
         int minX = componentNodes[0].x;
         int minY = componentNodes[0].y;
         int maxX = componentNodes[0].x;
@@ -1244,10 +1248,10 @@ void CliffRenderer::rebuildRegion(
             maxX = std::max(maxX, n.x);
             maxY = std::max(maxY, n.y);
         }
-        minX -= 1;
-        minY -= 1;
-        maxX += 1;
-        maxY += 1;
+        minX -= margin;
+        minY -= margin;
+        maxX += margin;
+        maxY += margin;
         const int nodesX = maxX - minX + 1;
         const int nodesY = maxY - minY + 1;
         std::vector<std::uint8_t> nodes(static_cast<std::size_t>(nodesX) * nodesY, 0);

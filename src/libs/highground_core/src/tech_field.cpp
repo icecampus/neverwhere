@@ -34,21 +34,60 @@ TechField::TechField(
     int nodesX,
     int nodesY)
     : m_params(params), m_nodesX(nodesX), m_nodesY(nodesY) {
-    if (nodes != nullptr && nodesX > 0 && nodesY > 0) {
-        m_nodes.assign(nodes, nodes + static_cast<size_t>(nodesX) * nodesY);
-    } else {
+    const bool hasNodes = nodes != nullptr && nodesX > 0 && nodesY > 0;
+    if (!hasNodes) {
         m_nodesX = 0;
         m_nodesY = 0;
     }
+    const size_t count = static_cast<size_t>(m_nodesX) * m_nodesY;
+    m_values.assign(count, 0.0f);
+
+    // Node values: land +1; with outlineDepth > 0 the 8-neighborhood of the
+    // land (minus the land itself) becomes an outline ring at -outlineDepth —
+    // the "yellow around green" derivation, so the border ramps continue
+    // below the water plane. Empty stays 0 (open water).
+    const float depth = std::max(m_params.outlineDepth, 0.0f);
+    if (hasNodes) {
+        std::vector<std::uint8_t> ring(count, 0);
+        for (int z = 0; z < m_nodesY; ++z) {
+            for (int x = 0; x < m_nodesX; ++x) {
+                if (nodes[static_cast<size_t>(z) * m_nodesX + x] == 0) continue;
+                m_values[static_cast<size_t>(z) * m_nodesX + x] = 1.0f;
+                if (depth > 0.0f) {
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            const int qx = x + dx;
+                            const int qz = z + dz;
+                            if (qx >= 0 && qx < m_nodesX && qz >= 0 && qz < m_nodesY) {
+                                ring[static_cast<size_t>(qz) * m_nodesX + qx] = 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (depth > 0.0f) {
+            for (int z = 0; z < m_nodesY; ++z) {
+                for (int x = 0; x < m_nodesX; ++x) {
+                    const size_t i = static_cast<size_t>(z) * m_nodesX + x;
+                    if (ring[i] != 0 && nodes[i] == 0) {
+                        m_values[i] = -depth;
+                    }
+                }
+            }
+        }
+    }
+
     // The region spans (nodesX-1) x (nodesY-1) map cells; the field is
-    // rectangular in XZ, Y spans [-(groundDepth + pad), levelHeight + pad] —
-    // a couple of voxels of slack is enough to keep F > 0 on the grid border.
-    m_regionX = static_cast<float>(nodesX - 1);
-    m_regionZ = static_cast<float>(nodesY - 1);
+    // rectangular in XZ, Y spans [-(under + groundDepth + pad), levelHeight + pad]
+    // — a couple of voxels of slack keeps F > 0 on the grid border.
+    m_regionX = static_cast<float>(m_nodesX - 1);
+    m_regionZ = static_cast<float>(m_nodesY - 1);
     const float pad = params.padding;
     const float cell = params.cellSize;
     const float padY = 2.0f * cell;
-    const float yMin = -(params.groundDepth + padY);
+    const float under = depth * params.levelHeight;
+    const float yMin = -(under + params.groundDepth + padY);
     const float yMax = params.levelHeight + padY;
     m_nx = static_cast<int>(std::ceil((m_regionX + 2.0f * pad) / cell));
     m_nz = static_cast<int>(std::ceil((m_regionZ + 2.0f * pad) / cell));
@@ -58,92 +97,141 @@ TechField::TechField(
 
 float TechField::nodeAt(int x, int z) const {
     return (x >= 0 && x < m_nodesX && z >= 0 && z < m_nodesY)
-        ? static_cast<float>(m_nodes[static_cast<size_t>(z) * m_nodesX + x])
+        ? m_values[static_cast<size_t>(z) * m_nodesX + x]
         : 0.0f;
 }
 
 bool TechField::cellNonEmpty(int x, int z) const {
-    return nodeAt(x, z) + nodeAt(x + 1, z) + nodeAt(x, z + 1) + nodeAt(x + 1, z + 1) > 0.0f;
+    return nodeAt(x, z) > 0.0f || nodeAt(x + 1, z) > 0.0f ||
+        nodeAt(x, z + 1) > 0.0f || nodeAt(x + 1, z + 1) > 0.0f;
 }
 
-// Center height per cell class, blending the two tilesets by `style`:
-// Full = 1 (plateau), Line = 0.5 (on the ramp plane either way),
-// Corner: ridge 0.5 (peak) -> valley 0 (flat floor with a ramp to the corner),
-// Lack/Opposite: ridge 0.5 (fold/saddle) -> valley 1 (flat plateau / ridge crest).
-float TechField::centerHeight(int nodeCount, bool opposite) const {
+// Center height per cell class, blending the two tilesets by `style`; the
+// table generalizes the binary {0,1} one to signed corner values:
+// Full = maxV, Line = mid, Corner: ridge mid (peak) -> valley minV (flat floor),
+// Lack/Opposite: ridge mid (fold/saddle) -> valley maxV (flat plateau/crest),
+// where mid = (maxV + minV) / 2 sits exactly on the ramp plane.
+float TechField::centerHeight(float maxV, float minV, int nMax, bool opposite) const {
     const float s = std::clamp(m_params.style, 0.0f, 1.0f);
-    if (nodeCount >= 4) return 1.0f;
-    if (nodeCount == 3) return lerpf(0.5f, 1.0f, s);
-    if (nodeCount == 1) return lerpf(0.5f, 0.0f, s);
-    return opposite ? lerpf(0.5f, 1.0f, s) : 0.5f;
+    const float mid = 0.5f * (maxV + minV);
+    if (nMax >= 4) return maxV;
+    if (nMax == 3) return lerpf(mid, maxV, s);
+    if (nMax == 1) return lerpf(mid, minV, s);
+    return opposite ? lerpf(mid, maxV, s) : mid;
 }
 
 float TechField::heightAt(float x, float z) const {
+    return heightAt(x, z, nullptr);
+}
+
+float TechField::heightAt(float x, float z, float* outGradLen) const {
+    if (outGradLen != nullptr) {
+        *outGradLen = 0.0f;
+    }
     const float gx = std::clamp(x, 0.0f, m_regionX - 1e-4f);
     const float gz = std::clamp(z, 0.0f, m_regionZ - 1e-4f);
     const int ix = static_cast<int>(gx);
     const int iz = static_cast<int>(gz);
     const float u = gx - static_cast<float>(ix);
     const float v = gz - static_cast<float>(iz);
-    const float h00 = nodeAt(ix, iz);
-    const float h10 = nodeAt(ix + 1, iz);
-    const float h01 = nodeAt(ix, iz + 1);
-    const float h11 = nodeAt(ix + 1, iz + 1);
-    const int count = static_cast<int>(h00 + h10 + h01 + h11);
-    if (count == 0) {
+    const float v00 = nodeAt(ix, iz);
+    const float v10 = nodeAt(ix + 1, iz);
+    const float v01 = nodeAt(ix, iz + 1);
+    const float v11 = nodeAt(ix + 1, iz + 1);
+    if (v00 == 0.0f && v10 == 0.0f && v01 == 0.0f && v11 == 0.0f) {
         return 0.0f;
     }
+    const float maxV = std::max(std::max(v00, v10), std::max(v01, v11));
+    const float minV = std::min(std::min(v00, v10), std::min(v01, v11));
+    const int nMax =
+        (v00 == maxV ? 1 : 0) + (v10 == maxV ? 1 : 0) +
+        (v01 == maxV ? 1 : 0) + (v11 == maxV ? 1 : 0);
     const bool opposite =
-        (count == 2) && ((h00 > 0.0f && h11 > 0.0f) || (h10 > 0.0f && h01 > 0.0f));
-    const float center = centerHeight(count, opposite);
+        (nMax == 2) && ((v00 == maxV && v11 == maxV) || (v10 == maxV && v01 == maxV));
+    const float center = centerHeight(maxV, minV, nMax, opposite);
 
     // Fan around the cell center (0.5,0.5): the sector diagonals u=v and
     // u+v=1 pick one of the four (corner, corner, center) triangles; weights
     // on shared fan edges coincide, so the surface is continuous across
     // sectors and across cells (on a cell border the center weight is 0 and
-    // the interpolation reduces to the shared-node linear ramp).
+    // the interpolation reduces to the shared-node linear ramp). The sector
+    // gradient is exact (the fan is affine per sector); the `side` clip uses
+    // it to keep ramp zero-crossings inside the solid.
     float w0 = 0.0f;
     float w1 = 0.0f;
     float wc = 0.0f;
     float h = 0.0f;
+    float dhu = 0.0f; // dh/du in node units per cell
+    float dhv = 0.0f; // dh/dv
     if (u + v <= 1.0f) {
         if (u >= v) { // bottom: (0,0) - (1,0) - C
             barycentric(u, v, 0.0f, 0.0f, 1.0f, 0.0f, 0.5f, 0.5f, w0, w1, wc);
-            h = w0 * h00 + w1 * h10 + wc * center;
+            h = w0 * v00 + w1 * v10 + wc * center;
+            dhu = -v00 + v10;
+            dhv = -v00 - v10 + 2.0f * center;
         } else { // left: (0,1) - (0,0) - C
             barycentric(u, v, 0.0f, 1.0f, 0.0f, 0.0f, 0.5f, 0.5f, w0, w1, wc);
-            h = w0 * h01 + w1 * h00 + wc * center;
+            h = w0 * v01 + w1 * v00 + wc * center;
+            dhu = -v00 - v01 + 2.0f * center;
+            dhv = -v00 + v01;
         }
     } else {
         if (u >= v) { // right: (1,0) - (1,1) - C
             barycentric(u, v, 1.0f, 0.0f, 1.0f, 1.0f, 0.5f, 0.5f, w0, w1, wc);
-            h = w0 * h10 + w1 * h11 + wc * center;
+            h = w0 * v10 + w1 * v11 + wc * center;
+            dhu = v10 + v11 - 2.0f * center;
+            dhv = -v10 + v11;
         } else { // top: (0,1) - (1,1) - C
             barycentric(u, v, 0.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0.5f, w0, w1, wc);
-            h = w0 * h01 + w1 * h11 + wc * center;
+            h = w0 * v01 + w1 * v11 + wc * center;
+            dhu = -v01 + v11;
+            dhv = v01 + v11 - 2.0f * center;
         }
     }
 
     const float s = std::clamp(m_params.soften, 0.0f, 1.0f);
     if (s > 0.0f) {
-        // Smoothstep on the final height: keeps 0 / 0.5 / 1 fixed and the
-        // field continuous, rounds the ramp shoulders and the center domes.
-        h = lerpf(h, h * h * (3.0f - 2.0f * h), s);
+        // Sign-aware smoothstep: keeps 0 / +-0.5 / +-1 fixed and the field
+        // continuous (the underwater half mirrors the land half), rounds the
+        // ramp shoulders and the center domes; the gradient follows the chain
+        // rule so the `side` clip still spares softened ramp crossings.
+        const float a = std::clamp(std::fabs(h), 0.0f, 1.0f);
+        const float soft = a * a * (3.0f - 2.0f * a);
+        const float shaped = (h >= 0.0f) ? soft : -soft;
+        const float ds = 6.0f * a * (1.0f - a); // d(shaped)/dh
+        h = lerpf(h, shaped, s);
+        const float g = lerpf(1.0f, ds, s);
+        dhu *= g;
+        dhv *= g;
+    }
+    if (outGradLen != nullptr) {
+        *outGradLen = std::sqrt(dhu * dhu + dhv * dhv);
     }
     return h * m_params.levelHeight;
 }
 
 float TechField::eval(const glm::vec3& p) const {
-    const float h = heightAt(p.x, p.z);
-    // Solid = { -groundDepth <= y <= max(h(x,z), eps) }: the landforms stand
-    // on their own, no ground sheet under empty cells. The h = eps contour
-    // gives each outer ramp a clean vertical foot (mostly below y = 0), and
-    // eps keeps the field strictly positive wherever nothing is raised
-    // (an all-zero grid yields no surface at all).
-    const float eps = 0.03f * m_params.levelHeight;
-    const float top = std::max(p.y, eps) - h;
-    const float bottom = -(p.y + m_params.groundDepth);
-    return std::max(top, bottom);
+    float gradLen = 0.0f;
+    const float h = heightAt(p.x, p.z, &gradLen);
+    // Solid = { min(h, 0) - groundDepth <= y <= h(x,z) }, clipped laterally to
+    // the formation: the `side` term is positive only in the open water
+    // (h ~ 0 AND flat), so empty cells stay outside while ramp zero-crossings
+    // (the waterline between the land and the underwater foot) keep their
+    // slope-based pass and no crack opens between the two.
+    const float level = std::max(m_params.levelHeight, 1e-3f);
+    const float epsH = 0.03f; // node-unit epsilon (3% of a level)
+    const float hu = h / level;
+    const float side = (epsH - std::fabs(hu) - 4.0f * epsH * gradLen) * level;
+    const float top = p.y - h;
+    const float bottom = std::min(h, 0.0f) - m_params.groundDepth - p.y;
+    // Region rectangle shrunk by half a voxel: the formation's toes end at
+    // the zero node ring inside the region anyway, and this keeps the field
+    // strictly positive on the grid border (the surface-nets contract).
+    const float m = 0.5f * m_params.cellSize;
+    const float qx = std::fabs(p.x - 0.5f * m_regionX) - (0.5f * m_regionX - m);
+    const float qz = std::fabs(p.z - 0.5f * m_regionZ) - (0.5f * m_regionZ - m);
+    const float footprint = std::max(qx, qz);
+    return std::max(std::max(top, bottom), std::max(side, footprint));
 }
 
 float TechField::grooveDepth(const glm::vec3& p) const {
@@ -157,7 +245,7 @@ float TechField::grooveDepth(const glm::vec3& p) const {
     const float u = gx - static_cast<float>(ix);
     const float v = gz - static_cast<float>(iz);
     // Distance to the nearest cell border; the outline is drawn when the cell
-    // on either side of that border is non-empty (the tileset drew the
+    // on either side of that border has land on it (the tileset drew the
     // contour along the edges of every raised tile).
     const float du = std::min(u, 1.0f - u);
     const float dv = std::min(v, 1.0f - v);

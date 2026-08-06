@@ -123,11 +123,12 @@ struct PaintLayer {
     const char* name;
 };
 
-constexpr int kLayerCount = 7;
+constexpr int kLayerCount = 8;
 constexpr int kYellowLayerIndex = 1;
 constexpr int kGreenLayerIndex = 2;
 constexpr int kTechLayerIndex = 5;
-constexpr int kTexLayerIndex = 6;
+constexpr int kTechOutlineLayerIndex = 6;
+constexpr int kTexLayerIndex = 7;
 
 PaintLayer g_layers[kLayerCount] = {
     {{}, AtlasKind::Grass, false, false, false, false, "Grass 2D"},
@@ -136,6 +137,7 @@ PaintLayer g_layers[kLayerCount] = {
     {{}, AtlasKind::Flat, true, false, false, false, "Cliff 3D"},
     {{}, AtlasKind::Flat, false, true, false, false, "Stone 3D"},
     {{}, AtlasKind::Flat, false, false, true, false, "Tech 3D"},
+    {{}, AtlasKind::Flat, false, false, true, false, "Tech 3D Outline"},
     {{}, AtlasKind::Flat, false, false, false, true, "Texture 2D"},
 };
 int g_activeLayer = 0;
@@ -163,6 +165,10 @@ stone_gen::StoneFieldParams g_stoneParams;
 // Tech layer: the TechnicalGrass ridge/valley tileset semantics as real
 // geometry (tech::TechField) — its own params/height scale, same debounce.
 tech::TechFieldParams g_techParams;
+// Tech Outline layer: the same field with the shoreline outline ring enabled
+// ("yellow around green" — an auto-derived ring of underwater nodes around
+// the painted land; the border ramps continue below the water plane).
+tech::TechFieldParams g_techOutlineParams;
 // Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
 // no mesh rebuild).
 float g_cliffHeightScale = 96.0f;
@@ -307,6 +313,7 @@ bool g_demoNode = false;
 // --no-ui                      hide the ImGui panel (clean captures)
 // --cliff-nodes=x,y;x,y;...    paint these nodes on the cliff layer
 // --tech-nodes=x,y;x,y;...     paint these nodes on the tech layer
+// --tech-outline-nodes=x,y;... paint these nodes on the tech outline layer
 // --tech-style=S               tech style blend: 0 = ridge, 1 = valley
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
 //                              (tagged with the first loaded texture)
@@ -319,6 +326,7 @@ bool g_demoNode = false;
 bool g_noUi = false;
 std::vector<glm::ivec2> g_cliCliffNodes;
 std::vector<glm::ivec2> g_cliTechNodes;
+std::vector<glm::ivec2> g_cliTechOutlineNodes;
 std::optional<float> g_cliTechStyle;
 std::vector<glm::ivec2> g_cliTexNodes;
 std::optional<float> g_cliZoom;
@@ -357,8 +365,10 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 
 // Painted programmatically in --demo mode: a cliff blob plus a stone blob
 // plus a tech blob (plateau block + a detached node for corner peaks) plus
-// grass/yellow/green flat strokes and a textured strip of three DIFFERENT
-// textures side by side — used to verify the multi-texture layer blends.
+// a shoreline blob (Tech 3D Outline: the ramps continue below the water
+// plane) plus grass/yellow/green flat strokes and a textured strip of three
+// DIFFERENT textures side by side — used to verify the multi-texture layer
+// blends.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
         for (int x = 15; x <= 18; ++x) {
@@ -379,6 +389,13 @@ void paintDemoPattern() {
         }
     }
     g_layers[kTechLayerIndex].brush.setNode({15, 9}, true);
+    // Tech 3D Outline: a land block whose shoreline ring spreads one node
+    // past it (auto-derived) and dips below the water plane.
+    for (int y = 10; y <= 12; ++y) {
+        for (int x = 11; x <= 13; ++x) {
+            g_layers[kTechOutlineLayerIndex].brush.setNode({x, y}, true);
+        }
+    }
     for (int y = 15; y <= 18; ++y) {
         for (int x = 6; x <= 9; ++x) {
             g_layers[0].brush.setNode({x, y}, true);
@@ -540,6 +557,9 @@ void init() {
     for (const glm::ivec2& node : g_cliTechNodes) {
         g_layers[kTechLayerIndex].brush.setNode(node, true);
     }
+    for (const glm::ivec2& node : g_cliTechOutlineNodes) {
+        g_layers[kTechOutlineLayerIndex].brush.setNode(node, true);
+    }
     for (const glm::ivec2& node : g_cliTexNodes) {
         g_layers[kTexLayerIndex].brush.setNode(node, true, texLayerTagFor(g_texChoice));
     }
@@ -552,14 +572,16 @@ void init() {
         g_camera.offset.x = canvas.x * 0.5f - nodePos.x * g_camera.zoom;
         g_camera.offset.y = canvas.y * 0.5f - nodePos.y * g_camera.zoom;
     }
-    if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty() || !g_cliTechNodes.empty()) {
+    if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty() || !g_cliTechNodes.empty() ||
+        !g_cliTechOutlineNodes.empty()) {
         // Deterministic framing for screenshot comparisons.
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
-        } else if (!g_cliCliffNodes.empty() || !g_cliTechNodes.empty()) {
-            const std::vector<glm::ivec2>& nodes =
-                !g_cliCliffNodes.empty() ? g_cliCliffNodes : g_cliTechNodes;
+        } else if (!g_cliCliffNodes.empty() || !g_cliTechNodes.empty() || !g_cliTechOutlineNodes.empty()) {
+            const std::vector<glm::ivec2>& nodes = !g_cliCliffNodes.empty()
+                ? g_cliCliffNodes
+                : (!g_cliTechNodes.empty() ? g_cliTechNodes : g_cliTechOutlineNodes);
             glm::vec2 acc(0.0f);
             for (const glm::ivec2& node : nodes) {
                 acc += g_iso.nodeToField(node);
@@ -733,7 +755,10 @@ void drawImGui(int w, int h) {
     if (g_layers[g_activeLayer].tech) {
         // TechnicalGrass ridge/valley heightfield as real geometry; edits are
         // debounced (0.3 s) into a full field rebuild, same as the cliff.
-        tech::TechFieldParams& p = g_techParams;
+        // The Outline layer shares the block — its params just have the
+        // shoreline ring enabled (outlineDepth > 0).
+        tech::TechFieldParams& p =
+            (g_activeLayer == kTechOutlineLayerIndex) ? g_techOutlineParams : g_techParams;
         // Lift scale: cheap re-projection of the cached mesh, no field rebuild.
         ImGui::SliderFloat("Tech height", &g_techHeightScale, 4.0f, 128.0f, "%.0f px");
         if (ImGui::CollapsingHeader("Tech field", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -742,6 +767,7 @@ void drawImGui(int w, int h) {
             ImGui::SliderFloat("Soften", &p.soften, 0.0f, 1.0f, "%.2f");
             ImGui::SliderFloat("Level height", &p.levelHeight, 0.1f, 1.0f, "%.2f");
             ImGui::SliderFloat("Ground depth", &p.groundDepth, 0.02f, 0.3f, "%.2f");
+            ImGui::SliderFloat("Outline depth", &p.outlineDepth, 0.0f, 2.0f, "%.2f");
             ImGui::SliderFloat("Crease width", &p.creaseWidth, 0.0f, 0.2f, "%.3f");
             ImGui::SliderFloat("Cell size", &p.cellSize, 0.04f, 0.12f, "%.3f");
             ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 3);
@@ -884,7 +910,7 @@ void frame() {
         views[i].stone = g_layers[i].stone;
         views[i].stoneParams = &g_stoneParams;
         views[i].tech = g_layers[i].tech;
-        views[i].techParams = &g_techParams;
+        views[i].techParams = (i == kTechOutlineLayerIndex) ? &g_techOutlineParams : &g_techParams;
         views[i].cliffHeightScale = g_layers[i].stone
             ? g_stoneHeightScale
             : (g_layers[i].tech ? g_techHeightScale : g_cliffHeightScale);
@@ -1104,8 +1130,11 @@ int main(int argc, char* argv[]) {
     g_cliffParams.groundEnabled = false;
     g_stoneParams.base.groundEnabled = false;
     // The tileset's signature dark contour: shading-only groove channel
-    // around the raised-cell borders.
+    // around the raised-cell borders. The Outline layer additionally turns
+    // the shoreline ring on (the underwater foot around the land).
     g_techParams.creaseWidth = 0.05f;
+    g_techOutlineParams.creaseWidth = 0.05f;
+    g_techOutlineParams.outlineDepth = 1.0f;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--smoke") {
@@ -1125,6 +1154,9 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--tech-nodes=", 0) == 0) {
             g_cliTechNodes = parseNodesArg(arg.substr(13));
+        }
+        if (arg.rfind("--tech-outline-nodes=", 0) == 0) {
+            g_cliTechOutlineNodes = parseNodesArg(arg.substr(21));
         }
         if (arg.rfind("--tech-style=", 0) == 0) {
             g_cliTechStyle = static_cast<float>(std::atof(arg.substr(13).c_str()));

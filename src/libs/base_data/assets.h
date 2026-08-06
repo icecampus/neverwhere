@@ -287,6 +287,11 @@ namespace BaseData
         float soften{0.0f};        // 0 = linear ramps, 1 = smoothstep shoulders
         float creaseWidth{0.05f};  // dark tile contour width (0 = off)
         int blurPasses{0};         // sampled-field anti-terracing blur
+        // Shoreline outline ("yellow around green"): the 8-neighborhood of
+        // the painted land nodes (minus the land) forms a ring at
+        // -outlineDepth * levelHeight — the ramps continue below the water
+        // plane. 0 = off (land only).
+        float outlineDepth{0.0f};
 
         Cliff3dShadingData shading;
 
@@ -303,6 +308,7 @@ namespace BaseData
                 {"soften", d.soften},
                 {"creaseWidth", d.creaseWidth},
                 {"blurPasses", d.blurPasses},
+                {"outlineDepth", d.outlineDepth},
                 {"shading", d.shading},
             };
         }
@@ -320,6 +326,7 @@ namespace BaseData
             if (j.contains("soften")) j.at("soften").get_to(d.soften);
             if (j.contains("creaseWidth")) j.at("creaseWidth").get_to(d.creaseWidth);
             if (j.contains("blurPasses")) j.at("blurPasses").get_to(d.blurPasses);
+            if (j.contains("outlineDepth")) j.at("outlineDepth").get_to(d.outlineDepth);
             if (j.contains("shading"))
             {
                 // Field-wise apply: a partial shading block must not reset

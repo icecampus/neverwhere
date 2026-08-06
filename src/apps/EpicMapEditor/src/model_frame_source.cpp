@@ -190,6 +190,7 @@ render_core::CliffParams techParamsFromAssetData(const BaseData::Tech3dAssetData
     t.soften = d.soften;
     t.creaseWidth = d.creaseWidth;
     t.blurPasses = d.blurPasses;
+    t.outlineDepth = d.outlineDepth;
     params.techField = t;
     render_core::CliffShading& s = params.shading;
     s.lightAzimuth = d.shading.lightAzimuth;

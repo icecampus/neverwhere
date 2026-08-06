@@ -325,6 +325,182 @@
                 "y": 8
             },
             "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 8
+            },
+            "position": {
+                "x": 18,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 17,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 17,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 9
+            },
+            "position": {
+                "x": 15,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 18,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 15,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 17,
+                "y": 3
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 11
+            },
+            "position": {
+                "x": 18,
+                "y": 3
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 14
+            },
+            "position": {
+                "x": 16,
+                "y": 3
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 15
+            },
+            "position": {
+                "x": 18,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 17,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 12
+            },
+            "position": {
+                "x": 16,
+                "y": 6
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 16,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 0
+            },
+            "position": {
+                "x": 16,
+                "y": 4
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 13
+            },
+            "position": {
+                "x": 15,
+                "y": 5
+            },
+            "type": 1
+        },
+        {
+            "assetUuid": "569b362e-01fc-4667-a79a-1acaa9ee0e94",
+            "landscapeData": {
+                "tileIndex": 10
+            },
+            "position": {
+                "x": 15,
+                "y": 3
+            },
+            "type": 1
         }
     ],
     "TextureLandscape": []

@@ -370,6 +370,66 @@ bool runTileShapeSmokeTest() {
                 return false;
             }
         }
+
+        // --- Tech shoreline (outlineDepth > 0): the field derives the
+        // outline ring around the land ("yellow around green"), the ramps
+        // continue below the water plane. Margin-2 grid: the ring spreads
+        // one cell past the land and the border ring stays empty.
+        {
+            const std::uint8_t shoreNodes[8][8] = {
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 1, 1, 1, 0, 0, 0},
+                {0, 0, 1, 0, 1, 0, 0, 0},
+                {0, 0, 1, 1, 1, 0, 0, 0},
+                {0, 0, 0, 0, 0, 1, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+            };
+            tech::TechFieldParams tp;
+            tp.cellSize = 0.09f; // coarse: smoke speed
+            tp.outlineDepth = 1.0f;
+            tech::TechField techField(tp, &shoreNodes[0][0], 8, 8);
+            cliff::ScalarFieldView techView = techField.view();
+            std::vector<float> techSamples;
+            techField.sample(techSamples);
+            cliff::RegularizeStats techReg;
+            cliff::regularizeSigns(techView, techSamples, &techReg);
+            const cliff::Mesh techMesh = cliff::extractSurfaceNets(techView, techSamples, nullptr);
+            if (techReg.remaining != 0) {
+                spdlog::error("TEST FAIL TileShape: tech outline sign regularization left {} saddles",
+                    techReg.remaining);
+                return false;
+            }
+            if (techMesh.vertices.empty() || techMesh.indices.empty()) {
+                spdlog::error("TEST FAIL TileShape: tech outline mesh is empty");
+                return false;
+            }
+            const cliff::WatertightReport techReport = cliff::checkWatertight(techMesh);
+            if (!techReport.ok()) {
+                spdlog::error("TEST FAIL TileShape: tech outline mesh not watertight ({} bad of {} edges)",
+                    techReport.badEdges,
+                    techReport.undirectedEdges);
+                return false;
+            }
+            float tpyMin = 1e9f;
+            float tpyMax = -1e9f;
+            for (const cliff::MeshVertex& v : techMesh.vertices) {
+                tpyMin = std::min(tpyMin, v.py);
+                tpyMax = std::max(tpyMax, v.py);
+            }
+            if (tpyMin > -0.5f * tp.levelHeight) {
+                spdlog::error("TEST FAIL TileShape: tech outline foot not underwater (min py {:.3f})",
+                    tpyMin);
+                return false;
+            }
+            if (std::fabs(tpyMax - tp.levelHeight) > 2.0f * tp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: tech outline plateau top {:.3f}, expected ~{:.3f}",
+                    tpyMax,
+                    tp.levelHeight);
+                return false;
+            }
+        }
     }
 
     spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech field pipelines");

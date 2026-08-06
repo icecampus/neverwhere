@@ -197,3 +197,120 @@ TEST(TechField, EmptyNodesYieldNoSurface) {
     EXPECT_GT(field.eval(glm::vec3(1.5f, -0.05f, 1.5f)), 0.0f);
     EXPECT_GT(field.eval(glm::vec3(1.5f, -10.0f, 1.5f)), 0.0f);
 }
+
+// Single land node in a wide zero margin: the 8-neighborhood becomes the
+// outline ring at -outlineDepth, everything further out stays open water.
+const std::uint8_t kSingleShore[7][7] = {
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 1, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0},
+};
+
+tech::TechField shoreField(float outlineDepth = 1.0f) {
+    tech::TechFieldParams params;
+    params.outlineDepth = outlineDepth;
+    return tech::TechField(params, &kSingleShore[0][0], 7, 7);
+}
+
+TEST(TechField, OutlineRingDerivation) {
+    tech::TechField field = shoreField();
+    const float level = field.params().levelHeight;
+    // The land node itself.
+    EXPECT_FLOAT_EQ(field.heightAt(3.0f, 3.0f), level);
+    // The 8-neighborhood is the underwater ring ("yellow around green").
+    EXPECT_FLOAT_EQ(field.heightAt(2.0f, 3.0f), -level);
+    EXPECT_FLOAT_EQ(field.heightAt(4.0f, 2.0f), -level);
+    EXPECT_FLOAT_EQ(field.heightAt(2.0f, 2.0f), -level);
+    // Two cells away is open water.
+    EXPECT_FLOAT_EQ(field.heightAt(1.0f, 3.0f), 0.0f);
+    EXPECT_FLOAT_EQ(field.heightAt(5.0f, 5.0f), 0.0f);
+}
+
+TEST(TechField, OutlineWaterlineNoCrack) {
+    tech::TechField field = shoreField();
+    const float level = field.params().levelHeight;
+    const float gd = field.params().groundDepth;
+    // Between the land node (3,3) and the ring node (2,2) the ramp crosses
+    // the water plane: above it is outside, below it is solid — no crack.
+    const float above = field.eval(glm::vec3(2.5f, 0.05f * level, 2.5f));
+    EXPECT_GT(above, 0.0f);
+    const float below = field.eval(glm::vec3(2.5f, -0.05f * level, 2.5f));
+    EXPECT_LT(below, 0.0f);
+    // Inside the underwater foot at the ring node (surface is at -level
+    // there, the base slab at -level - groundDepth).
+    EXPECT_LT(field.eval(glm::vec3(2.0f, -level - 0.5f * gd, 2.0f)), 0.0f);
+    // ...but not deeper than the base slab.
+    EXPECT_GT(field.eval(glm::vec3(2.0f, -level - 2.0f * gd, 2.0f)), 0.0f);
+    // Above the underwater surface (the water column) stays outside.
+    EXPECT_GT(field.eval(glm::vec3(2.0f, -0.1f * level, 2.0f)), 0.0f);
+    // Open water past the ring stays outside at any depth.
+    EXPECT_GT(field.eval(glm::vec3(0.5f, -0.5f * level, 0.5f)), 0.0f);
+}
+
+TEST(TechField, OutlineCellCenterBlends) {
+    // A cell with two adjacent land and two adjacent outline corners is a
+    // "Line": its center sits on the ramp plane at (maxV + minV) / 2.
+    std::uint8_t nodes[4][4] = {};
+    nodes[1][1] = 1;
+    nodes[1][2] = 1;
+    tech::TechFieldParams params;
+    params.outlineDepth = 1.0f;
+    tech::TechField field(params, &nodes[0][0], 4, 4);
+    const float level = field.params().levelHeight;
+    // Cell (1,1): land corners (1,1),(2,1); outline corners (1,2),(2,2)
+    // (in the 8-neighborhood of the land). Center at (1.5, 1.5) = (1 + -1)/2.
+    EXPECT_FLOAT_EQ(field.heightAt(1.5f, 1.5f), 0.0f);
+}
+
+TEST(TechField, OutlinePipelineWatertight) {
+    // Land block with a hole + a detached node, margin 2 (the ring spreads
+    // one cell past the land and the border ring stays empty).
+    const std::uint8_t nodes[8][8] = {
+        {0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 1, 1, 1, 0, 0, 0},
+        {0, 0, 1, 0, 1, 0, 0, 0},
+        {0, 0, 1, 1, 1, 0, 0, 0},
+        {0, 0, 0, 0, 0, 1, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0},
+    };
+    tech::TechFieldParams params;
+    params.cellSize = 0.09f; // coarse: test speed
+    params.outlineDepth = 1.0f;
+    tech::TechField field(params, &nodes[0][0], 8, 8);
+    std::vector<float> samples;
+    field.sample(samples);
+
+    // The padding must keep the field strictly positive on the whole grid
+    // border, otherwise the solid is clipped and the mesh comes out open.
+    EXPECT_GT(borderMin(field, samples), 0.0f);
+
+    cliff::ScalarFieldView view = field.view();
+    cliff::RegularizeStats regStats;
+    cliff::regularizeSigns(view, samples, &regStats);
+    const cliff::Mesh mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+
+    EXPECT_EQ(regStats.remaining, 0);
+    ASSERT_FALSE(mesh.vertices.empty());
+    EXPECT_GT(mesh.indices.size() / 3, 0u);
+
+    const cliff::WatertightReport report = cliff::checkWatertight(mesh);
+    EXPECT_TRUE(report.ok()) << "bad edges: " << report.badEdges << " of " << report.undirectedEdges;
+
+    float pyMin = 1e9f;
+    float pyMax = -1e9f;
+    for (const cliff::MeshVertex& v : mesh.vertices) {
+        pyMin = std::min(pyMin, v.py);
+        pyMax = std::max(pyMax, v.py);
+    }
+    // The plateau tops sit at +levelHeight, the underwater foot reaches
+    // ~-levelHeight (one level down) but not below its base slab.
+    EXPECT_NEAR(pyMax, params.levelHeight, 2.0f * params.cellSize);
+    EXPECT_LT(pyMin, -0.5f * params.levelHeight);
+    EXPECT_GT(pyMin, -params.levelHeight - params.groundDepth - 2.0f * params.cellSize);
+}

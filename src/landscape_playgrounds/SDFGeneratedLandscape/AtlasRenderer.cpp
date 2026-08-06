@@ -1867,10 +1867,13 @@ void AtlasRenderer::rebuildCliffCache(
             }
             // One-cell margin (the blurred outline must not cross the field
             // border, same contract as the demo shape's zero border rows).
-            minX -= 1;
-            minY -= 1;
-            maxX += 1;
-            maxY += 1;
+            // Tech with the shoreline outline enabled needs a second ring:
+            // the auto-derived outline nodes spread one cell past the land.
+            const int margin = (cache.tech && cache.techParams.outlineDepth > 0.0f) ? 2 : 1;
+            minX -= margin;
+            minY -= margin;
+            maxX += margin;
+            maxY += margin;
             const int nodesX = maxX - minX + 1;
             const int nodesY = maxY - minY + 1;
             std::vector<std::uint8_t> nodes(static_cast<size_t>(nodesX) * nodesY, 0);

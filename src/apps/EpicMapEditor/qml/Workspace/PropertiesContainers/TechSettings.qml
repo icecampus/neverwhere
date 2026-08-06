@@ -51,7 +51,8 @@ Rectangle
             "rows": [
                 ["style", "Style (ridge-valley)", 0.0, 1.0, 0.01],
                 ["soften", "Soften ramps", 0.0, 1.0, 0.01],
-                ["creaseWidth", "Crease width", 0.0, 0.2, 0.005]
+                ["creaseWidth", "Crease width", 0.0, 0.2, 0.005],
+                ["outlineDepth", "Outline depth", 0.0, 2.0, 0.01]
             ],
             "checks": []
         },

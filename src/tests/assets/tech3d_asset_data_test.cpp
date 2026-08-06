@@ -39,6 +39,7 @@ TEST(Tech3dAssetData, BaseDataDefaultsWhenPayloadEmpty) {
     EXPECT_FLOAT_EQ(d.soften, 0.0f);
     EXPECT_FLOAT_EQ(d.creaseWidth, 0.05f);
     EXPECT_EQ(d.blurPasses, 0);
+    EXPECT_FLOAT_EQ(d.outlineDepth, 0.0f); // shoreline outline off by default
     EXPECT_FLOAT_EQ(d.raisedHeight, 96.0f);
     // TechnicalGrass palette: earth ramps, no veins, muted spec, flat-lit.
     EXPECT_FLOAT_EQ(d.shading.darkColor[0], 0.25f);
@@ -62,6 +63,7 @@ TEST(Tech3dAssetData, BaseDataRoundTripPreservesAllFields) {
     d.soften = 0.6f;
     d.creaseWidth = 0.0f; // contour off
     d.blurPasses = 2;
+    d.outlineDepth = 1.5f; // shoreline outline on, one and a half levels down
     d.shading.ambient = 0.55f;
     d.shading.darkColor = {0.1f, 0.2f, 0.3f};
     d.shading.bottomDarken = 0.4f;
@@ -83,6 +85,7 @@ TEST(Tech3dAssetData, BaseDataRoundTripPreservesAllFields) {
     EXPECT_FLOAT_EQ(b.soften, 0.6f);
     EXPECT_FLOAT_EQ(b.creaseWidth, 0.0f);
     EXPECT_EQ(b.blurPasses, 2);
+    EXPECT_FLOAT_EQ(b.outlineDepth, 1.5f);
     EXPECT_FLOAT_EQ(b.shading.ambient, 0.55f);
     EXPECT_FLOAT_EQ(b.shading.darkColor[0], 0.1f);
     EXPECT_FLOAT_EQ(b.shading.darkColor[2], 0.3f);
@@ -100,6 +103,7 @@ TEST(Tech3dAssetData, GameDataFromJson) {
         {"soften", 0.4},
         {"creaseWidth", 0.08},
         {"blurPasses", 2},
+        {"outlineDepth", 1.0},
         {"shading", {{"diffuse", 0.9}, {"goldColor", {0.7, 0.6, 0.4}}}},
     };
     const game_data::AssetData asset = j.get<game_data::AssetData>();
@@ -114,6 +118,7 @@ TEST(Tech3dAssetData, GameDataFromJson) {
     EXPECT_FLOAT_EQ(asset.tech3d->soften, 0.4f);
     EXPECT_FLOAT_EQ(asset.tech3d->creaseWidth, 0.08f);
     EXPECT_EQ(asset.tech3d->blurPasses, 2);
+    EXPECT_FLOAT_EQ(asset.tech3d->outlineDepth, 1.0f);
     EXPECT_FLOAT_EQ(asset.tech3d->shading.diffuse, 0.9f);
     EXPECT_FLOAT_EQ(asset.tech3d->shading.goldColor[2], 0.4f);
     // Omitted fields keep the generator defaults.
