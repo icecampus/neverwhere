@@ -123,16 +123,16 @@ void main() {
 
 static const char* kColorVsGlsl = R"(
 #version 330
-layout(location=0) in vec2 pos;
+layout(location=0) in vec3 pos;
 layout(location=1) in vec4 color;
 out vec4 v_color;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
 void main() {
-    vec2 screen = (pos * camera_zoom) + camera_offset;
+    vec2 screen = (pos.xy * camera_zoom) + camera_offset;
     vec2 clip = vec2((screen.x / view_size.x) * 2.0 - 1.0, 1.0 - (screen.y / view_size.y) * 2.0);
-    gl_Position = vec4(clip, 0.0, 1.0);
+    gl_Position = vec4(clip, pos.z, 1.0);
     v_color = color;
 }
 )";
@@ -266,7 +266,7 @@ cbuffer vs_params: register(b0) {
     float camera_zoom;
 };
 struct VSIn {
-    float2 pos: TEXCOORD0;
+    float3 pos: TEXCOORD0;
     float4 color: TEXCOORD1;
 };
 struct VSOut {
@@ -275,11 +275,11 @@ struct VSOut {
 };
 VSOut main(VSIn inp) {
     VSOut o;
-    float2 screen = (inp.pos * camera_zoom) + camera_offset;
+    float2 screen = (inp.pos.xy * camera_zoom) + camera_offset;
     float2 clip;
     clip.x = (screen.x / view_size.x) * 2.0 - 1.0;
     clip.y = 1.0 - (screen.y / view_size.y) * 2.0;
-    o.pos = float4(clip, 0.0, 1.0);
+    o.pos = float4(clip, inp.pos.z, 1.0);
     o.color = inp.color;
     return o;
 }
@@ -437,7 +437,7 @@ struct VsParams {
 };
 
 struct VSIn {
-    float2 pos [[attribute(0)]];
+    float3 pos [[attribute(0)]];
     float4 color [[attribute(1)]];
 };
 
@@ -448,12 +448,12 @@ struct VSOut {
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
     VSOut o;
-    float2 screen = (in.pos * params.camera_zoom) + params.camera_offset;
+    float2 screen = (in.pos.xy * params.camera_zoom) + params.camera_offset;
     float2 clip = float2(
         (screen.x / params.view_size.x) * 2.0 - 1.0,
         1.0 - (screen.y / params.view_size.y) * 2.0
     );
-    o.pos = float4(clip, 0.0, 1.0);
+    o.pos = float4(clip, in.pos.z, 1.0);
     o.color = in.color;
     return o;
 }
@@ -1419,14 +1419,21 @@ void AtlasRenderer::appendDiamondOutline(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
-    glm::vec4 color) {
+    glm::vec4 color,
+    float zFar,
+    float zScale) {
 
+    // Same baked-depth scheme as the cliff pass: the field y of a ground
+    // point orders it along the iso view ray, so the grid sits exactly on
+    // the ground plane and raised 3D geometry occludes it by depth.
     const auto corners = iso.cellDiamondCorners(cell);
     for (int i = 0; i < 4; ++i) {
         const glm::vec2 a = corners[i];
         const glm::vec2 b = corners[(i + 1) % 4];
-        out.push_back({a.x, a.y, color.r, color.g, color.b, color.a});
-        out.push_back({b.x, b.y, color.r, color.g, color.b, color.a});
+        const float za = (zFar - a.y) * zScale;
+        const float zb = (zFar - b.y) * zScale;
+        out.push_back({a.x, a.y, za, color.r, color.g, color.b, color.a});
+        out.push_back({b.x, b.y, zb, color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1434,13 +1441,16 @@ void AtlasRenderer::appendDiamondFill(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
-    glm::vec4 color) {
+    glm::vec4 color,
+    float zFar,
+    float zScale) {
 
     const auto corners = iso.cellDiamondCorners(cell); // Left, Up, Right, Down
     const int tris[6] = {0, 1, 2, 0, 2, 3};
     for (const int idx : tris) {
         const glm::vec2 p = corners[idx];
-        out.push_back({p.x, p.y, color.r, color.g, color.b, color.a});
+        const float z = (zFar - p.y) * zScale;
+        out.push_back({p.x, p.y, z, color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1448,7 +1458,9 @@ void AtlasRenderer::appendNodeMarker(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 node,
-    glm::vec4 color) {
+    glm::vec4 color,
+    float zFar,
+    float zScale) {
 
     const glm::vec2 p = iso.nodeToField(node);
     const float s = 6.0f;
@@ -1459,8 +1471,10 @@ void AtlasRenderer::appendNodeMarker(
         {p.x, p.y + s * 0.5f},
     };
     for (int i = 0; i < 4; ++i) {
-        out.push_back({pts[i].x, pts[i].y, color.r, color.g, color.b, color.a});
-        out.push_back({pts[(i + 1) % 4].x, pts[(i + 1) % 4].y, color.r, color.g, color.b, color.a});
+        const float za = (zFar - pts[i].y) * zScale;
+        const float zb = (zFar - pts[(i + 1) % 4].y) * zScale;
+        out.push_back({pts[i].x, pts[i].y, za, color.r, color.g, color.b, color.a});
+        out.push_back({pts[(i + 1) % 4].x, pts[(i + 1) % 4].y, zb, color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1612,7 +1626,7 @@ void AtlasRenderer::render(
             if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
                 continue;
             }
-            appendDiamondFill(overlayVerts, iso, cell, cellFill);
+            appendDiamondFill(overlayVerts, iso, cell, cellFill, zFar, zScale);
         }
         fillVertCount = static_cast<int>(overlayVerts.size());
     }
@@ -1620,7 +1634,7 @@ void AtlasRenderer::render(
     const glm::vec4 gridColor{0.45f, 0.48f, 0.52f, 0.55f};
     for (int y = 0; y < mapH; ++y) {
         for (int x = 0; x < mapW; ++x) {
-            appendDiamondOutline(overlayVerts, iso, {x, y}, gridColor);
+            appendDiamondOutline(overlayVerts, iso, {x, y}, gridColor, zFar, zScale);
         }
     }
 
@@ -1631,9 +1645,9 @@ void AtlasRenderer::render(
             if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
                 continue;
             }
-            appendDiamondOutline(overlayVerts, iso, cell, cellEdge);
+            appendDiamondOutline(overlayVerts, iso, cell, cellEdge, zFar, zScale);
         }
-        appendNodeMarker(overlayVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f});
+        appendNodeMarker(overlayVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f}, zFar, zScale);
     }
 
     VsParams vsParams{};
@@ -2033,12 +2047,17 @@ void AtlasRenderer::ensurePipelines() {
 
         sg_pipeline_desc pip = {};
         pip.shader = m_colorShd;
-        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
+        pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
         pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
         pip.primitive_type = SG_PRIMITIVETYPE_LINES;
         pip.colors[0].blend.enabled = true;
         pip.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pip.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        // The overlay (grid / hover) shares the z-buffer with the 3D meshes:
+        // depth-tested against their baked depth, but not written, so overlay
+        // pieces never occlude each other (or the flat tiles under them).
+        pip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip.depth.write_enabled = false;
         pip.label = "tileshape-color-pip";
         m_colorPip = sg_make_pipeline(&pip);
 
