@@ -911,6 +911,28 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
 }
 )";
 
+// Normalized depth along the iso view ray. Field-y grows TOWARD the viewer, so
+// with LESS_EQUAL + clear 1.0 the closer fragment needs the SMALLER z. The
+// anchor is a constant rather than camera-derived: the cliff/stone/tech streams
+// bake their z once at rebuild time while the overlay computes it every frame,
+// and a camera-derived anchor would drift between the two as the view pans (a
+// pan of one cell was enough to flip the grid from under the mesh to over it).
+constexpr float kZFar = 100000.0f;
+constexpr float kZScale = 1.0f / 200000.0f;
+
+float bakedDepth(float fieldY) {
+    return (kZFar - fieldY) * kZScale;
+}
+
+// The overlay (grid, hover footprint) is an authoring aid on the ground plane,
+// and it sits behind the whole mesh depth range (bakedDepth stays within a
+// hundredth of 0.5 for any reachable field y) rather than on the plane itself:
+// a mesh fragment carries the depth of its own ground row, so parts hanging
+// BELOW the plane — the base slab walls, the underwater foot of the tech
+// shoreline — are farther than the plane along the view ray and would be cut
+// by grid lines of the cells in front of them.
+constexpr float kOverlayDepth = 0.9f;
+
 void fillVsUniformDesc(sg_shader_uniform_block* block) {
     block->stage = SG_SHADERSTAGE_VERTEX;
     block->size = sizeof(AtlasRenderer::VsParams);
@@ -1419,21 +1441,14 @@ void AtlasRenderer::appendDiamondOutline(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
-    glm::vec4 color,
-    float zFar,
-    float zScale) {
+    glm::vec4 color) {
 
-    // Same baked-depth scheme as the cliff pass: the field y of a ground
-    // point orders it along the iso view ray, so the grid sits exactly on
-    // the ground plane and raised 3D geometry occludes it by depth.
     const auto corners = iso.cellDiamondCorners(cell);
     for (int i = 0; i < 4; ++i) {
         const glm::vec2 a = corners[i];
         const glm::vec2 b = corners[(i + 1) % 4];
-        const float za = (zFar - a.y) * zScale;
-        const float zb = (zFar - b.y) * zScale;
-        out.push_back({a.x, a.y, za, color.r, color.g, color.b, color.a});
-        out.push_back({b.x, b.y, zb, color.r, color.g, color.b, color.a});
+        out.push_back({a.x, a.y, kOverlayDepth, color.r, color.g, color.b, color.a});
+        out.push_back({b.x, b.y, kOverlayDepth, color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1441,16 +1456,13 @@ void AtlasRenderer::appendDiamondFill(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 cell,
-    glm::vec4 color,
-    float zFar,
-    float zScale) {
+    glm::vec4 color) {
 
     const auto corners = iso.cellDiamondCorners(cell); // Left, Up, Right, Down
     const int tris[6] = {0, 1, 2, 0, 2, 3};
     for (const int idx : tris) {
         const glm::vec2 p = corners[idx];
-        const float z = (zFar - p.y) * zScale;
-        out.push_back({p.x, p.y, z, color.r, color.g, color.b, color.a});
+        out.push_back({p.x, p.y, kOverlayDepth, color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1458,9 +1470,7 @@ void AtlasRenderer::appendNodeMarker(
     std::vector<ColorVertex>& out,
     const topology_core::DiamondIsometry& iso,
     glm::ivec2 node,
-    glm::vec4 color,
-    float zFar,
-    float zScale) {
+    glm::vec4 color) {
 
     const glm::vec2 p = iso.nodeToField(node);
     const float s = 6.0f;
@@ -1471,10 +1481,10 @@ void AtlasRenderer::appendNodeMarker(
         {p.x, p.y + s * 0.5f},
     };
     for (int i = 0; i < 4; ++i) {
-        const float za = (zFar - pts[i].y) * zScale;
-        const float zb = (zFar - pts[(i + 1) % 4].y) * zScale;
-        out.push_back({pts[i].x, pts[i].y, za, color.r, color.g, color.b, color.a});
-        out.push_back({pts[(i + 1) % 4].x, pts[(i + 1) % 4].y, zb, color.r, color.g, color.b, color.a});
+        const glm::vec2 a = pts[i];
+        const glm::vec2 b = pts[(i + 1) % 4];
+        out.push_back({a.x, a.y, kOverlayDepth, color.r, color.g, color.b, color.a});
+        out.push_back({b.x, b.y, kOverlayDepth, color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1601,15 +1611,6 @@ void AtlasRenderer::render(
         }
     }
 
-    // Normalized depth along the iso view ray, anchored at the visible
-    // ground-y center with generous margins (monotonicity is what matters;
-    // the real scene stays far from the clip planes). Ground-y grows TOWARD
-    // the viewer, so with LESS_EQUAL + clear 1.0 the closer fragment must map
-    // to the SMALLER z.
-    const float groundCenterY = camera.screenToWorld({viewW * 0.5f, viewH * 0.5f}).y;
-    const float zFar = groundCenterY + 100000.0f;
-    const float zScale = 1.0f / 200000.0f;
-
     // Overlay stream: hover fill triangles first (own draw call on the
     // triangle pipeline), then all the line vertices — one buffer upload
     // feeds both draws.
@@ -1626,7 +1627,7 @@ void AtlasRenderer::render(
             if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
                 continue;
             }
-            appendDiamondFill(overlayVerts, iso, cell, cellFill, zFar, zScale);
+            appendDiamondFill(overlayVerts, iso, cell, cellFill);
         }
         fillVertCount = static_cast<int>(overlayVerts.size());
     }
@@ -1634,7 +1635,7 @@ void AtlasRenderer::render(
     const glm::vec4 gridColor{0.45f, 0.48f, 0.52f, 0.55f};
     for (int y = 0; y < mapH; ++y) {
         for (int x = 0; x < mapW; ++x) {
-            appendDiamondOutline(overlayVerts, iso, {x, y}, gridColor, zFar, zScale);
+            appendDiamondOutline(overlayVerts, iso, {x, y}, gridColor);
         }
     }
 
@@ -1645,9 +1646,9 @@ void AtlasRenderer::render(
             if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
                 continue;
             }
-            appendDiamondOutline(overlayVerts, iso, cell, cellEdge, zFar, zScale);
+            appendDiamondOutline(overlayVerts, iso, cell, cellEdge);
         }
-        appendNodeMarker(overlayVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f}, zFar, zScale);
+        appendNodeMarker(overlayVerts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f});
     }
 
     VsParams vsParams{};
@@ -1745,7 +1746,7 @@ void AtlasRenderer::render(
             cache.stats.pending = true;
         }
         if ((cache.meshDirty || cache.streamDirty) && (nowSec - cache.lastEditSec) > 0.3) {
-            rebuildCliffCache(cache, iso, zFar, zScale);
+            rebuildCliffCache(cache, iso);
             cache.meshDirty = false;
             cache.streamDirty = false;
             cache.gpuDirty = true;
@@ -1829,9 +1830,7 @@ const CliffStats& AtlasRenderer::cliffStatsFor(const LandBrush* brush) const {
 
 void AtlasRenderer::rebuildCliffCache(
     CliffCache& cache,
-    const topology_core::DiamondIsometry& iso,
-    float zFar,
-    float zScale) {
+    const topology_core::DiamondIsometry& iso) {
 
     using Clock = std::chrono::steady_clock;
     const auto t0 = Clock::now();
@@ -1937,9 +1936,8 @@ void AtlasRenderer::rebuildCliffCache(
         const float mapZ = static_cast<float>(cache.origin.y) + v.pz;
         const float fieldX = (mapX - mapZ) * halfW + halfW;
         const float fieldY = (mapX + mapZ) * halfH;
-        const float z = (zFar - fieldY) * zScale;
         cache.stream.push_back(CliffVertex{
-            fieldX, fieldY - v.py * cache.heightScale, z,
+            fieldX, fieldY - v.py * cache.heightScale, bakedDepth(fieldY),
             v.nx, v.ny, v.nz, v.groove,
             mapX, v.py, mapZ, v.rim});
     }

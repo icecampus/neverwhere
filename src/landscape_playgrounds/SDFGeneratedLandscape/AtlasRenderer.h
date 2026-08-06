@@ -36,9 +36,10 @@ enum class AtlasKind : int {
     FlatGreen = 2,
 };
 
-// Overlay vertex (grid lines, hover fill/marker): field position + baked
-// ground depth, so the overlay lives in the same z-buffer as the 3D meshes
-// (occluded by raised geometry) instead of drawing on top, plus flat RGBA.
+// Overlay vertex (grid lines, hover fill/marker): field position + a depth
+// behind the whole mesh depth range (see kOverlayDepth), so the overlay shares
+// the z-buffer with the 3D meshes and any of their fragments occludes it
+// instead of the grid drawing on top, plus flat RGBA.
 struct ColorVertex {
     float x, y, z;
     float r, g, b, a;
@@ -226,11 +227,7 @@ private:
     };
 
     CliffCache& cliffCacheFor(const LandBrush* brush);
-    void rebuildCliffCache(
-        CliffCache& cache,
-        const topology_core::DiamondIsometry& iso,
-        float zFar,
-        float zScale);
+    void rebuildCliffCache(CliffCache& cache, const topology_core::DiamondIsometry& iso);
 
     void ensurePipelines();
     void destroyPipelines();
@@ -265,24 +262,18 @@ private:
         std::vector<ColorVertex>& out,
         const topology_core::DiamondIsometry& iso,
         glm::ivec2 cell,
-        glm::vec4 color,
-        float zFar,
-        float zScale);
+        glm::vec4 color);
     // Solid diamond of a cell (2 triangles) for the hover footprint tint.
     void appendDiamondFill(
         std::vector<ColorVertex>& out,
         const topology_core::DiamondIsometry& iso,
         glm::ivec2 cell,
-        glm::vec4 color,
-        float zFar,
-        float zScale);
+        glm::vec4 color);
     void appendNodeMarker(
         std::vector<ColorVertex>& out,
         const topology_core::DiamondIsometry& iso,
         glm::ivec2 node,
-        glm::vec4 color,
-        float zFar,
-        float zScale);
+        glm::vec4 color);
 
     sg_pipeline m_texPip{};
     sg_pipeline m_colorPip{};
