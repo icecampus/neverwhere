@@ -35,6 +35,12 @@ endif()
 target_include_directories(${AppName} PRIVATE ${STB_INCLUDE_DIRS})
 
 nw_configure_sokol_app(${AppName})
+if(APPLE AND SDFGL_FORCE_GLCORE)
+    # Opt-in GLCORE build for --shot framebuffer readback on macOS
+    # (the Metal default has no readback path; same pattern as StoneCube).
+    target_compile_definitions(${AppName} PRIVATE SOKOL_GLCORE)
+    target_link_libraries(${AppName} PRIVATE "-framework OpenGL")
+endif()
 if(MSVC)
     # dwmapi: DwmFlush in the Win32 screenshot helper.
     target_link_libraries(${AppName} PRIVATE dwmapi)

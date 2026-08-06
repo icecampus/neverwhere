@@ -12,6 +12,7 @@
 #include <spdlog/spdlog.h>
 
 #include <highground_core/cliff_field.h>
+#include <highground_core/tech_field.h>
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
@@ -108,31 +109,34 @@ glm::vec2 canvasSize() {
 }
 
 // Brush palette: independent layers sharing one canvas. Each keeps its
-// own node grid and presentation (2D grass / 2D yellow / 2D green / cliff
-// or stone scalar-field / 2D tiling textures under the yellow masks). The
-// Texture 2D layer keeps a per-node texture tag, so several textures coexist
+// own node grid and presentation (2D grass / 2D yellow / 2D green / cliff,
+// stone or tech scalar-field / 2D tiling textures under the yellow masks).
+// The Texture 2D layer keeps a per-node texture tag, so several textures coexist
 // in the one layer and displace each other on repaint.
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
     bool cliff;
     bool stone;
+    bool tech;
     bool textured;
     const char* name;
 };
 
-constexpr int kLayerCount = 6;
+constexpr int kLayerCount = 7;
 constexpr int kYellowLayerIndex = 1;
 constexpr int kGreenLayerIndex = 2;
-constexpr int kTexLayerIndex = 5;
+constexpr int kTechLayerIndex = 5;
+constexpr int kTexLayerIndex = 6;
 
 PaintLayer g_layers[kLayerCount] = {
-    {{}, AtlasKind::Grass, false, false, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, false, false, "Yellow 2D"},
-    {{}, AtlasKind::FlatGreen, false, false, false, "Green 2D"},
-    {{}, AtlasKind::Flat, true, false, false, "Cliff 3D"},
-    {{}, AtlasKind::Flat, false, true, false, "Stone 3D"},
-    {{}, AtlasKind::Flat, false, false, true, "Texture 2D"},
+    {{}, AtlasKind::Grass, false, false, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::FlatGreen, false, false, false, false, "Green 2D"},
+    {{}, AtlasKind::Flat, true, false, false, false, "Cliff 3D"},
+    {{}, AtlasKind::Flat, false, true, false, false, "Stone 3D"},
+    {{}, AtlasKind::Flat, false, false, true, false, "Tech 3D"},
+    {{}, AtlasKind::Flat, false, false, false, true, "Texture 2D"},
 };
 int g_activeLayer = 0;
 // Texture 2D layer: tiling textures found in resources/textures (renderer
@@ -156,10 +160,14 @@ cliff::FieldParams g_cliffParams;
 // Stone layer: StoneCube voronoi stones over the same slab —
 // its own params/height scale, same debounce mechanics.
 stone_gen::StoneFieldParams g_stoneParams;
+// Tech layer: the TechnicalGrass ridge/valley tileset semantics as real
+// geometry (tech::TechField) — its own params/height scale, same debounce.
+tech::TechFieldParams g_techParams;
 // Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
 // no mesh rebuild).
 float g_cliffHeightScale = 96.0f;
 float g_stoneHeightScale = 96.0f;
+float g_techHeightScale = 96.0f;
 // Stone rim shading: depth below the top plane over which the grass fades
 // into the wall palette (uniforms only, applies instantly).
 float g_stoneGrassFade = 0.12f;
@@ -298,6 +306,8 @@ bool g_demoNode = false;
 // --- Visual debug CLI (headless screenshot comparisons vs the editor) ---
 // --no-ui                      hide the ImGui panel (clean captures)
 // --cliff-nodes=x,y;x,y;...    paint these nodes on the cliff layer
+// --tech-nodes=x,y;x,y;...     paint these nodes on the tech layer
+// --tech-style=S               tech style blend: 0 = ridge, 1 = valley
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
 //                              (tagged with the first loaded texture)
 // --tex-tiling=R               Texture 2D repeats per cell width (default 1.0)
@@ -308,6 +318,8 @@ bool g_demoNode = false;
 //                              the caches settle, then quit
 bool g_noUi = false;
 std::vector<glm::ivec2> g_cliCliffNodes;
+std::vector<glm::ivec2> g_cliTechNodes;
+std::optional<float> g_cliTechStyle;
 std::vector<glm::ivec2> g_cliTexNodes;
 std::optional<float> g_cliZoom;
 std::optional<glm::vec2> g_cliCenter;
@@ -344,7 +356,8 @@ std::optional<glm::vec2> parseVec2Arg(const std::string& value) {
 }
 
 // Painted programmatically in --demo mode: a cliff blob plus a stone blob
-// plus grass/yellow/green flat strokes and a textured strip of three DIFFERENT
+// plus a tech blob (plateau block + a detached node for corner peaks) plus
+// grass/yellow/green flat strokes and a textured strip of three DIFFERENT
 // textures side by side — used to verify the multi-texture layer blends.
 void paintDemoPattern() {
     for (int y = 14; y <= 17; ++y) {
@@ -358,6 +371,14 @@ void paintDemoPattern() {
             g_layers[4].brush.setNode({x, y}, true);
         }
     }
+    // Tech 3D: the TechnicalGrass ridge/valley transition shapes as real
+    // geometry — a plateau block plus a detached node (four corner cells).
+    for (int y = 6; y <= 8; ++y) {
+        for (int x = 11; x <= 13; ++x) {
+            g_layers[kTechLayerIndex].brush.setNode({x, y}, true);
+        }
+    }
+    g_layers[kTechLayerIndex].brush.setNode({15, 9}, true);
     for (int y = 15; y <= 18; ++y) {
         for (int x = 6; x <= 9; ++x) {
             g_layers[0].brush.setNode({x, y}, true);
@@ -516,6 +537,9 @@ void init() {
     for (const glm::ivec2& node : g_cliCliffNodes) {
         g_layers[3].brush.setNode(node, true);
     }
+    for (const glm::ivec2& node : g_cliTechNodes) {
+        g_layers[kTechLayerIndex].brush.setNode(node, true);
+    }
     for (const glm::ivec2& node : g_cliTexNodes) {
         g_layers[kTexLayerIndex].brush.setNode(node, true, texLayerTagFor(g_texChoice));
     }
@@ -528,17 +552,19 @@ void init() {
         g_camera.offset.x = canvas.x * 0.5f - nodePos.x * g_camera.zoom;
         g_camera.offset.y = canvas.y * 0.5f - nodePos.y * g_camera.zoom;
     }
-    if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty()) {
+    if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty() || !g_cliTechNodes.empty()) {
         // Deterministic framing for screenshot comparisons.
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
-        } else if (!g_cliCliffNodes.empty()) {
+        } else if (!g_cliCliffNodes.empty() || !g_cliTechNodes.empty()) {
+            const std::vector<glm::ivec2>& nodes =
+                !g_cliCliffNodes.empty() ? g_cliCliffNodes : g_cliTechNodes;
             glm::vec2 acc(0.0f);
-            for (const glm::ivec2& node : g_cliCliffNodes) {
+            for (const glm::ivec2& node : nodes) {
                 acc += g_iso.nodeToField(node);
             }
-            worldCenter = acc / static_cast<float>(g_cliCliffNodes.size());
+            worldCenter = acc / static_cast<float>(nodes.size());
         } else {
             // Zoom without an explicit center: the map middle (centerCamera).
             const glm::ivec2 mid{g_layers[0].brush.width() / 2, g_layers[0].brush.height() / 2};
@@ -704,6 +730,30 @@ void drawImGui(int w, int h) {
             ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
         }
     }
+    if (g_layers[g_activeLayer].tech) {
+        // TechnicalGrass ridge/valley heightfield as real geometry; edits are
+        // debounced (0.3 s) into a full field rebuild, same as the cliff.
+        tech::TechFieldParams& p = g_techParams;
+        // Lift scale: cheap re-projection of the cached mesh, no field rebuild.
+        ImGui::SliderFloat("Tech height", &g_techHeightScale, 4.0f, 128.0f, "%.0f px");
+        if (ImGui::CollapsingHeader("Tech field", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
+            ImGui::SliderFloat("Style", &p.style, 0.0f, 1.0f, "%.2f ridge-valley");
+            ImGui::SliderFloat("Soften", &p.soften, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Level height", &p.levelHeight, 0.1f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Ground depth", &p.groundDepth, 0.02f, 0.3f, "%.2f");
+            ImGui::SliderFloat("Crease width", &p.creaseWidth, 0.0f, 0.2f, "%.3f");
+            ImGui::SliderFloat("Cell size", &p.cellSize, 0.04f, 0.12f, "%.3f");
+            ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 3);
+        }
+        const CliffStats& st = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
+        ImGui::Text("Tech mesh: %d verts, %d tris", st.vertexCount, st.triangleCount);
+        ImGui::Text("Watertight: %s", st.watertight ? "yes" : "NO");
+        ImGui::Text("Rebuild: %.0f ms (%d voxels)", st.rebuildMs, st.voxelCount);
+        if (st.pending) {
+            ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
+        }
+    }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);
@@ -721,19 +771,15 @@ void drawImGui(int w, int h) {
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %s %d, %s %d, %s %d, %s %d, %s %d, %s %d",
-        g_layers[0].name,
-        g_layers[0].brush.onNodeCount(),
-        g_layers[1].name,
-        g_layers[1].brush.onNodeCount(),
-        g_layers[2].name,
-        g_layers[2].brush.onNodeCount(),
-        g_layers[3].name,
-        g_layers[3].brush.onNodeCount(),
-        g_layers[4].name,
-        g_layers[4].brush.onNodeCount(),
-        g_layers[5].name,
-        g_layers[5].brush.onNodeCount());
+    ImGui::Text("On nodes:");
+    for (int i = 0; i < kLayerCount; ++i) {
+        ImGui::SameLine();
+        ImGui::Text(
+            "%s %d%s",
+            g_layers[i].name,
+            g_layers[i].brush.onNodeCount(),
+            i + 1 < kLayerCount ? "," : "");
+    }
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
     if (ImGui::Button("Clear layer")) {
         activeBrush().clear();
@@ -837,7 +883,11 @@ void frame() {
         views[i].cliffParams = &g_cliffParams;
         views[i].stone = g_layers[i].stone;
         views[i].stoneParams = &g_stoneParams;
-        views[i].cliffHeightScale = g_layers[i].stone ? g_stoneHeightScale : g_cliffHeightScale;
+        views[i].tech = g_layers[i].tech;
+        views[i].techParams = &g_techParams;
+        views[i].cliffHeightScale = g_layers[i].stone
+            ? g_stoneHeightScale
+            : (g_layers[i].tech ? g_techHeightScale : g_cliffHeightScale);
         if (g_layers[i].textured) {
             // Multi-texture layer: diamond-fan cells whose corner nodes carry
             // texture weights (LandBrush::cellTextureBlend); the FS blends
@@ -899,9 +949,26 @@ void frame() {
     stoneFs.params2[1] = g_stoneRimShade;
     stoneFs.params2[2] = g_stoneTopTexMix;
     stoneFs.params2[3] = g_stoneTopTexTiles;
+    // Tech palette (per-layer shading override): the same omphalos shader
+    // re-tinted to the TechnicalGrass look — grassy flat tops, earth ramps,
+    // and the crease groove channel renders as the dark tile contour; the
+    // gold veins and spec are muted. The rim/plane-Y channels stay zeroed
+    // (tech has no rim stitch and its rim attribute is 0).
+    CliffFsParams techFs = cliffFs;
+    techFs.darkColor[0] = 0.25f;
+    techFs.darkColor[1] = 0.18f;
+    techFs.darkColor[2] = 0.12f;
+    techFs.goldColor[0] = 0.58f;
+    techFs.goldColor[1] = 0.44f;
+    techFs.goldColor[2] = 0.29f;
+    techFs.params0[0] = 2.0f;  // vein threshold above the fbm range: veins off
+    techFs.params0[3] = 0.15f; // spec strength
     for (int i = 0; i < kLayerCount; ++i) {
         if (g_layers[i].stone) {
             views[i].shadingOverride = &stoneFs;
+        }
+        if (g_layers[i].tech) {
+            views[i].shadingOverride = &techFs;
         }
     }
 
@@ -1036,6 +1103,9 @@ int main(int argc, char* argv[]) {
     // highground stands alone; the underlay will be authored separately.
     g_cliffParams.groundEnabled = false;
     g_stoneParams.base.groundEnabled = false;
+    // The tileset's signature dark contour: shading-only groove channel
+    // around the raised-cell borders.
+    g_techParams.creaseWidth = 0.05f;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--smoke") {
@@ -1053,6 +1123,12 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--cliff-nodes=", 0) == 0) {
             g_cliCliffNodes = parseNodesArg(arg.substr(14));
         }
+        if (arg.rfind("--tech-nodes=", 0) == 0) {
+            g_cliTechNodes = parseNodesArg(arg.substr(13));
+        }
+        if (arg.rfind("--tech-style=", 0) == 0) {
+            g_cliTechStyle = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
         if (arg.rfind("--tex-nodes=", 0) == 0) {
             g_cliTexNodes = parseNodesArg(arg.substr(12));
         }
@@ -1068,6 +1144,9 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--center=", 0) == 0) {
             g_cliCenter = parseVec2Arg(arg.substr(9));
         }
+    }
+    if (g_cliTechStyle) {
+        g_techParams.style = *g_cliTechStyle;
     }
 
     if (smoke) {

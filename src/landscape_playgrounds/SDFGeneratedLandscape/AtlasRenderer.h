@@ -23,6 +23,7 @@
 
 #include <highground_core/cliff_field.h>
 #include <highground_core/surface_nets.h>
+#include <highground_core/tech_field.h>
 #include <stone_gen/stone_field.h>
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
@@ -55,8 +56,8 @@ struct CliffVertex {
 
 // One paint layer on the shared canvas: its own node grid and either flat
 // (2D atlas tiles) or scalar-field surface nets from the same nodes
-// (z-buffered): cliff (omphalos grooves) or stone (StoneCube
-// voronoi stones).
+// (z-buffered): cliff (omphalos grooves), stone (StoneCube
+// voronoi stones) or tech (TechnicalGrass ridge/valley heightfield).
 struct PaintLayerView {
     const LandBrush* brush = nullptr;
     AtlasKind atlas = AtlasKind::Grass;
@@ -65,7 +66,9 @@ struct PaintLayerView {
     float cliffHeightScale = 96.0f;                  // field px per 1.0 world height
     bool stone = false;
     const stone_gen::StoneFieldParams* stoneParams = nullptr; // used when stone == true
-    const CliffFsParams* shadingOverride = nullptr;           // per-layer palette (stone)
+    bool tech = false;
+    const tech::TechFieldParams* techParams = nullptr;        // used when tech == true
+    const CliffFsParams* shadingOverride = nullptr;           // per-layer palette (stone/tech)
     // Flat tiles only: draw the layer with a tiling texture instead of the
     // atlas color. The texture is sampled continuously in world (field)
     // coordinates — no per-tile cuts, so any tiling texture stays seamless —
@@ -196,13 +199,15 @@ private:
     // Cached scalar-field derivative of a brush: the extracted surface-nets
     // mesh plus the projected vertex stream, rebuilt only when the brush
     // version or the field params change (debounced) — the full rebuild
-    // costs seconds. Holds either cliff or stone params, per the layer kind.
+    // costs seconds. Holds cliff, stone or tech params, per the layer kind.
     struct CliffCache {
         const LandBrush* brush = nullptr;
         std::uint64_t brushVersion = 0;
         bool stone = false;
+        bool tech = false;
         cliff::FieldParams params{};
         stone_gen::StoneFieldParams stoneParams{};
+        tech::TechFieldParams techParams{};
         float heightScale = 0.0f;
         bool contentValid = false;
         double lastEditSec = 0.0;

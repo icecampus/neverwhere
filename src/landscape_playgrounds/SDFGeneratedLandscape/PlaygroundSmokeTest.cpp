@@ -10,6 +10,7 @@
 
 #include <highground_core/cliff_field.h>
 #include <highground_core/surface_nets.h>
+#include <highground_core/tech_field.h>
 #include <stone_gen/stone_field.h>
 #include <topology_core/diamond_isometry.h>
 
@@ -314,8 +315,63 @@ bool runTileShapeSmokeTest() {
                 sgMax);
             return false;
         }
+
+        // --- Tech layer pipeline (tech::TechField over the same nodes):
+        // TechnicalGrass ridge/valley heightfield, generic ScalarFieldView ->
+        // surface nets, watertight mesh, crease groove attr, plateau top at
+        // levelHeight. Both style extremes (ridge / valley).
+        for (const float style : {0.0f, 1.0f}) {
+            tech::TechFieldParams tp;
+            tp.cellSize = 0.09f; // coarse: smoke speed
+            tp.style = style;
+            tp.creaseWidth = 0.08f;
+            tech::TechField techField(tp, nodes.data(), nodesX, nodesY);
+            cliff::ScalarFieldView techView = techField.view();
+            std::vector<float> techSamples;
+            techField.sample(techSamples);
+            cliff::RegularizeStats techReg;
+            cliff::regularizeSigns(techView, techSamples, &techReg);
+            const cliff::Mesh techMesh = cliff::extractSurfaceNets(techView, techSamples, nullptr);
+            if (techReg.remaining != 0) {
+                spdlog::error("TEST FAIL TileShape: tech sign regularization left {} saddles (style {:.1f})",
+                    techReg.remaining,
+                    style);
+                return false;
+            }
+            if (techMesh.vertices.empty() || techMesh.indices.empty()) {
+                spdlog::error("TEST FAIL TileShape: tech mesh is empty (style {:.1f})", style);
+                return false;
+            }
+            const cliff::WatertightReport techReport = cliff::checkWatertight(techMesh);
+            if (!techReport.ok()) {
+                spdlog::error(
+                    "TEST FAIL TileShape: tech mesh not watertight ({} bad of {} edges, style {:.1f})",
+                    techReport.badEdges,
+                    techReport.undirectedEdges,
+                    style);
+                return false;
+            }
+            float tgMax = -1e9f;
+            float tpyMax = -1e9f;
+            for (const cliff::MeshVertex& v : techMesh.vertices) {
+                tgMax = std::max(tgMax, v.groove);
+                tpyMax = std::max(tpyMax, v.py);
+            }
+            if (tgMax <= 0.5f) {
+                spdlog::error("TEST FAIL TileShape: tech groove attribute range max {:.4f} — no outline",
+                    tgMax);
+                return false;
+            }
+            if (std::fabs(tpyMax - tp.levelHeight) > 2.0f * tp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: tech plateau top {:.3f}, expected ~{:.3f} (style {:.1f})",
+                    tpyMax,
+                    tp.levelHeight,
+                    style);
+                return false;
+            }
+        }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone field pipelines");
+    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech field pipelines");
     return true;
 }
