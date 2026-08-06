@@ -6,7 +6,7 @@ namespace render_core {
 
 static const char* vs_src_glsl = R"(
 #version 330
-layout(location=0) in vec2 pos;
+layout(location=0) in vec3 pos;
 layout(location=1) in vec4 color0;
 out vec4 v_color;
 uniform vec2 view_size;
@@ -15,7 +15,7 @@ void main() {
         (pos.x / view_size.x) * 2.0 - 1.0,
         1.0 - (pos.y / view_size.y) * 2.0
     );
-    gl_Position = vec4(clip_pos, 0.0, 1.0);
+    gl_Position = vec4(clip_pos, pos.z, 1.0);
     v_color = color0;
 }
 )";
@@ -32,14 +32,14 @@ void main() {
 // Minimal HLSL for D3D11 backend
 static const char* vs_src_hlsl = R"(
 cbuffer vs_params: register(b0) { float2 view_size; };
-struct VSIn { float2 pos: TEXCOORD0; float4 color0: TEXCOORD1; };
+struct VSIn { float3 pos: TEXCOORD0; float4 color0: TEXCOORD1; };
 struct VSOut { float4 pos: SV_Position; float4 color0: TEXCOORD0; };
 VSOut main(VSIn inp) {
     VSOut o;
     float2 clip;
     clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
     clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
-    o.pos = float4(clip, 0.0, 1.0);
+    o.pos = float4(clip, inp.pos.z, 1.0);
     o.color0 = inp.color0;
     return o;
 }
@@ -63,7 +63,7 @@ struct VsParams {
 };
 
 struct VSIn {
-    float2 pos [[attribute(0)]];
+    float3 pos [[attribute(0)]];
     float4 color0 [[attribute(1)]];
 };
 
@@ -78,7 +78,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
         (in.pos.x / params.view_size.x) * 2.0 - 1.0,
         1.0 - (in.pos.y / params.view_size.y) * 2.0
     );
-    o.pos = float4(clip, 0.0, 1.0);
+    o.pos = float4(clip, in.pos.z, 1.0);
     o.color0 = in.color0;
     return o;
 }
@@ -164,48 +164,66 @@ void OverlayRenderer::ensurePipeline() {
 
     sg_pipeline_desc pip_desc = {};
     pip_desc.shader = shd;
-    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2; // pos
+    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3; // pos (z = depth)
     pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4; // color
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_LINES;
     // The depth format must match the pass we render into (sokol_app swapchain
-    // has depth-stencil; a Qt FBO wrapper has none). We don't depth-test either way.
+    // has depth-stencil; a Qt FBO wrapper has none).
     pip_desc.depth.pixel_format = depthFormat;
     pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
     pip_desc.depth.write_enabled = false;
     pip_desc.label = "overlay-pipeline";
     pip = sg_make_pipeline(&pip_desc);
+
+    if (depthFormat != SG_PIXELFORMAT_NONE) {
+        // Grid variant: the lines sit on the scene's ground plane, so they both
+        // test and write depth. The 3D passes run after them and overdraw only
+        // where they are nearer than the plane; anything hanging below it (base
+        // slabs, the underwater foot of a shoreline) loses to the grid.
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.write_enabled = true;
+        pip_desc.label = "overlay-depth-pipeline";
+        pipDepth = sg_make_pipeline(&pip_desc);
+    }
 }
 
 void OverlayRenderer::destroyPipeline() {
-    if (pip.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(pip);
-        pip.id = SG_INVALID_ID;
+    for (sg_pipeline* p : {&pip, &pipDepth}) {
+        if (p->id != SG_INVALID_ID) {
+            sg_destroy_pipeline(*p);
+            p->id = SG_INVALID_ID;
+        }
     }
 }
 
 void OverlayRenderer::render(const std::vector<LineSegment>& lines, int viewWidth, int viewHeight) {
-    renderLines(channelA, lines, viewWidth, viewHeight);
+    renderLines(channelA, pipDepth.id != SG_INVALID_ID ? pipDepth : pip, lines, viewWidth, viewHeight);
 }
 
 void OverlayRenderer::renderTop(const std::vector<LineSegment>& lines, int viewWidth, int viewHeight) {
-    renderLines(channelB, lines, viewWidth, viewHeight);
+    renderLines(channelB, pip, lines, viewWidth, viewHeight);
 }
 
-void OverlayRenderer::renderLines(Channel& channel, const std::vector<LineSegment>& lines, int viewWidth, int viewHeight) {
+void OverlayRenderer::renderLines(
+    Channel& channel,
+    sg_pipeline pipeline,
+    const std::vector<LineSegment>& lines,
+    int viewWidth,
+    int viewHeight) {
     if (lines.empty()) return;
-    if (pip.id == SG_INVALID_ID) return;
+    if (pipeline.id == SG_INVALID_ID) return;
 
     scratchVerts.clear();
     scratchVerts.reserve(lines.size() * 2);
     for (const LineSegment& l : lines) {
-        scratchVerts.push_back({{l.p0.x, l.p0.y}, {l.color.r, l.color.g, l.color.b, l.color.a}});
-        scratchVerts.push_back({{l.p1.x, l.p1.y}, {l.color.r, l.color.g, l.color.b, l.color.a}});
+        scratchVerts.push_back({{l.p0.x, l.p0.y, l.depth0}, {l.color.r, l.color.g, l.color.b, l.color.a}});
+        scratchVerts.push_back({{l.p1.x, l.p1.y, l.depth1}, {l.color.r, l.color.g, l.color.b, l.color.a}});
     }
 
-    sg_apply_pipeline(pip);
+    sg_apply_pipeline(pipeline);
     float vs_params[2] = {(float)viewWidth, (float)viewHeight};
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(0, &uniform_range);

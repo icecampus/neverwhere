@@ -36,10 +36,10 @@ enum class AtlasKind : int {
     FlatGreen = 2,
 };
 
-// Overlay vertex (grid lines, hover fill/marker): field position + a depth
-// behind the whole mesh depth range (see kOverlayDepth), so the overlay shares
-// the z-buffer with the 3D meshes and any of their fragments occludes it
-// instead of the grid drawing on top, plus flat RGBA.
+// Overlay vertex (grid lines, hover fill/marker): field position + the ground
+// plane depth of its own field row (same anchor as the mesh streams — see
+// bakedDepth), so the overlay shares the z-buffer with the 3D meshes: raised
+// geometry draws over it, submerged geometry under it, plus flat RGBA.
 struct ColorVertex {
     float x, y, z;
     float r, g, b, a;

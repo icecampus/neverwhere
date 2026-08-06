@@ -924,14 +924,15 @@ float bakedDepth(float fieldY) {
     return (kZFar - fieldY) * kZScale;
 }
 
-// The overlay (grid, hover footprint) is an authoring aid on the ground plane,
-// and it sits behind the whole mesh depth range (bakedDepth stays within a
-// hundredth of 0.5 for any reachable field y) rather than on the plane itself:
-// a mesh fragment carries the depth of its own ground row, so parts hanging
-// BELOW the plane — the base slab walls, the underwater foot of the tech
-// shoreline — are farther than the plane along the view ray and would be cut
-// by grid lines of the cells in front of them.
-constexpr float kOverlayDepth = 0.9f;
+// The overlay (grid, hover footprint) rides the ground plane itself: every
+// vertex takes the depth of its own field row, out of the same bakedDepth the
+// mesh streams use. That is the water-plane reading of the grid, and it needs
+// no height term to get right. A mesh fragment carries the depth of its own
+// row while its height only shifts it UP the screen, i.e. over rows FARTHER
+// than its own — so raised geometry always wins against the grid lines it
+// covers, and geometry hanging BELOW the plane (the base slab, the underwater
+// foot of the tech shoreline) shifts DOWN into nearer rows and loses to their
+// grid lines, which is what reads as "under water".
 
 void fillVsUniformDesc(sg_shader_uniform_block* block) {
     block->stage = SG_SHADERSTAGE_VERTEX;
@@ -1447,8 +1448,8 @@ void AtlasRenderer::appendDiamondOutline(
     for (int i = 0; i < 4; ++i) {
         const glm::vec2 a = corners[i];
         const glm::vec2 b = corners[(i + 1) % 4];
-        out.push_back({a.x, a.y, kOverlayDepth, color.r, color.g, color.b, color.a});
-        out.push_back({b.x, b.y, kOverlayDepth, color.r, color.g, color.b, color.a});
+        out.push_back({a.x, a.y, bakedDepth(a.y), color.r, color.g, color.b, color.a});
+        out.push_back({b.x, b.y, bakedDepth(b.y), color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1462,7 +1463,7 @@ void AtlasRenderer::appendDiamondFill(
     const int tris[6] = {0, 1, 2, 0, 2, 3};
     for (const int idx : tris) {
         const glm::vec2 p = corners[idx];
-        out.push_back({p.x, p.y, kOverlayDepth, color.r, color.g, color.b, color.a});
+        out.push_back({p.x, p.y, bakedDepth(p.y), color.r, color.g, color.b, color.a});
     }
 }
 
@@ -1483,8 +1484,8 @@ void AtlasRenderer::appendNodeMarker(
     for (int i = 0; i < 4; ++i) {
         const glm::vec2 a = pts[i];
         const glm::vec2 b = pts[(i + 1) % 4];
-        out.push_back({a.x, a.y, kOverlayDepth, color.r, color.g, color.b, color.a});
-        out.push_back({b.x, b.y, kOverlayDepth, color.r, color.g, color.b, color.a});
+        out.push_back({a.x, a.y, bakedDepth(a.y), color.r, color.g, color.b, color.a});
+        out.push_back({b.x, b.y, bakedDepth(b.y), color.r, color.g, color.b, color.a});
     }
 }
 

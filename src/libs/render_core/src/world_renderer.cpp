@@ -203,17 +203,29 @@ void WorldRenderer::prepare(const WorldFrame& frame, double /*nowSec*/) {
     m_stitchParams = buildStitchParams(stitch, m_aoField);
 }
 
-void WorldRenderer::appendCellDiamond(std::vector<LineSegment>& lines, const glm::vec2& center, const glm::vec2& halfSize, const glm::vec4& color) const {
+void WorldRenderer::appendCellDiamond(
+    std::vector<LineSegment>& lines,
+    const glm::vec2& center,
+    const glm::vec2& halfSize,
+    const glm::vec4& color,
+    float depthCenter,
+    float depthHalf) const {
     // Same 4 lines as the editor's DiamondGrid cell: Left -> Up -> Right -> Down -> Left.
     const glm::vec2 left  = center + glm::vec2(-halfSize.x, 0.0f);
     const glm::vec2 up    = center + glm::vec2(0.0f, -halfSize.y);
     const glm::vec2 right = center + glm::vec2(halfSize.x, 0.0f);
     const glm::vec2 down  = center + glm::vec2(0.0f, halfSize.y);
 
-    lines.push_back({left, up, color});
-    lines.push_back({up, right, color});
-    lines.push_back({right, down, color});
-    lines.push_back({down, left, color});
+    // The Up/Down corners are half a cell farther/nearer along the view ray
+    // than the cell center (the depth is affine in field y), Left/Right share
+    // the center's row.
+    const float dUp = depthCenter + depthHalf;
+    const float dDown = depthCenter - depthHalf;
+
+    lines.push_back({left, up, color, depthCenter, dUp});
+    lines.push_back({up, right, color, dUp, depthCenter});
+    lines.push_back({right, down, color, depthCenter, dDown});
+    lines.push_back({down, left, color, dDown, depthCenter});
 }
 
 void WorldRenderer::render(
@@ -236,9 +248,13 @@ void WorldRenderer::render(
     // painter order at the same constant depth), before the grid overlay.
     landscapeRenderer.renderTexture(frame.textureTiles, iso, camera, viewWidth, viewHeight, groundStitch, textureBlend);
 
-    // Grid overlay: above the water and the flat ground, but UNDER the 3D
-    // world (raised walls / cliffs / sprites overdraw it — no depth write
-    // here, and the 3D passes both test and write depth).
+    // Grid overlay: above the water and the flat ground, and ON the ground
+    // plane of the 3D world — the lines carry the same z as a mesh vertex of
+    // their own cell and write depth, so the 3D passes (drawn after them)
+    // overdraw the grid wherever they rise above the plane, while parts hanging
+    // below it — base slabs, the underwater foot of a tech shoreline — stay
+    // behind the grid lines in front of them and read as "under water".
+    // Sprites are painter-ordered (no depth test) and are not affected.
     scratchLines.clear();
 
     if (frame.showGrid && viewWidth > 0 && viewHeight > 0 && camera.zoom > 0.0f) {
@@ -254,12 +270,20 @@ void WorldRenderer::render(
         const glm::vec2 cellSize = iso.dims.cellSize();
         const glm::vec2 halfSizeScreen = cellSize * 0.5f * camera.zoom;
 
+        // Same depth convention as the 3D passes (see their z_range uniforms):
+        // field y grows toward the viewer, so the closer row gets the smaller z.
+        const float zFar = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y + 100000.0f;
+        constexpr float kZScale = 1.0f / 200000.0f;
+        const float depthHalf = cellSize.y * 0.5f * kZScale;
+
         for (int i = 0; i < cellsX; ++i) {
             const int cx = region.min.x + i;
             for (int j = 0; j < cellsY; ++j) {
                 const int cy = region.min.y + j;
-                const glm::vec2 screenCenter = camera.worldToScreen(iso.mapToField({cx, cy}));
-                appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.gridColor);
+                const glm::vec2 fieldCenter = iso.mapToField({cx, cy});
+                const glm::vec2 screenCenter = camera.worldToScreen(fieldCenter);
+                appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.gridColor,
+                    (zFar - fieldCenter.y) * kZScale, depthHalf);
             }
         }
     }
@@ -293,7 +317,8 @@ void WorldRenderer::render(
         const glm::vec2 cellSize = iso.dims.cellSize();
         const glm::vec2 halfSizeScreen = cellSize * 0.5f * camera.zoom;
         const glm::vec2 screenCenter = camera.worldToScreen(iso.mapToField(*frame.cursorCell));
-        appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.cursorColor);
+        // Depth is unused on the top channel (no test, no write).
+        appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.cursorColor, 0.0f, 0.0f);
     }
     overlayRenderer.renderTop(scratchLines, viewWidth, viewHeight);
 }

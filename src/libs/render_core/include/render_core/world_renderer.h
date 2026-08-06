@@ -38,10 +38,13 @@ struct WorldFrame {
 };
 
 // Facade over the world renderers — the single world render shared by shells.
-// Draw order: flat landscape tiles, grid overlay (above water/flat ground but
-// under the 3D world), raised landscape (cliff walls + lifted tops), cliff3d
-// meshes, stone3d+tech3d meshes (same cliff pass), cyclopean3d meshes, Tile2D
-// sprites, and finally the cell cursor overlay on top.
+// Draw order: flat landscape tiles, grid overlay (above water/flat ground, and
+// ON the ground plane of the 3D world: it writes depth, so the 3D overdraws it
+// where it rises above the plane and stays behind it where it hangs below —
+// base slabs, the underwater foot of a tech shoreline), raised landscape (cliff
+// walls + lifted tops), cliff3d meshes, stone3d+tech3d meshes (same cliff
+// pass), cyclopean3d meshes, Tile2D sprites (painter-ordered, no depth test),
+// and finally the cell cursor overlay on top.
 //
 // Scene stitching (HighgroundWithEffects port): the ground and the highground
 // share one sun/tone block, the ground darkens around the highground
@@ -111,7 +114,15 @@ private:
     SceneStitchParams m_stitchParams{};
     std::uint64_t m_aoKey = 0;
 
-    void appendCellDiamond(std::vector<LineSegment>& lines, const glm::vec2& screenCenter, const glm::vec2& halfSize, const glm::vec4& color) const;
+    // depthCenter/depthHalf: normalized depth of the cell center and the delta
+    // of the Up/Down corners (half a cell along the view ray).
+    void appendCellDiamond(
+        std::vector<LineSegment>& lines,
+        const glm::vec2& screenCenter,
+        const glm::vec2& halfSize,
+        const glm::vec4& color,
+        float depthCenter,
+        float depthHalf) const;
 };
 
 } // namespace render_core
