@@ -27,6 +27,7 @@ struct WorldFrame {
     std::vector<LandscapeTile> cyclopeanTiles; // CyclopeanLandscape layer (cyclopean3d: landscape_mesh walls)
     std::vector<LandscapeTile> stoneTiles;  // StoneLandscape layer (stone3d: voronoi-carved surface-nets plateau, shares the cliff pass)
     std::vector<LandscapeTile> textureTiles; // TextureLandscape layer (texture2d: tiling world-UV textures, multi-texture blend)
+    std::vector<LandscapeTile> techTiles;   // TechLandscape layer (tech3d: TechnicalGrass ridge/valley heightfield, shares the cliff pass)
     std::vector<SpriteInstance> sprites;
 
     bool showGrid = true;
@@ -39,7 +40,7 @@ struct WorldFrame {
 // Facade over the world renderers — the single world render shared by shells.
 // Draw order: flat landscape tiles, grid overlay (above water/flat ground but
 // under the 3D world), raised landscape (cliff walls + lifted tops), cliff3d
-// meshes, stone3d meshes (same cliff pass), cyclopean3d meshes, Tile2D
+// meshes, stone3d+tech3d meshes (same cliff pass), cyclopean3d meshes, Tile2D
 // sprites, and finally the cell cursor overlay on top.
 //
 // Scene stitching (HighgroundWithEffects port): the ground and the highground
@@ -60,6 +61,7 @@ public:
     void ensureCliffAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureCyclopeanAsset(const std::string& assetUuid, const CyclopeanParams& params);
     void ensureStoneAsset(const std::string& assetUuid, const CliffParams& params);
+    void ensureTechAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 

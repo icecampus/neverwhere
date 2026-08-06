@@ -103,6 +103,18 @@ Rectangle
             border.color: "transparent"
         }
 
+        // Tech3d generator/shading params (same embedding contract as CliffSettings).
+        TechSettings
+        {
+            width: parent.width
+            asset: assetSettings.asset
+            activeAsset: assetSettings.asset && assetSettings.asset.isTech3d
+            showTitle: false
+            showSaveButton: false
+            color: "transparent"
+            border.color: "transparent"
+        }
+
         Row
         { 
             anchors.horizontalCenter: parent.horizontalCenter

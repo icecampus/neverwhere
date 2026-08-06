@@ -35,7 +35,8 @@ namespace LayerTypes
         CliffLandscape,
         CyclopeanLandscape,
         StoneLandscape,
-        TextureLandscape
+        TextureLandscape,
+        TechLandscape
     };
     Q_ENUM_NS(Type);
 }

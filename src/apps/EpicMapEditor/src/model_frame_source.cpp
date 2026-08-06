@@ -173,6 +173,45 @@ render_core::CliffParams stoneParamsFromAssetData(const BaseData::Stone3dAssetDa
     return params;
 }
 
+// BaseData -> render_core parameter conversion for tech3d assets (the
+// runtime's world_frame_builder has its own game_data twin). The mesh params
+// ride in CliffParams::techField; CliffParams::field stays unused. The tech
+// look is the per-asset palette — the field's crease channel draws the
+// tile contour through the existing groove shading.
+render_core::CliffParams techParamsFromAssetData(const BaseData::Tech3dAssetData& d) {
+    render_core::CliffParams params;
+    params.heightScale = d.raisedHeight;
+    tech::TechFieldParams t;
+    t.cellSize = d.cellSize;
+    t.padding = d.padding;
+    t.levelHeight = d.levelHeight;
+    t.groundDepth = d.groundDepth;
+    t.style = d.style;
+    t.soften = d.soften;
+    t.creaseWidth = d.creaseWidth;
+    t.blurPasses = d.blurPasses;
+    params.techField = t;
+    render_core::CliffShading& s = params.shading;
+    s.lightAzimuth = d.shading.lightAzimuth;
+    s.lightElevation = d.shading.lightElevation;
+    s.darkColor = d.shading.darkColor;
+    s.goldColor = d.shading.goldColor;
+    s.grassA = d.shading.grassA;
+    s.grassB = d.shading.grassB;
+    s.veinThreshold = d.shading.veinThreshold;
+    s.ambient = d.shading.ambient;
+    s.diffuse = d.shading.diffuse;
+    s.backLight = d.shading.backLight;
+    s.specStrength = d.shading.specStrength;
+    s.specPower = d.shading.specPower;
+    s.gamma = d.shading.gamma;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    s.texScale = d.shading.texScale;
+    return params;
+}
+
 } // namespace
 
 void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
@@ -182,6 +221,7 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.cyclopeanTiles.clear();
     outFrame.stoneTiles.clear();
     outFrame.textureTiles.clear();
+    outFrame.techTiles.clear();
     outFrame.sprites.clear();
 
     if (!m_mapModel) return;
@@ -273,6 +313,21 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         });
     }
 
+    // TechLandscape layer -> tech tiles (Tech3d assets, TechnicalGrass
+    // ridge/valley heightfield sharing the cliff pass).
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::TechLandscape)) {
+        layer->iterate([&outFrame](GameObject& obj) {
+            const BaseData::GameObject data = obj.getData();
+            if (data.type != GameObjectTypes::Landscape || !data.landscapeData) return;
+
+            render_core::LandscapeTile t;
+            t.cell = data.position;
+            t.assetUuid = boost::uuids::to_string(data.assetUuid);
+            t.tileIndex = data.landscapeData->tileIndex;
+            outFrame.techTiles.push_back(std::move(t));
+        });
+    }
+
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
         LayerModel* layer = m_mapModel->layer(layerType);
@@ -300,6 +355,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
     for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -351,6 +407,11 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
             // Texture-2D tiles: the tiling texture joins the shared array
             // (one slice per asset), its tiling density rides in the verts.
             renderer.ensureTextureAsset(uuid, data.root() / data.texture2dData->texture, data.texture2dData->tilingRepeats);
+        }
+        if (data.tech3dData) {
+            // Tech tiles: the full tech-field generator + shading parameter
+            // set (no atlas — geometry comes from the tech field).
+            renderer.ensureTechAsset(uuid, techParamsFromAssetData(*data.tech3dData));
         }
         if (data.imageData) {
             renderer.ensureSpriteImage(uuid, data.root() / data.imageData->imageFilename, data.imageData->width, data.pivot);

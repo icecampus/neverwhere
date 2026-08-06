@@ -301,6 +301,72 @@ TEST(MapAuthoringTest, CyclopeanLayerSaveLoadRoundTrip)
     std::filesystem::remove(tmpPath);
 }
 
+TEST(MapAuthoringTest, TechLayerSaveLoadRoundTrip)
+{
+    MapModel map;
+    auto slice = makeSliceAsset(kSliceUuid, "landscape");
+
+    // Tech Landscape objects live on the TechLandscape layer (Tech3d assets);
+    // the authoring ops are layer-agnostic.
+    const std::vector<std::pair<math::ivec2, uint8_t>> updates = {
+        {math::ivec2(5, 5), 1}, {math::ivec2(6, 5), 1},
+        {math::ivec2(5, 6), 1}, {math::ivec2(6, 6), 1},
+    };
+    MapAuthoring::applyLandscapeUpdates(*map.layer(LayerTypes::TechLandscape), slice.get(), updates);
+
+    const QJsonObject before = MapAuthoring::dumpMap(map);
+
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_tech_roundtrip_test.json";
+    const QString path = QString::fromStdString(tmpPath.string());
+    map.save(path);
+
+    MapModel loaded;
+    loaded.load(path);
+    const QJsonObject after = MapAuthoring::dumpMap(loaded);
+
+    EXPECT_EQ(QJsonDocument(before).toJson(QJsonDocument::Compact),
+              QJsonDocument(after).toJson(QJsonDocument::Compact));
+
+    int techTotal = 0;
+    loaded.layer(LayerTypes::TechLandscape)->iterate([&techTotal](GameObject&) { ++techTotal; });
+    EXPECT_GT(techTotal, 0);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(MapAuthoringTest, LoadLegacyMapWithoutTechLayer)
+{
+    // Maps saved before the TechLandscape layer existed have no such key;
+    // loading must treat it as empty instead of throwing.
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_legacy_tech_test.json";
+    {
+        std::ofstream file(tmpPath);
+        file << R"({
+            "BaseLandscape": [],
+            "Decoration": [],
+            "GameplayInteractive": [],
+            "RaisedLandscape": [],
+            "CliffLandscape": []
+        })";
+    }
+
+    MapModel loaded;
+    ASSERT_NO_THROW(loaded.load(QString::fromStdString(tmpPath.string())));
+
+    int techTotal = 0;
+    loaded.layer(LayerTypes::TechLandscape)->iterate([&techTotal](GameObject&) { ++techTotal; });
+    EXPECT_EQ(techTotal, 0);
+
+    const std::filesystem::path outPath =
+        std::filesystem::temp_directory_path() / "map_authoring_legacy_tech_out_test.json";
+    ASSERT_NO_THROW(loaded.save(QString::fromStdString(outPath.string())));
+
+    std::filesystem::remove(tmpPath);
+    std::filesystem::remove(outPath);
+}
+
 TEST(MapAuthoringTest, LoadLegacyMapWithoutCyclopeanLayer)
 {
     // Maps saved before the CyclopeanLandscape layer existed have no such

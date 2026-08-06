@@ -7,6 +7,12 @@
 // carved slab) instead of cliff::CliffField, and the FS adds a small stone
 // shading block (boulder plane-Y gate, rim gradient, top texture mix).
 //
+// Tech3d assets (TechLandscape layer) share the pass too: the mesh comes from
+// tech::TechField (TechnicalGrass ridge/valley heightfield), the shading is
+// just the per-asset palette (earth ramps, no veins) plus the existing groove
+// channel rendering the tile contour — no FS additions needed, the stone
+// extras stay at zero and rim is 0.
+//
 // Differences from the playground original:
 // - the camera is applied in the vertex shader (view_size/camera_offset/
 //   camera_zoom uniforms), so the cached vertex stream survives pan/zoom;
@@ -33,6 +39,7 @@
 
 #include <highground_core/cliff_field.h>
 #include <highground_core/surface_nets.h>
+#include <highground_core/tech_field.h>
 #include <stone_gen/stone_field.h>
 
 #include "render_core/landscape_renderer.h" // LandscapeTile, camera, iso
@@ -87,6 +94,12 @@ struct CliffParams {
     // stone_gen::StoneField (voronoi-carved slab) instead of cliff::CliffField
     // — `field` then stays at its defaults and is not consumed.
     std::optional<stone_gen::StoneFieldParams> stoneField;
+    // Tech3d block (tech3d assets only): when set, regions build from
+    // tech::TechField (TechnicalGrass ridge/valley heightfield) — `field`
+    // stays at its defaults and is not consumed. The tech look rides entirely
+    // on `shading` (earth palette) and the field's crease groove channel, so
+    // the stone extras below stay at their plain-cliff defaults.
+    std::optional<tech::TechFieldParams> techField;
     // Stone shading extras (uniforms only). The defaults keep plain cliffs
     // bit-identical: planeY 0 disables the boulder/rim gate, topTexMix 1 keeps
     // the textured top at full strength.
@@ -124,6 +137,13 @@ public:
     // ensureCliffAsset — the params carry the stone field block, so regions
     // rebuild through StoneField and shade with the stone extras.
     void ensureStoneAsset(const std::string& assetUuid, const CliffParams& params) {
+        ensureCliffAsset(assetUuid, params);
+    }
+
+    // Register/update a tech3d asset: same cache machinery as
+    // ensureCliffAsset — the params carry the tech field block, so regions
+    // rebuild through TechField (the tech look is the per-asset palette).
+    void ensureTechAsset(const std::string& assetUuid, const CliffParams& params) {
         ensureCliffAsset(assetUuid, params);
     }
 

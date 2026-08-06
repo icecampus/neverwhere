@@ -17,7 +17,8 @@ namespace AssetTypes
         cliff3d,
         cyclopean3d,
         stone3d,
-        texture2d
+        texture2d,
+        tech3d
     };
     Q_ENUM_NS(Type);
 }
@@ -255,6 +256,96 @@ namespace BaseData
             thumbnail, texture, tilingRepeats);
     };
 
+    // Tech3D: the tech-field generator parameter set (mirror of
+    // tech::TechFieldParams from highground_core — the TechnicalGrass
+    // ridge/valley tileset semantics as real geometry) + shading palette.
+    // No atlas — objects are plain Landscape tiles on the TechLandscape layer
+    // whose tileIndex encodes the vertex nodes; these params drive the
+    // renderer.
+    struct Tech3dAssetData
+    {
+        Tech3dAssetData()
+        {
+            // TechnicalGrass look: earth ramps, grassy tops, no veins, muted
+            // spec, no bottom darkening (flat-lit ramps like the 2D tileset).
+            shading.darkColor = {0.25f, 0.18f, 0.12f};
+            shading.goldColor = {0.58f, 0.44f, 0.29f};
+            shading.veinThreshold = 2.0f;
+            shading.specStrength = 0.15f;
+            shading.bottomDarken = 0.0f;
+        }
+
+        std::string thumbnail; // optional palette preview
+        float raisedHeight{96.0f}; // field px per 1.0 world height (heightScale)
+
+        // Scalar field (defaults = tech::TechFieldParams).
+        float cellSize{0.06f};
+        float padding{0.5f};
+        float levelHeight{0.35f};  // world height of one level (the Python ELEVATION analog)
+        float groundDepth{0.05f};  // bottom slab thickness
+        float style{0.0f};         // 0 = Ridge .. 1 = Valley (center-height blend)
+        float soften{0.0f};        // 0 = linear ramps, 1 = smoothstep shoulders
+        float creaseWidth{0.05f};  // dark tile contour width (0 = off)
+        int blurPasses{0};         // sampled-field anti-terracing blur
+
+        Cliff3dShadingData shading;
+
+        friend void to_json(nlohmann::json& j, const Tech3dAssetData& d)
+        {
+            j = nlohmann::json{
+                {"thumbnail", d.thumbnail},
+                {"raisedHeight", d.raisedHeight},
+                {"cellSize", d.cellSize},
+                {"padding", d.padding},
+                {"levelHeight", d.levelHeight},
+                {"groundDepth", d.groundDepth},
+                {"style", d.style},
+                {"soften", d.soften},
+                {"creaseWidth", d.creaseWidth},
+                {"blurPasses", d.blurPasses},
+                {"shading", d.shading},
+            };
+        }
+
+        friend void from_json(const nlohmann::json& j, Tech3dAssetData& d)
+        {
+            // Field-by-field: omitted keys keep the Tech3dAssetData defaults.
+            if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+            if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+            if (j.contains("cellSize")) j.at("cellSize").get_to(d.cellSize);
+            if (j.contains("padding")) j.at("padding").get_to(d.padding);
+            if (j.contains("levelHeight")) j.at("levelHeight").get_to(d.levelHeight);
+            if (j.contains("groundDepth")) j.at("groundDepth").get_to(d.groundDepth);
+            if (j.contains("style")) j.at("style").get_to(d.style);
+            if (j.contains("soften")) j.at("soften").get_to(d.soften);
+            if (j.contains("creaseWidth")) j.at("creaseWidth").get_to(d.creaseWidth);
+            if (j.contains("blurPasses")) j.at("blurPasses").get_to(d.blurPasses);
+            if (j.contains("shading"))
+            {
+                // Field-wise apply: a partial shading block must not reset
+                // the retuned TechnicalGrass palette to the cliff defaults.
+                const nlohmann::json& s = j.at("shading");
+                if (s.contains("lightAzimuth")) s.at("lightAzimuth").get_to(d.shading.lightAzimuth);
+                if (s.contains("lightElevation")) s.at("lightElevation").get_to(d.shading.lightElevation);
+                if (s.contains("darkColor")) s.at("darkColor").get_to(d.shading.darkColor);
+                if (s.contains("goldColor")) s.at("goldColor").get_to(d.shading.goldColor);
+                if (s.contains("grassA")) s.at("grassA").get_to(d.shading.grassA);
+                if (s.contains("grassB")) s.at("grassB").get_to(d.shading.grassB);
+                if (s.contains("veinThreshold")) s.at("veinThreshold").get_to(d.shading.veinThreshold);
+                if (s.contains("ambient")) s.at("ambient").get_to(d.shading.ambient);
+                if (s.contains("diffuse")) s.at("diffuse").get_to(d.shading.diffuse);
+                if (s.contains("backLight")) s.at("backLight").get_to(d.shading.backLight);
+                if (s.contains("specStrength")) s.at("specStrength").get_to(d.shading.specStrength);
+                if (s.contains("specPower")) s.at("specPower").get_to(d.shading.specPower);
+                if (s.contains("gamma")) s.at("gamma").get_to(d.shading.gamma);
+                if (s.contains("texScale")) s.at("texScale").get_to(d.shading.texScale);
+                if (s.contains("bottomDarken")) s.at("bottomDarken").get_to(d.shading.bottomDarken);
+                if (s.contains("bottomBand")) s.at("bottomBand").get_to(d.shading.bottomBand);
+                if (s.contains("strataStrength")) s.at("strataStrength").get_to(d.shading.strataStrength);
+            }
+        }
+    };
+
     //Asset
     struct AssetData
     {
@@ -271,6 +362,7 @@ namespace BaseData
         std::optional<Cyclopean3dAssetData> cyclopean3dData;
         std::optional<Stone3dAssetData> stone3dData;
         std::optional<Texture2dAssetData> texture2dData;
+        std::optional<Tech3dAssetData> tech3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

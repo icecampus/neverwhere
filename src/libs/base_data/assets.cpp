@@ -46,6 +46,10 @@ void to_json(nlohmann::json& j, const AssetData& obj)
     {
         j["texture2d"] = *obj.texture2dData;
     }
+    if (obj.tech3dData)
+    {
+        j["tech3d"] = *obj.tech3dData;
+    }
 }
 
 void from_json(const nlohmann::json& j, AssetData& obj)
@@ -94,6 +98,10 @@ void from_json(const nlohmann::json& j, AssetData& obj)
     if (j.contains("texture2d"))
     {
         obj.texture2dData = j["texture2d"].get<Texture2dAssetData>();
+    }
+    if (j.contains("tech3d"))
+    {
+        obj.tech3dData = j["tech3d"].get<Tech3dAssetData>();
     }
 }
 

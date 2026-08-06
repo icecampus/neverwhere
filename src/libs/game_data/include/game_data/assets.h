@@ -179,6 +179,37 @@ struct Stone3dAssetData {
     float topTexTiles = 1.0f;
 };
 
+// Tech3D assets — the tech-field generator parameter set (mirror of
+// tech::TechFieldParams from highground_core: the TechnicalGrass ridge/valley
+// tileset semantics as real geometry) + shading palette. No atlas; tiles on
+// the TechLandscape layer encode the vertex nodes.
+struct Tech3dAssetData {
+    Tech3dAssetData() {
+        // TechnicalGrass look: earth ramps, grassy tops, no veins, muted spec,
+        // no bottom darkening (the ramps stay flat-lit like the 2D tileset).
+        shading.darkColor = {0.25f, 0.18f, 0.12f};
+        shading.goldColor = {0.58f, 0.44f, 0.29f};
+        shading.veinThreshold = 2.0f;
+        shading.specStrength = 0.15f;
+        shading.bottomDarken = 0.0f;
+    }
+
+    std::string thumbnail; // optional palette preview
+    float raisedHeight = 96.0f; // field px per 1.0 world height (heightScale)
+
+    // Scalar field (defaults = tech::TechFieldParams).
+    float cellSize = 0.06f;
+    float padding = 0.5f;
+    float levelHeight = 0.35f;  // world height of one level (the Python ELEVATION analog)
+    float groundDepth = 0.05f;  // bottom slab thickness
+    float style = 0.0f;         // 0 = Ridge .. 1 = Valley (center-height blend)
+    float soften = 0.0f;        // 0 = linear ramps, 1 = smoothstep shoulders
+    float creaseWidth = 0.05f;  // dark tile contour width (0 = off)
+    int blurPasses = 0;         // sampled-field anti-terracing blur
+
+    Cliff3dShadingData shading;
+};
+
 // Tiling-texture landscape brush (multi-texture blend layer).
 struct Texture2dAssetData {
     std::string thumbnail;
@@ -199,6 +230,7 @@ struct AssetData {
     std::optional<Cyclopean3dAssetData> cyclopean3d;
     std::optional<Stone3dAssetData> stone3d;
     std::optional<Texture2dAssetData> texture2d;
+    std::optional<Tech3dAssetData> tech3d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -335,6 +367,22 @@ inline void from_json(const nlohmann::json& j, Texture2dAssetData& d) {
     if (j.contains("tilingRepeats")) j.at("tilingRepeats").get_to(d.tilingRepeats);
 }
 
+inline void from_json(const nlohmann::json& j, Tech3dAssetData& d) {
+    if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+    if (j.contains("cellSize")) j.at("cellSize").get_to(d.cellSize);
+    if (j.contains("padding")) j.at("padding").get_to(d.padding);
+    if (j.contains("levelHeight")) j.at("levelHeight").get_to(d.levelHeight);
+    if (j.contains("groundDepth")) j.at("groundDepth").get_to(d.groundDepth);
+    if (j.contains("style")) j.at("style").get_to(d.style);
+    if (j.contains("soften")) j.at("soften").get_to(d.soften);
+    if (j.contains("creaseWidth")) j.at("creaseWidth").get_to(d.creaseWidth);
+    if (j.contains("blurPasses")) j.at("blurPasses").get_to(d.blurPasses);
+    // Field-wise apply: a partial shading block must not reset the retuned
+    // TechnicalGrass palette to the cliff defaults (omitted keys keep them).
+    if (j.contains("shading")) from_json(j["shading"], d.shading);
+}
+
 inline void from_json(const nlohmann::json& j, AssetData& a) {
     j.at("uuid").get_to(a.uuid);
     // pivot may be omitted in older assets; default (0,0)
@@ -354,6 +402,7 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     else if (layerStr == "CyclopeanLandscape") a.layerType = LayerType::CyclopeanLandscape;
     else if (layerStr == "StoneLandscape") a.layerType = LayerType::StoneLandscape;
     else if (layerStr == "TextureLandscape") a.layerType = LayerType::TextureLandscape;
+    else if (layerStr == "TechLandscape") a.layerType = LayerType::TechLandscape;
 
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
@@ -381,6 +430,10 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("texture2d") && !j["texture2d"].is_null()) {
         a.texture2d = j["texture2d"].get<Texture2dAssetData>();
+    }
+
+    if (j.contains("tech3d") && !j["tech3d"].is_null()) {
+        a.tech3d = j["tech3d"].get<Tech3dAssetData>();
     }
 }
 
@@ -427,6 +480,11 @@ struct AssetIndexEntry {
     Texture2dAssetData textureData;
     std::filesystem::path texturePath;
 
+    // Tech3D (tech-field) assets — TechnicalGrass ridge/valley heightfield as
+    // surface-nets geometry, no atlas; the generator + shading ride along.
+    bool tech3d = false;
+    Tech3dAssetData tech;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
     bool isShape3d() const { return shape3d; }
@@ -434,6 +492,7 @@ struct AssetIndexEntry {
     bool isCyclopean3d() const { return cyclopean3d; }
     bool isStone3d() const { return stone3d; }
     bool isTexture2d() const { return texture2d; }
+    bool isTech3d() const { return tech3d; }
 };
 
 struct AssetIndex {

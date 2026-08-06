@@ -13,6 +13,7 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     outFrame.cyclopeanTiles.clear();
     outFrame.stoneTiles.clear();
     outFrame.textureTiles.clear();
+    outFrame.techTiles.clear();
     outFrame.sprites.clear();
 
     for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
@@ -87,6 +88,19 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
         t.assetUuid = obj.assetUuid;
         t.tileIndex = obj.landscapeData->tileIndex;
         outFrame.textureTiles.push_back(std::move(t));
+    }
+
+    // TechLandscape layer -> tech tiles (Tech3d assets, TechnicalGrass
+    // ridge/valley heightfield sharing the cliff pass).
+    for (const auto& obj : map.layer(game_data::LayerType::TechLandscape)) {
+        if (obj.type != game_data::GameObjectType::Landscape) continue;
+        if (!obj.landscapeData) continue;
+
+        LandscapeTile t;
+        t.cell = obj.position;
+        t.assetUuid = obj.assetUuid;
+        t.tileIndex = obj.landscapeData->tileIndex;
+        outFrame.techTiles.push_back(std::move(t));
     }
 
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
@@ -254,6 +268,45 @@ static CliffParams stoneParamsFromAssetData(const game_data::Stone3dAssetData& d
     return params;
 }
 
+// game_data -> render_core parameter conversion for tech3d assets (the
+// editor's ModelFrameSource has its own BaseData twin). The mesh params ride
+// in CliffParams::techField; CliffParams::field stays unused. The tech look is
+// the per-asset palette (TechnicalGrass earth ramps, no veins) — the crease
+// groove channel of the field draws the tile contour.
+static CliffParams techParamsFromAssetData(const game_data::Tech3dAssetData& d) {
+    CliffParams params;
+    params.heightScale = d.raisedHeight;
+    tech::TechFieldParams t;
+    t.cellSize = d.cellSize;
+    t.padding = d.padding;
+    t.levelHeight = d.levelHeight;
+    t.groundDepth = d.groundDepth;
+    t.style = d.style;
+    t.soften = d.soften;
+    t.creaseWidth = d.creaseWidth;
+    t.blurPasses = d.blurPasses;
+    params.techField = t;
+    CliffShading& s = params.shading;
+    s.lightAzimuth = d.shading.lightAzimuth;
+    s.lightElevation = d.shading.lightElevation;
+    s.darkColor = d.shading.darkColor;
+    s.goldColor = d.shading.goldColor;
+    s.grassA = d.shading.grassA;
+    s.grassB = d.shading.grassB;
+    s.veinThreshold = d.shading.veinThreshold;
+    s.ambient = d.shading.ambient;
+    s.diffuse = d.shading.diffuse;
+    s.backLight = d.shading.backLight;
+    s.specStrength = d.shading.specStrength;
+    s.specPower = d.shading.specPower;
+    s.gamma = d.shading.gamma;
+    s.texScale = d.shading.texScale;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    return params;
+}
+
 void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame& frame, WorldRenderer& renderer) {
     std::unordered_set<std::string> uniqueAssets;
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
@@ -262,6 +315,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
     for (const auto& t : frame.cyclopeanTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -295,6 +349,9 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
         }
         if (entry->isTexture2d()) {
             renderer.ensureTextureAsset(uuid, entry->texturePath, entry->textureData.tilingRepeats);
+        }
+        if (entry->isTech3d()) {
+            renderer.ensureTechAsset(uuid, techParamsFromAssetData(entry->tech));
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);

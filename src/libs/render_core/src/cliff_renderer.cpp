@@ -697,8 +697,11 @@ struct CliffComponent {
 };
 
 // Plateau height of the active generator (stone assets keep it in the stone
-// field's base slab; CliffParams::field is unused then).
+// field's base slab; CliffParams::field is unused then; tech — in levelHeight).
 float plateauHeightOf(const CliffParams& params) {
+    if (params.techField) {
+        return params.techField->levelHeight;
+    }
     return params.stoneField ? params.stoneField->base.plateauHeight : params.field.plateauHeight;
 }
 
@@ -726,6 +729,17 @@ std::uint64_t regionKey(std::vector<glm::ivec2> nodes, const CliffParams& params
         hashFloat(h, p.rimBulge);
         hashFloat(h, p.rimNotch);
         hashCombine(h, p.flatTop ? 1ULL : 0ULL);
+    }
+    if (params.techField) {
+        const tech::TechFieldParams& p = *params.techField;
+        hashFloat(h, p.cellSize);
+        hashFloat(h, p.padding);
+        hashFloat(h, p.levelHeight);
+        hashFloat(h, p.groundDepth);
+        hashFloat(h, p.style);
+        hashFloat(h, p.soften);
+        hashFloat(h, p.creaseWidth);
+        hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.blurPasses)));
     }
     std::sort(nodes.begin(), nodes.end(), [](const glm::ivec2& a, const glm::ivec2& b) {
         if (a.y != b.y) return a.y < b.y;
@@ -1242,11 +1256,24 @@ void CliffRenderer::rebuildRegion(
         }
 
         cliff::RegularizeStats regStats;
+        const char* kind = "cliff";
         if (params.stoneField) {
             // Stone3d: voronoi-carved slab through the generic field view
             // (same pipeline as the playground's stone branch; the sampled
             // field blur against voronoi terracing runs inside sample()).
+            kind = "stone";
             stone_gen::StoneField field(*params.stoneField, nodes.data(), nodesX, nodesY);
+            cliff::ScalarFieldView view = field.view();
+            std::vector<float> samples;
+            field.sample(samples);
+            cliff::regularizeSigns(view, samples, &regStats);
+            region.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+        } else if (params.techField) {
+            // Tech3d: TechnicalGrass ridge/valley heightfield through the
+            // generic field view (same pipeline as the playground's tech
+            // branch; the tile contour rides the groove channel).
+            kind = "tech";
+            tech::TechField field(*params.techField, nodes.data(), nodesX, nodesY);
             cliff::ScalarFieldView view = field.view();
             std::vector<float> samples;
             field.sample(samples);
@@ -1264,11 +1291,11 @@ void CliffRenderer::rebuildRegion(
         region.watertight = report.ok();
         if (!report.ok()) {
             spdlog::warn("CliffRenderer: {} mesh not watertight ({} bad of {} edges, {} saddles left)",
-                params.stoneField ? "stone" : "cliff",
+                kind,
                 report.badEdges, report.undirectedEdges, regStats.remaining);
         }
         spdlog::info("CliffRenderer: rebuilt {} region at ({}, {}) — {} nodes, {} tris",
-            params.stoneField ? "stone" : "cliff",
+            kind,
             minX, minY, componentNodes.size(), region.mesh.indices.size() / 3);
     } else {
         region.mesh = {};
