@@ -50,11 +50,13 @@ struct TechFieldParams {
     float cellSize = 0.06f;    // field voxel size in world units
     float padding = 0.5f;      // field margin outside the region; F > 0 on the grid border
     float levelHeight = 0.35f; // world height of one level (the Python ELEVATION analog)
-    float groundDepth = 0.05f; // bottom slab thickness (closes the solid below the surface)
+    float groundDepth = 0.05f; // bottom slab depth; the effective slab is at
+                               // least ~2 voxels thick (see TechField::baseDepth)
     float style = 0.0f;        // 0 = Ridge (folds/peaks/saddles) .. 1 = Valley (flat planes)
     float soften = 0.0f;       // 0 = linear ramps (faithful), 1 = smoothstep-shouldered ramps
     float creaseWidth = 0.0f;  // groove shading band around raised-cell borders (0 = off)
-    int blurPasses = 0;        // sampled-field anti-terracing blur (same trick as stone)
+    int blurPasses = 1;        // sampled-field anti-terracing blur (same trick
+                               // as stone; the base slab is thickened to match)
     // Shoreline outline ("yellow around green"): when > 0, the 8-neighborhood
     // of the painted land nodes (minus the land) forms an outline ring at
     // height -outlineDepth * levelHeight — the border ramps continue below
@@ -101,6 +103,11 @@ private:
     // Node value: +1 land, -outlineDepth outline, 0 empty (0 outside the grid).
     float nodeAt(int x, int z) const;
     bool cellNonEmpty(int x, int z) const;     // any corner with value > 0 (land)
+    // Base slab depth under the solid: at least ~2 voxels thick everywhere,
+    // plus one voxel per blur pass against erosion — a sub-voxel solid makes
+    // the top and bottom surfaces share voxel vertices (membrane with junk
+    // normals, and the blur erodes it away entirely).
+    float baseDepth() const;
     // Style-blended center height for the cell class (maxV/minV are the
     // extreme corner values; nMax counts the maxV corners; opposite marks the
     // diagonal 2-maxV case).

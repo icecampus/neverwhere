@@ -286,7 +286,7 @@ namespace BaseData
         float style{0.0f};         // 0 = Ridge .. 1 = Valley (center-height blend)
         float soften{0.0f};        // 0 = linear ramps, 1 = smoothstep shoulders
         float creaseWidth{0.05f};  // dark tile contour width (0 = off)
-        int blurPasses{0};         // sampled-field anti-terracing blur
+        int blurPasses{1};         // sampled-field anti-terracing blur
         // Shoreline outline ("yellow around green"): the 8-neighborhood of
         // the painted land nodes (minus the land) forms a ring at
         // -outlineDepth * levelHeight — the ramps continue below the water

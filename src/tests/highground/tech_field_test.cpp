@@ -233,7 +233,10 @@ TEST(TechField, OutlineRingDerivation) {
 TEST(TechField, OutlineWaterlineNoCrack) {
     tech::TechField field = shoreField();
     const float level = field.params().levelHeight;
-    const float gd = field.params().groundDepth;
+    // The effective base slab is max(groundDepth, (2.2 + blurPasses) * cellSize).
+    const float base = std::max(
+        field.params().groundDepth,
+        (2.2f + static_cast<float>(field.params().blurPasses)) * field.params().cellSize);
     // Between the land node (3,3) and the ring node (2,2) the ramp crosses
     // the water plane: above it is outside, below it is solid — no crack.
     const float above = field.eval(glm::vec3(2.5f, 0.05f * level, 2.5f));
@@ -241,10 +244,10 @@ TEST(TechField, OutlineWaterlineNoCrack) {
     const float below = field.eval(glm::vec3(2.5f, -0.05f * level, 2.5f));
     EXPECT_LT(below, 0.0f);
     // Inside the underwater foot at the ring node (surface is at -level
-    // there, the base slab at -level - groundDepth).
-    EXPECT_LT(field.eval(glm::vec3(2.0f, -level - 0.5f * gd, 2.0f)), 0.0f);
+    // there, the base slab at -level - base).
+    EXPECT_LT(field.eval(glm::vec3(2.0f, -level - 0.5f * base, 2.0f)), 0.0f);
     // ...but not deeper than the base slab.
-    EXPECT_GT(field.eval(glm::vec3(2.0f, -level - 2.0f * gd, 2.0f)), 0.0f);
+    EXPECT_GT(field.eval(glm::vec3(2.0f, -level - 2.0f * base, 2.0f)), 0.0f);
     // Above the underwater surface (the water column) stays outside.
     EXPECT_GT(field.eval(glm::vec3(2.0f, -0.1f * level, 2.0f)), 0.0f);
     // Open water past the ring stays outside at any depth.
@@ -309,8 +312,13 @@ TEST(TechField, OutlinePipelineWatertight) {
         pyMax = std::max(pyMax, v.py);
     }
     // The plateau tops sit at +levelHeight, the underwater foot reaches
-    // ~-levelHeight (one level down) but not below its base slab.
+    // ~-levelHeight (one level down) but not below its base slab (the
+    // effective slab depth is max(groundDepth, (2.2 + blurPasses) * cellSize)
+    // plus extraction slack).
+    const float base = std::max(
+        params.groundDepth,
+        (2.2f + static_cast<float>(params.blurPasses)) * params.cellSize);
     EXPECT_NEAR(pyMax, params.levelHeight, 2.0f * params.cellSize);
     EXPECT_LT(pyMin, -0.5f * params.levelHeight);
-    EXPECT_GT(pyMin, -params.levelHeight - params.groundDepth - 2.0f * params.cellSize);
+    EXPECT_GT(pyMin, -params.levelHeight - base - 2.0f * params.cellSize);
 }

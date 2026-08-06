@@ -79,7 +79,7 @@ TechField::TechField(
     }
 
     // The region spans (nodesX-1) x (nodesY-1) map cells; the field is
-    // rectangular in XZ, Y spans [-(under + groundDepth + pad), levelHeight + pad]
+    // rectangular in XZ, Y spans [-(under + base + pad), levelHeight + pad]
     // — a couple of voxels of slack keeps F > 0 on the grid border.
     m_regionX = static_cast<float>(m_nodesX - 1);
     m_regionZ = static_cast<float>(m_nodesY - 1);
@@ -87,7 +87,7 @@ TechField::TechField(
     const float cell = params.cellSize;
     const float padY = 2.0f * cell;
     const float under = depth * params.levelHeight;
-    const float yMin = -(under + params.groundDepth + padY);
+    const float yMin = -(under + baseDepth() + padY);
     const float yMax = params.levelHeight + padY;
     m_nx = static_cast<int>(std::ceil((m_regionX + 2.0f * pad) / cell));
     m_nz = static_cast<int>(std::ceil((m_regionZ + 2.0f * pad) / cell));
@@ -210,10 +210,18 @@ float TechField::heightAt(float x, float z, float* outGradLen) const {
     return h * m_params.levelHeight;
 }
 
+float TechField::baseDepth() const {
+    // At least ~2 voxels of solid thickness everywhere (plus one per blur
+    // pass against erosion) — see the class comment above.
+    return std::max(
+        m_params.groundDepth,
+        (2.2f + static_cast<float>(m_params.blurPasses)) * m_params.cellSize);
+}
+
 float TechField::eval(const glm::vec3& p) const {
     float gradLen = 0.0f;
     const float h = heightAt(p.x, p.z, &gradLen);
-    // Solid = { min(h, 0) - groundDepth <= y <= h(x,z) }, clipped laterally to
+    // Solid = { min(h, 0) - baseDepth <= y <= h(x,z) }, clipped laterally to
     // the formation: the `side` term is positive only in the open water
     // (h ~ 0 AND flat), so empty cells stay outside while ramp zero-crossings
     // (the waterline between the land and the underwater foot) keep their
@@ -223,7 +231,7 @@ float TechField::eval(const glm::vec3& p) const {
     const float hu = h / level;
     const float side = (epsH - std::fabs(hu) - 4.0f * epsH * gradLen) * level;
     const float top = p.y - h;
-    const float bottom = std::min(h, 0.0f) - m_params.groundDepth - p.y;
+    const float bottom = std::min(h, 0.0f) - baseDepth() - p.y;
     // Region rectangle shrunk by half a voxel: the formation's toes end at
     // the zero node ring inside the region anyway, and this keeps the field
     // strictly positive on the grid border (the surface-nets contract).

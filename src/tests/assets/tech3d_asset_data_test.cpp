@@ -38,7 +38,7 @@ TEST(Tech3dAssetData, BaseDataDefaultsWhenPayloadEmpty) {
     EXPECT_FLOAT_EQ(d.style, 0.0f); // ridge by default
     EXPECT_FLOAT_EQ(d.soften, 0.0f);
     EXPECT_FLOAT_EQ(d.creaseWidth, 0.05f);
-    EXPECT_EQ(d.blurPasses, 0);
+    EXPECT_EQ(d.blurPasses, 1);
     EXPECT_FLOAT_EQ(d.outlineDepth, 0.0f); // shoreline outline off by default
     EXPECT_FLOAT_EQ(d.raisedHeight, 96.0f);
     // TechnicalGrass palette: earth ramps, no veins, muted spec, flat-lit.

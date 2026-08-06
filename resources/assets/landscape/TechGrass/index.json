@@ -1,6 +1,6 @@
 {
     "tech3d": {
-        "blurPasses": 0,
+        "blurPasses": 1,
         "cellSize": 0.05999999865889549,
         "creaseWidth": 0.05000000074505806,
         "groundDepth": 0.05000000074505806,
