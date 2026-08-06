@@ -225,8 +225,13 @@ TEST(TechField, OutlineRingDerivation) {
     EXPECT_FLOAT_EQ(field.heightAt(2.0f, 3.0f), -level);
     EXPECT_FLOAT_EQ(field.heightAt(4.0f, 2.0f), -level);
     EXPECT_FLOAT_EQ(field.heightAt(2.0f, 2.0f), -level);
-    // Two cells away is open water.
-    EXPECT_FLOAT_EQ(field.heightAt(1.0f, 3.0f), 0.0f);
+    // The outer rim of the foot stays submerged instead of climbing back to
+    // the water plane: cell (1,3) holds ring corners but no land, so the whole
+    // cell — its open-water corners included — sits at the outline depth.
+    EXPECT_FLOAT_EQ(field.heightAt(1.0f, 3.0f), -level);
+    EXPECT_FLOAT_EQ(field.heightAt(1.5f, 3.5f), -level);
+    // Past that cell there is no outline corner left: open water.
+    EXPECT_FLOAT_EQ(field.heightAt(0.5f, 3.5f), 0.0f);
     EXPECT_FLOAT_EQ(field.heightAt(5.0f, 5.0f), 0.0f);
 }
 
@@ -250,6 +255,10 @@ TEST(TechField, OutlineWaterlineNoCrack) {
     EXPECT_GT(field.eval(glm::vec3(2.0f, -level - 2.0f * base, 2.0f)), 0.0f);
     // Above the underwater surface (the water column) stays outside.
     EXPECT_GT(field.eval(glm::vec3(2.0f, -0.1f * level, 2.0f)), 0.0f);
+    // Same at the outer rim of the foot (cell (1,1), ring corners only): solid
+    // below the outline depth, water above it — the rim never surfaces.
+    EXPECT_GT(field.eval(glm::vec3(1.5f, -0.5f * level, 1.5f)), 0.0f);
+    EXPECT_LT(field.eval(glm::vec3(1.5f, -level - 0.5f * base, 1.5f)), 0.0f);
     // Open water past the ring stays outside at any depth.
     EXPECT_GT(field.eval(glm::vec3(0.5f, -0.5f * level, 0.5f)), 0.0f);
 }

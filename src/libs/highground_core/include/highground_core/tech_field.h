@@ -17,9 +17,12 @@
 // Shoreline mode (outlineDepth > 0, the "yellow around green" principle): the
 // 8-neighborhood of the painted land nodes minus the land itself becomes an
 // outline ring of nodes at height -outlineDepth, so the border ramps continue
-// through the water plane (y = 0) into an underwater foot, then back up to
-// the open water — a beach profile around the landform. Nodes are then
-// three-valued: land +1, outline -outlineDepth, empty 0.
+// through the water plane (y = 0) into an underwater foot — a beach profile
+// around the landform. Nodes are then three-valued: land +1, outline
+// -outlineDepth, empty 0. The foot does NOT climb back to the water plane at
+// the outer rim: cells that hold outline corners but no land corner keep the
+// outline depth across their whole span (see heightAt), so the formation ends
+// under water with a wall on the border of the open-water cells.
 //
 // Ridge and Valley differ only in the center heights (the Valley split
 // triangulation of Lack tiles is geometrically identical to a fan with

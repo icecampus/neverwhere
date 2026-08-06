@@ -134,15 +134,28 @@ float TechField::heightAt(float x, float z, float* outGradLen) const {
     const int iz = static_cast<int>(gz);
     const float u = gx - static_cast<float>(ix);
     const float v = gz - static_cast<float>(iz);
-    const float v00 = nodeAt(ix, iz);
-    const float v10 = nodeAt(ix + 1, iz);
-    const float v01 = nodeAt(ix, iz + 1);
-    const float v11 = nodeAt(ix + 1, iz + 1);
+    float v00 = nodeAt(ix, iz);
+    float v10 = nodeAt(ix + 1, iz);
+    float v01 = nodeAt(ix, iz + 1);
+    float v11 = nodeAt(ix + 1, iz + 1);
     if (v00 == 0.0f && v10 == 0.0f && v01 == 0.0f && v11 == 0.0f) {
         return 0.0f;
     }
-    const float maxV = std::max(std::max(v00, v10), std::max(v01, v11));
+    float maxV = std::max(std::max(v00, v10), std::max(v01, v11));
     const float minV = std::min(std::min(v00, v10), std::min(v01, v11));
+    // Underwater shelf: a cell with no land corner (outline ring nodes plus
+    // open water) holds the outline depth across its whole span instead of
+    // ramping back up to the water plane — the foot of a shoreline has to stay
+    // submerged. The open water past it has no outline corner at all, so its
+    // h stays 0 and `side` still clips it: the formation ends on that cell
+    // border with a wall below the waterline.
+    if (maxV <= 0.0f) {
+        v00 = minV;
+        v10 = minV;
+        v01 = minV;
+        v11 = minV;
+        maxV = minV;
+    }
     const int nMax =
         (v00 == maxV ? 1 : 0) + (v10 == maxV ? 1 : 0) +
         (v01 == maxV ? 1 : 0) + (v11 == maxV ? 1 : 0);
