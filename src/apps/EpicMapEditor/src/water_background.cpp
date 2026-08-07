@@ -16,7 +16,12 @@ out vec2 v_screen;
 uniform vec2 view_size;
 void main() {
     gl_Position = vec4(pos, 0.0, 1.0);
-    v_screen = (pos * 0.5 + 0.5) * view_size;
+    // Clip space is GL y-up, but the camera convention (screen = world*zoom +
+    // offset) is Qt top-left / y-down — the same convention the world passes
+    // use (clip.y = 1.0 - (pos.y / view_size.y) * 2.0). Without the Y flip the
+    // reconstructed world.y runs against the world content and the water
+    // drifts opposite to the grid when panning along Y.
+    v_screen = (vec2(pos.x, -pos.y) * 0.5 + 0.5) * view_size;
 }
 )";
 
