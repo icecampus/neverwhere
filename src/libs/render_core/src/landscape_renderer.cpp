@@ -1358,6 +1358,13 @@ void LandscapeRenderer::ensurePipeline() {
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended pass
+    // would stamp its own alpha over the destination's, punching transparent
+    // holes into the editor FBO (flat-grass tiles showed the QML background
+    // through their alpha-masked texels). Keep the channel under classic
+    // "over" so the target stays opaque where anything was already drawn.
+    pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     // The depth format must match the pass we render into (sokol_app swapchain
     // has depth-stencil; a Qt FBO wrapper has none). We don't depth-test either way.
@@ -1470,13 +1477,26 @@ void LandscapeRenderer::ensureGroundPipeline() {
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended pass
+    // would stamp its own alpha over the destination's, punching transparent
+    // holes into the editor FBO (flat-grass tiles showed the QML background
+    // through their alpha-masked texels). Keep the channel under classic
+    // "over" so the target stays opaque where anything was already drawn.
+    pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pip_desc.depth.pixel_format = depthFormat;
     if (depthFormat != SG_PIXELFORMAT_NONE) {
-        // The ground joins the z-buffer at one constant depth behind
-        // everything (see the vertex shader): tiles tie under LESS_EQUAL and
-        // keep their painter order, the 3D passes always overdraw.
-        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        // Same-plane ground tiles OVERLAP (each quad spans ±2 cell rows) and
+        // must composite by painter order (union coverage). Testing their
+        // interpolated plane z against each other z-fights: the zFar offset
+        // sinks the values to where a 1-ulp interpolation difference flips a
+        // depth bucket, and the winner's alpha-masked holes show water (the
+        // "grass tearing into stripes" bug). So: no test between ground
+        // tiles (ALWAYS), but the plane depth is still WRITTEN — later
+        // passes key off it (3D wins by the height term, underwater parts
+        // lose to the plane, the grid sits on it via kGridZBias).
+        pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
         pip_desc.depth.write_enabled = true;
     } else {
         pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
@@ -1604,13 +1624,22 @@ void LandscapeRenderer::ensureTexturePipeline() {
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended pass
+    // would stamp its own alpha over the destination's, punching transparent
+    // holes into the editor FBO (flat-grass tiles showed the QML background
+    // through their alpha-masked texels). Keep the channel under classic
+    // "over" so the target stays opaque where anything was already drawn.
+    pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pip_desc.depth.pixel_format = depthFormat;
     if (depthFormat != SG_PIXELFORMAT_NONE) {
-        // Ground level, same constant depth as the flat ground pass: texture
-        // cells tie with it under LESS_EQUAL and win by painter order (the
-        // texture pass draws later), the 3D passes stay on top.
-        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        // Same story as the flat ground pass: the level-0 plane is resolved
+        // by painter order, not by testing interpolated z between co-planar
+        // fragments (they z-fight at the zFar-offset magnitude). ALWAYS +
+        // depth write: texture cells overdraw the ground (drawn later) and
+        // the plane depth stays published for the 3D/underwater passes.
+        pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
         pip_desc.depth.write_enabled = true;
     } else {
         pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
@@ -1669,6 +1698,13 @@ void LandscapeRenderer::ensureWallPipeline() {
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended pass
+    // would stamp its own alpha over the destination's, punching transparent
+    // holes into the editor FBO (flat-grass tiles showed the QML background
+    // through their alpha-masked texels). Keep the channel under classic
+    // "over" so the target stays opaque where anything was already drawn.
+    pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     // Same depth contract as the textured pipeline (match the pass, no depth test).
     pip_desc.depth.pixel_format = depthFormat;
@@ -1758,6 +1794,11 @@ void LandscapeRenderer::ensureDepthPipelines() {
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended
+        // pass would punch transparent holes into the editor FBO — keep
+        // classic "over" for the alpha channel.
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip_desc.depth.pixel_format = depthFormat;
         pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
@@ -1778,6 +1819,11 @@ void LandscapeRenderer::ensureDepthPipelines() {
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended
+        // pass would punch transparent holes into the editor FBO — keep
+        // classic "over" for the alpha channel.
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip_desc.depth.pixel_format = depthFormat;
         pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
@@ -1878,6 +1924,11 @@ void LandscapeRenderer::ensureTriWallPipelines() {
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended
+        // pass would punch transparent holes into the editor FBO — keep
+        // classic "over" for the alpha channel.
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip_desc.depth.pixel_format = depthFormat;
         pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
@@ -1900,6 +1951,11 @@ void LandscapeRenderer::ensureTriWallPipelines() {
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        // sokol defaults the ALPHA factors to ONE/ZERO (replace): a blended
+        // pass would punch transparent holes into the editor FBO — keep
+        // classic "over" for the alpha channel.
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pip_desc.depth.pixel_format = depthFormat;
         pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;

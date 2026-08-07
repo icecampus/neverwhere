@@ -914,6 +914,12 @@ void CliffRenderer::ensurePipeline() {
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // Keep the alpha channel under classic "over" as well — sokol's default
+    // (ONE/ZERO) replaces the destination alpha, and fading fragments would
+    // punch transparent holes into the editor FBO instead of dissolving into
+    // the water drawn beneath them.
+    pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.depth.pixel_format = depthFormat;
     pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     pip_desc.depth.write_enabled = true;

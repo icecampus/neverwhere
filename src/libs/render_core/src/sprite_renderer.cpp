@@ -204,6 +204,10 @@ void SpriteRenderer::ensurePipeline() {
     pip_desc.colors[0].blend.enabled = true;
     pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
     pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    // Classic "over" for the alpha channel too (sokol defaults to replace,
+    // which punches transparent holes into the editor FBO).
+    pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     // The depth format must match the pass we render into (sokol_app swapchain
     // has depth-stencil; a Qt FBO wrapper has none). We don't depth-test either way.
