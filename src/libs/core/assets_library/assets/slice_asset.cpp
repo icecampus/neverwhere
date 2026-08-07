@@ -82,6 +82,15 @@ QSize SliceAsset::getSize(DiamondIsometry* iso)
 
 void SliceAsset::registerImages(RegistationHandle handle)
 {
+    // Atlas-less types (cliff3d/stone3d/cyclopean3d/texture2d/tech3d) have no
+    // tiles at all, so index 0 — what the palette asks for — has to come from
+    // the explicit thumbnail, otherwise their cells render blank.
+    if (tiles.empty())
+    {
+        handle(0, thumbnailImage);
+        return;
+    }
+
     for(int i=0; i<tiles.size(); ++i)
     {
         if (!tiles[i].isNull())
