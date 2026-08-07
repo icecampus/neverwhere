@@ -208,6 +208,22 @@ public:
         m_worldRenderer.render(m_frame, m_iso, camera, viewW, viewH, m_time.elapsed() / 1000.0);
 
         sg_end_pass();
+
+        // Water surface on the ground plane (the grid level): own pass, so
+        // the world depth buffer can come in as a texture (sokol forbids
+        // sampling an attachment of the same pass). Blends the caustics over
+        // submerged geometry, alpha growing with the depth below the plane.
+        {
+            sg_pass_action surf_action = {};
+            surf_action.colors[0].load_action = SG_LOADACTION_LOAD;
+            sg_pass surf_pass = {};
+            surf_pass.action = surf_action;
+            surf_pass.attachments.colors[0] = m_colorAttView;
+            sg_begin_pass(&surf_pass);
+            m_water.renderSurface(camera, viewW, viewH, (float)m_time.elapsed() / 1000.0f, m_depthTexView);
+            sg_end_pass();
+        }
+
         // Exactly one sg_commit per frame at the top level (EcsPlayground rules).
         sg_commit();
 
@@ -250,6 +266,10 @@ private:
             sg_destroy_view(m_depthAttView);
             m_depthAttView.id = SG_INVALID_ID;
         }
+        if (m_depthTexView.id != SG_INVALID_ID) {
+            sg_destroy_view(m_depthTexView);
+            m_depthTexView.id = SG_INVALID_ID;
+        }
         if (m_depthImg.id != SG_INVALID_ID) {
             sg_destroy_image(m_depthImg);
             m_depthImg.id = SG_INVALID_ID;
@@ -290,6 +310,12 @@ private:
         sg_view_desc depth_view_desc = {};
         depth_view_desc.depth_stencil_attachment.image = m_depthImg;
         m_depthAttView = sg_make_view(&depth_view_desc);
+
+        // The same depth buffer as a texture: the water-surface pass samples
+        // it after the world pass to blend the water by submerged depth.
+        sg_view_desc depth_tex_view_desc = {};
+        depth_tex_view_desc.texture.image = m_depthImg;
+        m_depthTexView = sg_make_view(&depth_tex_view_desc);
     }
 
     int m_width = 0;
@@ -299,6 +325,7 @@ private:
     sg_view m_colorAttView{SG_INVALID_ID};
     sg_image m_depthImg{SG_INVALID_ID};
     sg_view m_depthAttView{SG_INVALID_ID};
+    sg_view m_depthTexView{SG_INVALID_ID};
 
     bool m_worldInit = false;
     render_core::WorldRenderer m_worldRenderer;
