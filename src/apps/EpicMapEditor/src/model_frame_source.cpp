@@ -70,6 +70,7 @@ render_core::CliffParams cliffParamsFromAssetData(const BaseData::Cliff3dAssetDa
     s.bottomDarken = d.shading.bottomDarken;
     s.bottomBand = d.shading.bottomBand;
     s.strataStrength = d.shading.strataStrength;
+    s.underwaterFade = d.shading.underwaterFade;
     params.flareAmount = d.flareAmount;
     params.flareBand = d.flareBand;
     return params;
@@ -162,6 +163,7 @@ render_core::CliffParams stoneParamsFromAssetData(const BaseData::Stone3dAssetDa
     s.bottomDarken = d.shading.bottomDarken;
     s.bottomBand = d.shading.bottomBand;
     s.strataStrength = d.shading.strataStrength;
+    s.underwaterFade = d.shading.underwaterFade;
     s.texScale = d.topTexTiles; // stone top tiling lives in the extras, not in shading.texScale
     // Stone shading extras: the flat-top plane (boulders above it keep the
     // wall palette), the below-plane grass fade, the rim gradient strength
@@ -209,6 +211,7 @@ render_core::CliffParams techParamsFromAssetData(const BaseData::Tech3dAssetData
     s.bottomDarken = d.shading.bottomDarken;
     s.bottomBand = d.shading.bottomBand;
     s.strataStrength = d.shading.strataStrength;
+    s.underwaterFade = d.shading.underwaterFade;
     s.texScale = d.shading.texScale;
     return params;
 }

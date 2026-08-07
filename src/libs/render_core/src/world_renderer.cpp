@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #include "atlas_tile_types.h"
+#include "render_core/depth_levels.h"
 
 namespace render_core {
 
@@ -271,9 +272,12 @@ void WorldRenderer::render(
         const glm::vec2 halfSizeScreen = cellSize * 0.5f * camera.zoom;
 
         // Same depth convention as the 3D passes (see their z_range uniforms):
-        // field y grows toward the viewer, so the closer row gets the smaller z.
-        const float zFar = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y + 100000.0f;
-        constexpr float kZScale = 1.0f / 200000.0f;
+        // field y grows toward the viewer, so the closer row gets the smaller
+        // z. The grid is the water-level plane and shares the flat ground's
+        // affine depth exactly — kGridZBias keeps it deterministically on top
+        // of the ground without z-fighting (underwater geometry is strictly
+        // farther anyway; raised content still wins by the height term).
+        const float zFar = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y + kZFarOffset;
         const float depthHalf = cellSize.y * 0.5f * kZScale;
 
         for (int i = 0; i < cellsX; ++i) {
@@ -283,7 +287,7 @@ void WorldRenderer::render(
                 const glm::vec2 fieldCenter = iso.mapToField({cx, cy});
                 const glm::vec2 screenCenter = camera.worldToScreen(fieldCenter);
                 appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.gridColor,
-                    (zFar - fieldCenter.y) * kZScale, depthHalf);
+                    (zFar - fieldCenter.y) * kZScale - kGridZBias, depthHalf);
             }
         }
     }

@@ -13,6 +13,7 @@
 #include <highground_core/highground.h>
 #include <landscape_core/landscape_logic.h>
 
+#include "render_core/depth_levels.h"
 #include "render_core/image_loader.h"
 #include "render_core/texture_blend.h"
 
@@ -133,11 +134,12 @@ fragment float4 _main(PSIn in [[stage_in]],
 
 // ---------------------------------------------------------------------------
 // Stitched flat ground pass (scene stitch port from HighgroundWithEffects):
-// the tile quad carries the world (map-cell) position, sits at one constant
-// depth behind the whole scene and shades with the shared sun/tone + the
-// contact-AO distance field. Tiles tie under LESS_EQUAL and keep resolving
-// against each other by painter order; the 3D passes (raised/cliff/stone,
-// all closer) always win.
+// the tile quad carries the world (map-cell) position, sits ON the level-0
+// (water) plane — depth comes from the vertex ground-y via the shared
+// z-range convention (render_core/depth_levels.h) — and shades with the
+// shared sun/tone + the contact-AO distance field. Tiles tie under LESS_EQUAL
+// and keep resolving against each other by painter order; 3D passes win by
+// height (y>0 is closer), underwater geometry (y<0) loses to the plane.
 // ---------------------------------------------------------------------------
 
 static const char* ground_vs_src_glsl = R"(
@@ -148,14 +150,19 @@ layout(location=2) in vec2 world;
 out vec2 v_uv;
 out vec2 v_world;
 uniform vec2 view_size;
+uniform vec2 z_range;
+uniform vec2 ground_params; // x: cell half-height in field px (halfH), y: unused
 void main() {
     vec2 clip_pos = vec2(
         (pos.x / view_size.x) * 2.0 - 1.0,
         1.0 - (pos.y / view_size.y) * 2.0
     );
-    // Constant depth behind the whole scene (HighgroundWithEffects'
-    // kGroundDepth): the z-range convention maps visible content to ~0.5.
-    gl_Position = vec4(clip_pos, 0.999, 1.0);
+    // Level-0 (water) plane depth: the ground-y of the vertex through the
+    // shared z-range convention (depth_levels.h), no longer one constant
+    // behind the scene — a tall cliff far back now loses to a near flat tile,
+    // and the underwater shelf always loses to the plane.
+    float fieldY = (world.x + world.y) * ground_params.x;
+    gl_Position = vec4(clip_pos, (z_range.x - fieldY) * z_range.y, 1.0);
     v_uv = uv0;
     v_world = world;
 }
@@ -190,7 +197,7 @@ void main() {
 )";
 
 static const char* ground_vs_src_hlsl = R"(
-cbuffer vs_params: register(b0) { float2 view_size; };
+cbuffer vs_params: register(b0) { float2 view_size; float2 z_range; float2 ground_params; };
 struct VSIn { float2 pos: TEXCOORD0; float2 uv0: TEXCOORD1; float2 world: TEXCOORD2; };
 struct VSOut { float4 pos: SV_Position; float2 uv0: TEXCOORD0; float2 world: TEXCOORD1; };
 VSOut main(VSIn inp) {
@@ -198,8 +205,9 @@ VSOut main(VSIn inp) {
     float2 clip;
     clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
     clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
-    // Constant depth behind the whole scene (see the GLSL variant).
-    o.pos = float4(clip, 0.999, 1.0);
+    // Level-0 (water) plane depth from the vertex ground-y (see the GLSL variant).
+    float fieldY = (inp.world.x + inp.world.y) * ground_params.x;
+    o.pos = float4(clip, (z_range.x - fieldY) * z_range.y, 1.0);
     o.uv0 = inp.uv0;
     o.world = inp.world;
     return o;
@@ -236,6 +244,8 @@ using namespace metal;
 
 struct VsParams {
     float2 view_size;
+    float2 z_range;
+    float2 ground_params;
 };
 
 struct VSIn {
@@ -256,8 +266,9 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
         (in.pos.x / params.view_size.x) * 2.0 - 1.0,
         1.0 - (in.pos.y / params.view_size.y) * 2.0
     );
-    // Constant depth behind the whole scene (see the GLSL variant).
-    o.pos = float4(clip, 0.999, 1.0);
+    // Level-0 (water) plane depth from the vertex ground-y (see the GLSL variant).
+    float fieldY = (in.world.x + in.world.y) * params.ground_params.x;
+    o.pos = float4(clip, (params.z_range.x - fieldY) * params.z_range.y, 1.0);
     o.uv0 = in.uv0;
     o.world = in.world;
     return o;
@@ -323,13 +334,16 @@ out vec4 v_weights;
 out vec4 v_tiling;
 out float v_fill;
 uniform vec2 view_size;
+uniform vec2 z_range;
+uniform vec2 ground_params; // x: cell half-height in field px (halfH), y: unused
 void main() {
     vec2 clip_pos = vec2(
         (pos.x / view_size.x) * 2.0 - 1.0,
         1.0 - (pos.y / view_size.y) * 2.0
     );
-    // Same ground-level constant depth as the flat ground pass.
-    gl_Position = vec4(clip_pos, 0.999, 1.0);
+    // Same level-0 (water) plane depth as the flat ground pass.
+    float fieldY = (world.x + world.y) * ground_params.x;
+    gl_Position = vec4(clip_pos, (z_range.x - fieldY) * z_range.y, 1.0);
     v_world = world;
     v_layers = layers;
     v_weights = weights;
@@ -420,7 +434,7 @@ void main() {
 )";
 
 static const char* texture_vs_src_hlsl = R"(
-cbuffer vs_params: register(b0) { float2 view_size; };
+cbuffer vs_params: register(b0) { float2 view_size; float2 z_range; float2 ground_params; };
 struct VSIn {
     float2 pos: TEXCOORD0;
     float2 world: TEXCOORD1;
@@ -442,8 +456,9 @@ VSOut main(VSIn inp) {
     float2 clip;
     clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
     clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
-    // Same ground-level constant depth as the flat ground pass.
-    o.pos = float4(clip, 0.999, 1.0);
+    // Same level-0 (water) plane depth as the flat ground pass.
+    float fieldY = (inp.world.x + inp.world.y) * ground_params.x;
+    o.pos = float4(clip, (z_range.x - fieldY) * z_range.y, 1.0);
     o.world = inp.world;
     o.layers = inp.layers;
     o.weights = inp.weights;
@@ -539,6 +554,8 @@ using namespace metal;
 
 struct VsParams {
     float2 view_size;
+    float2 z_range;
+    float2 ground_params;
 };
 
 struct VSIn {
@@ -565,8 +582,9 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
         (in.pos.x / params.view_size.x) * 2.0 - 1.0,
         1.0 - (in.pos.y / params.view_size.y) * 2.0
     );
-    // Same ground-level constant depth as the flat ground pass.
-    o.pos = float4(clip, 0.999, 1.0);
+    // Same level-0 (water) plane depth as the flat ground pass.
+    float fieldY = (in.world.x + in.world.y) * params.ground_params.x;
+    o.pos = float4(clip, (params.z_range.x - fieldY) * params.z_range.y, 1.0);
     o.world = in.world;
     o.layers = in.layers;
     o.weights = in.weights;
@@ -758,9 +776,11 @@ fragment float4 _main(PSIn in [[stage_in]]) {
 }
 )";
 
-// Z-buffered raised pass: pos.z is the ground y (un-lifted field y) of the
-// vertex, monotonic with depth along the iso view ray (0,+1,+1). Ground-y
-// grows TOWARD the viewer (the painter draws larger ground-y last), so with
+// Z-buffered raised pass: pos.z is the ground y of the vertex PLUS its height
+// lift (depth-levels model, see render_core/depth_levels.h): depth along the
+// iso view ray (0,+1,+1) is groundY + screenLift, so a raised/underwater
+// fragment is closer/farther by exactly its screen lift. Ground-y grows
+// TOWARD the viewer (the painter draws larger ground-y last), so with
 // LESS_EQUAL + clear 1.0 the closer fragment must map to the SMALLER z —
 // hence (zFar - groundY) * zScale. z_range = {far ground-y, 1/(far-near)}.
 // Fragment shaders are shared with the painter pipelines.
@@ -1375,15 +1395,19 @@ void LandscapeRenderer::ensureGroundPipeline() {
         shd_desc.fragment_func.source = ground_fs_src_glsl;
     }
 
-    // VS: view size (slot 0).
+    // VS: view size + the level-0 z-range (slot 0).
     shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
-    shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
+    shd_desc.uniform_blocks[0].size = sizeof(float) * 6;
     shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
     shd_desc.uniform_blocks[0].msl_buffer_n = 0;
     shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
     shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
     shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
     shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].glsl_uniforms[1].glsl_name = "z_range";
+    shd_desc.uniform_blocks[0].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].glsl_uniforms[2].glsl_name = "ground_params";
+    shd_desc.uniform_blocks[0].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT2;
 
     // FS: the FULL scene stitch block (slot 1) — the ground pass is the one
     // that samples the AO field, so unlike the cliff pass it gets ao_rect too.
@@ -1492,15 +1516,19 @@ void LandscapeRenderer::ensureTexturePipeline() {
         shd_desc.fragment_func.source = texture_fs_src_glsl;
     }
 
-    // VS: view size (slot 0).
+    // VS: view size + the level-0 z-range (slot 0).
     shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
-    shd_desc.uniform_blocks[0].size = sizeof(float) * 2;
+    shd_desc.uniform_blocks[0].size = sizeof(float) * 6;
     shd_desc.uniform_blocks[0].hlsl_register_b_n = 0;
     shd_desc.uniform_blocks[0].msl_buffer_n = 0;
     shd_desc.uniform_blocks[0].wgsl_group0_binding_n = 0;
     shd_desc.uniform_blocks[0].spirv_set0_binding_n = 0;
     shd_desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "view_size";
     shd_desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].glsl_uniforms[1].glsl_name = "z_range";
+    shd_desc.uniform_blocks[0].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT2;
+    shd_desc.uniform_blocks[0].glsl_uniforms[2].glsl_name = "ground_params";
+    shd_desc.uniform_blocks[0].glsl_uniforms[2].type = SG_UNIFORMTYPE_FLOAT2;
 
     // FS slot 1: the FULL scene stitch block (sun/tone + AO rect), same
     // contract as the flat ground pass.
@@ -2078,7 +2106,17 @@ void LandscapeRenderer::render(
     sg_update_buffer(vbuf, &range);
 
     sg_apply_pipeline(groundPip);
-    float vs_params[2] = {(float)viewWidth, (float)viewHeight};
+    // Level-0 plane depth: the same z-range convention as the 3D passes,
+    // anchored at the visible ground-y center (a per-frame constant).
+    const float groundCenterY = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y;
+    float vs_params[6] = {
+        (float)viewWidth,
+        (float)viewHeight,
+        groundCenterY + kZFarOffset,
+        kZScale,
+        iso.dims.cellSize().y * 0.5f,
+        0.0f,
+    };
     sg_range uniform_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(0, &uniform_range);
     // Scene stitch block (sun/tone + AO rect), shared with the cliff pass.
@@ -2325,7 +2363,16 @@ void LandscapeRenderer::renderTexture(
     sg_update_buffer(textureVbuf, &range);
 
     sg_apply_pipeline(texturePip);
-    float vs_params[2] = {(float)viewWidth, (float)viewHeight};
+    // Same level-0 z-range block as the flat ground pass.
+    const float groundCenterY = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y;
+    float vs_params[6] = {
+        (float)viewWidth,
+        (float)viewHeight,
+        groundCenterY + kZFarOffset,
+        kZScale,
+        halfH,
+        0.0f,
+    };
     sg_range vs_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(0, &vs_range);
     sg_range stitch_range = { &groundStitch.params, sizeof(SceneStitchParams) };
@@ -2540,7 +2587,7 @@ void LandscapeRenderer::renderRaised(
                         float tcoord[3];
                         wallTcoord(v, tcoord);
                         scratchTriDepthWallVerts.push_back(
-                            {{p.x, p.y, v.groundY},
+                            {{p.x, p.y, liftedGroundY(v.groundY, v.groundY - v.pos.y)},
                              {v.color.r, v.color.g, v.color.b, v.color.a},
                              {tcoord[0], tcoord[1], tcoord[2]},
                              {v.normal.x, v.normal.y}});
@@ -2558,7 +2605,7 @@ void LandscapeRenderer::renderRaised(
                 for (std::uint32_t k = 0; k < ref.count; ++k) {
                     const highground::Vertex& v = ref.mesh->vertices[ref.first + k];
                     const glm::vec2 p = camera.worldToScreen(v.pos);
-                    scratchDepthWallVerts.push_back({{p.x, p.y, v.groundY}, {v.color.r, v.color.g, v.color.b, v.color.a}});
+                    scratchDepthWallVerts.push_back({{p.x, p.y, liftedGroundY(v.groundY, v.groundY - v.pos.y)}, {v.color.r, v.color.g, v.color.b, v.color.a}});
                 }
                 batches.back().count += (int)ref.count;
             } else if (ref.mesh != nullptr) {
@@ -2572,12 +2619,13 @@ void LandscapeRenderer::renderRaised(
                 for (std::uint32_t k = 0; k < ref.count; ++k) {
                     const highground::Vertex& v = ref.mesh->vertices[ref.first + k];
                     const glm::vec2 p = camera.worldToScreen(v.pos);
-                    scratchDepthVerts.push_back({{p.x, p.y, v.groundY}, {v.uv.x, v.uv.y}, {v.color.r, v.color.g, v.color.b, v.color.a}});
+                    scratchDepthVerts.push_back({{p.x, p.y, liftedGroundY(v.groundY, v.groundY - v.pos.y)}, {v.uv.x, v.uv.y}, {v.color.r, v.color.g, v.color.b, v.color.a}});
                 }
                 batches.back().count += (int)ref.count;
             } else {
                 // Legacy atlas-quad top (6 verts per cell): the quad is lifted
-                // by height, so the per-vertex ground y is its un-lifted y.
+                // by height, so the per-vertex ground y is its un-lifted y and
+                // the baked z adds the lift back (depth-levels model).
                 if (scratchDepthVerts.size() + 6 > kDepthRaisedCap) {
                     emitTruncated = true;
                     continue;
@@ -2592,7 +2640,7 @@ void LandscapeRenderer::renderRaised(
                 for (const Vertex& v : quad) {
                     const glm::vec2 p = camera.worldToScreen({v.pos[0], v.pos[1]});
                     scratchDepthVerts.push_back(
-                        {{p.x, p.y, v.pos[1] + raised.params.height},
+                        {{p.x, p.y, liftedGroundY(v.pos[1] + raised.params.height, raised.params.height)},
                          {v.uv[0], v.uv[1]},
                          {v.color[0], v.color[1], v.color[2], v.color[3]}});
                 }

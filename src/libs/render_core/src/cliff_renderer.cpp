@@ -8,6 +8,7 @@
 #include <spdlog/spdlog.h>
 
 #include "atlas_tile_types.h"
+#include "render_core/depth_levels.h"
 
 namespace render_core {
 
@@ -200,7 +201,11 @@ void main() {
     float footAo = 1.0 - stitch[1].z * step(1e-4, params5.w)
         * (1.0 - smoothstep(0.0, max(params5.w, 1e-4), p.y - params5.z));
     col *= footAo;
-    frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(params1.y)), 1.0);
+    // Underwater dissolve: below the water level (y=0) the fragment fades out
+    // over params3.z world units (0 = off). Anything at/above the water level
+    // stays opaque, so stones keep sticking out of the water.
+    float uwAlpha = params3.z > 0.0 ? smoothstep(-params3.z, 0.0, p.y) : 1.0;
+    frag_color = vec4(pow(clamp(col, 0.0, 1.0), vec3(params1.y)), uwAlpha);
 }
 )";
 
@@ -388,7 +393,10 @@ float4 main(PSIn inp): SV_Target {
     float footAo = 1.0 - stitch1.z * step(1e-4, params5.w)
         * (1.0 - smoothstep(0.0, max(params5.w, 1e-4), p.y - params5.z));
     col *= footAo;
-    return float4(pow(clamp(col, 0.0, 1.0), (float3)params1.y), 1.0);
+    // Underwater dissolve: below the water level (y=0) the fragment fades out
+    // over params3.z world units (0 = off); at/above the level stays opaque.
+    float uwAlpha = params3.z > 0.0 ? smoothstep(-params3.z, 0.0, p.y) : 1.0;
+    return float4(pow(clamp(col, 0.0, 1.0), (float3)params1.y), uwAlpha);
 }
 )";
 
@@ -588,7 +596,10 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
     float footAo = 1.0 - st.stitch1.z * step(1e-4, fs.params5.w)
         * (1.0 - smoothstep(0.0, max(fs.params5.w, 1e-4), p.y - fs.params5.z));
     col *= footAo;
-    return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), 1.0);
+    // Underwater dissolve: below the water level (y=0) the fragment fades out
+    // over params3.z world units (0 = off); at/above the level stays opaque.
+    float uwAlpha = fs.params3.z > 0.0 ? smoothstep(-fs.params3.z, 0.0, p.y) : 1.0;
+    return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.y)), uwAlpha);
 }
 )";
 
@@ -898,6 +909,11 @@ void CliffRenderer::ensurePipeline() {
     pip_desc.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT;  // rim
     pip_desc.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT3; // world
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+    // Blend for the underwater dissolve (alpha is 1 at/above the water level,
+    // so opaque content is bit-identical to before).
+    pip_desc.colors[0].blend.enabled = true;
+    pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+    pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.depth.pixel_format = depthFormat;
     pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     pip_desc.depth.write_enabled = true;
@@ -978,8 +994,8 @@ void CliffRenderer::render(
     vs.view_size[1] = static_cast<float>(viewHeight);
     vs.camera_offset[0] = camera.offset.x;
     vs.camera_offset[1] = camera.offset.y;
-    vs.z_range[0] = groundCenterY + 100000.0f;
-    vs.z_range[1] = 1.0f / 200000.0f;
+    vs.z_range[0] = groundCenterY + kZFarOffset;
+    vs.z_range[1] = kZScale;
     vs.camera_zoom = camera.zoom;
 
     // Shading uniforms from the *current* asset params — palette edits are
@@ -1013,6 +1029,7 @@ void CliffRenderer::render(
         fs.params2[3] = useTexture ? 1.0f : 0.0f;
         fs.params3[0] = s.strataStrength;
         fs.params3[1] = stitch.seam.topBrightness;
+        fs.params3[2] = s.underwaterFade;
         // Stone shading extras (all-neutral for plain cliffs: gate off, rim
         // shade off, top texture at full strength).
         fs.params4[0] = params.stonePlaneY;
@@ -1338,8 +1355,9 @@ void CliffRenderer::projectRegionStream(
     float plateauHeight) {
 
     // Projection path: region mesh -> field-space vertex stream. Placement
-    // matches DiamondIsometry::nodeToField (no +halfH on y), z carries the raw
-    // ground fieldY (normalized in the VS via z_range).
+    // matches DiamondIsometry::nodeToField (no +halfH on y), z carries the
+    // ground fieldY plus the height lift (depth-levels model, see
+    // render_core/depth_levels.h; normalized in the VS via z_range).
     //
     // Wall flare: near ground level the vertices bulge outward along the
     // horizontal normal (quadratic falloff over flareBand * plateauHeight), so
@@ -1370,7 +1388,7 @@ void CliffRenderer::projectRegionStream(
         const float fieldX = (mapX - mapZ) * halfW + halfW;
         const float fieldY = (mapX + mapZ) * halfH;
         region.stream.push_back(CliffVertex{
-            {fieldX, fieldY - v.py * heightScale, fieldY},
+            {fieldX, fieldY - v.py * heightScale, liftedGroundY(fieldY, v.py * heightScale)},
             {v.nx, v.ny, v.nz},
             v.groove,
             v.rim,

@@ -10,6 +10,7 @@
 #include <landscape_mesh/landscape_mesh.h>
 
 #include "atlas_tile_types.h"
+#include "render_core/depth_levels.h"
 
 namespace render_core {
 
@@ -310,8 +311,8 @@ void CyclopeanRenderer::render(
     vs.view_size[1] = static_cast<float>(viewHeight);
     vs.camera_offset[0] = camera.offset.x;
     vs.camera_offset[1] = camera.offset.y;
-    vs.z_range[0] = groundCenterY + 100000.0f;
-    vs.z_range[1] = 1.0f / 200000.0f;
+    vs.z_range[0] = groundCenterY + kZFarOffset;
+    vs.z_range[1] = kZScale;
     vs.camera_zoom = camera.zoom;
 
     for (auto& [uuid, group] : groups) {
@@ -415,8 +416,9 @@ void CyclopeanRenderer::rebuildMesh(
             minX, minY, onNodes.size(), result.quads.size());
 
         // Projection matches the cliff pass (DiamondIsometry::nodeToField,
-        // no +halfH on y); z carries the raw ground fieldY (normalized in the
-        // VS via z_range). Quads triangulate as (a-b-c, a-c-d).
+        // no +halfH on y); z carries the ground fieldY plus the height lift
+        // (depth-levels model, see render_core/depth_levels.h; normalized in
+        // the VS via z_range). Quads triangulate as (a-b-c, a-c-d).
         const glm::vec2 cellSz = iso.dims.cellSize();
         const float halfW = cellSz.x * 0.5f;
         const float halfH = cellSz.y * 0.5f;
@@ -428,7 +430,7 @@ void CyclopeanRenderer::rebuildMesh(
             const float fieldX = (mapX - mapZ) * halfW + halfW;
             const float fieldY = (mapX + mapZ) * halfH;
             cache.stream.push_back(CyclopeanVertex{
-                {fieldX, fieldY - v.y * kHeightScalePx, fieldY},
+                {fieldX, fieldY - v.y * kHeightScalePx, liftedGroundY(fieldY, v.y * kHeightScalePx)},
                 {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f}});
         };
         for (const landscape_mesh::MeshQuad& quad : result.quads) {

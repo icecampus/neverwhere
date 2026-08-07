@@ -43,6 +43,7 @@
             "specStrength": 0.15000000596046448,
             "strataStrength": 0.0,
             "texScale": 1.0,
+            "underwaterFade": 0.35,
             "veinThreshold": 2.0
         },
         "thumbnail": "thumbnail.png"

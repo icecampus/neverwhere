@@ -76,6 +76,10 @@ struct CliffShading {
     float bottomBand = 0.35f;
     // Sediment strata banding on the walls (0 = off).
     float strataStrength = 0.0f;
+    // Underwater dissolve: fragments below the water level (world y < 0) fade
+    // out over this many world units (0 = off — plain cliffs/stones stay
+    // fully opaque). One levelHeight dissolves the whole shoreline shelf.
+    float underwaterFade = 0.0f;
 };
 
 // Full parameter set of a cliff3d asset (mirror of BaseData/game_data
@@ -218,7 +222,7 @@ private:
         float params0[4]; // vein threshold, ambient, diffuse, spec strength
         float params1[4]; // spec power, gamma, wrap backlight, tex scale
         float params2[4]; // bottom darken, bottom band, plateau top, use texture
-        float params3[4]; // strata strength, seam top brightness, unused x2
+        float params3[4]; // strata strength, seam top brightness, underwater fade, unused
         float params4[4]; // stone: plane Y (0=off), grass fade, rim shade, top tex mix
         float params5[4]; // seam: rim contact AO, height->world, ground plane Y, AO wall fade
         float params6[4]; // seam: bounce tint rgb, bounce strength

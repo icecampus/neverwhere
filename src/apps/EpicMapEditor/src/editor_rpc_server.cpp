@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "editor_rpc_server.h"
 
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QEventLoop>
@@ -622,26 +623,60 @@ QByteArray EditorRpcServer::_cmdScreenshot(const QJsonObject& args)
     // degrades the semi-transparent landscape tiles (sparse tufts instead
     // of the dense cover the window shows). grabWindow + crop to the item
     // rect gives the true on-screen pixels.
+    //
+    // source="fbo" skips the window grab and forces the item FBO grab: on
+    // macOS without Screen Recording permission grabWindow either returns
+    // null OR — worse — a valid-looking pixmap with the window's own content
+    // privacy-excluded (you get the windows beneath it). There is no API to
+    // tell the two apart, so the caller that knows the environment is
+    // TCC-blocked asks for the FBO path explicitly.
+    const bool forceFbo = args.value("source").toString() == QLatin1String("fbo");
     QWindow* window = item->window();
-    if (!window || !window->screen())
+    if (!forceFbo && (!window || !window->screen()))
         return _error("render_failed", "render item has no window/screen");
 
-    const QPixmap pixmap = window->screen()->grabWindow(window->winId());
-    if (pixmap.isNull())
-        return _error("render_failed", "grabWindow() failed");
-
-    const qreal dpr = pixmap.devicePixelRatio();
-    const QPointF topLeft = item->mapToScene(QPointF(0, 0));
-    const QRectF sceneRect(topLeft, item->size());
-    const QRect crop(
-        static_cast<int>(sceneRect.x() * dpr),
-        static_cast<int>(sceneRect.y() * dpr),
-        static_cast<int>(sceneRect.width() * dpr),
-        static_cast<int>(sceneRect.height() * dpr));
-
-    const QImage image = pixmap.copy(crop).toImage();
+    QImage image;
+    const QPixmap pixmap = forceFbo ? QPixmap() : window->screen()->grabWindow(window->winId());
+    if (!pixmap.isNull()) {
+        const qreal dpr = pixmap.devicePixelRatio();
+        const QPointF topLeft = item->mapToScene(QPointF(0, 0));
+        const QRectF sceneRect(topLeft, item->size());
+        const QRect crop(
+            static_cast<int>(sceneRect.x() * dpr),
+            static_cast<int>(sceneRect.y() * dpr),
+            static_cast<int>(sceneRect.width() * dpr),
+            static_cast<int>(sceneRect.height() * dpr));
+        image = pixmap.copy(crop).toImage();
+    } else {
+        // Item FBO grab: same renderer/z-buffer, only the semi-transparent
+        // tile density differs slightly from the display path. The grab
+        // completes on the next scene-graph frame, and an occluded/minimized
+        // window on macOS stops getting frames at all — so raise the window
+        // and pump update requests while waiting.
+        if (window) {
+            if (window->windowStates() & Qt::WindowMinimized) window->showNormal();
+            window->raise();
+            window->requestActivate();
+        }
+        QSharedPointer<QQuickItemGrabResult> grab = item->grabToImage();
+        if (!grab)
+            return _error("render_failed", "grabWindow() failed and grabToImage() unavailable");
+        QEventLoop loop;
+        bool ready = false;
+        QObject::connect(grab.data(), &QQuickItemGrabResult::ready, &loop,
+            [&ready, &loop] { ready = true; loop.quit(); });
+        QElapsedTimer deadline;
+        deadline.start();
+        while (!ready && deadline.elapsed() < 10000) {
+            if (window) window->requestUpdate();
+            loop.processEvents(QEventLoop::AllEvents, 100);
+        }
+        if (!ready)
+            return _error("render_failed", "grabToImage() timed out");
+        image = grab->image();
+    }
     if (image.isNull())
-        return _error("render_failed", "cropped image is null");
+        return _error("render_failed", "captured image is null");
     if (!image.save(path))
         return _error("io_failed", "could not save image to: " + path);
 

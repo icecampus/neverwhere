@@ -86,11 +86,15 @@ namespace BaseData
         float bottomBand{0.35f};
         // Sediment strata banding on the walls (0 = off).
         float strataStrength{0.0f};
+        // Underwater dissolve: fragments below the water level (world y < 0)
+        // fade out over this many world units (0 = off). One levelHeight
+        // dissolves the whole shoreline shelf.
+        float underwaterFade{0.0f};
 
         NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Cliff3dShadingData,
             lightAzimuth, lightElevation, darkColor, goldColor, grassA, grassB,
             veinThreshold, ambient, diffuse, backLight, specStrength, specPower, gamma,
-            texScale, bottomDarken, bottomBand, strataStrength);
+            texScale, bottomDarken, bottomBand, strataStrength, underwaterFade);
     };
 
     // Cliff3D: the whole cliff-field generator parameter set (mirror of

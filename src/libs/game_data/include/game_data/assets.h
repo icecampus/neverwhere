@@ -58,6 +58,10 @@ struct Cliff3dShadingData {
     float bottomBand = 0.35f;
     // Sediment strata banding on the walls (0 = off).
     float strataStrength = 0.0f;
+    // Underwater dissolve: fragments below the water level (world y < 0) fade
+    // out over this many world units (0 = off). One levelHeight dissolves the
+    // whole shoreline shelf; anything at/above y=0 stays fully opaque.
+    float underwaterFade = 0.0f;
 };
 
 // Cliff3D assets — the whole cliff-field generator parameter set (mirror of
@@ -278,6 +282,7 @@ inline void from_json(const nlohmann::json& j, Cliff3dShadingData& d) {
     if (j.contains("bottomDarken")) j.at("bottomDarken").get_to(d.bottomDarken);
     if (j.contains("bottomBand")) j.at("bottomBand").get_to(d.bottomBand);
     if (j.contains("strataStrength")) j.at("strataStrength").get_to(d.strataStrength);
+    if (j.contains("underwaterFade")) j.at("underwaterFade").get_to(d.underwaterFade);
 }
 
 inline void from_json(const nlohmann::json& j, Cliff3dAssetData& d) {

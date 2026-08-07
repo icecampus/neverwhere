@@ -67,7 +67,8 @@ Rectangle
                 ["shading.backLight", "Back light", 0.0, 0.4, 0.01],
                 ["shading.specStrength", "Spec strength", 0.0, 1.5, 0.01],
                 ["shading.specPower", "Spec power", 4.0, 64.0, 1.0],
-                ["shading.gamma", "Gamma", 0.5, 1.5, 0.01]
+                ["shading.gamma", "Gamma", 0.5, 1.5, 0.01],
+                ["shading.underwaterFade", "Underwater fade", 0.0, 1.0, 0.01]
             ],
             "checks": []
         },

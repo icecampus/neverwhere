@@ -77,6 +77,7 @@ QVariantMap TechAsset::techParams() const
     out["shading.bottomDarken"] = s.bottomDarken;
     out["shading.bottomBand"] = s.bottomBand;
     out["shading.strataStrength"] = s.strataStrength;
+    out["shading.underwaterFade"] = s.underwaterFade;
     return out;
 }
 
@@ -122,4 +123,5 @@ void TechAsset::setTechParam(const QString& name, const QVariant& value)
     else if (name == "shading.bottomDarken") s.bottomDarken = value.toFloat();
     else if (name == "shading.bottomBand") s.bottomBand = value.toFloat();
     else if (name == "shading.strataStrength") s.strataStrength = value.toFloat();
+    else if (name == "shading.underwaterFade") s.underwaterFade = value.toFloat();
 }
