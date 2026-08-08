@@ -1708,11 +1708,12 @@ void AtlasRenderer::render(
     // debounce), a heightScale edit only re-projects the cached mesh.
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
-        if (!layer.brush || (!layer.cliff && !layer.stone && !layer.tech && !layer.techOutline)) {
+        if (!layer.brush || (!layer.cliff && !layer.stone && !layer.tech && !layer.techOutline && !layer.box)) {
             continue;
         }
         if ((layer.cliff && !layer.cliffParams) || (layer.stone && !layer.stoneParams) ||
-            (layer.tech && !layer.techParams) || (layer.techOutline && !layer.techOutlineParams)) {
+            (layer.tech && !layer.techParams) || (layer.techOutline && !layer.techOutlineParams) ||
+            (layer.box && !layer.boxParams)) {
             continue;
         }
         CliffCache& cache = cliffCacheFor(layer.brush);
@@ -1723,25 +1724,30 @@ void AtlasRenderer::render(
             paramsChanged = std::memcmp(&cache.techParams, layer.techParams, sizeof(tech::TechFieldParams)) != 0;
         } else if (layer.techOutline) {
             paramsChanged = std::memcmp(&cache.techOutlineParams, layer.techOutlineParams, sizeof(tech_outline::TechOutlineFieldParams)) != 0;
+        } else if (layer.box) {
+            paramsChanged = std::memcmp(&cache.boxParams, layer.boxParams, sizeof(boxfield::BoxFieldParams)) != 0;
         } else {
             paramsChanged = std::memcmp(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams)) != 0;
         }
         const bool contentChanged = !cache.contentValid ||
             cache.brushVersion != layer.brush->version() ||
             cache.stone != layer.stone || cache.tech != layer.tech ||
-            cache.techOutline != layer.techOutline || paramsChanged;
+            cache.techOutline != layer.techOutline || cache.box != layer.box || paramsChanged;
         const bool scaleChanged = cache.heightScale != layer.cliffHeightScale;
         if (contentChanged || scaleChanged) {
             cache.brushVersion = layer.brush->version();
             cache.stone = layer.stone;
             cache.tech = layer.tech;
             cache.techOutline = layer.techOutline;
+            cache.box = layer.box;
             if (layer.stone) {
                 std::memcpy(&cache.stoneParams, layer.stoneParams, sizeof(stone_gen::StoneFieldParams));
             } else if (layer.tech) {
                 std::memcpy(&cache.techParams, layer.techParams, sizeof(tech::TechFieldParams));
             } else if (layer.techOutline) {
                 std::memcpy(&cache.techOutlineParams, layer.techOutlineParams, sizeof(tech_outline::TechOutlineFieldParams));
+            } else if (layer.box) {
+                std::memcpy(&cache.boxParams, layer.boxParams, sizeof(boxfield::BoxFieldParams));
             } else {
                 std::memcpy(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams));
             }
@@ -1922,6 +1928,16 @@ void AtlasRenderer::rebuildCliffCache(
                 cliff::regularizeSigns(view, samples, &regStats);
                 cache.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
                 cache.stats.voxelCount = view.nx * view.ny * view.nz;
+            } else if (cache.box) {
+                // The minimal teaching sample — one axis-aligned box per
+                // painted cell: BoxField -> generic ScalarFieldView -> nets.
+                boxfield::BoxField field(cache.boxParams, nodes.data(), nodesX, nodesY);
+                cliff::ScalarFieldView view = field.view();
+                std::vector<float> samples;
+                field.sample(samples);
+                cliff::regularizeSigns(view, samples, &regStats);
+                cache.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+                cache.stats.voxelCount = view.nx * view.ny * view.nz;
             } else {
                 cliff::CliffField field(cache.params, nodes.data(), nodesX, nodesY);
                 std::vector<float> samples;
@@ -1937,7 +1953,9 @@ void AtlasRenderer::rebuildCliffCache(
             cache.origin = {minX, minY};
             if (!report.ok()) {
                 spdlog::warn("AtlasRenderer: {} mesh not watertight ({} bad of {} edges, {} saddles left)",
-                    cache.stone ? "stone" : (cache.tech ? "tech" : (cache.techOutline ? "tech outline" : "cliff")),
+                    cache.stone ? "stone"
+                        : (cache.tech ? "tech"
+                            : (cache.techOutline ? "tech outline" : (cache.box ? "box" : "cliff"))),
                     report.badEdges, report.undirectedEdges, regStats.remaining);
             }
         }

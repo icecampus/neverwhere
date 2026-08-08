@@ -15,6 +15,7 @@
 #include <topology_core/diamond_isometry.h>
 
 #include "FlatAtlasGenerator.h"
+#include "BoxField.h"
 #include "LandBrush.h"
 #include "TechOutlineField.h"
 
@@ -433,8 +434,84 @@ bool runTileShapeSmokeTest() {
                 return false;
             }
         }
+
+        // --- Box layer pipeline (boxfield::BoxField — the minimal teaching
+        // sample the "Box 3D" layer renders with): one axis-aligned box per
+        // painted cell. A merged 3x3-cell block plus a detached cluster
+        // touching it at a single point (a pinch: saddle faces for
+        // regularizeSigns to resolve). Watertight at fill = 1 (neighbours
+        // merge) and at fill = 0.6 (gaps between cells).
+        for (const float fill : {1.0f, 0.6f}) {
+            const std::uint8_t boxNodes[8][8] = {
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 1, 1, 0, 0, 0, 0},
+                {0, 0, 1, 1, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 1, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+            };
+            boxfield::BoxFieldParams bp;
+            bp.cellSize = 0.09f; // coarse: smoke speed
+            bp.fill = fill;
+            boxfield::BoxField boxField(bp, &boxNodes[0][0], 8, 8);
+            cliff::ScalarFieldView boxView = boxField.view();
+            std::vector<float> boxSamples;
+            boxField.sample(boxSamples);
+            cliff::RegularizeStats boxReg;
+            cliff::regularizeSigns(boxView, boxSamples, &boxReg);
+            const cliff::Mesh boxMesh = cliff::extractSurfaceNets(boxView, boxSamples, nullptr);
+            if (boxReg.remaining != 0) {
+                spdlog::error("TEST FAIL TileShape: box sign regularization left {} saddles (fill {:.2f})",
+                    boxReg.remaining,
+                    fill);
+                return false;
+            }
+            if (boxMesh.vertices.empty() || boxMesh.indices.empty()) {
+                spdlog::error("TEST FAIL TileShape: box mesh is empty (fill {:.2f})", fill);
+                return false;
+            }
+            const cliff::WatertightReport boxReport = cliff::checkWatertight(boxMesh);
+            if (!boxReport.ok()) {
+                spdlog::error("TEST FAIL TileShape: box mesh not watertight ({} bad of {} edges, fill {:.2f})",
+                    boxReport.badEdges,
+                    boxReport.undirectedEdges,
+                    fill);
+                return false;
+            }
+            float bpyMin = 1e9f;
+            float bpyMax = -1e9f;
+            for (const cliff::MeshVertex& v : boxMesh.vertices) {
+                bpyMin = std::min(bpyMin, v.py);
+                bpyMax = std::max(bpyMax, v.py);
+            }
+            if (std::fabs(bpyMax - bp.boxHeight) > 2.0f * bp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: box top {:.3f}, expected ~{:.3f} (fill {:.2f})",
+                    bpyMax,
+                    bp.boxHeight,
+                    fill);
+                return false;
+            }
+            if (std::fabs(bpyMin) > 2.0f * bp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: box bottom {:.3f}, expected ~0 (fill {:.2f})",
+                    bpyMin,
+                    fill);
+                return false;
+            }
+            if (fill < 1.0f) {
+                // The gap between cells is real: outside between two boxes.
+                const float gapF = boxField.eval(glm::vec3(1.5f, 0.5f * bp.boxHeight, 2.0f));
+                if (gapF <= 0.0f) {
+                    spdlog::error("TEST FAIL TileShape: box fill {:.2f} still merged at the gap (f {:.4f})",
+                        fill,
+                        gapF);
+                    return false;
+                }
+            }
+        }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech field pipelines");
+    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech/box field pipelines");
     return true;
 }
