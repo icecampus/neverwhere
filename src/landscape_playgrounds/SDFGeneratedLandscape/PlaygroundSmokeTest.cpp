@@ -671,6 +671,53 @@ bool runTileShapeSmokeTest() {
                     outW);
                 return false;
             }
+
+            // --- Spread: the XZ term is a true signed distance to the
+            // contour, so subtracting spreadDistance offsets the iso
+            // outward by that many cells. The wall leaves the edge midpoint
+            // (3.5) for the off-node line (3.5 + 0.5), convex corners
+            // (the bilinear contour cuts the block's corner through
+            // ~(3.29, 3.29) on the diagonal) become rounded arcs.
+            {
+                maskfield::MaskFieldParams mps;
+                mps.cellSize = 0.09f; // coarse: smoke speed
+                mps.spreadDistance = 0.5f;
+                maskfield::MaskField spreadField(mps, &maskNodes[0][0], 8, 8);
+                const float halfY = 0.5f * mps.height;
+                // Straight edge of the block: wall at the off-node line.
+                const float inS = spreadField.eval(glm::vec3(3.9f, halfY, 2.2f));
+                const float outS = spreadField.eval(glm::vec3(4.1f, halfY, 2.2f));
+                // Diagonal off the block's convex corner: ~0.36 vs ~0.72
+                // from the contour, spread 0.5 sits between them.
+                const float inC = spreadField.eval(glm::vec3(3.55f, halfY, 3.55f));
+                const float outC = spreadField.eval(glm::vec3(3.8f, halfY, 3.8f));
+                if (inS >= 0.0f || outS <= 0.0f || inC >= 0.0f || outC <= 0.0f) {
+                    spdlog::error(
+                        "TEST FAIL TileShape: mask spread wrong (edge in {:.4f}/out {:.4f}, corner in {:.4f}/out {:.4f})",
+                        inS,
+                        outS,
+                        inC,
+                        outC);
+                    return false;
+                }
+                // The grown silhouette must still close inside the field:
+                // same extraction, same watertight contract.
+                cliff::ScalarFieldView spreadView = spreadField.view();
+                std::vector<float> spreadSamples;
+                spreadField.sample(spreadSamples);
+                cliff::RegularizeStats spreadReg;
+                cliff::regularizeSigns(spreadView, spreadSamples, &spreadReg);
+                const cliff::Mesh spreadMesh = cliff::extractSurfaceNets(spreadView, spreadSamples, nullptr);
+                const cliff::WatertightReport spreadReport = cliff::checkWatertight(spreadMesh);
+                if (spreadReg.remaining != 0 || !spreadReport.ok()) {
+                    spdlog::error(
+                        "TEST FAIL TileShape: mask spread mesh broken ({} saddles left, {} bad of {} edges)",
+                        spreadReg.remaining,
+                        spreadReport.badEdges,
+                        spreadReport.undirectedEdges);
+                    return false;
+                }
+            }
         }
     }
 

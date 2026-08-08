@@ -355,6 +355,7 @@ bool g_demoNode = false;
 // --circle-nodes=x,y;x,y;...   paint these nodes on the circle layer
 // --circle-radius=R            circle radius around a node (default 0.55)
 // --mask-nodes=x,y;x,y;...     paint these nodes on the mask layer
+// --mask-spread=D              grow the mask slab outward by D cells (default 0)
 // --tech-style=S               tech style blend: 0 = ridge, 1 = valley
 // --tech-outline-style=S       tech outline style blend (independent)
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
@@ -374,6 +375,7 @@ std::optional<float> g_cliBoxFill;
 std::vector<glm::ivec2> g_cliCircleNodes;
 std::optional<float> g_cliCircleRadius;
 std::vector<glm::ivec2> g_cliMaskNodes;
+std::optional<float> g_cliMaskSpread;
 std::optional<float> g_cliTechStyle;
 std::optional<float> g_cliTechOutlineStyle;
 std::vector<glm::ivec2> g_cliTexNodes;
@@ -925,6 +927,7 @@ void drawImGui(int w, int h) {
         if (ImGui::CollapsingHeader("Mask field", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
             ImGui::SliderFloat("Height (world)", &g_maskParams.height, 0.05f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Spread", &g_maskParams.spreadDistance, 0.0f, 2.0f, "%.2f cells");
             ImGui::SliderFloat("Cell size", &g_maskParams.cellSize, 0.04f, 0.12f, "%.3f");
             ImGui::SliderInt("Blur passes", &g_maskParams.blurPasses, 0, 3);
         }
@@ -1370,6 +1373,9 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--mask-nodes=", 0) == 0) {
             g_cliMaskNodes = parseNodesArg(arg.substr(13));
         }
+        if (arg.rfind("--mask-spread=", 0) == 0) {
+            g_cliMaskSpread = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
         if (arg.rfind("--tex-nodes=", 0) == 0) {
             g_cliTexNodes = parseNodesArg(arg.substr(12));
         }
@@ -1397,6 +1403,9 @@ int main(int argc, char* argv[]) {
     }
     if (g_cliCircleRadius) {
         g_circleParams.nodeRadius = *g_cliCircleRadius;
+    }
+    if (g_cliMaskSpread) {
+        g_maskParams.spreadDistance = *g_cliMaskSpread;
     }
 
     if (smoke) {

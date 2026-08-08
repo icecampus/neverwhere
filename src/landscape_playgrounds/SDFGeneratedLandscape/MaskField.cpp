@@ -37,29 +37,169 @@ MaskField::MaskField(
     m_nz = static_cast<int>(std::ceil((regionZ + 2.0f * pad) / cell));
     m_ny = static_cast<int>(std::ceil((params.height + 2.0f * padY) / cell));
     m_origin = glm::vec3(-pad, -padY, -pad);
+
+    buildDistanceField();
 }
 
-float MaskField::fillAt(int nx, int nz) const {
+float MaskField::nodeFill(int nx, int nz) const {
     const bool on = (nx >= 0 && nx < m_nodesX && nz >= 0 && nz < m_nodesZ) &&
         m_nodes[static_cast<size_t>(nz) * m_nodesX + nx] != 0;
     return on ? 1.0f : 0.0f;
 }
 
-float MaskField::eval(const glm::vec3& p) const {
-    // 2D footprint: bilinear node fill over the point's cell, mask = the
-    // fill >= 0.5 iso (the same contour the Texture 2D layer renders).
-    const int ix = static_cast<int>(std::floor(p.x));
-    const int iz = static_cast<int>(std::floor(p.z));
-    const float fx = p.x - static_cast<float>(ix);
-    const float fz = p.z - static_cast<float>(iz);
-    const float f00 = fillAt(ix, iz);
-    const float f10 = fillAt(ix + 1, iz);
-    const float f01 = fillAt(ix, iz + 1);
-    const float f11 = fillAt(ix + 1, iz + 1);
-    const float fill =
-        f00 * (1.0f - fx) * (1.0f - fz) + f10 * fx * (1.0f - fz) +
+float MaskField::fillAt(float x, float z) const {
+    const int ix = static_cast<int>(std::floor(x));
+    const int iz = static_cast<int>(std::floor(z));
+    const float fx = x - static_cast<float>(ix);
+    const float fz = z - static_cast<float>(iz);
+    const float f00 = nodeFill(ix, iz);
+    const float f10 = nodeFill(ix + 1, iz);
+    const float f01 = nodeFill(ix, iz + 1);
+    const float f11 = nodeFill(ix + 1, iz + 1);
+    return f00 * (1.0f - fx) * (1.0f - fz) + f10 * fx * (1.0f - fz) +
         f01 * (1.0f - fx) * fz + f11 * fx * fz;
-    const float d = 0.5f - fill; // negative inside the mask, zero on the contour
+}
+
+void MaskField::buildDistanceField() {
+    m_dist.clear();
+    m_distW = 0;
+    m_distH = 0;
+    if (m_nodesX < 2 || m_nodesZ < 2) {
+        return;
+    }
+    // Raster signed distance to the bilinear fill = 0.5 contour, R texels
+    // per cell: seeded with the fractional zero crossings of fill - 0.5 on
+    // texel edges (the fill is linear along an axis-aligned segment, so the
+    // crossings are exact), then propagated with a two-pass chamfer
+    // (1, sqrt2) — the same trick as the contact-AO field in scene_stitch.
+    // The sign stays per texel: inside the mask (fill >= 0.5) is negative.
+    const int R = kDistTexelsPerCell;
+    const float h = 1.0f / static_cast<float>(R); // texel size in cell units
+    const int w = (m_nodesX - 1) * R + 1;
+    const int hgt = (m_nodesZ - 1) * R + 1;
+    const float kInf = 1e9f;
+    std::vector<float> v(static_cast<size_t>(w) * hgt);
+    std::vector<float> d(static_cast<size_t>(w) * hgt, kInf);
+    for (int j = 0; j < hgt; ++j) {
+        for (int i = 0; i < w; ++i) {
+            v[static_cast<size_t>(j) * w + i] =
+                fillAt(static_cast<float>(i) * h, static_cast<float>(j) * h) - 0.5f;
+        }
+    }
+    // Seed: texels sitting on the contour, and texel edges whose endpoints'
+    // values straddle zero — both endpoints get their fractional distance to
+    // the crossing (in texel units).
+    bool anySeed = false;
+    auto seedEdge = [&v, &d, &anySeed, w](int i0, int j0, int i1, int j1) {
+        const float v0 = v[static_cast<size_t>(j0) * w + i0];
+        const float v1 = v[static_cast<size_t>(j1) * w + i1];
+        if (v0 == v1 || ((v0 < 0.0f) == (v1 < 0.0f) && v0 != 0.0f && v1 != 0.0f)) {
+            return;
+        }
+        const float t = v0 / (v0 - v1); // crossing at t of the way from 0 to 1
+        float& d0 = d[static_cast<size_t>(j0) * w + i0];
+        float& d1 = d[static_cast<size_t>(j1) * w + i1];
+        d0 = std::min(d0, t);
+        d1 = std::min(d1, 1.0f - t);
+        anySeed = true;
+    };
+    for (int j = 0; j < hgt; ++j) {
+        for (int i = 0; i < w; ++i) {
+            if (v[static_cast<size_t>(j) * w + i] == 0.0f) {
+                d[static_cast<size_t>(j) * w + i] = 0.0f;
+                anySeed = true;
+            }
+            if (i + 1 < w) {
+                seedEdge(i, j, i + 1, j);
+            }
+            if (j + 1 < hgt) {
+                seedEdge(i, j, i, j + 1);
+            }
+        }
+    }
+    if (!anySeed) {
+        // No contour at all (nothing painted): keep the field a constant
+        // positive, exactly like before the distance field.
+        m_dist.assign(static_cast<size_t>(w) * hgt, m_params.spreadDistance + 0.5f);
+        m_distW = w;
+        m_distH = hgt;
+        return;
+    }
+    // Two-pass chamfer (1, sqrt2) over the magnitude, in texel units.
+    const float kDiag = 1.41421356237f;
+    for (int j = 0; j < hgt; ++j) {
+        for (int i = 0; i < w; ++i) {
+            float& cur = d[static_cast<size_t>(j) * w + i];
+            if (i > 0) {
+                cur = std::min(cur, d[static_cast<size_t>(j) * w + i - 1] + 1.0f);
+            }
+            if (j > 0) {
+                cur = std::min(cur, d[static_cast<size_t>(j - 1) * w + i] + 1.0f);
+                if (i > 0) {
+                    cur = std::min(cur, d[static_cast<size_t>(j - 1) * w + i - 1] + kDiag);
+                }
+                if (i + 1 < w) {
+                    cur = std::min(cur, d[static_cast<size_t>(j - 1) * w + i + 1] + kDiag);
+                }
+            }
+        }
+    }
+    for (int j = hgt - 1; j >= 0; --j) {
+        for (int i = w - 1; i >= 0; --i) {
+            float& cur = d[static_cast<size_t>(j) * w + i];
+            if (i + 1 < w) {
+                cur = std::min(cur, d[static_cast<size_t>(j) * w + i + 1] + 1.0f);
+            }
+            if (j + 1 < hgt) {
+                cur = std::min(cur, d[static_cast<size_t>(j + 1) * w + i] + 1.0f);
+                if (i + 1 < w) {
+                    cur = std::min(cur, d[static_cast<size_t>(j + 1) * w + i + 1] + kDiag);
+                }
+                if (i > 0) {
+                    cur = std::min(cur, d[static_cast<size_t>(j + 1) * w + i - 1] + kDiag);
+                }
+            }
+        }
+    }
+    m_dist.resize(static_cast<size_t>(w) * hgt);
+    for (int j = 0; j < hgt; ++j) {
+        for (int i = 0; i < w; ++i) {
+            const size_t idx = static_cast<size_t>(j) * w + i;
+            m_dist[idx] = (v[idx] >= 0.0f ? -1.0f : 1.0f) * d[idx] * h;
+        }
+    }
+    m_distW = w;
+    m_distH = hgt;
+}
+
+float MaskField::distanceAt(float x, float z) const {
+    if (m_dist.empty()) {
+        // No grid at all: outside, like the old constant +0.5.
+        return m_params.spreadDistance + 0.5f;
+    }
+    const float R = static_cast<float>(kDistTexelsPerCell);
+    const float gx = std::clamp(x * R, 0.0f, static_cast<float>(m_distW - 1));
+    const float gz = std::clamp(z * R, 0.0f, static_cast<float>(m_distH - 1));
+    const int ix = static_cast<int>(gx);
+    const int iz = static_cast<int>(gz);
+    const int ix1 = std::min(ix + 1, m_distW - 1);
+    const int iz1 = std::min(iz + 1, m_distH - 1);
+    const float fx = gx - static_cast<float>(ix);
+    const float fz = gz - static_cast<float>(iz);
+    const float d00 = m_dist[static_cast<size_t>(iz) * m_distW + ix];
+    const float d10 = m_dist[static_cast<size_t>(iz) * m_distW + ix1];
+    const float d01 = m_dist[static_cast<size_t>(iz1) * m_distW + ix];
+    const float d11 = m_dist[static_cast<size_t>(iz1) * m_distW + ix1];
+    return d00 * (1.0f - fx) * (1.0f - fz) + d10 * fx * (1.0f - fz) +
+        d01 * (1.0f - fx) * fz + d11 * fx * fz;
+}
+
+float MaskField::eval(const glm::vec3& p) const {
+    // XZ term: signed distance to the fill = 0.5 contour (rasterized in the
+    // constructor, bilinear here), pushed outward by spreadDistance. At
+    // spread 0 the wall stands on the same contour the Texture 2D layer
+    // renders (it cuts an on->off edge at its midpoint).
+    const float d = distanceAt(p.x, p.z) - m_params.spreadDistance;
     // Slab 0..height: max of the two terms is the exact CSG intersection —
     // the wall stands on the contour, the top is flat at y = height.
     const float hy = 0.5f * m_params.height;

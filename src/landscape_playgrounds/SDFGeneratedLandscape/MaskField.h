@@ -3,20 +3,31 @@
 // fill (1 at an on-node, 0 at an off-node) interpolated across each cell,
 // mask = fill >= 0.5 — and extrudes that footprint into a thin slab:
 //
-//   eval(p) = max(0.5 - fill(x,z), |y - hy| - hy)
+//   eval(p) = max(sd(x,z) - spreadDistance, |y - hy| - hy)
 //
-//   fill(x,z) is bilinear over the four corner nodes of the point's cell, so
-//   the 0.5 iso line is the same contour the Texture 2D mask renders (edges
-//   cross at their midpoints, half-painted cells become wedges, a lone node
-//   becomes a small blob) — minus the shader-only fbm wobble and alpha fade,
-//   which have no geometric counterpart: the contour becomes a crisp
-//   vertical wall, the top a flat plate. max() is the exact CSG intersection
-//   of the footprint prism with the 0..height slab.
+//   sd(x,z) is the signed distance to the fill = 0.5 iso contour (negative
+//   inside), rasterized at construction time at kDistTexelsPerCell texels
+//   per cell: seeded with the fractional zero crossings of fill - 0.5 on
+//   texel edges (the fill is linear along an axis-aligned segment, so the
+//   crossings are exact), then propagated with a two-pass chamfer (1, sqrt2)
+//   — the same trick as the contact-AO field in scene_stitch. eval() just
+//   bilinearly samples that raster, so it stays O(1).
+//
+//   spreadDistance >= 0 offsets the iso outward by that many cells: the
+//   silhouette grows past the painted nodes and convex corners become
+//   rounded arcs (the defining property of a true distance field). At
+//   spreadDistance = 0 the wall stands on the same contour the Texture 2D
+//   mask renders (edges cross at their midpoints, half-painted cells become
+//   wedges, a lone node becomes a small blob) — minus the shader-only fbm
+//   wobble and alpha fade, which have no geometric counterpart. max() is the
+//   exact CSG intersection of the footprint prism with the 0..height slab.
 //
 // Unlike BoxField/CircleField there is no neighbourhood loop at all: the
-// mask is a single continuous function (C0 across shared edges), every point
-// belongs to exactly one cell, and outside the node grid fill = 0 keeps the
-// field positive — eval() is O(1).
+// distance raster is built once in the constructor and every eval() is a
+// single clamped bilinear lookup. Far outside the mask the field grows with
+// distance, so the sampled volume border stays positive as long as the
+// caller's zero border ring is wider than spreadDistance (the renderer
+// derives the ring from it automatically).
 //
 // Same contract as boxfield::BoxField / circlefield::CircleField: node grid
 // + params -> sampled field, no Qt/GPU. Border nodes must be 0.
@@ -32,12 +43,16 @@
 namespace maskfield {
 
 struct MaskFieldParams {
-    float cellSize = 0.06f; // field voxel size in world units
-    float padding = 0.5f;   // field margin outside the region (slack for blur;
-                            // the field stays positive on the border anyway)
-    float height = 0.2f;    // slab height in world units (bottom sits at y = 0)
-    int blurPasses = 0;     // sampled-field blur passes: 0 = crisp walls,
-                            // > 0 rounds the top lip
+    float cellSize = 0.06f;      // field voxel size in world units
+    float padding = 0.5f;        // field margin outside the region (slack for blur;
+                                 // the field stays positive on the border anyway)
+    float height = 0.2f;         // slab height in world units (bottom sits at y = 0)
+    float spreadDistance = 0.0f; // grow the silhouette outward by this many cells:
+                                 // the iso leaves the fill = 0.5 contour and offsets
+                                 // past the painted nodes (convex corners round off).
+                                 // Must stay below the caller's zero border ring.
+    int blurPasses = 0;          // sampled-field blur passes: 0 = crisp walls,
+                                 // > 0 rounds the top lip
 };
 
 class MaskField {
@@ -53,8 +68,10 @@ public:
         int nodesY);
 
     // Footprint prism intersected with the 0..height slab: negative inside
-    // the mask below the top, positive outside. Outside the node grid the
-    // fill is 0, so the field is a constant +0.5 out there.
+    // the mask below the top, positive outside; the wall offsets outward by
+    // spreadDistance. Outside the distance raster the lookup clamps to the
+    // raster edge, whose distance already exceeds the spread (given the
+    // zero-ring contract), so the field stays positive out there.
     float eval(const glm::vec3& p) const;
 
     // Samples eval() on the regular grid; outValues gets
@@ -74,8 +91,19 @@ public:
     int sizeZ() const { return m_nz; }
 
 private:
-    // Node fill at (nx, nz); out-of-range reads as 0 (open space).
-    float fillAt(int nx, int nz) const;
+    // Texels per cell of the distance raster (same resolution as the
+    // contact-AO field in scene_stitch).
+    static constexpr int kDistTexelsPerCell = 8;
+
+    // Raw node value at (nx, nz); out-of-range reads as 0 (open space).
+    float nodeFill(int nx, int nz) const;
+    // Bilinear node fill at the point (x, z) in node (cell) coordinates.
+    float fillAt(float x, float z) const;
+    // Builds the raster signed distance to the fill = 0.5 contour.
+    void buildDistanceField();
+    // Clamped bilinear sample of the distance raster at (x, z) in node
+    // coordinates; negative inside the mask.
+    float distanceAt(float x, float z) const;
 
     MaskFieldParams m_params;
     std::vector<std::uint8_t> m_nodes; // binary fill per map node
@@ -85,6 +113,12 @@ private:
     int m_nx = 0;
     int m_ny = 0;
     int m_nz = 0;
+    // Signed distance to the fill = 0.5 contour in node (cell) units,
+    // kDistTexelsPerCell texels per cell; texel (i, j) sits at node
+    // coordinate (i, j) / kDistTexelsPerCell. Empty when there is no grid.
+    std::vector<float> m_dist;
+    int m_distW = 0;
+    int m_distH = 0;
 };
 
 } // namespace maskfield
