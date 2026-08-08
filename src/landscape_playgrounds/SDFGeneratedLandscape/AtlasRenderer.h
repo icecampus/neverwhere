@@ -31,6 +31,7 @@
 #include "LandBrush.h"
 #include "BoxField.h"
 #include "CircleField.h"
+#include "MaskField.h"
 #include "TechOutlineField.h"
 
 enum class AtlasKind : int {
@@ -67,9 +68,10 @@ struct CliffVertex {
 // voronoi stones), tech (TechnicalGrass ridge/valley heightfield), tech
 // outline (the same with the shoreline ring, on a playground-local forked
 // field class — fully independent from the plain tech layer), box (the
-// minimal teaching sample: one axis-aligned box per painted cell) or circle
+// minimal teaching sample: one axis-aligned box per painted cell), circle
 // (the second teaching sample: a cylinder per painted node plus a full
-// parallelepiped per fully-painted cell).
+// parallelepiped per fully-painted cell) or mask (the third one: the
+// Texture 2D mask silhouette extruded into a thin slab).
 struct PaintLayerView {
     const LandBrush* brush = nullptr;
     AtlasKind atlas = AtlasKind::Grass;
@@ -86,6 +88,8 @@ struct PaintLayerView {
     const boxfield::BoxFieldParams* boxParams = nullptr;      // used when box == true
     bool circle = false;
     const circlefield::CircleFieldParams* circleParams = nullptr; // used when circle == true
+    bool mask = false;
+    const maskfield::MaskFieldParams* maskParams = nullptr;       // used when mask == true
     const CliffFsParams* shadingOverride = nullptr;           // per-layer palette (stone/tech)
     // Flat tiles only: draw the layer with a tiling texture instead of the
     // atlas color. The texture is sampled continuously in world (field)
@@ -217,8 +221,8 @@ private:
     // Cached scalar-field derivative of a brush: the extracted surface-nets
     // mesh plus the projected vertex stream, rebuilt only when the brush
     // version or the field params change (debounced) — the full rebuild
-    // costs seconds. Holds cliff, stone, tech, tech-outline, box or circle
-    // params, per the layer kind.
+    // costs seconds. Holds cliff, stone, tech, tech-outline, box, circle or
+    // mask params, per the layer kind.
     struct CliffCache {
         const LandBrush* brush = nullptr;
         std::uint64_t brushVersion = 0;
@@ -227,12 +231,14 @@ private:
         bool techOutline = false;
         bool box = false;
         bool circle = false;
+        bool mask = false;
         cliff::FieldParams params{};
         stone_gen::StoneFieldParams stoneParams{};
         tech::TechFieldParams techParams{};
         tech_outline::TechOutlineFieldParams techOutlineParams{};
         boxfield::BoxFieldParams boxParams{};
         circlefield::CircleFieldParams circleParams{};
+        maskfield::MaskFieldParams maskParams{};
         float heightScale = 0.0f;
         bool contentValid = false;
         double lastEditSec = 0.0;

@@ -19,6 +19,7 @@
 #include "AtlasRenderer.h"
 #include "BoxField.h"
 #include "CircleField.h"
+#include "MaskField.h"
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
 #include "PlaygroundScreenshot.h"
@@ -121,7 +122,9 @@ glm::vec2 canvasSize() {
 // params, height scales and palettes. Box 3D is the minimal teaching sample:
 // one axis-aligned box per painted cell (boxfield::BoxField). Circle 3D is
 // the second teaching sample: a cylinder per painted node plus a full
-// parallelepiped per fully-painted cell (circlefield::CircleField).
+// parallelepiped per fully-painted cell (circlefield::CircleField). Mask 3D
+// extrudes the Texture 2D mask silhouette (interpolated node fill, iso 0.5)
+// into a thin slab (maskfield::MaskField).
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
@@ -131,30 +134,33 @@ struct PaintLayer {
     bool techOutline;
     bool box;
     bool circle;
+    bool mask;
     bool textured;
     const char* name;
 };
 
-constexpr int kLayerCount = 10;
+constexpr int kLayerCount = 11;
 constexpr int kYellowLayerIndex = 1;
 constexpr int kGreenLayerIndex = 2;
 constexpr int kTechLayerIndex = 5;
 constexpr int kTechOutlineLayerIndex = 6;
 constexpr int kBoxLayerIndex = 7;
 constexpr int kCircleLayerIndex = 8;
-constexpr int kTexLayerIndex = 9;
+constexpr int kMaskLayerIndex = 9;
+constexpr int kTexLayerIndex = 10;
 
 PaintLayer g_layers[kLayerCount] = {
-    {{}, AtlasKind::Grass, false, false, false, false, false, false, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, false, false, false, false, false, false, "Yellow 2D"},
-    {{}, AtlasKind::FlatGreen, false, false, false, false, false, false, false, "Green 2D"},
-    {{}, AtlasKind::Flat, true, false, false, false, false, false, false, "Cliff 3D"},
-    {{}, AtlasKind::Flat, false, true, false, false, false, false, false, "Stone 3D"},
-    {{}, AtlasKind::Flat, false, false, true, false, false, false, false, "Tech 3D"},
-    {{}, AtlasKind::Flat, false, false, false, true, false, false, false, "Tech 3D Outline"},
-    {{}, AtlasKind::Flat, false, false, false, false, true, false, false, "Box 3D"},
-    {{}, AtlasKind::Flat, false, false, false, false, false, true, false, "Circle 3D"},
-    {{}, AtlasKind::Flat, false, false, false, false, false, false, true, "Texture 2D"},
+    {{}, AtlasKind::Grass, false, false, false, false, false, false, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, false, false, false, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::FlatGreen, false, false, false, false, false, false, false, false, "Green 2D"},
+    {{}, AtlasKind::Flat, true, false, false, false, false, false, false, false, "Cliff 3D"},
+    {{}, AtlasKind::Flat, false, true, false, false, false, false, false, false, "Stone 3D"},
+    {{}, AtlasKind::Flat, false, false, true, false, false, false, false, false, "Tech 3D"},
+    {{}, AtlasKind::Flat, false, false, false, true, false, false, false, false, "Tech 3D Outline"},
+    {{}, AtlasKind::Flat, false, false, false, false, true, false, false, false, "Box 3D"},
+    {{}, AtlasKind::Flat, false, false, false, false, false, true, false, false, "Circle 3D"},
+    {{}, AtlasKind::Flat, false, false, false, false, false, false, true, false, "Mask 3D"},
+    {{}, AtlasKind::Flat, false, false, false, false, false, false, false, true, "Texture 2D"},
 };
 int g_activeLayer = 0;
 // Texture 2D layer: tiling textures found in resources/textures (renderer
@@ -192,6 +198,9 @@ boxfield::BoxFieldParams g_boxParams;
 // cylinder per painted node plus a full parallelepiped per fully-painted
 // cell, same debounce mechanics.
 circlefield::CircleFieldParams g_circleParams;
+// Mask layer: the third teaching sample (maskfield::MaskField) — the
+// Texture 2D mask silhouette extruded into a thin slab, same debounce.
+maskfield::MaskFieldParams g_maskParams;
 // Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
 // no mesh rebuild).
 float g_cliffHeightScale = 96.0f;
@@ -200,6 +209,7 @@ float g_techHeightScale = 96.0f;
 float g_techOutlineHeightScale = 96.0f;
 float g_boxHeightScale = 96.0f;
 float g_circleHeightScale = 96.0f;
+float g_maskHeightScale = 96.0f;
 // Stone rim shading: depth below the top plane over which the grass fades
 // into the wall palette (uniforms only, applies instantly).
 float g_stoneGrassFade = 0.12f;
@@ -344,6 +354,7 @@ bool g_demoNode = false;
 // --box-fill=F                 box fill fraction of a cell (1 = neighbours merge)
 // --circle-nodes=x,y;x,y;...   paint these nodes on the circle layer
 // --circle-radius=R            circle radius around a node (default 0.55)
+// --mask-nodes=x,y;x,y;...     paint these nodes on the mask layer
 // --tech-style=S               tech style blend: 0 = ridge, 1 = valley
 // --tech-outline-style=S       tech outline style blend (independent)
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
@@ -362,6 +373,7 @@ std::vector<glm::ivec2> g_cliBoxNodes;
 std::optional<float> g_cliBoxFill;
 std::vector<glm::ivec2> g_cliCircleNodes;
 std::optional<float> g_cliCircleRadius;
+std::vector<glm::ivec2> g_cliMaskNodes;
 std::optional<float> g_cliTechStyle;
 std::optional<float> g_cliTechOutlineStyle;
 std::vector<glm::ivec2> g_cliTexNodes;
@@ -449,6 +461,15 @@ void paintDemoPattern() {
         }
     }
     g_layers[kCircleLayerIndex].brush.setNode({22, 11}, true);
+    // Mask 3D: an L-shaped node stroke plus a detached node — the slab
+    // follows the interpolated fill contour (diagonal walls on the
+    // half-painted cells, a small blob around the lone node).
+    for (int y = 3; y <= 5; ++y) {
+        g_layers[kMaskLayerIndex].brush.setNode({18, y}, true);
+        g_layers[kMaskLayerIndex].brush.setNode({19, y}, true);
+    }
+    g_layers[kMaskLayerIndex].brush.setNode({20, 5}, true);
+    g_layers[kMaskLayerIndex].brush.setNode({22, 4}, true);
     for (int y = 15; y <= 18; ++y) {
         for (int x = 6; x <= 9; ++x) {
             g_layers[0].brush.setNode({x, y}, true);
@@ -619,6 +640,9 @@ void init() {
     for (const glm::ivec2& node : g_cliCircleNodes) {
         g_layers[kCircleLayerIndex].brush.setNode(node, true);
     }
+    for (const glm::ivec2& node : g_cliMaskNodes) {
+        g_layers[kMaskLayerIndex].brush.setNode(node, true);
+    }
     for (const glm::ivec2& node : g_cliTexNodes) {
         g_layers[kTexLayerIndex].brush.setNode(node, true, texLayerTagFor(g_texChoice));
     }
@@ -632,20 +656,23 @@ void init() {
         g_camera.offset.y = canvas.y * 0.5f - nodePos.y * g_camera.zoom;
     }
     if (g_cliZoom || g_cliCenter || !g_cliCliffNodes.empty() || !g_cliTechNodes.empty() ||
-        !g_cliTechOutlineNodes.empty() || !g_cliBoxNodes.empty() || !g_cliCircleNodes.empty()) {
+        !g_cliTechOutlineNodes.empty() || !g_cliBoxNodes.empty() || !g_cliCircleNodes.empty() ||
+        !g_cliMaskNodes.empty()) {
         // Deterministic framing for screenshot comparisons.
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(glm::ivec2(*g_cliCenter));
         } else if (!g_cliCliffNodes.empty() || !g_cliTechNodes.empty() || !g_cliTechOutlineNodes.empty() ||
-            !g_cliBoxNodes.empty() || !g_cliCircleNodes.empty()) {
+            !g_cliBoxNodes.empty() || !g_cliCircleNodes.empty() || !g_cliMaskNodes.empty()) {
             const std::vector<glm::ivec2>& nodes = !g_cliCliffNodes.empty()
                 ? g_cliCliffNodes
                 : (!g_cliTechNodes.empty()
                     ? g_cliTechNodes
                     : (!g_cliTechOutlineNodes.empty()
                         ? g_cliTechOutlineNodes
-                        : (!g_cliBoxNodes.empty() ? g_cliBoxNodes : g_cliCircleNodes)));
+                        : (!g_cliBoxNodes.empty()
+                            ? g_cliBoxNodes
+                            : (!g_cliCircleNodes.empty() ? g_cliCircleNodes : g_cliMaskNodes))));
             glm::vec2 acc(0.0f);
             for (const glm::ivec2& node : nodes) {
                 acc += g_iso.nodeToField(node);
@@ -890,6 +917,25 @@ void drawImGui(int w, int h) {
             ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
         }
     }
+    if (g_layers[g_activeLayer].mask) {
+        // The Texture 2D mask silhouette (interpolated node fill, iso 0.5)
+        // extruded into a thin slab (maskfield::MaskField); edits are
+        // debounced (0.3 s) into a full field rebuild, same as the others.
+        ImGui::SliderFloat("Mask height", &g_maskHeightScale, 4.0f, 128.0f, "%.0f px");
+        if (ImGui::CollapsingHeader("Mask field", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
+            ImGui::SliderFloat("Height (world)", &g_maskParams.height, 0.05f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Cell size", &g_maskParams.cellSize, 0.04f, 0.12f, "%.3f");
+            ImGui::SliderInt("Blur passes", &g_maskParams.blurPasses, 0, 3);
+        }
+        const CliffStats& st = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
+        ImGui::Text("Mask mesh: %d verts, %d tris", st.vertexCount, st.triangleCount);
+        ImGui::Text("Watertight: %s", st.watertight ? "yes" : "NO");
+        ImGui::Text("Rebuild: %.0f ms (%d voxels)", st.rebuildMs, st.voxelCount);
+        if (st.pending) {
+            ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
+        }
+    }
     ImGui::Separator();
     ImGui::Text("Frame: %d  dt: %.2f ms", g_state.frame_index, 1000.0f * g_state.dt);
     ImGui::Text("View: %dx%d", w, h);
@@ -1027,6 +1073,8 @@ void frame() {
         views[i].boxParams = &g_boxParams;
         views[i].circle = g_layers[i].circle;
         views[i].circleParams = &g_circleParams;
+        views[i].mask = g_layers[i].mask;
+        views[i].maskParams = &g_maskParams;
         views[i].cliffHeightScale = g_layers[i].stone
             ? g_stoneHeightScale
             : (g_layers[i].tech
@@ -1035,7 +1083,9 @@ void frame() {
                     ? g_techOutlineHeightScale
                     : (g_layers[i].box
                         ? g_boxHeightScale
-                        : (g_layers[i].circle ? g_circleHeightScale : g_cliffHeightScale))));
+                        : (g_layers[i].circle
+                            ? g_circleHeightScale
+                            : (g_layers[i].mask ? g_maskHeightScale : g_cliffHeightScale)))));
         if (g_layers[i].textured) {
             // Multi-texture layer: diamond-fan cells whose corner nodes carry
             // texture weights (LandBrush::cellTextureBlend); the FS blends
@@ -1154,7 +1204,7 @@ void frame() {
     // stretches the wait to minutes while the debounce has long fired.
     bool cachesSettled = true;
     for (const PaintLayer& layer : g_layers) {
-        if ((layer.cliff || layer.stone || layer.tech || layer.techOutline || layer.box || layer.circle) &&
+        if ((layer.cliff || layer.stone || layer.tech || layer.techOutline || layer.box || layer.circle || layer.mask) &&
             g_renderer.cliffStatsFor(&layer.brush).pending) {
             cachesSettled = false;
             break;
@@ -1316,6 +1366,9 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--circle-radius=", 0) == 0) {
             g_cliCircleRadius = static_cast<float>(std::atof(arg.substr(16).c_str()));
+        }
+        if (arg.rfind("--mask-nodes=", 0) == 0) {
+            g_cliMaskNodes = parseNodesArg(arg.substr(13));
         }
         if (arg.rfind("--tex-nodes=", 0) == 0) {
             g_cliTexNodes = parseNodesArg(arg.substr(12));

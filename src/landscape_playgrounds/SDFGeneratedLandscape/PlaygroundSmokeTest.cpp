@@ -17,6 +17,7 @@
 #include "FlatAtlasGenerator.h"
 #include "BoxField.h"
 #include "CircleField.h"
+#include "MaskField.h"
 #include "LandBrush.h"
 #include "TechOutlineField.h"
 
@@ -589,8 +590,90 @@ bool runTileShapeSmokeTest() {
                 return false;
             }
         }
+
+        // --- Mask layer pipeline (maskfield::MaskField — the third teaching
+        // sample the "Mask 3D" layer renders with): the Texture 2D mask
+        // silhouette (bilinear node fill, iso 0.5) extruded into a thin
+        // slab. A 2x2 node block plus a detached node (a small blob).
+        {
+            const std::uint8_t maskNodes[8][8] = {
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 1, 1, 0, 0, 0, 0},
+                {0, 0, 1, 1, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 1, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+            };
+            maskfield::MaskFieldParams mp;
+            mp.cellSize = 0.09f; // coarse: smoke speed
+            maskfield::MaskField maskField(mp, &maskNodes[0][0], 8, 8);
+            cliff::ScalarFieldView maskView = maskField.view();
+            std::vector<float> maskSamples;
+            maskField.sample(maskSamples);
+            cliff::RegularizeStats maskReg;
+            cliff::regularizeSigns(maskView, maskSamples, &maskReg);
+            const cliff::Mesh maskMesh = cliff::extractSurfaceNets(maskView, maskSamples, nullptr);
+            if (maskReg.remaining != 0) {
+                spdlog::error("TEST FAIL TileShape: mask sign regularization left {} saddles",
+                    maskReg.remaining);
+                return false;
+            }
+            if (maskMesh.vertices.empty() || maskMesh.indices.empty()) {
+                spdlog::error("TEST FAIL TileShape: mask mesh is empty");
+                return false;
+            }
+            const cliff::WatertightReport maskReport = cliff::checkWatertight(maskMesh);
+            if (!maskReport.ok()) {
+                spdlog::error("TEST FAIL TileShape: mask mesh not watertight ({} bad of {} edges)",
+                    maskReport.badEdges,
+                    maskReport.undirectedEdges);
+                return false;
+            }
+            float mpyMin = 1e9f;
+            float mpyMax = -1e9f;
+            for (const cliff::MeshVertex& v : maskMesh.vertices) {
+                mpyMin = std::min(mpyMin, v.py);
+                mpyMax = std::max(mpyMax, v.py);
+            }
+            if (std::fabs(mpyMax - mp.height) > 2.0f * mp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: mask top {:.3f}, expected ~{:.3f}",
+                    mpyMax,
+                    mp.height);
+                return false;
+            }
+            if (std::fabs(mpyMin) > 2.0f * mp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: mask bottom {:.3f}, expected ~0",
+                    mpyMin);
+                return false;
+            }
+            // Deep inside the block and on the detached node: solid. The
+            // shared edge of two on-nodes is inside too (no crack: the fill
+            // is C0 across cells).
+            const float midF = maskField.eval(glm::vec3(2.5f, 0.5f * mp.height, 2.5f));
+            const float nodeF = maskField.eval(glm::vec3(5.0f, 0.5f * mp.height, 5.0f));
+            const float edgeF = maskField.eval(glm::vec3(2.5f, 0.5f * mp.height, 2.0f));
+            if (midF >= 0.0f || nodeF >= 0.0f || edgeF >= 0.0f) {
+                spdlog::error("TEST FAIL TileShape: mask interior wrong (mid {:.4f}, node {:.4f}, edge {:.4f})",
+                    midF,
+                    nodeF,
+                    edgeF);
+                return false;
+            }
+            // The iso-0.5 contour: the wall cuts an on->off edge at its
+            // midpoint — inside at 0.4 of the way, outside at 0.6.
+            const float inW = maskField.eval(glm::vec3(3.0f + 0.4f, 0.5f * mp.height, 2.2f));
+            const float outW = maskField.eval(glm::vec3(3.0f + 0.6f, 0.5f * mp.height, 2.2f));
+            if (inW >= 0.0f || outW <= 0.0f) {
+                spdlog::error("TEST FAIL TileShape: mask wall not at the edge midpoint (in {:.4f}, out {:.4f})",
+                    inW,
+                    outW);
+                return false;
+            }
+        }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech/box/circle field pipelines");
+    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech/box/circle/mask field pipelines");
     return true;
 }
