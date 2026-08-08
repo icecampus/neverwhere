@@ -4,11 +4,16 @@
 // mask = fill >= 0.5 — and extrudes that footprint into a thin plate with
 // a sloped skirt around it:
 //
-//   eval(p) = max(p.y - top(s), -p.y, s - S),   s = sd(x,z), S = spreadDistance
+//   eval(p) = max(p.y - top(s), -(p.y + hh), s - S)
+//     s = sd(x,z), S = spreadDistance, hh = height/2
 //
-//   top(s) = height                    for s <= 0  (the core silhouette)
-//          = height * (1 - s/S)        for 0 <= s <= S  (the skirt: a linear
-//          = 0                         for s >= S    ramp down to the ground)
+//   top(s) = +hh                        for s <= 0  (the core silhouette)
+//          = height * (1 - s/S) - hh    for 0 <= s <= S  (the skirt: a linear
+//          = -hh                        for s >= S    ramp down past the grid)
+//
+//   The plate stands half its height below the node grid plane (y = 0): the
+//   slab spans y = -hh..+hh and the skirt foot reaches y = -hh exactly at
+//   s = S.
 //
 //   sd(x,z) is the signed distance to the fill = 0.5 iso contour (negative
 //   inside), rasterized at construction time at kDistTexelsPerCell texels
@@ -21,14 +26,14 @@
 //   The core (the silhouette spread 0 would draw) keeps the full height
 //   (Height, world). spreadDistance > 0 grows no full-height geometry —
 //   instead the plate's edge rolls off as a height ramp driven by the
-//   distance from the core contour: full height at the wall, y = 0 exactly
-//   at s = S, with the iso lines (and so the skirt foot) rounded around
-//   convex corners (the defining property of a true distance field). At
+//   distance from the core contour: +hh at the wall, -hh exactly at s = S,
+//   with the iso lines (and so the skirt foot) rounded around convex
+//   corners (the defining property of a true distance field). At
 //   spreadDistance = 0 the skirt vanishes and the formula reduces exactly
-//   to the old slab: max(s, |y - hy| - hy) — a vertical wall on the same
-//   contour the Texture 2D mask renders (edges cross at their midpoints,
-//   half-painted cells become wedges, a lone node becomes a small blob),
-//   minus the shader-only fbm wobble and alpha fade.
+//   to a slab max(s, |y| - hh): a vertical wall on the same contour the
+//   Texture 2D mask renders (edges cross at their midpoints, half-painted
+//   cells become wedges, a lone node becomes a small blob), minus the
+//   shader-only fbm wobble and alpha fade.
 //
 // Unlike BoxField/CircleField there is no neighbourhood loop at all: the
 // distance raster is built once in the constructor and every eval() is a
@@ -54,12 +59,14 @@ struct MaskFieldParams {
     float cellSize = 0.06f;      // field voxel size in world units
     float padding = 0.5f;        // field margin outside the region (slack for blur;
                                  // the field stays positive on the border anyway)
-    float height = 0.2f;         // core plate height in world units (bottom at y = 0)
+    float height = 0.2f;         // core plate height in world units; the plate is
+                                 // centered on the node grid plane (y = 0): it spans
+                                 // y = -height/2..+height/2
     float spreadDistance = 0.0f; // skirt width in cells: the plate edge rolls off
                                  // as a linear height ramp driven by the distance
-                                 // from the core contour, reaching y = 0 this many
-                                 // cells outside it. Must stay below the caller's
-                                 // zero border ring.
+                                 // from the core contour, reaching the bottom plane
+                                 // y = -height/2 this many cells outside it. Must
+                                 // stay below the caller's zero border ring.
     int blurPasses = 0;          // sampled-field blur passes: 0 = crisp walls,
                                  // > 0 rounds the top lip
 };
@@ -77,9 +84,9 @@ public:
         int nodesY);
 
     // Solid under the core plate and its skirt: negative below the top
-    // surface above y = 0 within s <= spreadDistance, positive outside.
-    // Outside the distance raster the lookup clamps to the raster edge,
-    // whose distance already exceeds the spread (given the zero-ring
+    // surface above y = -height/2 within s <= spreadDistance, positive
+    // outside. Outside the distance raster the lookup clamps to the raster
+    // edge, whose distance already exceeds the spread (given the zero-ring
     // contract), so the field stays positive out there.
     float eval(const glm::vec3& p) const;
 

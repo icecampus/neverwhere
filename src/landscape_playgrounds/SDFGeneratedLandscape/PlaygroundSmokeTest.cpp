@@ -594,7 +594,9 @@ bool runTileShapeSmokeTest() {
         // --- Mask layer pipeline (maskfield::MaskField — the third teaching
         // sample the "Mask 3D" layer renders with): the Texture 2D mask
         // silhouette (bilinear node fill, iso 0.5) extruded into a thin
-        // slab. A 2x2 node block plus a detached node (a small blob).
+        // plate standing half its height below the node grid plane (slab
+        // y = -height/2..+height/2). A 2x2 node block plus a detached node
+        // (a small blob).
         {
             const std::uint8_t maskNodes[8][8] = {
                 {0, 0, 0, 0, 0, 0, 0, 0},
@@ -637,23 +639,25 @@ bool runTileShapeSmokeTest() {
                 mpyMin = std::min(mpyMin, v.py);
                 mpyMax = std::max(mpyMax, v.py);
             }
-            if (std::fabs(mpyMax - mp.height) > 2.0f * mp.cellSize) {
+            if (std::fabs(mpyMax - 0.5f * mp.height) > 2.0f * mp.cellSize) {
                 spdlog::error("TEST FAIL TileShape: mask top {:.3f}, expected ~{:.3f}",
                     mpyMax,
-                    mp.height);
+                    0.5f * mp.height);
                 return false;
             }
-            if (std::fabs(mpyMin) > 2.0f * mp.cellSize) {
-                spdlog::error("TEST FAIL TileShape: mask bottom {:.3f}, expected ~0",
-                    mpyMin);
+            if (std::fabs(mpyMin + 0.5f * mp.height) > 2.0f * mp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: mask bottom {:.3f}, expected ~{:.3f}",
+                    mpyMin,
+                    -0.5f * mp.height);
                 return false;
             }
-            // Deep inside the block and on the detached node: solid. The
-            // shared edge of two on-nodes is inside too (no crack: the fill
-            // is C0 across cells).
-            const float midF = maskField.eval(glm::vec3(2.5f, 0.5f * mp.height, 2.5f));
-            const float nodeF = maskField.eval(glm::vec3(5.0f, 0.5f * mp.height, 5.0f));
-            const float edgeF = maskField.eval(glm::vec3(2.5f, 0.5f * mp.height, 2.0f));
+            // Deep inside the block and on the detached node: solid at the
+            // slab mid-plane (y = 0 — the node grid plane). The shared edge
+            // of two on-nodes is inside too (no crack: the fill is C0
+            // across cells).
+            const float midF = maskField.eval(glm::vec3(2.5f, 0.0f, 2.5f));
+            const float nodeF = maskField.eval(glm::vec3(5.0f, 0.0f, 5.0f));
+            const float edgeF = maskField.eval(glm::vec3(2.5f, 0.0f, 2.0f));
             if (midF >= 0.0f || nodeF >= 0.0f || edgeF >= 0.0f) {
                 spdlog::error("TEST FAIL TileShape: mask interior wrong (mid {:.4f}, node {:.4f}, edge {:.4f})",
                     midF,
@@ -663,8 +667,8 @@ bool runTileShapeSmokeTest() {
             }
             // The iso-0.5 contour: the wall cuts an on->off edge at its
             // midpoint — inside at 0.4 of the way, outside at 0.6.
-            const float inW = maskField.eval(glm::vec3(3.0f + 0.4f, 0.5f * mp.height, 2.2f));
-            const float outW = maskField.eval(glm::vec3(3.0f + 0.6f, 0.5f * mp.height, 2.2f));
+            const float inW = maskField.eval(glm::vec3(3.0f + 0.4f, 0.0f, 2.2f));
+            const float outW = maskField.eval(glm::vec3(3.0f + 0.6f, 0.0f, 2.2f));
             if (inW >= 0.0f || outW <= 0.0f) {
                 spdlog::error("TEST FAIL TileShape: mask wall not at the edge midpoint (in {:.4f}, out {:.4f})",
                     inW,
@@ -674,42 +678,50 @@ bool runTileShapeSmokeTest() {
 
             // --- Spread: the XZ term is a true signed distance to the core
             // contour, and the spread band is a skirt whose height ramps
-            // linearly from height at the wall (s = 0) down to y = 0 at
-            // s = spreadDistance. Here spread 0.5, height 0.2: the ramp
-            // reaches the ground at the off-node line (3.5 + 0.5), and the
-            // skirt foot rounds the convex corners (the bilinear contour
-            // cuts the block's corner through ~(3.29, 3.29) on the
-            // diagonal).
+            // linearly from +hh at the wall (s = 0) down to -hh at
+            // s = spreadDistance, crossing the node grid plane mid-band.
+            // Here spread 0.5, height 0.2 (hh 0.1): top(s) = 0.1 - 0.4*s,
+            // the foot reaches the bottom plane at the off-node line
+            // (3.5 + 0.5), and the skirt foot rounds the convex corners
+            // (the bilinear contour cuts the block's corner through
+            // ~(3.29, 3.29) on the diagonal).
             {
                 maskfield::MaskFieldParams mps;
                 mps.cellSize = 0.09f; // coarse: smoke speed
                 mps.spreadDistance = 0.5f;
                 maskfield::MaskField spreadField(mps, &maskNodes[0][0], 8, 8);
-                // The core keeps the full height right up to the wall.
-                const float coreIn = spreadField.eval(glm::vec3(2.5f, mps.height - 0.02f, 2.5f));
-                const float coreOut = spreadField.eval(glm::vec3(2.5f, mps.height + 0.02f, 2.5f));
-                // The ramp: at x = 3.6 (s = 0.1) the top is at 0.16, at
-                // x = 3.9 (s = 0.4) it is at 0.04 — below/above probes.
-                const float rampAIn = spreadField.eval(glm::vec3(3.6f, 0.14f, 2.2f));
-                const float rampAOut = spreadField.eval(glm::vec3(3.6f, 0.18f, 2.2f));
-                const float rampBIn = spreadField.eval(glm::vec3(3.9f, 0.02f, 2.2f));
-                const float rampBOut = spreadField.eval(glm::vec3(3.9f, 0.06f, 2.2f));
-                // The foot at ground level: inside just before the off-node
-                // line, outside past it; the corner diagonal rounds off
-                // (~0.36 vs ~0.72 from the contour, spread 0.5 between).
-                const float footIn = spreadField.eval(glm::vec3(3.9f, 0.001f, 2.2f));
-                const float footOut = spreadField.eval(glm::vec3(4.1f, 0.001f, 2.2f));
-                const float cornerIn = spreadField.eval(glm::vec3(3.55f, 0.001f, 3.55f));
-                const float cornerOut = spreadField.eval(glm::vec3(3.8f, 0.001f, 3.8f));
+                // The core keeps the full height right up to the wall
+                // (top at y = +hh).
+                const float coreIn = spreadField.eval(glm::vec3(2.5f, 0.08f, 2.5f));
+                const float coreOut = spreadField.eval(glm::vec3(2.5f, 0.12f, 2.5f));
+                // The ramp: at x = 3.6 (s = 0.1) the top is at 0.06, at
+                // x = 3.9 (s = 0.4) it is at -0.06 — below/above probes.
+                const float rampAIn = spreadField.eval(glm::vec3(3.6f, 0.04f, 2.2f));
+                const float rampAOut = spreadField.eval(glm::vec3(3.6f, 0.08f, 2.2f));
+                const float rampBIn = spreadField.eval(glm::vec3(3.9f, -0.08f, 2.2f));
+                const float rampBOut = spreadField.eval(glm::vec3(3.9f, -0.04f, 2.2f));
+                // The skirt crosses the node grid plane halfway across the
+                // band: at x = 3.75 (s = 0.25) the top sits exactly at y=0.
+                const float gridIn = spreadField.eval(glm::vec3(3.75f, -0.02f, 2.2f));
+                const float gridOut = spreadField.eval(glm::vec3(3.75f, 0.02f, 2.2f));
+                // The foot at the bottom plane (y = -hh): inside just
+                // before the off-node line, outside past it; the corner
+                // diagonal rounds off (~0.36 vs ~0.72 from the contour,
+                // spread 0.5 between).
+                const float footIn = spreadField.eval(glm::vec3(3.9f, -0.09f, 2.2f));
+                const float footOut = spreadField.eval(glm::vec3(4.1f, -0.09f, 2.2f));
+                const float cornerIn = spreadField.eval(glm::vec3(3.55f, -0.09f, 3.55f));
+                const float cornerOut = spreadField.eval(glm::vec3(3.8f, -0.09f, 3.8f));
                 if (coreIn >= 0.0f || coreOut <= 0.0f ||
                     rampAIn >= 0.0f || rampAOut <= 0.0f ||
                     rampBIn >= 0.0f || rampBOut <= 0.0f ||
+                    gridIn >= 0.0f || gridOut <= 0.0f ||
                     footIn >= 0.0f || footOut <= 0.0f ||
                     cornerIn >= 0.0f || cornerOut <= 0.0f) {
                     spdlog::error(
-                        "TEST FAIL TileShape: mask spread wrong (core {:.4f}/{:.4f}, ramp {:.4f}/{:.4f} {:.4f}/{:.4f}, foot {:.4f}/{:.4f}, corner {:.4f}/{:.4f})",
+                        "TEST FAIL TileShape: mask spread wrong (core {:.4f}/{:.4f}, ramp {:.4f}/{:.4f} {:.4f}/{:.4f}, grid {:.4f}/{:.4f}, foot {:.4f}/{:.4f}, corner {:.4f}/{:.4f})",
                         coreIn, coreOut, rampAIn, rampAOut, rampBIn, rampBOut,
-                        footIn, footOut, cornerIn, cornerOut);
+                        gridIn, gridOut, footIn, footOut, cornerIn, cornerOut);
                     return false;
                 }
                 // The skirted silhouette must still close inside the field:

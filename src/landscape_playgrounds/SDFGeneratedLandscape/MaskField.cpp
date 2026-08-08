@@ -25,9 +25,11 @@ MaskField::MaskField(
     }
 
     // The region spans (nodesX-1) x (nodesY-1) map cells; the field is
-    // rectangular in XZ, Y spans [-padY, height + padY]. The mask itself
-    // keeps F > 0 outside the region (fill = 0 there), so the XZ pad is
-    // just slack for the optional blur.
+    // rectangular in XZ. The geometry stands half its height below the node
+    // grid plane (y = 0): the slab spans y = -height/2..+height/2, so the
+    // field's Y range is [-height/2 - padY, height/2 + padY]. The mask
+    // itself keeps F > 0 outside the region (fill = 0 there), so the XZ pad
+    // is just slack for the optional blur.
     const float cell = params.cellSize;
     const float pad = params.padding;
     const float padY = 2.0f * cell;
@@ -36,7 +38,7 @@ MaskField::MaskField(
     m_nx = static_cast<int>(std::ceil((regionX + 2.0f * pad) / cell));
     m_nz = static_cast<int>(std::ceil((regionZ + 2.0f * pad) / cell));
     m_ny = static_cast<int>(std::ceil((params.height + 2.0f * padY) / cell));
-    m_origin = glm::vec3(-pad, -padY, -pad);
+    m_origin = glm::vec3(-pad, -0.5f * params.height - padY, -pad);
 
     buildDistanceField();
 }
@@ -197,21 +199,22 @@ float MaskField::distanceAt(float x, float z) const {
 float MaskField::eval(const glm::vec3& p) const {
     const float s = distanceAt(p.x, p.z);
     const float S = m_params.spreadDistance;
+    const float hh = 0.5f * m_params.height;
     // Top elevation: the core silhouette (the geometry spread 0 would draw)
     // keeps the full height; the spread band grows no full-height geometry
-    // — it is a skirt whose height ramps linearly down to y = 0 with the
-    // distance from the core contour.
-    float top = 0.0f;
-    if (s <= 0.0f) {
-        top = m_params.height;
-    } else if (S > 0.0f) {
-        top = m_params.height * std::max(1.0f - s / S, 0.0f);
+    // — it is a skirt whose height ramps linearly down with the distance
+    // from the core contour. The whole geometry stands half its height
+    // below the node grid plane (y = 0): the plate spans y = -hh..+hh and
+    // the skirt foot reaches y = -hh.
+    float top = hh;
+    if (s > 0.0f) {
+        top = S > 0.0f ? m_params.height * std::max(1.0f - s / S, 0.0f) - hh : -hh;
     }
-    // Negative under the top surface above y = 0 within s <= S. At S = 0
-    // this reduces exactly to the old slab max(s, |y - hy| - hy): a
-    // vertical wall on the fill = 0.5 contour, flat top at y = height.
+    // Negative under the top surface above y = -hh within s <= S. At S = 0
+    // this reduces exactly to a slab max(s, |y| - hh): a vertical wall on
+    // the fill = 0.5 contour, flat top at y = +hh.
     const float qTop = p.y - top;
-    const float qBottom = -p.y;
+    const float qBottom = -p.y - hh;
     const float qSide = s - S;
     return std::max({qTop, qBottom, qSide});
 }
