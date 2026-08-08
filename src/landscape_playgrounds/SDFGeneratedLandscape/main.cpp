@@ -21,6 +21,7 @@
 #include "LandBrush.h"
 #include "PlaygroundScreenshot.h"
 #include "PlaygroundSmokeTest.h"
+#include "TechOutlineField.h"
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -112,13 +113,17 @@ glm::vec2 canvasSize() {
 // own node grid and presentation (2D grass / 2D yellow / 2D green / cliff,
 // stone or tech scalar-field / 2D tiling textures under the yellow masks).
 // The Texture 2D layer keeps a per-node texture tag, so several textures coexist
-// in the one layer and displace each other on repaint.
+// in the one layer and displace each other on repaint. Tech 3D and
+// Tech 3D Outline are fully independent: separate field classes (library
+// tech::TechField vs the playground-local fork tech_outline::TechOutlineField),
+// params, height scales and palettes.
 struct PaintLayer {
     LandBrush brush;
     AtlasKind atlas;
     bool cliff;
     bool stone;
     bool tech;
+    bool techOutline;
     bool textured;
     const char* name;
 };
@@ -131,14 +136,14 @@ constexpr int kTechOutlineLayerIndex = 6;
 constexpr int kTexLayerIndex = 7;
 
 PaintLayer g_layers[kLayerCount] = {
-    {{}, AtlasKind::Grass, false, false, false, false, "Grass 2D"},
-    {{}, AtlasKind::Flat, false, false, false, false, "Yellow 2D"},
-    {{}, AtlasKind::FlatGreen, false, false, false, false, "Green 2D"},
-    {{}, AtlasKind::Flat, true, false, false, false, "Cliff 3D"},
-    {{}, AtlasKind::Flat, false, true, false, false, "Stone 3D"},
-    {{}, AtlasKind::Flat, false, false, true, false, "Tech 3D"},
-    {{}, AtlasKind::Flat, false, false, true, false, "Tech 3D Outline"},
-    {{}, AtlasKind::Flat, false, false, false, true, "Texture 2D"},
+    {{}, AtlasKind::Grass, false, false, false, false, false, "Grass 2D"},
+    {{}, AtlasKind::Flat, false, false, false, false, false, "Yellow 2D"},
+    {{}, AtlasKind::FlatGreen, false, false, false, false, false, "Green 2D"},
+    {{}, AtlasKind::Flat, true, false, false, false, false, "Cliff 3D"},
+    {{}, AtlasKind::Flat, false, true, false, false, false, "Stone 3D"},
+    {{}, AtlasKind::Flat, false, false, true, false, false, "Tech 3D"},
+    {{}, AtlasKind::Flat, false, false, false, true, false, "Tech 3D Outline"},
+    {{}, AtlasKind::Flat, false, false, false, false, true, "Texture 2D"},
 };
 int g_activeLayer = 0;
 // Texture 2D layer: tiling textures found in resources/textures (renderer
@@ -165,15 +170,16 @@ stone_gen::StoneFieldParams g_stoneParams;
 // Tech layer: the TechnicalGrass ridge/valley tileset semantics as real
 // geometry (tech::TechField) — its own params/height scale, same debounce.
 tech::TechFieldParams g_techParams;
-// Tech Outline layer: the same field with the shoreline outline ring enabled
-// ("yellow around green" — an auto-derived ring of underwater nodes around
-// the painted land; the border ramps continue below the water plane).
-tech::TechFieldParams g_techOutlineParams;
+// Tech Outline layer: the shoreline variant on the playground-local forked
+// field class (tech_outline::TechOutlineField) — fully independent from the
+// plain tech layer: own params, own height scale, own palette.
+tech_outline::TechOutlineFieldParams g_techOutlineParams;
 // Cliff layer lift: field px per 1.0 plateau height (cheap re-projection,
 // no mesh rebuild).
 float g_cliffHeightScale = 96.0f;
 float g_stoneHeightScale = 96.0f;
 float g_techHeightScale = 96.0f;
+float g_techOutlineHeightScale = 96.0f;
 // Stone rim shading: depth below the top plane over which the grass fades
 // into the wall palette (uniforms only, applies instantly).
 float g_stoneGrassFade = 0.12f;
@@ -315,6 +321,7 @@ bool g_demoNode = false;
 // --tech-nodes=x,y;x,y;...     paint these nodes on the tech layer
 // --tech-outline-nodes=x,y;... paint these nodes on the tech outline layer
 // --tech-style=S               tech style blend: 0 = ridge, 1 = valley
+// --tech-outline-style=S       tech outline style blend (independent)
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer
 //                              (tagged with the first loaded texture)
 // --tex-tiling=R               Texture 2D repeats per cell width (default 1.0)
@@ -328,6 +335,7 @@ std::vector<glm::ivec2> g_cliCliffNodes;
 std::vector<glm::ivec2> g_cliTechNodes;
 std::vector<glm::ivec2> g_cliTechOutlineNodes;
 std::optional<float> g_cliTechStyle;
+std::optional<float> g_cliTechOutlineStyle;
 std::vector<glm::ivec2> g_cliTexNodes;
 std::optional<float> g_cliZoom;
 std::optional<glm::vec2> g_cliCenter;
@@ -752,25 +760,31 @@ void drawImGui(int w, int h) {
             ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Rebuilding...");
         }
     }
-    if (g_layers[g_activeLayer].tech) {
+    if (g_layers[g_activeLayer].tech || g_layers[g_activeLayer].techOutline) {
         // TechnicalGrass ridge/valley heightfield as real geometry; edits are
         // debounced (0.3 s) into a full field rebuild, same as the cliff.
-        // The Outline layer shares the block — its params just have the
-        // shoreline ring enabled (outlineDepth > 0).
-        tech::TechFieldParams& p =
-            (g_activeLayer == kTechOutlineLayerIndex) ? g_techOutlineParams : g_techParams;
-        // Lift scale: cheap re-projection of the cached mesh, no field rebuild.
-        ImGui::SliderFloat("Tech height", &g_techHeightScale, 4.0f, 128.0f, "%.0f px");
-        if (ImGui::CollapsingHeader("Tech field", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
-            ImGui::SliderFloat("Style", &p.style, 0.0f, 1.0f, "%.2f ridge-valley");
-            ImGui::SliderFloat("Soften", &p.soften, 0.0f, 1.0f, "%.2f");
-            ImGui::SliderFloat("Level height", &p.levelHeight, 0.1f, 1.0f, "%.2f");
-            ImGui::SliderFloat("Ground depth", &p.groundDepth, 0.02f, 0.3f, "%.2f");
-            ImGui::SliderFloat("Outline depth", &p.outlineDepth, 0.0f, 2.0f, "%.2f");
-            ImGui::SliderFloat("Crease width", &p.creaseWidth, 0.0f, 0.2f, "%.3f");
-            ImGui::SliderFloat("Cell size", &p.cellSize, 0.04f, 0.12f, "%.3f");
-            ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 3);
+        // Tech 3D and Tech 3D Outline are fully independent layers: separate
+        // field classes, params, height scales and palettes — the shared
+        // panel below just edits whichever set belongs to the active layer.
+        auto techPanel = [](auto& p, float& heightScale) {
+            // Lift scale: cheap re-projection of the cached mesh, no field rebuild.
+            ImGui::SliderFloat("Tech height", &heightScale, 4.0f, 128.0f, "%.0f px");
+            if (ImGui::CollapsingHeader("Tech field", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
+                ImGui::SliderFloat("Style", &p.style, 0.0f, 1.0f, "%.2f ridge-valley");
+                ImGui::SliderFloat("Soften", &p.soften, 0.0f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Level height", &p.levelHeight, 0.1f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Ground depth", &p.groundDepth, 0.02f, 0.3f, "%.2f");
+                ImGui::SliderFloat("Outline depth", &p.outlineDepth, 0.0f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Crease width", &p.creaseWidth, 0.0f, 0.2f, "%.3f");
+                ImGui::SliderFloat("Cell size", &p.cellSize, 0.04f, 0.12f, "%.3f");
+                ImGui::SliderInt("Blur passes", &p.blurPasses, 0, 3);
+            }
+        };
+        if (g_layers[g_activeLayer].techOutline) {
+            techPanel(g_techOutlineParams, g_techOutlineHeightScale);
+        } else {
+            techPanel(g_techParams, g_techHeightScale);
         }
         const CliffStats& st = g_renderer.cliffStatsFor(&g_layers[g_activeLayer].brush);
         ImGui::Text("Tech mesh: %d verts, %d tris", st.vertexCount, st.triangleCount);
@@ -910,10 +924,14 @@ void frame() {
         views[i].stone = g_layers[i].stone;
         views[i].stoneParams = &g_stoneParams;
         views[i].tech = g_layers[i].tech;
-        views[i].techParams = (i == kTechOutlineLayerIndex) ? &g_techOutlineParams : &g_techParams;
+        views[i].techParams = &g_techParams;
+        views[i].techOutline = g_layers[i].techOutline;
+        views[i].techOutlineParams = &g_techOutlineParams;
         views[i].cliffHeightScale = g_layers[i].stone
             ? g_stoneHeightScale
-            : (g_layers[i].tech ? g_techHeightScale : g_cliffHeightScale);
+            : (g_layers[i].tech
+                ? g_techHeightScale
+                : (g_layers[i].techOutline ? g_techOutlineHeightScale : g_cliffHeightScale));
         if (g_layers[i].textured) {
             // Multi-texture layer: diamond-fan cells whose corner nodes carry
             // texture weights (LandBrush::cellTextureBlend); the FS blends
@@ -989,12 +1007,18 @@ void frame() {
     techFs.goldColor[2] = 0.29f;
     techFs.params0[0] = 2.0f;  // vein threshold above the fbm range: veins off
     techFs.params0[3] = 0.15f; // spec strength
+    // Tech Outline palette: starts identical to the tech one, but is a
+    // separate copy — the outline layer is tuned independently.
+    CliffFsParams techOutlineFs = techFs;
     for (int i = 0; i < kLayerCount; ++i) {
         if (g_layers[i].stone) {
             views[i].shadingOverride = &stoneFs;
         }
         if (g_layers[i].tech) {
             views[i].shadingOverride = &techFs;
+        }
+        if (g_layers[i].techOutline) {
+            views[i].shadingOverride = &techOutlineFs;
         }
     }
 
@@ -1161,6 +1185,9 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--tech-style=", 0) == 0) {
             g_cliTechStyle = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
+        if (arg.rfind("--tech-outline-style=", 0) == 0) {
+            g_cliTechOutlineStyle = static_cast<float>(std::atof(arg.substr(21).c_str()));
+        }
         if (arg.rfind("--tex-nodes=", 0) == 0) {
             g_cliTexNodes = parseNodesArg(arg.substr(12));
         }
@@ -1179,6 +1206,9 @@ int main(int argc, char* argv[]) {
     }
     if (g_cliTechStyle) {
         g_techParams.style = *g_cliTechStyle;
+    }
+    if (g_cliTechOutlineStyle) {
+        g_techOutlineParams.style = *g_cliTechOutlineStyle;
     }
 
     if (smoke) {

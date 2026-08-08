@@ -16,6 +16,7 @@
 
 #include "FlatAtlasGenerator.h"
 #include "LandBrush.h"
+#include "TechOutlineField.h"
 
 bool runTileShapeSmokeTest() {
     LandBrush brush;
@@ -371,10 +372,12 @@ bool runTileShapeSmokeTest() {
             }
         }
 
-        // --- Tech shoreline (outlineDepth > 0): the field derives the
-        // outline ring around the land ("yellow around green"), the ramps
-        // continue below the water plane. Margin-2 grid: the ring spreads
-        // one cell past the land and the border ring stays empty.
+        // --- Tech shoreline (tech_outline::TechOutlineField — the
+        // playground-local fork the "Tech 3D Outline" layer renders with):
+        // the field derives the outline ring around the land ("yellow around
+        // green"), the ramps continue below the water plane. Margin-2 grid:
+        // the ring spreads one cell past the land and the border ring stays
+        // empty.
         {
             const std::uint8_t shoreNodes[8][8] = {
                 {0, 0, 0, 0, 0, 0, 0, 0},
@@ -386,10 +389,10 @@ bool runTileShapeSmokeTest() {
                 {0, 0, 0, 0, 0, 0, 0, 0},
                 {0, 0, 0, 0, 0, 0, 0, 0},
             };
-            tech::TechFieldParams tp;
+            tech_outline::TechOutlineFieldParams tp;
             tp.cellSize = 0.09f; // coarse: smoke speed
             tp.outlineDepth = 1.0f;
-            tech::TechField techField(tp, &shoreNodes[0][0], 8, 8);
+            tech_outline::TechOutlineField techField(tp, &shoreNodes[0][0], 8, 8);
             cliff::ScalarFieldView techView = techField.view();
             std::vector<float> techSamples;
             techField.sample(techSamples);

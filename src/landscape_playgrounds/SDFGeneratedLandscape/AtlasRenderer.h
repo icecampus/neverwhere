@@ -29,6 +29,7 @@
 #include <topology_core/diamond_isometry.h>
 
 #include "LandBrush.h"
+#include "TechOutlineField.h"
 
 enum class AtlasKind : int {
     Grass = 0,
@@ -61,7 +62,9 @@ struct CliffVertex {
 // One paint layer on the shared canvas: its own node grid and either flat
 // (2D atlas tiles) or scalar-field surface nets from the same nodes
 // (z-buffered): cliff (omphalos grooves), stone (StoneCube
-// voronoi stones) or tech (TechnicalGrass ridge/valley heightfield).
+// voronoi stones), tech (TechnicalGrass ridge/valley heightfield) or tech
+// outline (the same with the shoreline ring, on a playground-local forked
+// field class — fully independent from the plain tech layer).
 struct PaintLayerView {
     const LandBrush* brush = nullptr;
     AtlasKind atlas = AtlasKind::Grass;
@@ -72,6 +75,8 @@ struct PaintLayerView {
     const stone_gen::StoneFieldParams* stoneParams = nullptr; // used when stone == true
     bool tech = false;
     const tech::TechFieldParams* techParams = nullptr;        // used when tech == true
+    bool techOutline = false;
+    const tech_outline::TechOutlineFieldParams* techOutlineParams = nullptr; // used when techOutline == true
     const CliffFsParams* shadingOverride = nullptr;           // per-layer palette (stone/tech)
     // Flat tiles only: draw the layer with a tiling texture instead of the
     // atlas color. The texture is sampled continuously in world (field)
@@ -203,15 +208,18 @@ private:
     // Cached scalar-field derivative of a brush: the extracted surface-nets
     // mesh plus the projected vertex stream, rebuilt only when the brush
     // version or the field params change (debounced) — the full rebuild
-    // costs seconds. Holds cliff, stone or tech params, per the layer kind.
+    // costs seconds. Holds cliff, stone, tech or tech-outline params, per
+    // the layer kind.
     struct CliffCache {
         const LandBrush* brush = nullptr;
         std::uint64_t brushVersion = 0;
         bool stone = false;
         bool tech = false;
+        bool techOutline = false;
         cliff::FieldParams params{};
         stone_gen::StoneFieldParams stoneParams{};
         tech::TechFieldParams techParams{};
+        tech_outline::TechOutlineFieldParams techOutlineParams{};
         float heightScale = 0.0f;
         bool contentValid = false;
         double lastEditSec = 0.0;
