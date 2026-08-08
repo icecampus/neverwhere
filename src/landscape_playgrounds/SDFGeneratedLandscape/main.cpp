@@ -928,7 +928,7 @@ void drawImGui(int w, int h) {
         if (ImGui::CollapsingHeader("Mask field", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
             ImGui::SliderFloat("Height (world)", &g_maskParams.height, 0.05f, 1.0f, "%.2f");
-            ImGui::SliderFloat("Spread", &g_maskParams.spreadDistance, 0.0f, 2.0f, "%.2f cells");
+            ImGui::SliderFloat("Spread", &g_maskParams.spreadDistance, 0.0f, 3.0f, "%.2f cells");
             ImGui::SliderFloat("Cell size", &g_maskParams.cellSize, 0.04f, 0.12f, "%.3f");
             ImGui::SliderInt("Blur passes", &g_maskParams.blurPasses, 0, 3);
         }
