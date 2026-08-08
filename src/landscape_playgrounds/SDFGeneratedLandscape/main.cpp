@@ -355,7 +355,8 @@ bool g_demoNode = false;
 // --circle-nodes=x,y;x,y;...   paint these nodes on the circle layer
 // --circle-radius=R            circle radius around a node (default 0.55)
 // --mask-nodes=x,y;x,y;...     paint these nodes on the mask layer
-// --mask-spread=D              grow the mask slab outward by D cells (default 0)
+// --mask-spread=D              slope skirt around the mask plate: height ramps
+//                              down to 0 over D cells outside the core contour
 // --tech-style=S               tech style blend: 0 = ridge, 1 = valley
 // --tech-outline-style=S       tech outline style blend (independent)
 // --tex-nodes=x,y;x,y;...      paint these nodes on the Texture 2D layer

@@ -1893,9 +1893,9 @@ void AtlasRenderer::rebuildCliffCache(
             // border, same contract as the demo shape's zero border rows).
             // Tech with the shoreline outline enabled needs a second ring:
             // the auto-derived outline nodes spread one cell past the land.
-            // Mask with a spread grows its silhouette past the painted
-            // nodes: the zero ring must stay wider than the spread so the
-            // grown contour still closes inside the field.
+            // Mask with a spread drops its skirt onto the ground past the
+            // painted nodes: the zero ring must stay wider than the spread
+            // so the skirt foot still closes inside the field.
             const bool shoreline =
                 (cache.tech && cache.techParams.outlineDepth > 0.0f) ||
                 (cache.techOutline && cache.techOutlineParams.outlineDepth > 0.0f);

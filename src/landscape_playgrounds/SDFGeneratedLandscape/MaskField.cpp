@@ -195,16 +195,25 @@ float MaskField::distanceAt(float x, float z) const {
 }
 
 float MaskField::eval(const glm::vec3& p) const {
-    // XZ term: signed distance to the fill = 0.5 contour (rasterized in the
-    // constructor, bilinear here), pushed outward by spreadDistance. At
-    // spread 0 the wall stands on the same contour the Texture 2D layer
-    // renders (it cuts an on->off edge at its midpoint).
-    const float d = distanceAt(p.x, p.z) - m_params.spreadDistance;
-    // Slab 0..height: max of the two terms is the exact CSG intersection —
-    // the wall stands on the contour, the top is flat at y = height.
-    const float hy = 0.5f * m_params.height;
-    const float qy = std::fabs(p.y - hy) - hy;
-    return std::max(d, qy);
+    const float s = distanceAt(p.x, p.z);
+    const float S = m_params.spreadDistance;
+    // Top elevation: the core silhouette (the geometry spread 0 would draw)
+    // keeps the full height; the spread band grows no full-height geometry
+    // — it is a skirt whose height ramps linearly down to y = 0 with the
+    // distance from the core contour.
+    float top = 0.0f;
+    if (s <= 0.0f) {
+        top = m_params.height;
+    } else if (S > 0.0f) {
+        top = m_params.height * std::max(1.0f - s / S, 0.0f);
+    }
+    // Negative under the top surface above y = 0 within s <= S. At S = 0
+    // this reduces exactly to the old slab max(s, |y - hy| - hy): a
+    // vertical wall on the fill = 0.5 contour, flat top at y = height.
+    const float qTop = p.y - top;
+    const float qBottom = -p.y;
+    const float qSide = s - S;
+    return std::max({qTop, qBottom, qSide});
 }
 
 void MaskField::sample(std::vector<float>& outValues) const {
