@@ -1708,12 +1708,12 @@ void AtlasRenderer::render(
     // debounce), a heightScale edit only re-projects the cached mesh.
     for (int li = 0; li < layerCount; ++li) {
         const PaintLayerView& layer = layers[li];
-        if (!layer.brush || (!layer.cliff && !layer.stone && !layer.tech && !layer.techOutline && !layer.box)) {
+        if (!layer.brush || (!layer.cliff && !layer.stone && !layer.tech && !layer.techOutline && !layer.box && !layer.circle)) {
             continue;
         }
         if ((layer.cliff && !layer.cliffParams) || (layer.stone && !layer.stoneParams) ||
             (layer.tech && !layer.techParams) || (layer.techOutline && !layer.techOutlineParams) ||
-            (layer.box && !layer.boxParams)) {
+            (layer.box && !layer.boxParams) || (layer.circle && !layer.circleParams)) {
             continue;
         }
         CliffCache& cache = cliffCacheFor(layer.brush);
@@ -1726,13 +1726,16 @@ void AtlasRenderer::render(
             paramsChanged = std::memcmp(&cache.techOutlineParams, layer.techOutlineParams, sizeof(tech_outline::TechOutlineFieldParams)) != 0;
         } else if (layer.box) {
             paramsChanged = std::memcmp(&cache.boxParams, layer.boxParams, sizeof(boxfield::BoxFieldParams)) != 0;
+        } else if (layer.circle) {
+            paramsChanged = std::memcmp(&cache.circleParams, layer.circleParams, sizeof(circlefield::CircleFieldParams)) != 0;
         } else {
             paramsChanged = std::memcmp(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams)) != 0;
         }
         const bool contentChanged = !cache.contentValid ||
             cache.brushVersion != layer.brush->version() ||
             cache.stone != layer.stone || cache.tech != layer.tech ||
-            cache.techOutline != layer.techOutline || cache.box != layer.box || paramsChanged;
+            cache.techOutline != layer.techOutline || cache.box != layer.box ||
+            cache.circle != layer.circle || paramsChanged;
         const bool scaleChanged = cache.heightScale != layer.cliffHeightScale;
         if (contentChanged || scaleChanged) {
             cache.brushVersion = layer.brush->version();
@@ -1740,6 +1743,7 @@ void AtlasRenderer::render(
             cache.tech = layer.tech;
             cache.techOutline = layer.techOutline;
             cache.box = layer.box;
+            cache.circle = layer.circle;
             if (layer.stone) {
                 std::memcpy(&cache.stoneParams, layer.stoneParams, sizeof(stone_gen::StoneFieldParams));
             } else if (layer.tech) {
@@ -1748,6 +1752,8 @@ void AtlasRenderer::render(
                 std::memcpy(&cache.techOutlineParams, layer.techOutlineParams, sizeof(tech_outline::TechOutlineFieldParams));
             } else if (layer.box) {
                 std::memcpy(&cache.boxParams, layer.boxParams, sizeof(boxfield::BoxFieldParams));
+            } else if (layer.circle) {
+                std::memcpy(&cache.circleParams, layer.circleParams, sizeof(circlefield::CircleFieldParams));
             } else {
                 std::memcpy(&cache.params, layer.cliffParams, sizeof(cliff::FieldParams));
             }
@@ -1938,6 +1944,17 @@ void AtlasRenderer::rebuildCliffCache(
                 cliff::regularizeSigns(view, samples, &regStats);
                 cache.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
                 cache.stats.voxelCount = view.nx * view.ny * view.nz;
+            } else if (cache.circle) {
+                // The second teaching sample — a cylinder per painted node
+                // plus a full parallelepiped per fully-painted cell:
+                // CircleField -> generic ScalarFieldView -> surface nets.
+                circlefield::CircleField field(cache.circleParams, nodes.data(), nodesX, nodesY);
+                cliff::ScalarFieldView view = field.view();
+                std::vector<float> samples;
+                field.sample(samples);
+                cliff::regularizeSigns(view, samples, &regStats);
+                cache.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+                cache.stats.voxelCount = view.nx * view.ny * view.nz;
             } else {
                 cliff::CliffField field(cache.params, nodes.data(), nodesX, nodesY);
                 std::vector<float> samples;
@@ -1955,7 +1972,8 @@ void AtlasRenderer::rebuildCliffCache(
                 spdlog::warn("AtlasRenderer: {} mesh not watertight ({} bad of {} edges, {} saddles left)",
                     cache.stone ? "stone"
                         : (cache.tech ? "tech"
-                            : (cache.techOutline ? "tech outline" : (cache.box ? "box" : "cliff"))),
+                            : (cache.techOutline ? "tech outline"
+                                : (cache.box ? "box" : (cache.circle ? "circle" : "cliff")))),
                     report.badEdges, report.undirectedEdges, regStats.remaining);
             }
         }

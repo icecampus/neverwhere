@@ -16,6 +16,7 @@
 
 #include "FlatAtlasGenerator.h"
 #include "BoxField.h"
+#include "CircleField.h"
 #include "LandBrush.h"
 #include "TechOutlineField.h"
 
@@ -510,8 +511,86 @@ bool runTileShapeSmokeTest() {
                 }
             }
         }
+
+        // --- Circle layer pipeline (circlefield::CircleField — the second
+        // teaching sample the "Circle 3D" layer renders with): a cylinder per
+        // painted node plus a full parallelepiped per fully-painted cell.
+        // A 2x2 node block (its centre cell is fully painted) plus a
+        // detached node that stays a lone cylinder.
+        {
+            const std::uint8_t circleNodes[8][8] = {
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 1, 1, 0, 0, 0, 0},
+                {0, 0, 1, 1, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 1, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+                {0, 0, 0, 0, 0, 0, 0, 0},
+            };
+            circlefield::CircleFieldParams cp;
+            cp.cellSize = 0.09f; // coarse: smoke speed
+            circlefield::CircleField circleField(cp, &circleNodes[0][0], 8, 8);
+            cliff::ScalarFieldView circleView = circleField.view();
+            std::vector<float> circleSamples;
+            circleField.sample(circleSamples);
+            cliff::RegularizeStats circleReg;
+            cliff::regularizeSigns(circleView, circleSamples, &circleReg);
+            const cliff::Mesh circleMesh = cliff::extractSurfaceNets(circleView, circleSamples, nullptr);
+            if (circleReg.remaining != 0) {
+                spdlog::error("TEST FAIL TileShape: circle sign regularization left {} saddles",
+                    circleReg.remaining);
+                return false;
+            }
+            if (circleMesh.vertices.empty() || circleMesh.indices.empty()) {
+                spdlog::error("TEST FAIL TileShape: circle mesh is empty");
+                return false;
+            }
+            const cliff::WatertightReport circleReport = cliff::checkWatertight(circleMesh);
+            if (!circleReport.ok()) {
+                spdlog::error("TEST FAIL TileShape: circle mesh not watertight ({} bad of {} edges)",
+                    circleReport.badEdges,
+                    circleReport.undirectedEdges);
+                return false;
+            }
+            float cpyMin = 1e9f;
+            float cpyMax = -1e9f;
+            for (const cliff::MeshVertex& v : circleMesh.vertices) {
+                cpyMin = std::min(cpyMin, v.py);
+                cpyMax = std::max(cpyMax, v.py);
+            }
+            if (std::fabs(cpyMax - cp.height) > 2.0f * cp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: circle top {:.3f}, expected ~{:.3f}",
+                    cpyMax,
+                    cp.height);
+                return false;
+            }
+            if (std::fabs(cpyMin) > 2.0f * cp.cellSize) {
+                spdlog::error("TEST FAIL TileShape: circle bottom {:.3f}, expected ~0",
+                    cpyMin);
+                return false;
+            }
+            // The fully painted cell (2,2): its centre is covered by the
+            // box — the four corner circles (r 0.55 < ~0.707) would leave
+            // it open on their own.
+            const float cellF = circleField.eval(glm::vec3(2.5f, 0.5f * cp.height, 2.5f));
+            if (cellF >= 0.0f) {
+                spdlog::error("TEST FAIL TileShape: full cell centre not covered (f {:.4f})", cellF);
+                return false;
+            }
+            // The detached node grows a cylinder: inside within the radius,
+            // outside past it.
+            const float inF = circleField.eval(glm::vec3(5.0f, 0.5f * cp.height, 5.0f));
+            const float outF = circleField.eval(glm::vec3(5.0f + cp.nodeRadius + 0.15f, 0.5f * cp.height, 5.0f));
+            if (inF >= 0.0f || outF <= 0.0f) {
+                spdlog::error("TEST FAIL TileShape: detached cylinder wrong (in {:.4f}, out {:.4f})",
+                    inF,
+                    outF);
+                return false;
+            }
+        }
     }
 
-    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech/box field pipelines");
+    spdlog::info("TEST PASS TileShape: LandBrush + node tags + flat atlas generator + cliff/stone/tech/box/circle field pipelines");
     return true;
 }
