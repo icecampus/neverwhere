@@ -335,14 +335,15 @@ out vec4 v_tiling;
 out float v_fill;
 uniform vec2 view_size;
 uniform vec2 z_range;
-uniform vec2 ground_params; // x: cell half-height in field px (halfH), y: unused
+uniform vec2 ground_params; // x: cell half-height in field px (halfH), y: cover lift (field px)
 void main() {
     vec2 clip_pos = vec2(
         (pos.x / view_size.x) * 2.0 - 1.0,
         1.0 - (pos.y / view_size.y) * 2.0
     );
-    // Same level-0 (water) plane depth as the flat ground pass.
-    float fieldY = (world.x + world.y) * ground_params.x;
+    // Ground cover rides a small lift above the level-0 plane: above low
+    // relief (mask3d beaches), below raised 3D (render_core/depth_levels.h).
+    float fieldY = (world.x + world.y) * ground_params.x + ground_params.y;
     gl_Position = vec4(clip_pos, (z_range.x - fieldY) * z_range.y, 1.0);
     v_world = world;
     v_layers = layers;
@@ -456,8 +457,9 @@ VSOut main(VSIn inp) {
     float2 clip;
     clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
     clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
-    // Same level-0 (water) plane depth as the flat ground pass.
-    float fieldY = (inp.world.x + inp.world.y) * ground_params.x;
+    // Ground cover rides a small lift above the level-0 plane: above low
+    // relief (mask3d beaches), below raised 3D (render_core/depth_levels.h).
+    float fieldY = (inp.world.x + inp.world.y) * ground_params.x + ground_params.y;
     o.pos = float4(clip, (z_range.x - fieldY) * z_range.y, 1.0);
     o.world = inp.world;
     o.layers = inp.layers;
@@ -582,8 +584,9 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
         (in.pos.x / params.view_size.x) * 2.0 - 1.0,
         1.0 - (in.pos.y / params.view_size.y) * 2.0
     );
-    // Same level-0 (water) plane depth as the flat ground pass.
-    float fieldY = (in.world.x + in.world.y) * params.ground_params.x;
+    // Ground cover rides a small lift above the level-0 plane: above low
+    // relief (mask3d beaches), below raised 3D (render_core/depth_levels.h).
+    float fieldY = (in.world.x + in.world.y) * params.ground_params.x + params.ground_params.y;
     o.pos = float4(clip, (params.z_range.x - fieldY) * params.z_range.y, 1.0);
     o.world = in.world;
     o.layers = in.layers;
@@ -2419,7 +2422,10 @@ void LandscapeRenderer::renderTexture(
     sg_update_buffer(textureVbuf, &range);
 
     sg_apply_pipeline(texturePip);
-    // Same level-0 z-range block as the flat ground pass.
+    // Same z-range block as the flat ground pass, plus the cover lift: the
+    // pass keeps compare=ALWAYS for its co-planar tile union, so the lift is
+    // what arbitrates against the 3D meshes (above a mask3d beach top, below
+    // any raised level — render_core/depth_levels.h).
     const float groundCenterY = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y;
     float vs_params[6] = {
         (float)viewWidth,
@@ -2427,7 +2433,7 @@ void LandscapeRenderer::renderTexture(
         groundCenterY + kZFarOffset,
         kZScale,
         halfH,
-        0.0f,
+        kTextureCoverLiftPx,
     };
     sg_range vs_range = { &vs_params, sizeof(vs_params) };
     sg_apply_uniforms(0, &vs_range);

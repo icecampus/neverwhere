@@ -77,4 +77,18 @@ TEST(DepthLevels, GridBiasKeepsGridOnPlane) {
     EXPECT_LT(zGrid, zGround);
 }
 
+TEST(DepthLevels, TextureCoverAboveBeachBelowRaised) {
+    // The texture2d ground cover bakes kTextureCoverLiftPx into its z (its
+    // pass compares ALWAYS for the co-planar tile union, so the written z is
+    // its only arbitration against the 3D passes): it must beat a low mask3d
+    // beach top and lose to any raised level (stone/cliff/tech/raised).
+    const float zFar = zFarFor(1000.0f);
+    const float row = 1000.0f;
+    const float zTexture = render_core::levelGroundZ(row + render_core::kTextureCoverLiftPx, zFar);
+    const float zBeach = zAtRow(row, 0.1f, zFar);          // mask3d beach top, ~+0.1 level
+    const float zStone = zAtRow(row, kLevelHeight, zFar);  // raised 3D, +1 level
+    EXPECT_LT(zTexture, zBeach);
+    EXPECT_LT(zStone, zTexture);
+}
+
 } // namespace
