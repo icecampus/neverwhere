@@ -48,7 +48,7 @@
             "specStrength": 0.15000000596046448,
             "strataStrength": 0.0,
             "texScale": 1.0,
-            "underwaterFade": 0.0,
+            "underwaterFade": 0.25,
             "veinThreshold": 2.0
         },
         "sinkFraction": 0.8399999737739563,
