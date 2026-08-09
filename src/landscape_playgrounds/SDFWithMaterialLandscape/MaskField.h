@@ -4,16 +4,17 @@
 // mask = fill >= 0.5 — and extrudes that footprint into a thin plate with
 // a sloped skirt around it:
 //
-//   eval(p) = max(p.y - top(s), -(p.y + hh), s - S)
-//     s = sd(x,z), S = spreadDistance, hh = height/2
+//   eval(p) = max(p.y - top(s), -(p.y + botH), s - S)
+//     s = sd(x,z), S = spreadDistance
+//     topH = height * (1 - sink), botH = height * sink
 //
-//   top(s) = +hh                        for s <= 0  (the core silhouette)
-//          = height * (1 - s/S) - hh    for 0 <= s <= S  (the skirt: a linear
-//          = -hh                        for s >= S    ramp down past the grid)
+//   top(s) = +topH                      for s <= 0  (the core silhouette)
+//          = height * (1 - s/S - sink)  for 0 <= s <= S  (the skirt: a linear
+//          = -botH                      for s >= S    ramp down past the grid)
 //
-//   The plate stands half its height below the node grid plane (y = 0): the
-//   slab spans y = -hh..+hh and the skirt foot reaches y = -hh exactly at
-//   s = S.
+//   sinkFraction of the plate stands below the node grid plane (y = 0, the
+//   future water line): the slab spans y = -botH..+topH and the skirt foot
+//   reaches y = -botH exactly at s = S.
 //
 //   With a reliefMap bound, the iso surface is then shifted by the centered
 //   tiling height sample:
@@ -38,11 +39,11 @@
 //   The core (the silhouette spread 0 would draw) keeps the full height
 //   (Height, world). spreadDistance > 0 grows no full-height geometry —
 //   instead the plate's edge rolls off as a height ramp driven by the
-//   distance from the core contour: +hh at the wall, -hh exactly at s = S,
-//   with the iso lines (and so the skirt foot) rounded around convex
+//   distance from the core contour: +topH at the wall, -botH exactly at
+//   s = S, with the iso lines (and so the skirt foot) rounded around convex
 //   corners (the defining property of a true distance field). At
 //   spreadDistance = 0 the skirt vanishes and the formula reduces exactly
-//   to a slab max(s, |y| - hh): a vertical wall on the same contour the
+//   to a slab with a vertical wall on the same contour the
 //   Texture 2D mask renders (edges cross at their midpoints, half-painted
 //   cells become wedges, a lone node becomes a small blob), minus the
 //   shader-only fbm wobble and alpha fade.
@@ -77,24 +78,37 @@ struct ReliefMap {
 };
 
 struct MaskFieldParams {
-    float cellSize = 0.06f;      // field voxel size in world units
+    float cellSize = 0.04f;      // field voxel size in world units (finer than
+                                 // the teaching default 0.06: the micro relief
+                                 // needs a few voxels per ripple to show)
     float padding = 0.5f;        // field margin outside the region (slack for blur;
                                  // the field stays positive on the border anyway)
-    float height = 0.2f;         // core plate height in world units; the plate is
-                                 // centered on the node grid plane (y = 0): it spans
-                                 // y = -height/2..+height/2
+    float height = 0.2f;         // core plate height in world units; the plate
+                                 // straddles the node grid plane (y = 0) by
+                                 // sinkFraction: it spans
+                                 // y = -height*sink .. +height*(1-sink)
     float spreadDistance = 0.0f; // skirt width in cells: the plate edge rolls off
                                  // as a linear height ramp driven by the distance
                                  // from the core contour, reaching the bottom plane
-                                 // y = -height/2 this many cells outside it. Must
-                                 // stay below the caller's zero border ring.
+                                 // y = -height*sink this many cells outside it.
+                                 // Must stay below the caller's zero border ring.
+    float sinkFraction = 0.5f;   // share of the height below the node grid
+                                 // plane (y = 0, the future water line). 0 =
+                                 // the bottom sits on the grid plane,
+                                 // 1 = fully submerged
     float reliefDepth = 0.0f;    // micro relief amplitude in world units: the iso
                                  // surface shifts by depth * (sample - 0.5) * 2 —
                                  // the displacement-map ripple becomes real
                                  // geometry (0 = off, the field is bit-for-bit
                                  // the smooth one)
-    float reliefTiling = 2.0f;   // relief repeats per cell (V tiles 2x faster:
-                                 // the Ground061 maps are 2:1)
+    float reliefTiling = 1.0f;   // relief repeats per cell (V tiles 2x faster:
+                                 // the Ground061 maps are 2:1); keep in sync
+                                 // with the material tiling so the geometry
+                                 // dunes align with the shader ripples
+    float reliefFade = 0.15f;    // distance from the core contour (world units)
+                                 // over which the relief ramps in: the walls
+                                 // and the skirt stay clean, only the plate
+                                 // top carries the dunes (0 = no fade)
     const ReliefMap* reliefMap = nullptr; // owned by the caller
     std::uint32_t reliefVersion = 0;      // bumped by the caller on (re)load:
                                           // the params memcmp sees it and

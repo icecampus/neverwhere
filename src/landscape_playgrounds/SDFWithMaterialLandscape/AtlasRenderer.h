@@ -210,6 +210,15 @@ private:
         int width,
         int height,
         const char* label);
+    // Same, but uploads a full CPU-built mip chain (2x2 box filter) — the
+    // material maps minify hard on the ground plane, and a single-level
+    // REPEAT texture aliases into noise. Sampler must use LINEAR mipmaps.
+    bool uploadSlotMipmapped(
+        AtlasSlot& slot,
+        const void* rgba,
+        int width,
+        int height,
+        const char* label);
     glm::vec4 atlasUvRect(int tileIndex) const;
     void appendTileQuad(
         std::vector<TexVertex>& out,

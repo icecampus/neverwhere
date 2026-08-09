@@ -154,7 +154,7 @@ maskfield::ReliefMap g_reliefMap;
 int g_matMapsLoaded = 0;
 bool g_reliefLoaded = false;
 std::string g_matDir = "resources/textures/ambientcg/Ground061";
-float g_matTiling = 2.0f;
+float g_matTiling = 1.0f;
 float g_matAlbedo = 1.0f;
 float g_matNormal = 1.0f;
 float g_matAo = 1.0f;
@@ -217,11 +217,13 @@ bool g_demoPattern = false;
 // --mask-nodes=x,y;x,y;...  paint these nodes on the mask layer
 // --mask-spread=D           slope skirt around the mask plate: height ramps
 //                           down to 0 over D cells outside the core contour
+// --mask-sink=K             share of the height below the grid plane (the
+//                           future water), 0..1 (default 0.5)
 // --mat-dir=path            material set directory
 //                           (default resources/textures/ambientcg/Ground061)
-// --mat-tiling=T            material tiling repeats per world unit (default 2.0)
+// --mat-tiling=T            material tiling repeats per world unit (default 1.0)
 // --relief-depth=D          micro relief amplitude in world units
-//                           (default 0.015 with a loaded map, 0 without)
+//                           (default 0.02 with a loaded map, 0 without)
 // --zoom=Z                  camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy            camera center in cell coords
 //                           (default: bbox center of --mask-nodes)
@@ -230,6 +232,7 @@ bool g_demoPattern = false;
 bool g_noUi = false;
 std::vector<glm::ivec2> g_cliMaskNodes;
 std::optional<float> g_cliMaskSpread;
+std::optional<float> g_cliMaskSink;
 std::string g_cliMatDir;
 std::optional<float> g_cliMatTiling;
 std::optional<float> g_cliReliefDepth;
@@ -347,7 +350,7 @@ void init() {
         (g_dataRoot / g_matDir / "Ground061_Displacement.jpg").string(),
         g_reliefMap);
     g_maskParams.reliefMap = &g_reliefMap;
-    g_maskParams.reliefDepth = g_reliefLoaded ? g_cliReliefDepth.value_or(0.015f) : 0.0f;
+    g_maskParams.reliefDepth = g_reliefLoaded ? g_cliReliefDepth.value_or(0.02f) : 0.0f;
     if (g_reliefLoaded) {
         g_maskParams.reliefVersion = 1;
     }
@@ -414,19 +417,20 @@ void drawImGui(int w, int h) {
             ImGui::TextDisabled("(applied after a 0.3 s edit pause)");
             ImGui::SliderFloat("Height (world)", &g_maskParams.height, 0.05f, 1.0f, "%.2f");
             ImGui::SliderFloat("Spread", &g_maskParams.spreadDistance, 0.0f, 3.0f, "%.2f cells");
-            ImGui::SliderFloat("Cell size", &g_maskParams.cellSize, 0.04f, 0.12f, "%.3f");
+            ImGui::SliderFloat("Sink below grid", &g_maskParams.sinkFraction, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Cell size", &g_maskParams.cellSize, 0.03f, 0.12f, "%.3f");
             ImGui::SliderInt("Blur passes", &g_maskParams.blurPasses, 0, 3);
         }
         if (ImGui::CollapsingHeader("Material (Ground061)", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Text("Maps: %d/4%s", g_matMapsLoaded, g_matMapsLoaded > 0 ? "" : " (palette look)");
-            ImGui::SliderFloat("Mat tiling", &g_matTiling, 0.5f, 8.0f, "%.1f");
+            ImGui::SliderFloat("Mat tiling", &g_matTiling, 0.01f, 2.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
             ImGui::SliderFloat("Albedo", &g_matAlbedo, 0.0f, 1.0f, "%.2f");
             ImGui::SliderFloat("Normal map", &g_matNormal, 0.0f, 1.0f, "%.2f");
             ImGui::SliderFloat("AO", &g_matAo, 0.0f, 1.0f, "%.2f");
             ImGui::SliderFloat("Roughness", &g_matRough, 0.0f, 1.0f, "%.2f");
             ImGui::TextDisabled("(relief rebuilds the mesh after the pause)");
             ImGui::SliderFloat("Relief depth", &g_maskParams.reliefDepth, 0.0f, 0.05f, "%.3f");
-            ImGui::SliderFloat("Relief tiling", &g_maskParams.reliefTiling, 0.5f, 8.0f, "%.1f");
+            ImGui::SliderFloat("Relief tiling", &g_maskParams.reliefTiling, 0.01f, 2.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
             if (ImGui::Button("Reload material")) {
                 g_matMapsLoaded = g_renderer.loadMaterialMaps((g_dataRoot / g_matDir).string());
                 g_reliefLoaded = g_renderer.loadReliefMap(
@@ -761,6 +765,9 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--mask-spread=", 0) == 0) {
             g_cliMaskSpread = static_cast<float>(std::atof(arg.substr(14).c_str()));
         }
+        if (arg.rfind("--mask-sink=", 0) == 0) {
+            g_cliMaskSink = static_cast<float>(std::atof(arg.substr(12).c_str()));
+        }
         if (arg.rfind("--mat-dir=", 0) == 0) {
             g_cliMatDir = arg.substr(10);
         }
@@ -783,11 +790,17 @@ int main(int argc, char* argv[]) {
     if (g_cliMaskSpread) {
         g_maskParams.spreadDistance = *g_cliMaskSpread;
     }
+    if (g_cliMaskSink) {
+        g_maskParams.sinkFraction = std::clamp(*g_cliMaskSink, 0.0f, 1.0f);
+    }
     if (!g_cliMatDir.empty()) {
         g_matDir = g_cliMatDir;
     }
     if (g_cliMatTiling) {
         g_matTiling = *g_cliMatTiling;
+        // Keep the geometry dunes aligned with the shader ripples (the UI
+        // sliders can still be desynced deliberately).
+        g_maskParams.reliefTiling = *g_cliMatTiling;
     }
 
     if (smoke) {

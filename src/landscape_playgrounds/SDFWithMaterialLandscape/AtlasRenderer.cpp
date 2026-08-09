@@ -858,6 +858,12 @@ void AtlasRenderer::init() {
     sg_sampler_desc matSmp = {};
     matSmp.min_filter = SG_FILTER_LINEAR;
     matSmp.mag_filter = SG_FILTER_LINEAR;
+    // The material maps carry a full CPU-built mip chain (see
+    // uploadSlotMipmapped): without it the minified REPEAT texture aliases
+    // into noise a few cells out. Anisotropy keeps the grazing iso angle
+    // crisp; sokol clamps/ignores it when the extension is missing.
+    matSmp.mipmap_filter = SG_FILTER_LINEAR;
+    matSmp.max_anisotropy = 8;
     matSmp.wrap_u = SG_WRAP_REPEAT;
     matSmp.wrap_v = SG_WRAP_REPEAT;
     matSmp.label = "tileshape-mat-smp";
@@ -962,6 +968,77 @@ bool AtlasRenderer::uploadSlot(
     return slot.view.id != SG_INVALID_ID;
 }
 
+namespace {
+
+// Full RGBA8 mip chain via 2x2 box filter, halving until 1x1 (odd sizes
+// clamp the second tap). Material maps only — never atlases, whose tiles
+// would bleed into each other in the low levels.
+std::vector<std::vector<std::uint8_t>> buildMipChain(const std::uint8_t* rgba, int w, int h) {
+    std::vector<std::vector<std::uint8_t>> levels;
+    levels.emplace_back(rgba, rgba + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    while (w > 1 || h > 1) {
+        const int nw = std::max(1, w / 2);
+        const int nh = std::max(1, h / 2);
+        const std::vector<std::uint8_t>& src = levels.back();
+        std::vector<std::uint8_t> dst(static_cast<size_t>(nw) * static_cast<size_t>(nh) * 4);
+        for (int y = 0; y < nh; ++y) {
+            const int y0 = std::min(2 * y, h - 1);
+            const int y1 = std::min(2 * y + 1, h - 1);
+            for (int x = 0; x < nw; ++x) {
+                const int x0 = std::min(2 * x, w - 1);
+                const int x1 = std::min(2 * x + 1, w - 1);
+                for (int c = 0; c < 4; ++c) {
+                    const int sum = static_cast<int>(src[(static_cast<size_t>(y0) * w + x0) * 4 + c]) +
+                        static_cast<int>(src[(static_cast<size_t>(y0) * w + x1) * 4 + c]) +
+                        static_cast<int>(src[(static_cast<size_t>(y1) * w + x0) * 4 + c]) +
+                        static_cast<int>(src[(static_cast<size_t>(y1) * w + x1) * 4 + c]);
+                    dst[(static_cast<size_t>(y) * nw + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                }
+            }
+        }
+        levels.push_back(std::move(dst));
+        w = nw;
+        h = nh;
+    }
+    return levels;
+}
+
+} // namespace
+
+bool AtlasRenderer::uploadSlotMipmapped(
+    AtlasSlot& slot,
+    const void* rgba,
+    int width,
+    int height,
+    const char* label) {
+
+    destroySlot(slot);
+
+    // sg_make_image copies the levels synchronously, so a local chain is fine.
+    const std::vector<std::vector<std::uint8_t>> levels =
+        buildMipChain(static_cast<const std::uint8_t*>(rgba), width, height);
+    sg_image_desc desc = {};
+    desc.width = width;
+    desc.height = height;
+    desc.num_mipmaps = static_cast<int>(levels.size());
+    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    for (size_t i = 0; i < levels.size(); ++i) {
+        desc.data.mip_levels[i].ptr = levels[i].data();
+        desc.data.mip_levels[i].size = levels[i].size();
+    }
+    desc.label = label;
+    slot.image = sg_make_image(&desc);
+    if (slot.image.id == SG_INVALID_ID) {
+        spdlog::error("AtlasRenderer: sg_make_image failed ({})", label ? label : "?");
+        return false;
+    }
+
+    sg_view_desc viewDesc = {};
+    viewDesc.texture.image = slot.image;
+    slot.view = sg_make_view(&viewDesc);
+    return slot.view.id != SG_INVALID_ID;
+}
+
 int AtlasRenderer::loadMaterialMaps(const std::string& dir, const std::string& setName) {
     const char* suffixes[kMatCount] = {"_Color.jpg", "_NormalGL.jpg", "_AmbientOcclusion.jpg", "_Roughness.jpg"};
     const char* labels[kMatCount] = {"mat-color", "mat-normal", "mat-ao", "mat-rough"};
@@ -979,7 +1056,7 @@ int AtlasRenderer::loadMaterialMaps(const std::string& dir, const std::string& s
             }
             continue;
         }
-        const bool ok = uploadSlot(m_matMaps[i], pixels, w, h, labels[i]);
+        const bool ok = uploadSlotMipmapped(m_matMaps[i], pixels, w, h, labels[i]);
         stbi_image_free(pixels);
         if (!ok) {
             spdlog::error("AtlasRenderer: material map '{}' upload failed", path);
@@ -1009,7 +1086,32 @@ bool AtlasRenderer::loadReliefMap(const std::string& path, maskfield::ReliefMap&
         out.gray[i] = static_cast<float>(pixels[i]) * (1.0f / 255.0f);
     }
     stbi_image_free(pixels);
-    spdlog::info("AtlasRenderer: relief map '{}' ({}x{})", path, w, h);
+    // Low-pass to the dune scale: the voxel grid cannot hold the fine
+    // ripples (they turn into gravel-like lump noise), and those already
+    // live in the normal map. Repeated 2x2 box halving with REPEAT wrap
+    // keeps the raster tileable; reliefAt's bilinear smooths the rest.
+    while (out.w > 32 || out.h > 16) {
+        const int nw = std::max(1, out.w / 2);
+        const int nh = std::max(1, out.h / 2);
+        std::vector<float> next(static_cast<size_t>(nw) * static_cast<size_t>(nh));
+        for (int y = 0; y < nh; ++y) {
+            const int y0 = (2 * y) % out.h;
+            const int y1 = (2 * y + 1) % out.h;
+            for (int x = 0; x < nw; ++x) {
+                const int x0 = (2 * x) % out.w;
+                const int x1 = (2 * x + 1) % out.w;
+                next[static_cast<size_t>(y) * nw + x] = 0.25f *
+                    (out.gray[static_cast<size_t>(y0) * out.w + x0] +
+                     out.gray[static_cast<size_t>(y0) * out.w + x1] +
+                     out.gray[static_cast<size_t>(y1) * out.w + x0] +
+                     out.gray[static_cast<size_t>(y1) * out.w + x1]);
+            }
+        }
+        out.w = nw;
+        out.h = nh;
+        out.gray = std::move(next);
+    }
+    spdlog::info("AtlasRenderer: relief map '{}' ({}x{}, low-passed to {}x{})", path, w, h, out.w, out.h);
     return true;
 }
 

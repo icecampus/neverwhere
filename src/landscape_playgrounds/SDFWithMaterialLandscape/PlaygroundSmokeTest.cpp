@@ -259,6 +259,27 @@ bool runTileShapeSmokeTest() {
             }
         }
 
+        // --- Sink fraction: the share of the plate height standing below
+        // the node grid plane (y = 0, the future water). height 0.2,
+        // sink 0.75 -> the slab spans y = -0.15..+0.05 (the default 0.5
+        // keeps the symmetric +-hh slab the blocks above assert).
+        {
+            maskfield::MaskFieldParams mpk;
+            mpk.cellSize = 0.09f; // coarse: smoke speed
+            mpk.sinkFraction = 0.75f;
+            maskfield::MaskField sinkField(mpk, &maskNodes[0][0], 8, 8);
+            const float topIn = sinkField.eval(glm::vec3(2.5f, 0.03f, 2.5f));
+            const float topOut = sinkField.eval(glm::vec3(2.5f, 0.07f, 2.5f));
+            const float botIn = sinkField.eval(glm::vec3(2.5f, -0.13f, 2.5f));
+            const float botOut = sinkField.eval(glm::vec3(2.5f, -0.17f, 2.5f));
+            if (topIn >= 0.0f || topOut <= 0.0f || botIn >= 0.0f || botOut <= 0.0f) {
+                spdlog::error(
+                    "TEST FAIL TileShape: mask sink wrong (top {:.4f}/{:.4f}, bottom {:.4f}/{:.4f})",
+                    topIn, topOut, botIn, botOut);
+                return false;
+            }
+        }
+
         // --- Micro relief (displacement): a tiling CPU height raster
         // shifts the iso surface by reliefDepth * (sample - 0.5) * 2.
         // A uniform map moves the top by exactly +/- depth; a gradient map

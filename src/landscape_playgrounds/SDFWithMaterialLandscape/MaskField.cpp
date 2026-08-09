@@ -25,11 +25,12 @@ MaskField::MaskField(
     }
 
     // The region spans (nodesX-1) x (nodesY-1) map cells; the field is
-    // rectangular in XZ. The geometry stands half its height below the node
-    // grid plane (y = 0): the slab spans y = -height/2..+height/2, so the
-    // field's Y range is [-height/2 - padY, height/2 + padY]. The mask
-    // itself keeps F > 0 outside the region (fill = 0 there), so the XZ pad
-    // is just slack for the optional blur.
+    // rectangular in XZ. sinkFraction of the height stands below the node
+    // grid plane (y = 0): the slab spans y = -height*sink..+height*(1-sink),
+    // so the field's Y range is [-height*sink - padY, height*(1-sink) + padY]
+    // (the span itself does not change with sink, only the shift does). The
+    // mask itself keeps F > 0 outside the region (fill = 0 there), so the XZ
+    // pad is just slack for the optional blur.
     const float cell = params.cellSize;
     const float pad = params.padding;
     const float padY = 2.0f * cell;
@@ -38,7 +39,7 @@ MaskField::MaskField(
     m_nx = static_cast<int>(std::ceil((regionX + 2.0f * pad) / cell));
     m_nz = static_cast<int>(std::ceil((regionZ + 2.0f * pad) / cell));
     m_ny = static_cast<int>(std::ceil((params.height + 2.0f * padY) / cell));
-    m_origin = glm::vec3(-pad, -0.5f * params.height - padY, -pad);
+    m_origin = glm::vec3(-pad, -params.height * params.sinkFraction - padY, -pad);
 
     buildDistanceField();
 }
@@ -224,31 +225,42 @@ float MaskField::reliefAt(float x, float z) const {
 float MaskField::eval(const glm::vec3& p) const {
     const float s = distanceAt(p.x, p.z);
     const float S = m_params.spreadDistance;
-    const float hh = 0.5f * m_params.height;
+    const float topH = m_params.height * (1.0f - m_params.sinkFraction);
+    const float botH = m_params.height * m_params.sinkFraction;
     // Top elevation: the core silhouette (the geometry spread 0 would draw)
     // keeps the full height; the spread band grows no full-height geometry
     // — it is a skirt whose height ramps linearly down with the distance
-    // from the core contour. The whole geometry stands half its height
-    // below the node grid plane (y = 0): the plate spans y = -hh..+hh and
-    // the skirt foot reaches y = -hh.
-    float top = hh;
+    // from the core contour. sinkFraction of the height stands below the
+    // node grid plane (y = 0): the plate spans y = -botH..+topH and the
+    // skirt foot reaches y = -botH.
+    float top = topH;
     if (s > 0.0f) {
-        top = S > 0.0f ? m_params.height * std::max(1.0f - s / S, 0.0f) - hh : -hh;
+        top = S > 0.0f ?
+            m_params.height * (std::max(1.0f - s / S, 0.0f) - m_params.sinkFraction) :
+            -botH;
     }
-    // Negative under the top surface above y = -hh within s <= S. At S = 0
-    // this reduces exactly to a slab max(s, |y| - hh): a vertical wall on
-    // the fill = 0.5 contour, flat top at y = +hh.
+    // Negative under the top surface above y = -botH within s <= S. At S = 0
+    // this reduces exactly to a slab with a vertical wall on the fill = 0.5
+    // contour.
     const float qTop = p.y - top;
-    const float qBottom = -p.y - hh;
+    const float qBottom = -p.y - botH;
     const float qSide = s - S;
     float F = std::max({qTop, qBottom, qSide});
     // Micro relief (displacement map): shifts the iso surface by a centered,
-    // tiling height sample — the beach ripple becomes real geometry (top,
-    // walls and skirt all ripple). O(1); at reliefDepth = 0 or without a
-    // map the field is bit-for-bit the smooth one. The amplitude (~0.02) is
-    // dwarfed by the border distance, so the field border stays positive.
+    // tiling height sample — the beach dunes become real geometry with a
+    // silhouette. The raster is low-passed at load (see loadReliefMap): the
+    // voxel grid cannot hold the fine ripples (they live in the normal map),
+    // only the dune-scale undulation. The relief ramps in over reliefFade
+    // from the core contour, so walls and skirt keep a clean silhouette.
+    // O(1); at reliefDepth = 0 or without a map the field is bit-for-bit the
+    // smooth one.
     if (m_params.reliefDepth > 0.0f && m_params.reliefMap != nullptr) {
-        F -= m_params.reliefDepth * (reliefAt(p.x, p.z) - 0.5f) * 2.0f;
+        float w = 1.0f;
+        if (m_params.reliefFade > 0.0f) {
+            const float t = std::clamp(-s / m_params.reliefFade, 0.0f, 1.0f);
+            w = t * t * (3.0f - 2.0f * t);
+        }
+        F -= m_params.reliefDepth * (reliefAt(p.x, p.z) - 0.5f) * 2.0f * w;
     }
     return F;
 }
