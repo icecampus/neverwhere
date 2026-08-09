@@ -101,6 +101,12 @@ void WorldRenderer::ensureTechAsset(const std::string& assetUuid, const CliffPar
     cliffRenderer.ensureTechAsset(assetUuid, params);
 }
 
+void WorldRenderer::ensureMaskAsset(const std::string& assetUuid, const CliffParams& params) {
+    // Mask3d shares the cliff renderer (mask field + the PBR-lite material
+    // map set ride inside CliffParams).
+    cliffRenderer.ensureMaskAsset(assetUuid, params);
+}
+
 void WorldRenderer::ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats) {
     landscapeRenderer.ensureTextureAsset(assetUuid, texturePath, tilingRepeats);
 }
@@ -137,6 +143,7 @@ void WorldRenderer::prepare(const WorldFrame& frame, double /*nowSec*/) {
     addTiles(frame.cliffTiles, cliffKnown);
     addTiles(frame.stoneTiles, cliffKnown);
     addTiles(frame.techTiles, cliffKnown);
+    addTiles(frame.maskTiles, cliffKnown);
     addTiles(frame.cyclopeanTiles, [this](const std::string& uuid) {
         return cyclopeanRenderer.hasAsset(uuid);
     });
@@ -295,8 +302,8 @@ void WorldRenderer::render(
 
     landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
 
-    // Cliff/stone/tech passes: shared sun via the stitch core block + the seam
-    // materials. The wall-foot AO shares the ground's AO switch. All tile
+    // Cliff/stone/tech/mask passes: shared sun via the stitch core block + the
+    // seam materials. The wall-foot AO shares the ground's AO switch. All tile
     // sets go through ONE render call: they share the pipeline, the cache
     // machinery and its per-frame scratch buffers — two calls in one frame
     // would update the prototype-silhouette buffer twice, and sokol allows
@@ -306,10 +313,12 @@ void WorldRenderer::render(
     cliffStitch.seam = seam;
     cliffStitch.aoWallFade = stitch.aoEnabled ? stitch.aoWallFade : 0.0f;
     scratchCliffStoneTiles.clear();
-    scratchCliffStoneTiles.reserve(frame.cliffTiles.size() + frame.stoneTiles.size() + frame.techTiles.size());
+    scratchCliffStoneTiles.reserve(frame.cliffTiles.size() + frame.stoneTiles.size() +
+        frame.techTiles.size() + frame.maskTiles.size());
     scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.cliffTiles.begin(), frame.cliffTiles.end());
     scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.stoneTiles.begin(), frame.stoneTiles.end());
     scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.techTiles.begin(), frame.techTiles.end());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.maskTiles.begin(), frame.maskTiles.end());
     cliffRenderer.render(scratchCliffStoneTiles, iso, camera, viewWidth, viewHeight, nowSec, cliffStitch);
     cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
     spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);

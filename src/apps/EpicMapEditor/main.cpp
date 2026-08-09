@@ -111,6 +111,7 @@ void registreTypes()
     qmlRegisterType<StoneAsset>("Game", 1, 0, "StoneAsset");
     qmlRegisterType<TextureAsset>("Game", 1, 0, "TextureAsset");
     qmlRegisterType<TechAsset>("Game", 1, 0, "TechAsset");
+    qmlRegisterType<MaskAsset>("Game", 1, 0, "MaskAsset");
 
 
     qmlRegisterType<DiamondIsometryView>("Game", 1, 0, "DiamondIsometryView");

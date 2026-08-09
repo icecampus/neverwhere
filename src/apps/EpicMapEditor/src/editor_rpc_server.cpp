@@ -333,6 +333,7 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     //   stone3d: 0=StonePencil
     //   texture2d: 0=TexturePencil
     //   tech3d: 0=TechPencil
+    //   mask3d: 0=MaskPencil
     int index = -1;
     if (cur->type == AssetTypes::slice)
     {
@@ -361,6 +362,10 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     else if (cur->type == AssetTypes::tech3d)
     {
         if (tool == "tech_pencil" || tool == "0") index = 0;
+    }
+    else if (cur->type == AssetTypes::mask3d)
+    {
+        if (tool == "mask_pencil" || tool == "0") index = 0;
     }
     else
     {

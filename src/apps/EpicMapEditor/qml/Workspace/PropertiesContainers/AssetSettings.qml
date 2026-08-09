@@ -115,6 +115,18 @@ Rectangle
             border.color: "transparent"
         }
 
+        // Mask3d generator/material params (same embedding contract as CliffSettings).
+        MaskSettings
+        {
+            width: parent.width
+            asset: assetSettings.asset
+            activeAsset: assetSettings.asset && assetSettings.asset.isMask3d
+            showTitle: false
+            showSaveButton: false
+            color: "transparent"
+            border.color: "transparent"
+        }
+
         Row
         { 
             anchors.horizontalCenter: parent.horizontalCenter

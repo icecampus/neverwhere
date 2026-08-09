@@ -9,6 +9,7 @@
 
 #include "atlas_tile_types.h"
 #include "render_core/depth_levels.h"
+#include "render_core/image_loader.h"
 
 namespace render_core {
 
@@ -67,6 +68,8 @@ uniform vec4 params5;
 uniform vec4 params6;
 uniform vec4 params7;
 uniform vec4 params8;
+uniform vec4 params9;
+uniform vec4 params10;
 // Scene stitch core (slot 2): the shared sun + the ground's tone/AO. The two
 // vec4 after sun_dir ride one array on purpose: stitch[0] is ground-only data
 // (the cliff pass keeps its own palette tone), and a GL driver drops unused
@@ -76,6 +79,13 @@ uniform vec4 params8;
 uniform vec4 sun_dir;
 uniform vec4 stitch[2]; // [0]: ground ambient/diffuse/gamma; [1]: --, AO strength, AO radius
 uniform sampler2D top_tex;
+// Mask material (mask3d assets): the ambientCG-style map set on one shared
+// mipmapped REPEAT sampler (views 1..4, sampler slot 1). Sampled only under
+// strength > 0 guards, so the dummies bound elsewhere never show.
+uniform sampler2D mat_color;
+uniform sampler2D mat_normal;
+uniform sampler2D mat_ao;
+uniform sampler2D mat_rough;
 
 vec4 hashv4v3(vec3 p) {
     vec3 chash = vec3(37.0, 39.0, 41.0);
@@ -126,6 +136,12 @@ float fbm2(vec2 p) {
     return f * (1.0 / 1.9375);
 }
 
+// Material UV: the ambientCG maps are 2:1, so V tiles twice as fast to keep
+// the features square in world space.
+vec2 matuv(vec2 q) {
+    return q * vec2(params9.x, params9.x * 2.0);
+}
+
 void main() {
     vec3 n = normalize(v_normal);
     vec3 p = v_world;
@@ -164,6 +180,30 @@ void main() {
         topMask *= 1.0 - stone;
     }
     vec3 base = mix(rock, grass, topMask);
+    // --- Mask material (mask3d assets): each strength at 0 disables its
+    // channel — at all zeros the shader is bit-for-bit the palette one.
+    // Albedo: triplanar over the world position (the mesh has no UVs),
+    // weights sharpened to ^4 towards the dominant axis.
+    if (params9.y > 0.0) {
+        vec3 tw = abs(n);
+        tw = tw * tw;
+        tw = tw * tw;
+        tw /= (tw.x + tw.y + tw.z);
+        vec3 alb = tw.x * texture(mat_color, matuv(p.zy)).rgb +
+            tw.y * texture(mat_color, matuv(p.xz)).rgb +
+            tw.z * texture(mat_color, matuv(p.xy)).rgb;
+        base = mix(base, alb, params9.y);
+    }
+    // Normal detail: top projection (the beach reads mostly horizontal,
+    // skirt included), tangent frame around the geometric normal, NormalGL
+    // (Y+) convention. Remaps n before the lighting below.
+    if (params9.z > 0.0) {
+        vec3 nts = texture(mat_normal, matuv(p.xz)).rgb * 2.0 - 1.0;
+        vec3 tang = abs(n.y) < 0.99 ? normalize(cross(vec3(0.0, 1.0, 0.0), n)) : vec3(1.0, 0.0, 0.0);
+        vec3 bitang = cross(n, tang);
+        vec3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
+        n = normalize(mix(n, nm, params9.z));
+    }
     // Sediment strata bands on the walls.
     base *= 1.0 - params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
     // Seam: lift the plateau tone off the ground plane (params3.y, 1 = neutral).
@@ -184,9 +224,18 @@ void main() {
     // looking pasted onto the walls (params5.x = strength, 0 = off; plain
     // cliffs carry no rim attribute and stay untouched).
     float rimAo = 1.0 - clamp(v_rim * params5.x, 0.0, 1.0);
-    vec3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
+    // Material AO dims the ambient term (the baked cavity of the map set).
+    float ambient = params0.y;
+    if (params9.w > 0.0) {
+        ambient *= mix(1.0, texture(mat_ao, matuv(p.xz)).r, params9.w);
+    }
+    vec3 col = base * (ambient + params1.z * max(-ndl, 0.0) +
         params0.z * max(ndl, 0.0)) * rimAo;
     float specAmt = mix(0.05, params0.w, shell) * (1.0 - topMask);
+    // Material roughness kills the spec (sand is rough).
+    if (params10.x > 0.0) {
+        specAmt *= mix(1.0, 1.0 - texture(mat_rough, matuv(p.xz)).r, params10.x);
+    }
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
     // Bottom blend: darken + a faint soil-green cast, so the wall foot merges
     // with the underlay instead of hanging in the void.
@@ -261,6 +310,8 @@ cbuffer fs_params: register(b0) {
     float4 params6; // seam: xyz: bounce tint, w: bounce strength
     float4 params7; // seam: xyz: sky tint, w: sky strength
     float4 params8; // seam: xyz: plateau top tint, w: top UV rotation
+    float4 params9; // material: x: tiling, y: albedo, z: normal map, w: AO strengths
+    float4 params10; // material: x: roughness strength
 };
 // Scene stitch core (shared sun + ground tone/AO; stitch0 is ground-only).
 cbuffer stitch_params: register(b1) {
@@ -270,6 +321,14 @@ cbuffer stitch_params: register(b1) {
 };
 Texture2D top_tex: register(t0);
 SamplerState top_tex_smp: register(s0);
+// Mask material (mask3d assets): the ambientCG-style map set on one shared
+// mipmapped sampler (views t1..t4, sampler s1). Sampled only under
+// strength > 0 guards.
+Texture2D mat_color: register(t1);
+Texture2D mat_normal: register(t2);
+Texture2D mat_ao: register(t3);
+Texture2D mat_rough: register(t4);
+SamplerState mat_smp: register(s1);
 
 float4 hashv4v3(float3 p) {
     float3 chash = float3(37.0, 39.0, 41.0);
@@ -328,6 +387,12 @@ struct PSIn {
     float rim: TEXCOORD3;
 };
 
+// Material UV: the ambientCG maps are 2:1, so V tiles twice as fast to keep
+// the features square in world space.
+float2 matuv(float2 q) {
+    return q * float2(params9.x, params9.x * 2.0);
+}
+
 float4 main(PSIn inp): SV_Target {
     float3 n = normalize(inp.normal);
     float3 p = inp.world;
@@ -363,6 +428,29 @@ float4 main(PSIn inp): SV_Target {
         topMask *= 1.0 - stone;
     }
     float3 base = lerp(rock, grass, topMask);
+    // --- Mask material (mask3d assets): each strength at 0 disables its
+    // channel — at all zeros the shader is bit-for-bit the palette one.
+    // Albedo: triplanar over the world position (the mesh has no UVs),
+    // weights sharpened to ^4 towards the dominant axis.
+    if (params9.y > 0.0) {
+        float3 tw = abs(n);
+        tw = tw * tw;
+        tw = tw * tw;
+        tw /= (tw.x + tw.y + tw.z);
+        float3 alb = tw.x * mat_color.Sample(mat_smp, matuv(p.zy)).rgb +
+            tw.y * mat_color.Sample(mat_smp, matuv(p.xz)).rgb +
+            tw.z * mat_color.Sample(mat_smp, matuv(p.xy)).rgb;
+        base = lerp(base, alb, params9.y);
+    }
+    // Normal detail: top projection, tangent frame around the geometric
+    // normal, NormalGL (Y+) convention. Remaps n before the lighting below.
+    if (params9.z > 0.0) {
+        float3 nts = mat_normal.Sample(mat_smp, matuv(p.xz)).rgb * 2.0 - 1.0;
+        float3 tang = abs(n.y) < 0.99 ? normalize(cross(float3(0.0, 1.0, 0.0), n)) : float3(1.0, 0.0, 0.0);
+        float3 bitang = cross(n, tang);
+        float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
+        n = normalize(lerp(n, nm, params9.z));
+    }
     // Sediment strata bands on the walls.
     base *= 1.0 - params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
     // Seam: lift the plateau tone off the ground plane (params3.y, 1 = neutral).
@@ -379,9 +467,18 @@ float4 main(PSIn inp): SV_Target {
     float ndl = dot(n, l);
     // Seam: baked wall proximity darkens the plateau edge (params5.x, 0 = off).
     float rimAo = 1.0 - clamp(inp.rim * params5.x, 0.0, 1.0);
-    float3 col = base * (params0.y + params1.z * max(-ndl, 0.0) +
+    // Material AO dims the ambient term (the baked cavity of the map set).
+    float ambient = params0.y;
+    if (params9.w > 0.0) {
+        ambient *= lerp(1.0, mat_ao.Sample(mat_smp, matuv(p.xz)).r, params9.w);
+    }
+    float3 col = base * (ambient + params1.z * max(-ndl, 0.0) +
         params0.z * max(ndl, 0.0)) * rimAo;
     float specAmt = lerp(0.05, params0.w, shell) * (1.0 - topMask);
+    // Material roughness kills the spec (sand is rough).
+    if (params10.x > 0.0) {
+        specAmt *= lerp(1.0, 1.0 - mat_rough.Sample(mat_smp, matuv(p.xz)).r, params10.x);
+    }
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), params1.x);
     // Bottom blend: darken + a faint soil-green cast toward the underlay.
     float hf = clamp(p.y / max(params2.z, 0.001), 0.0, 1.0);
@@ -462,6 +559,8 @@ struct FsParams {
     float4 params6; // seam: xyz: bounce tint, w: bounce strength
     float4 params7; // seam: xyz: sky tint, w: sky strength
     float4 params8; // seam: xyz: plateau top tint, w: top UV rotation
+    float4 params9; // material: x: tiling, y: albedo, z: normal map, w: AO strengths
+    float4 params10; // material: x: roughness strength
 };
 
 // Scene stitch core (shared sun + ground tone/AO; stitch0 is ground-only).
@@ -528,10 +627,21 @@ struct PSIn {
     float rim;
 };
 
+// Material UV: the ambientCG maps are 2:1, so V tiles twice as fast to keep
+// the features square in world space.
+float2 matuv(float2 q, float tiling) {
+    return q * float2(tiling, tiling * 2.0);
+}
+
 fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
                       constant StitchCore& st [[buffer(2)]],
                       texture2d<float> top_tex [[texture(0)]],
-                      sampler top_tex_smp [[sampler(0)]]) {
+                      sampler top_tex_smp [[sampler(0)]],
+                      texture2d<float> mat_color [[texture(1)]],
+                      texture2d<float> mat_normal [[texture(2)]],
+                      texture2d<float> mat_ao [[texture(3)]],
+                      texture2d<float> mat_rough [[texture(4)]],
+                      sampler mat_smp [[sampler(1)]]) {
     float3 n = normalize(in.normal);
     float3 p = in.world;
     // Omphalos stone palette: dark at groove floors, gold + veins on the shell.
@@ -566,6 +676,29 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
         topMask *= 1.0 - stone;
     }
     float3 base = mix(rock, grass, topMask);
+    // --- Mask material (mask3d assets): each strength at 0 disables its
+    // channel — at all zeros the shader is bit-for-bit the palette one.
+    // Albedo: triplanar over the world position (the mesh has no UVs),
+    // weights sharpened to ^4 towards the dominant axis.
+    if (fs.params9.y > 0.0) {
+        float3 tw = abs(n);
+        tw = tw * tw;
+        tw = tw * tw;
+        tw /= (tw.x + tw.y + tw.z);
+        float3 alb = tw.x * mat_color.sample(mat_smp, matuv(p.zy, fs.params9.x)).rgb +
+            tw.y * mat_color.sample(mat_smp, matuv(p.xz, fs.params9.x)).rgb +
+            tw.z * mat_color.sample(mat_smp, matuv(p.xy, fs.params9.x)).rgb;
+        base = mix(base, alb, fs.params9.y);
+    }
+    // Normal detail: top projection, tangent frame around the geometric
+    // normal, NormalGL (Y+) convention. Remaps n before the lighting below.
+    if (fs.params9.z > 0.0) {
+        float3 nts = mat_normal.sample(mat_smp, matuv(p.xz, fs.params9.x)).rgb * 2.0 - 1.0;
+        float3 tang = abs(n.y) < 0.99 ? normalize(cross(float3(0.0, 1.0, 0.0), n)) : float3(1.0, 0.0, 0.0);
+        float3 bitang = cross(n, tang);
+        float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
+        n = normalize(mix(n, nm, fs.params9.z));
+    }
     // Sediment strata bands on the walls.
     base *= 1.0 - fs.params3.x * (1.0 - topMask) * (0.5 + 0.5 * sin(p.y * 40.0 + 3.0 * fbm3(8.0 * p)));
     // Seam: lift the plateau tone off the ground plane (params3.y, 1 = neutral).
@@ -582,9 +715,18 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
     float ndl = dot(n, l);
     // Seam: baked wall proximity darkens the plateau edge (params5.x, 0 = off).
     float rimAo = 1.0 - clamp(in.rim * fs.params5.x, 0.0, 1.0);
-    float3 col = base * (fs.params0.y + fs.params1.z * max(-ndl, 0.0) +
+    // Material AO dims the ambient term (the baked cavity of the map set).
+    float ambient = fs.params0.y;
+    if (fs.params9.w > 0.0) {
+        ambient *= mix(1.0, mat_ao.sample(mat_smp, matuv(p.xz, fs.params9.x)).r, fs.params9.w);
+    }
+    float3 col = base * (ambient + fs.params1.z * max(-ndl, 0.0) +
         fs.params0.z * max(ndl, 0.0)) * rimAo;
     float specAmt = mix(0.05, fs.params0.w, shell) * (1.0 - topMask);
+    // Material roughness kills the spec (sand is rough).
+    if (fs.params10.x > 0.0) {
+        specAmt *= mix(1.0, 1.0 - mat_rough.sample(mat_smp, matuv(p.xz, fs.params9.x)).r, fs.params10.x);
+    }
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params1.x);
     // Bottom blend: darken + a faint soil-green cast toward the underlay.
     float hf = clamp(p.y / max(fs.params2.z, 0.001), 0.0, 1.0);
@@ -628,10 +770,11 @@ void fillFsUniformDesc(sg_shader_uniform_block* block, std::size_t size) {
     block->msl_buffer_n = 1;
     block->wgsl_group0_binding_n = 1;
     block->spirv_set0_binding_n = 1;
-    const char* names[14] = {"view_dir", "dark_color", "gold_color",
+    const char* names[16] = {"view_dir", "dark_color", "gold_color",
         "grass_a", "grass_b", "params0", "params1", "params2", "params3",
-        "params4", "params5", "params6", "params7", "params8"};
-    for (int i = 0; i < 14; ++i) {
+        "params4", "params5", "params6", "params7", "params8", "params9",
+        "params10"};
+    for (int i = 0; i < 16; ++i) {
         block->glsl_uniforms[i].glsl_name = names[i];
         block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
     }
@@ -700,6 +843,38 @@ std::uint64_t hashFieldParams(const cliff::FieldParams& p) {
     return h;
 }
 
+// Loads one material map with a full CPU mip chain (see image_loader):
+// without mips the minified REPEAT texture on the ground plane aliases into
+// noise. On failure the out params stay invalid and the caller binds the
+// per-channel placeholder instead.
+bool loadMatTexture(const std::filesystem::path& file, sg_image& outImage, sg_view& outView) {
+    try {
+        const ImageRGBA8 img = loadImageRGBA8(file);
+        const std::vector<ImageRGBA8> levels = buildMipChain(img);
+        sg_image_desc desc = {};
+        desc.width = img.width;
+        desc.height = img.height;
+        desc.num_mipmaps = static_cast<int>(levels.size());
+        desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        for (std::size_t i = 0; i < levels.size(); ++i) {
+            desc.data.mip_levels[i].ptr = levels[i].pixels.data();
+            desc.data.mip_levels[i].size = levels[i].pixels.size();
+        }
+        desc.label = "render-core-cliff-mat";
+        outImage = sg_make_image(&desc);
+        if (outImage.id == SG_INVALID_ID) {
+            return false;
+        }
+        sg_view_desc view = {};
+        view.texture.image = outImage;
+        outView = sg_make_view(&view);
+        return outView.id != SG_INVALID_ID;
+    } catch (const std::exception& e) {
+        spdlog::warn("CliffRenderer: material map '{}' not loaded: {}", file.string(), e.what());
+        return false;
+    }
+}
+
 // One connected piece of an asset's cliffs: its on-nodes and the tiles
 // carrying them (tiles drive the prototype silhouette while pending).
 struct CliffComponent {
@@ -708,8 +883,12 @@ struct CliffComponent {
 };
 
 // Plateau height of the active generator (stone assets keep it in the stone
-// field's base slab; CliffParams::field is unused then; tech — in levelHeight).
+// field's base slab; CliffParams::field is unused then; tech — in levelHeight;
+// mask — the top elevation of the plate, height * (1 - sink)).
 float plateauHeightOf(const CliffParams& params) {
+    if (params.maskField) {
+        return params.maskField->height * (1.0f - params.maskField->sinkFraction);
+    }
     if (params.techField) {
         return params.techField->levelHeight;
     }
@@ -751,6 +930,20 @@ std::uint64_t regionKey(std::vector<glm::ivec2> nodes, const CliffParams& params
         hashFloat(h, p.soften);
         hashFloat(h, p.creaseWidth);
         hashFloat(h, p.outlineDepth);
+        hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.blurPasses)));
+    }
+    if (params.maskField) {
+        const mask::MaskFieldParams& p = *params.maskField;
+        hashFloat(h, p.cellSize);
+        hashFloat(h, p.padding);
+        hashFloat(h, p.height);
+        hashFloat(h, p.spreadDistance);
+        hashFloat(h, p.sinkFraction);
+        hashFloat(h, p.reliefDepth);
+        hashFloat(h, p.reliefTiling);
+        hashFloat(h, p.reliefFade);
+        // The raster content itself: the renderer bumps this on (re)load.
+        hashCombine(h, static_cast<std::uint64_t>(p.reliefVersion));
         hashCombine(h, static_cast<std::uint64_t>(static_cast<std::uint32_t>(p.blurPasses)));
     }
     std::sort(nodes.begin(), nodes.end(), [](const glm::ivec2& a, const glm::ivec2& b) {
@@ -835,10 +1028,25 @@ void CliffRenderer::init(sg_pixel_format depthFormat_) {
     }
 }
 
+void CliffRenderer::destroyMatMaps(AssetCache& cache) {
+    for (int i = 0; i < 4; ++i) {
+        if (cache.matViews[i].id != SG_INVALID_ID) {
+            sg_destroy_view(cache.matViews[i]);
+            cache.matViews[i] = {};
+        }
+        if (cache.matImages[i].id != SG_INVALID_ID) {
+            sg_destroy_image(cache.matImages[i]);
+            cache.matImages[i] = {};
+        }
+        cache.matValid[i] = false;
+    }
+}
+
 void CliffRenderer::shutdown() {
     destroyPipeline();
     for (auto& [uuid, asset] : caches) {
         asset.topTex.destroy();
+        destroyMatMaps(asset);
         for (auto& [key, region] : asset.regions) {
             if (region.vbuf.id != SG_INVALID_ID) {
                 sg_destroy_buffer(region.vbuf);
@@ -899,6 +1107,28 @@ void CliffRenderer::ensurePipeline() {
     shd_desc.texture_sampler_pairs[0].view_slot = 0;
     shd_desc.texture_sampler_pairs[0].sampler_slot = 0;
     shd_desc.texture_sampler_pairs[0].glsl_name = "top_tex";
+    // Mask material maps (mask3d): views 1..4 on the shared mipmapped
+    // sampler 1 (dummies keep the binding complete for other assets).
+    const char* matNames[4] = {"mat_color", "mat_normal", "mat_ao", "mat_rough"};
+    for (int i = 0; i < 4; ++i) {
+        shd_desc.views[1 + i].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        shd_desc.views[1 + i].texture.image_type = SG_IMAGETYPE_2D;
+        shd_desc.views[1 + i].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        shd_desc.views[1 + i].texture.hlsl_register_t_n = 1 + i;
+        shd_desc.views[1 + i].texture.msl_texture_n = 1 + i;
+        shd_desc.views[1 + i].texture.wgsl_group1_binding_n = 2 + i;
+        shd_desc.views[1 + i].texture.spirv_set1_binding_n = 2 + i;
+        shd_desc.texture_sampler_pairs[1 + i].stage = SG_SHADERSTAGE_FRAGMENT;
+        shd_desc.texture_sampler_pairs[1 + i].view_slot = 1 + i;
+        shd_desc.texture_sampler_pairs[1 + i].sampler_slot = 1;
+        shd_desc.texture_sampler_pairs[1 + i].glsl_name = matNames[i];
+    }
+    shd_desc.samplers[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    shd_desc.samplers[1].sampler_type = SG_SAMPLERTYPE_FILTERING;
+    shd_desc.samplers[1].hlsl_register_s_n = 1;
+    shd_desc.samplers[1].msl_sampler_n = 1;
+    shd_desc.samplers[1].wgsl_group1_binding_n = 6;
+    shd_desc.samplers[1].spirv_set1_binding_n = 6;
     shd = sg_make_shader(&shd_desc);
 
     sg_pipeline_desc pip_desc = {};
@@ -948,9 +1178,52 @@ void CliffRenderer::ensurePipeline() {
     smp_desc.wrap_v = SG_WRAP_REPEAT;
     smp_desc.label = "render-core-cliff-dummy-smp";
     m_dummySampler = sg_make_sampler(&smp_desc);
+
+    // Mask material: the shared mipmapped REPEAT sampler (the maps carry a
+    // CPU-built mip chain; aniso keeps the grazing iso angle crisp, sokol
+    // clamps/ignores it when the extension is missing) and the per-channel
+    // 1x1 placeholders.
+    sg_sampler_desc mat_smp = {};
+    mat_smp.min_filter = SG_FILTER_LINEAR;
+    mat_smp.mag_filter = SG_FILTER_LINEAR;
+    mat_smp.mipmap_filter = SG_FILTER_LINEAR;
+    mat_smp.max_anisotropy = 8;
+    mat_smp.wrap_u = SG_WRAP_REPEAT;
+    mat_smp.wrap_v = SG_WRAP_REPEAT;
+    mat_smp.label = "render-core-cliff-mat-smp";
+    m_matSampler = sg_make_sampler(&mat_smp);
+    const std::uint32_t matDummyPx[2] = {0xFFFFFFFF, 0xFFFF8080}; // white, flat normal (128,128,255)
+    const char* matDummyLabels[2] = {"render-core-cliff-mat-white", "render-core-cliff-mat-flatn"};
+    for (int i = 0; i < 2; ++i) {
+        sg_image_desc img = {};
+        img.width = 1;
+        img.height = 1;
+        img.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img.data.mip_levels[0].ptr = &matDummyPx[i];
+        img.data.mip_levels[0].size = sizeof(matDummyPx[i]);
+        img.label = matDummyLabels[i];
+        m_matDummyImages[i] = sg_make_image(&img);
+        sg_view_desc view = {};
+        view.texture.image = m_matDummyImages[i];
+        m_matDummyViews[i] = sg_make_view(&view);
+    }
 }
 
 void CliffRenderer::destroyPipeline() {
+    for (int i = 0; i < 2; ++i) {
+        if (m_matDummyViews[i].id != SG_INVALID_ID) {
+            sg_destroy_view(m_matDummyViews[i]);
+            m_matDummyViews[i] = {};
+        }
+        if (m_matDummyImages[i].id != SG_INVALID_ID) {
+            sg_destroy_image(m_matDummyImages[i]);
+            m_matDummyImages[i] = {};
+        }
+    }
+    if (m_matSampler.id != SG_INVALID_ID) {
+        sg_destroy_sampler(m_matSampler);
+        m_matSampler = {};
+    }
     if (m_dummyView.id != SG_INVALID_ID) {
         sg_destroy_view(m_dummyView);
         m_dummyView = {};
@@ -1055,6 +1328,24 @@ void CliffRenderer::render(
         fs.params7[3] = stitch.seam.skyStrength;
         std::memcpy(fs.params8, stitch.seam.topTint, sizeof(stitch.seam.topTint));
         fs.params8[3] = stitch.seam.topRotation;
+        // Mask material (mask3d; all-zero strengths for the other generators
+        // — the FS guards skip every channel and the look is bit-identical).
+        fs.params9[0] = params.maskMatTiling;
+        fs.params9[1] = params.maskMatAlbedo;
+        fs.params9[2] = params.maskMatNormal;
+        fs.params9[3] = params.maskMatAo;
+        fs.params10[0] = params.maskMatRough;
+        // A mask3d beach sits AT the water line: the seam bands (bounce/sky/
+        // top tints, the wall-foot AO) are tuned for tall cliffs and read as
+        // a heavy green-gray cast over the low sand plate — neutralize them
+        // (the contact AO on the ground around the island stays).
+        if (params.maskField) {
+            fs.params3[1] = 1.0f;                                // top brightness
+            fs.params5[3] = 0.0f;                                // wall-foot AO
+            fs.params6[3] = 0.0f;                                // bounce strength
+            fs.params7[3] = 0.0f;                                // sky strength
+            fs.params8[0] = fs.params8[1] = fs.params8[2] = 1.0f; // top tint
+        }
         return fs;
     };
 
@@ -1089,7 +1380,7 @@ void CliffRenderer::render(
     m_previewRanges.clear();
 
     for (auto& [uuid, group] : groups) {
-        const CliffParams& params = assets.find(uuid)->second;
+        CliffParams& params = assets.find(uuid)->second;
         AssetCache& asset = caches[uuid];
 
         // Lazy (re)load of the optional tiled top texture; the FS falls back
@@ -1108,6 +1399,52 @@ void CliffRenderer::render(
         const bool useTex = asset.topTex.valid();
         const sg_view texView = useTex ? asset.topTex.sgView() : m_dummyView;
         const sg_sampler texSmp = useTex ? asset.topTex.sgSampler() : m_dummySampler;
+
+        // Mask3d: lazy (re)load of the material map set + the CPU relief
+        // raster when the params' prefix changes. Fresh params arriving from
+        // a re-ensure carry no raster pointer — rewire them to the cached
+        // raster (and its version, so the region key sees the content).
+        if (params.maskField) {
+            if (!asset.matTried || asset.matPrefix != params.maskMaterialPrefix) {
+                destroyMatMaps(asset);
+                asset.matPrefix = params.maskMaterialPrefix;
+                asset.matTried = true;
+                asset.relief = {};
+                if (!params.maskMaterialPrefix.empty()) {
+                    static const char* kMatSuffixes[4] = {
+                        "_Color.jpg", "_NormalGL.jpg", "_AmbientOcclusion.jpg", "_Roughness.jpg"};
+                    for (int i = 0; i < 4; ++i) {
+                        asset.matValid[i] = loadMatTexture(
+                            params.maskMaterialPrefix.string() + kMatSuffixes[i],
+                            asset.matImages[i], asset.matViews[i]);
+                    }
+                    try {
+                        const ImageRGBA8 img = loadImageRGBA8(
+                            params.maskMaterialPrefix.string() + "_Displacement.jpg");
+                        asset.relief = mask::reliefMapFromImage(img.pixels.data(), img.width, img.height, 4);
+                    } catch (const std::exception& e) {
+                        spdlog::warn("CliffRenderer: mask relief map not loaded: {}", e.what());
+                    }
+                    spdlog::info(
+                        "CliffRenderer: mask material '{}' — maps {}/{}/{}/{}, relief {}x{}",
+                        params.maskMaterialPrefix.string(),
+                        asset.matValid[0], asset.matValid[1], asset.matValid[2], asset.matValid[3],
+                        asset.relief.w, asset.relief.h);
+                } else {
+                    spdlog::info("CliffRenderer: mask asset without a materialSet (palette look)");
+                }
+                ++asset.reliefVersion;
+            }
+            params.maskField->reliefMap = asset.relief.gray.empty() ? nullptr : &asset.relief;
+            params.maskField->reliefVersion = asset.reliefVersion;
+        }
+        // Material views for this asset's draws (per-channel placeholders for
+        // missing maps / non-mask assets): 0 color, 1 normal, 2 AO, 3 rough.
+        sg_view matViews[4];
+        matViews[0] = asset.matValid[0] ? asset.matViews[0] : m_matDummyViews[0];
+        matViews[1] = asset.matValid[1] ? asset.matViews[1] : m_matDummyViews[1];
+        matViews[2] = asset.matValid[2] ? asset.matViews[2] : m_matDummyViews[0];
+        matViews[3] = asset.matValid[3] ? asset.matViews[3] : m_matDummyViews[0];
 
         // Split into connected regions and key them by content: an untouched
         // region keeps its cache entry, a local edit rehashes only its own.
@@ -1187,6 +1524,7 @@ void CliffRenderer::render(
                 range.texView = texView;
                 range.texSampler = texSmp;
                 range.useTexture = useTex;
+                std::memcpy(range.matViews, matViews, sizeof(matViews));
                 for (const LandscapeTile* t : comp.tiles) {
                     appendPreviewDiamond(m_previewVerts, t->cell);
                 }
@@ -1204,7 +1542,12 @@ void CliffRenderer::render(
             sg_bindings bind = {};
             bind.vertex_buffers[0] = region.vbuf;
             bind.views[0] = texView;
+            bind.views[1] = matViews[0];
+            bind.views[2] = matViews[1];
+            bind.views[3] = matViews[2];
+            bind.views[4] = matViews[3];
             bind.samplers[0] = texSmp;
+            bind.samplers[1] = m_matSampler;
             sg_apply_pipeline(pip);
             sg_apply_bindings(&bind);
             sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
@@ -1235,7 +1578,12 @@ void CliffRenderer::render(
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = m_previewVbuf;
                 bind.views[0] = range.texView;
+                bind.views[1] = range.matViews[0];
+                bind.views[2] = range.matViews[1];
+                bind.views[3] = range.matViews[2];
+                bind.views[4] = range.matViews[3];
                 bind.samplers[0] = range.texSampler;
+                bind.samplers[1] = m_matSampler;
                 sg_apply_pipeline(pip);
                 sg_apply_bindings(&bind);
                 sg_apply_uniforms(0, sg_range{&vs, sizeof(vs)});
@@ -1259,8 +1607,15 @@ void CliffRenderer::rebuildRegion(
         // Field over the component bbox + a one-cell margin (the blurred
         // outline must not cross the field border). Tech with the shoreline
         // outline enabled needs a second ring: the auto-derived outline
-        // nodes spread one cell past the land.
-        const int margin = (params.techField && params.techField->outlineDepth > 0.0f) ? 2 : 1;
+        // nodes spread one cell past the land. The mask skirt needs its
+        // whole spread band plus one ring (the playground rule).
+        int margin = 1;
+        if (params.techField && params.techField->outlineDepth > 0.0f) {
+            margin = 2;
+        }
+        if (params.maskField) {
+            margin = 1 + static_cast<int>(std::ceil(std::max(params.maskField->spreadDistance, 0.0f)));
+        }
         int minX = componentNodes[0].x;
         int minY = componentNodes[0].y;
         int maxX = componentNodes[0].x;
@@ -1301,6 +1656,17 @@ void CliffRenderer::rebuildRegion(
             // branch; the tile contour rides the groove channel).
             kind = "tech";
             tech::TechField field(*params.techField, nodes.data(), nodesX, nodesY);
+            cliff::ScalarFieldView view = field.view();
+            std::vector<float> samples;
+            field.sample(samples);
+            cliff::regularizeSigns(view, samples, &regStats);
+            region.mesh = cliff::extractSurfaceNets(view, samples, nullptr);
+        } else if (params.maskField) {
+            // Mask3d: the node-mask plate with a sloped skirt through the
+            // generic field view (the relief raster is already wired into
+            // the params by render()).
+            kind = "mask";
+            mask::MaskField field(*params.maskField, nodes.data(), nodesX, nodesY);
             cliff::ScalarFieldView view = field.view();
             std::vector<float> samples;
             field.sample(samples);

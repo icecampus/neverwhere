@@ -10,6 +10,7 @@
 #include "assets/stone_asset.h"
 #include "assets/texture_asset.h"
 #include "assets/tech_asset.h"
+#include "assets/mask_asset.h"
 #include "assets_pack_model.h"
 #include "base_data/lib.h"
 
@@ -90,6 +91,13 @@ void AssetsLoader::loadAsset(const BaseData::AssetData& assetData, AssetsPackMod
     if (assetData.tech3dData.has_value() )
     {
         auto asset = std::make_unique<TechAsset>(pack);
+        asset->load(assetData);
+        pack->addElement(std::move(asset));
+    }
+
+    if (assetData.mask3dData.has_value() )
+    {
+        auto asset = std::make_unique<MaskAsset>(pack);
         asset->load(assetData);
         pack->addElement(std::move(asset));
     }

@@ -13,6 +13,15 @@
 // channel rendering the tile contour — no FS additions needed, the stone
 // extras stay at zero and rim is 0.
 //
+// Mask3d assets (MaskLandscape layer) share the pass as well: the mesh comes
+// from mask::MaskField (the painted node silhouette extruded into a plate
+// with a sloped skirt, standing sinkFraction of its height below the water
+// plane) and the FS adds the PBR-lite material block — triplanar albedo,
+// top-projected normal map, AO and roughness from an ambientCG-style map set
+// (4 views + one mipmapped REPEAT sampler, slots 1..4 / sampler 1), plus a
+// CPU relief raster feeding the field itself. All-zero material strengths
+// keep the shader bit-for-bit the palette one.
+//
 // Differences from the playground original:
 // - the camera is applied in the vertex shader (view_size/camera_offset/
 //   camera_zoom uniforms), so the cached vertex stream survives pan/zoom;
@@ -38,6 +47,7 @@
 #include "render_core/sokol_config.h"
 
 #include <highground_core/cliff_field.h>
+#include <highground_core/mask_field.h>
 #include <highground_core/surface_nets.h>
 #include <highground_core/tech_field.h>
 #include <stone_gen/stone_field.h>
@@ -104,6 +114,23 @@ struct CliffParams {
     // on `shading` (earth palette) and the field's crease groove channel, so
     // the stone extras below stay at their plain-cliff defaults.
     std::optional<tech::TechFieldParams> techField;
+    // Mask3d block (mask3d assets only): when set, regions build from
+    // mask::MaskField (the node-mask silhouette extruded into a plate with a
+    // sloped skirt) — `field` stays at its defaults and is not consumed. The
+    // renderer fills maskField->reliefMap from the cached raster (see
+    // maskMaterialPrefix) before any field work — converters never set it.
+    std::optional<mask::MaskFieldParams> maskField;
+    // Mask material (PBR-lite, mask3d assets only; textures + uniforms, no
+    // field rebuild): the maps sit at <maskMaterialPrefix>_Color.jpg,
+    // _NormalGL.jpg, _AmbientOcclusion.jpg, _Roughness.jpg, the relief
+    // raster at _Displacement.jpg. The zero-strength defaults keep non-mask
+    // assets bit-identical (palette look).
+    std::filesystem::path maskMaterialPrefix;
+    float maskMatTiling = 1.0f;
+    float maskMatAlbedo = 0.0f;
+    float maskMatNormal = 0.0f;
+    float maskMatAo = 0.0f;
+    float maskMatRough = 0.0f;
     // Stone shading extras (uniforms only). The defaults keep plain cliffs
     // bit-identical: planeY 0 disables the boulder/rim gate, topTexMix 1 keeps
     // the textured top at full strength.
@@ -151,6 +178,13 @@ public:
         ensureCliffAsset(assetUuid, params);
     }
 
+    // Register/update a mask3d asset: same cache machinery — the params
+    // carry the mask field block plus the material prefix, so regions
+    // rebuild through MaskField and shade with the PBR-lite material maps.
+    void ensureMaskAsset(const std::string& assetUuid, const CliffParams& params) {
+        ensureCliffAsset(assetUuid, params);
+    }
+
     // Read access for the contact-shadow field (the underlay darkens with the
     // same strength as the wall foot — shading.bottomDarken).
     const CliffParams* findAsset(const std::string& assetUuid) const {
@@ -193,9 +227,10 @@ private:
         float camera_zoom;
     };
 
-    // FS uniforms (palette/light + blend params + seam block, 14xvec4 = 224
-    // bytes, slot 1). The sun is NOT here: it comes from the scene stitch
-    // core block (slot 2) — one sun for the ground and the highground.
+    // FS uniforms (palette/light + blend params + seam block + the mask
+    // material, 16xvec4 = 256 bytes, slot 1). The sun is NOT here: it comes
+    // from the scene stitch core block (slot 2) — one sun for the ground
+    // and the highground.
     //
     // Seam block mapping (params5..params8): the HighgroundWithEffects
     // playground layout params3..params7 repacked without the skirt/
@@ -213,6 +248,11 @@ private:
     //   params6    — xyz: bounce tint, w: bounce strength   (pg params5.rgb/4.z)
     //   params7    — xyz: sky tint,    w: sky strength      (pg params6.rgb/4.w)
     //   params8    — xyz: plateau top tint, w: top UV rotation (pg params7.rgb/6.w)
+    //
+    // Mask material (params9..params10, the SDFWithMaterialLandscape
+    // playground block; all-zero strengths = palette look, bit-identical):
+    //   params9    — x: tiling, y: albedo, z: normal map, w: AO strengths
+    //   params10   — x: roughness strength (yzw reserved)
     struct CliffFsParams {
         float viewDir[4];
         float darkColor[4];
@@ -228,6 +268,8 @@ private:
         float params6[4]; // seam: bounce tint rgb, bounce strength
         float params7[4]; // seam: sky tint rgb, sky strength
         float params8[4]; // seam: plateau top tint rgb, top UV rotation
+        float params9[4]; // material: tiling, albedo/normal/AO strengths
+        float params10[4]; // material: roughness strength, reserved
     };
 
     // Per-region cache: an independently rebuildable piece of one asset's
@@ -259,10 +301,25 @@ private:
         TextureAtlas topTex;
         std::filesystem::path topTexPath;
         bool topTexTried = false;
+        // Mask3d material maps (FS views 1..4: color/normal/AO/rough) plus
+        // the CPU relief raster the field consumes. Lazy (re)loaded when the
+        // params' material prefix changes; an invalid view falls back to the
+        // renderer's per-channel placeholder at bind time. reliefVersion
+        // bumps on every raster (re)load — the region key sees it.
+        sg_image matImages[4]{};
+        sg_view matViews[4]{};
+        bool matValid[4] = {false, false, false, false};
+        std::filesystem::path matPrefix;
+        bool matTried = false;
+        mask::ReliefMap relief;
+        std::uint32_t reliefVersion = 0;
     };
 
     void ensurePipeline();
     void destroyPipeline();
+    // Mask material maps of one asset: destroy the GPU handles (the CPU
+    // relief raster stays — it is not a GPU resource).
+    void destroyMatMaps(AssetCache& cache);
     void rebuildRegion(
         RegionCache& region,
         const std::vector<glm::ivec2>& componentNodes,
@@ -286,6 +343,14 @@ private:
     sg_view m_dummyView{SG_INVALID_ID};
     sg_sampler m_dummySampler{SG_INVALID_ID};
 
+    // Mask material: one shared mipmapped REPEAT sampler (FS sampler slot 1;
+    // mips + aniso keep the minified ground-plane texture from aliasing into
+    // noise) and the per-channel 1x1 placeholders bound when an asset lacks a
+    // map: [0] white (color/AO/rough), [1] flat normal (128,128,255).
+    sg_sampler m_matSampler{SG_INVALID_ID};
+    sg_image m_matDummyImages[2]{};
+    sg_view m_matDummyViews[2]{};
+
     std::unordered_map<std::string, CliffParams> assets;
     std::unordered_map<std::string, AssetCache> caches;
 
@@ -300,6 +365,7 @@ private:
         sg_view texView{SG_INVALID_ID};
         sg_sampler texSampler{SG_INVALID_ID};
         bool useTexture = false;
+        sg_view matViews[4]{}; // mask material maps (placeholders otherwise)
     };
     std::vector<CliffVertex> m_previewVerts;
     std::vector<PreviewRange> m_previewRanges;

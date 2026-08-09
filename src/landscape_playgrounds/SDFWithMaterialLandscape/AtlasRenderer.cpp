@@ -1079,37 +1079,11 @@ bool AtlasRenderer::loadReliefMap(const std::string& path, maskfield::ReliefMap&
         }
         return false;
     }
-    out.w = w;
-    out.h = h;
-    out.gray.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
-    for (size_t i = 0; i < out.gray.size(); ++i) {
-        out.gray[i] = static_cast<float>(pixels[i]) * (1.0f / 255.0f);
-    }
+    // The library helper does the dune-scale low-pass (see mask_field).
+    out = mask::reliefMapFromImage(pixels, w, h, 1);
     stbi_image_free(pixels);
-    // Low-pass to the dune scale: the voxel grid cannot hold the fine
-    // ripples (they turn into gravel-like lump noise), and those already
-    // live in the normal map. Repeated 2x2 box halving with REPEAT wrap
-    // keeps the raster tileable; reliefAt's bilinear smooths the rest.
-    while (out.w > 32 || out.h > 16) {
-        const int nw = std::max(1, out.w / 2);
-        const int nh = std::max(1, out.h / 2);
-        std::vector<float> next(static_cast<size_t>(nw) * static_cast<size_t>(nh));
-        for (int y = 0; y < nh; ++y) {
-            const int y0 = (2 * y) % out.h;
-            const int y1 = (2 * y + 1) % out.h;
-            for (int x = 0; x < nw; ++x) {
-                const int x0 = (2 * x) % out.w;
-                const int x1 = (2 * x + 1) % out.w;
-                next[static_cast<size_t>(y) * nw + x] = 0.25f *
-                    (out.gray[static_cast<size_t>(y0) * out.w + x0] +
-                     out.gray[static_cast<size_t>(y0) * out.w + x1] +
-                     out.gray[static_cast<size_t>(y1) * out.w + x0] +
-                     out.gray[static_cast<size_t>(y1) * out.w + x1]);
-            }
-        }
-        out.w = nw;
-        out.h = nh;
-        out.gray = std::move(next);
+    if (out.gray.empty()) {
+        return false;
     }
     spdlog::info("AtlasRenderer: relief map '{}' ({}x{}, low-passed to {}x{})", path, w, h, out.w, out.h);
     return true;

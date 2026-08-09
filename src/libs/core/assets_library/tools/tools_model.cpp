@@ -11,6 +11,7 @@
 #include "landscape/stone_pencil.h"
 #include "landscape/texture_pencil.h"
 #include "landscape/tech_pencil.h"
+#include "landscape/mask_pencil.h"
 
 
 //AssetToolsModel
@@ -82,6 +83,9 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
 
     assetType2ToolsModel[AssetTypes::tech3d].reset(new AssetToolsModel(this));
     assetType2ToolsModel[AssetTypes::tech3d]->addElement<TechPencil>(this);
+
+    assetType2ToolsModel[AssetTypes::mask3d].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::mask3d]->addElement<MaskPencil>(this);
 
 }
 

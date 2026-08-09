@@ -1,11 +1,51 @@
 #include "pch.h"
 
-#include "MaskField.h"
+#include "highground_core/mask_field.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace maskfield {
+namespace mask {
+
+ReliefMap reliefMapFromImage(const std::uint8_t* gray, int w, int h, int stride) {
+    ReliefMap out;
+    if (gray == nullptr || w <= 0 || h <= 0 || stride < 1) {
+        return out;
+    }
+    out.w = w;
+    out.h = h;
+    out.gray.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+    for (size_t i = 0; i < out.gray.size(); ++i) {
+        out.gray[i] = static_cast<float>(gray[i * static_cast<size_t>(stride)]) * (1.0f / 255.0f);
+    }
+    // Low-pass to the dune scale: the voxel grid cannot hold the fine
+    // ripples (they turn into gravel-like lump noise), and those already
+    // live in the material's normal map. Repeated 2x2 box halving with
+    // REPEAT wrap keeps the raster tileable; reliefAt's bilinear smooths
+    // the rest.
+    while (out.w > 32 || out.h > 16) {
+        const int nw = std::max(1, out.w / 2);
+        const int nh = std::max(1, out.h / 2);
+        std::vector<float> next(static_cast<size_t>(nw) * static_cast<size_t>(nh));
+        for (int y = 0; y < nh; ++y) {
+            const int y0 = (2 * y) % out.h;
+            const int y1 = (2 * y + 1) % out.h;
+            for (int x = 0; x < nw; ++x) {
+                const int x0 = (2 * x) % out.w;
+                const int x1 = (2 * x + 1) % out.w;
+                next[static_cast<size_t>(y) * nw + x] = 0.25f *
+                    (out.gray[static_cast<size_t>(y0) * out.w + x0] +
+                     out.gray[static_cast<size_t>(y0) * out.w + x1] +
+                     out.gray[static_cast<size_t>(y1) * out.w + x0] +
+                     out.gray[static_cast<size_t>(y1) * out.w + x1]);
+            }
+        }
+        out.w = nw;
+        out.h = nh;
+        out.gray = std::move(next);
+    }
+    return out;
+}
 
 MaskField::MaskField(
     const MaskFieldParams& params,
@@ -122,7 +162,7 @@ void MaskField::buildDistanceField() {
     }
     if (!anySeed) {
         // No contour at all (nothing painted): keep the field a constant
-        // positive, exactly like before the distance field.
+        // positive.
         m_dist.assign(static_cast<size_t>(w) * hgt, m_params.spreadDistance + 0.5f);
         m_distW = w;
         m_distH = hgt;
@@ -177,7 +217,7 @@ void MaskField::buildDistanceField() {
 
 float MaskField::distanceAt(float x, float z) const {
     if (m_dist.empty()) {
-        // No grid at all: outside, like the old constant +0.5.
+        // No grid at all: outside, a constant beyond the spread.
         return m_params.spreadDistance + 0.5f;
     }
     const float R = static_cast<float>(kDistTexelsPerCell);
@@ -247,13 +287,13 @@ float MaskField::eval(const glm::vec3& p) const {
     const float qSide = s - S;
     float F = std::max({qTop, qBottom, qSide});
     // Micro relief (displacement map): shifts the iso surface by a centered,
-    // tiling height sample — the beach dunes become real geometry with a
-    // silhouette. The raster is low-passed at load (see loadReliefMap): the
-    // voxel grid cannot hold the fine ripples (they live in the normal map),
-    // only the dune-scale undulation. The relief ramps in over reliefFade
-    // from the core contour, so walls and skirt keep a clean silhouette.
-    // O(1); at reliefDepth = 0 or without a map the field is bit-for-bit the
-    // smooth one.
+    // tiling height sample — the dunes become real geometry with a
+    // silhouette. The raster is low-passed at load (see reliefMapFromImage):
+    // the voxel grid cannot hold the fine ripples (they live in the normal
+    // map), only the dune-scale undulation. The relief ramps in over
+    // reliefFade from the core contour, so walls and skirt keep a clean
+    // silhouette. O(1); at reliefDepth = 0 or without a map the field is
+    // bit-for-bit the smooth one.
     if (m_params.reliefDepth > 0.0f && m_params.reliefMap != nullptr) {
         float w = 1.0f;
         if (m_params.reliefFade > 0.0f) {
@@ -322,4 +362,4 @@ cliff::ScalarFieldView MaskField::view() const {
     return v;
 }
 
-} // namespace maskfield
+} // namespace mask

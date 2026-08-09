@@ -1,5 +1,6 @@
 #include "render_core/image_loader.h"
 
+#include <algorithm>
 #include <cstring>
 #include <queue>
 #include <stdexcept>
@@ -56,6 +57,47 @@ void bleedTransparentRGB(ImageRGBA8& img) {
 }
 
 } // namespace
+
+// Full RGBA8 mip chain via a 2x2 box filter (level 0 is the source, then
+// halving with clamped edges down to 1x1). For standalone tiling textures
+// (material maps): without mips a minified REPEAT texture on the ground
+// plane aliases into noise. NEVER for atlases — the tiles would bleed into
+// each other in the low levels.
+std::vector<ImageRGBA8> buildMipChain(const ImageRGBA8& src) {
+    std::vector<ImageRGBA8> levels;
+    if (src.width <= 0 || src.height <= 0 || src.pixels.empty()) {
+        return levels;
+    }
+    levels.push_back(src);
+    for (;;) {
+        const ImageRGBA8& prev = levels.back();
+        if (prev.width <= 1 && prev.height <= 1) {
+            break;
+        }
+        ImageRGBA8 next;
+        next.width = std::max(1, prev.width / 2);
+        next.height = std::max(1, prev.height / 2);
+        next.pixels.resize(static_cast<size_t>(next.width) * static_cast<size_t>(next.height) * 4);
+        for (int y = 0; y < next.height; ++y) {
+            const int y0 = std::min(2 * y, prev.height - 1);
+            const int y1 = std::min(2 * y + 1, prev.height - 1);
+            for (int x = 0; x < next.width; ++x) {
+                const int x0 = std::min(2 * x, prev.width - 1);
+                const int x1 = std::min(2 * x + 1, prev.width - 1);
+                for (int c = 0; c < 4; ++c) {
+                    const int sum = static_cast<int>(prev.pixels[(static_cast<size_t>(y0) * prev.width + x0) * 4 + c]) +
+                        static_cast<int>(prev.pixels[(static_cast<size_t>(y0) * prev.width + x1) * 4 + c]) +
+                        static_cast<int>(prev.pixels[(static_cast<size_t>(y1) * prev.width + x0) * 4 + c]) +
+                        static_cast<int>(prev.pixels[(static_cast<size_t>(y1) * prev.width + x1) * 4 + c]);
+                    next.pixels[(static_cast<size_t>(y) * next.width + x) * 4 + c] =
+                        static_cast<std::uint8_t>((sum + 2) / 4);
+                }
+            }
+        }
+        levels.push_back(std::move(next));
+    }
+    return levels;
+}
 
 ImageRGBA8 loadImageRGBA8(const fs::path& path) {
     int w = 0, h = 0, comp = 0;

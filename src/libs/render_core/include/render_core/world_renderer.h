@@ -28,6 +28,7 @@ struct WorldFrame {
     std::vector<LandscapeTile> stoneTiles;  // StoneLandscape layer (stone3d: voronoi-carved surface-nets plateau, shares the cliff pass)
     std::vector<LandscapeTile> textureTiles; // TextureLandscape layer (texture2d: tiling world-UV textures, multi-texture blend)
     std::vector<LandscapeTile> techTiles;   // TechLandscape layer (tech3d: TechnicalGrass ridge/valley heightfield, shares the cliff pass)
+    std::vector<LandscapeTile> maskTiles;   // MaskLandscape layer (mask3d: node-mask plate with a sloped skirt + PBR-lite material, shares the cliff pass)
     std::vector<SpriteInstance> sprites;
 
     bool showGrid = true;
@@ -65,6 +66,7 @@ public:
     void ensureCyclopeanAsset(const std::string& assetUuid, const CyclopeanParams& params);
     void ensureStoneAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureTechAsset(const std::string& assetUuid, const CliffParams& params);
+    void ensureMaskAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 

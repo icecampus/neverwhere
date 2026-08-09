@@ -18,7 +18,8 @@ namespace AssetTypes
         cyclopean3d,
         stone3d,
         texture2d,
-        tech3d
+        tech3d,
+        mask3d
     };
     Q_ENUM_NS(Type);
 }
@@ -357,6 +358,132 @@ namespace BaseData
         }
     };
 
+    // Mask3D: the mask-field generator parameter set (mirror of
+    // mask::MaskFieldParams from highground_core — the painted node
+    // silhouette extruded into a plate with a sloped skirt, standing
+    // sinkFraction of its height below the water plane) + the PBR-lite
+    // material (an ambientCG-style map set in the bundle) + shading palette.
+    // No atlas — objects are plain Landscape tiles on the MaskLandscape layer
+    // whose tileIndex encodes the vertex nodes; these params drive the
+    // renderer.
+    struct Mask3dAssetData
+    {
+        Mask3dAssetData()
+        {
+            // Sand fallback look (the material covers it when the maps
+            // load): warm light ramps, no veins, muted spec, no bottom
+            // darkening.
+            shading.darkColor = {0.55f, 0.48f, 0.38f};
+            shading.goldColor = {0.85f, 0.78f, 0.62f};
+            shading.grassA = {0.82f, 0.76f, 0.60f};
+            shading.grassB = {0.90f, 0.85f, 0.70f};
+            shading.veinThreshold = 2.0f;
+            shading.specStrength = 0.15f;
+            shading.bottomDarken = 0.0f;
+        }
+
+        std::string thumbnail; // optional palette preview
+        float raisedHeight{96.0f}; // field px per 1.0 world height (heightScale)
+
+        // Scalar field (defaults = mask::MaskFieldParams).
+        float cellSize{0.04f};
+        float padding{0.5f};
+        float height{0.2f};         // core plate height in world units
+        float spreadDistance{0.0f}; // skirt width in cells (the height ramp
+                                    // rolling off to the bottom plane)
+        float sinkFraction{0.5f};   // share of the height below the water plane
+        int blurPasses{0};          // sampled-field blur (0 = crisp walls)
+
+        // Micro relief (displacement): the <materialSet>_Displacement.jpg
+        // raster, low-passed to the dune scale at load.
+        float reliefDepth{0.02f};   // dune amplitude in world units (0 = off)
+        float reliefTiling{1.0f};   // relief repeats per cell (kept in sync
+                                    // with matTiling: dunes align with ripples)
+        float reliefFade{0.15f};    // fade-in distance from the core contour
+
+        // PBR-lite material: the bundle holds <materialSet>_Color.jpg,
+        // _NormalGL.jpg, _AmbientOcclusion.jpg, _Roughness.jpg (and
+        // _Displacement.jpg for the relief). Empty = palette look.
+        std::string materialSet;
+        float matTiling{1.0f};      // texture repeats per world unit
+        float matAlbedo{1.0f};      // channel strengths (0 = the channel falls
+        float matNormal{1.0f};      // back to the palette/flat shading)
+        float matAo{1.0f};
+        float matRough{0.7f};
+
+        Cliff3dShadingData shading;
+
+        friend void to_json(nlohmann::json& j, const Mask3dAssetData& d)
+        {
+            j = nlohmann::json{
+                {"thumbnail", d.thumbnail},
+                {"raisedHeight", d.raisedHeight},
+                {"cellSize", d.cellSize},
+                {"padding", d.padding},
+                {"height", d.height},
+                {"spreadDistance", d.spreadDistance},
+                {"sinkFraction", d.sinkFraction},
+                {"blurPasses", d.blurPasses},
+                {"reliefDepth", d.reliefDepth},
+                {"reliefTiling", d.reliefTiling},
+                {"reliefFade", d.reliefFade},
+                {"materialSet", d.materialSet},
+                {"matTiling", d.matTiling},
+                {"matAlbedo", d.matAlbedo},
+                {"matNormal", d.matNormal},
+                {"matAo", d.matAo},
+                {"matRough", d.matRough},
+                {"shading", d.shading},
+            };
+        }
+
+        friend void from_json(const nlohmann::json& j, Mask3dAssetData& d)
+        {
+            // Field-by-field: omitted keys keep the Mask3dAssetData defaults.
+            if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+            if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
+            if (j.contains("cellSize")) j.at("cellSize").get_to(d.cellSize);
+            if (j.contains("padding")) j.at("padding").get_to(d.padding);
+            if (j.contains("height")) j.at("height").get_to(d.height);
+            if (j.contains("spreadDistance")) j.at("spreadDistance").get_to(d.spreadDistance);
+            if (j.contains("sinkFraction")) j.at("sinkFraction").get_to(d.sinkFraction);
+            if (j.contains("blurPasses")) j.at("blurPasses").get_to(d.blurPasses);
+            if (j.contains("reliefDepth")) j.at("reliefDepth").get_to(d.reliefDepth);
+            if (j.contains("reliefTiling")) j.at("reliefTiling").get_to(d.reliefTiling);
+            if (j.contains("reliefFade")) j.at("reliefFade").get_to(d.reliefFade);
+            if (j.contains("materialSet")) j.at("materialSet").get_to(d.materialSet);
+            if (j.contains("matTiling")) j.at("matTiling").get_to(d.matTiling);
+            if (j.contains("matAlbedo")) j.at("matAlbedo").get_to(d.matAlbedo);
+            if (j.contains("matNormal")) j.at("matNormal").get_to(d.matNormal);
+            if (j.contains("matAo")) j.at("matAo").get_to(d.matAo);
+            if (j.contains("matRough")) j.at("matRough").get_to(d.matRough);
+            if (j.contains("shading"))
+            {
+                // Field-wise apply: a partial shading block must not reset
+                // the retuned sand palette to the cliff defaults.
+                const nlohmann::json& s = j.at("shading");
+                if (s.contains("lightAzimuth")) s.at("lightAzimuth").get_to(d.shading.lightAzimuth);
+                if (s.contains("lightElevation")) s.at("lightElevation").get_to(d.shading.lightElevation);
+                if (s.contains("darkColor")) s.at("darkColor").get_to(d.shading.darkColor);
+                if (s.contains("goldColor")) s.at("goldColor").get_to(d.shading.goldColor);
+                if (s.contains("grassA")) s.at("grassA").get_to(d.shading.grassA);
+                if (s.contains("grassB")) s.at("grassB").get_to(d.shading.grassB);
+                if (s.contains("veinThreshold")) s.at("veinThreshold").get_to(d.shading.veinThreshold);
+                if (s.contains("ambient")) s.at("ambient").get_to(d.shading.ambient);
+                if (s.contains("diffuse")) s.at("diffuse").get_to(d.shading.diffuse);
+                if (s.contains("backLight")) s.at("backLight").get_to(d.shading.backLight);
+                if (s.contains("specStrength")) s.at("specStrength").get_to(d.shading.specStrength);
+                if (s.contains("specPower")) s.at("specPower").get_to(d.shading.specPower);
+                if (s.contains("gamma")) s.at("gamma").get_to(d.shading.gamma);
+                if (s.contains("texScale")) s.at("texScale").get_to(d.shading.texScale);
+                if (s.contains("bottomDarken")) s.at("bottomDarken").get_to(d.shading.bottomDarken);
+                if (s.contains("bottomBand")) s.at("bottomBand").get_to(d.shading.bottomBand);
+                if (s.contains("strataStrength")) s.at("strataStrength").get_to(d.shading.strataStrength);
+                if (s.contains("underwaterFade")) s.at("underwaterFade").get_to(d.shading.underwaterFade);
+            }
+        }
+    };
+
     //Asset
     struct AssetData
     {
@@ -374,6 +501,7 @@ namespace BaseData
         std::optional<Stone3dAssetData> stone3dData;
         std::optional<Texture2dAssetData> texture2dData;
         std::optional<Tech3dAssetData> tech3dData;
+        std::optional<Mask3dAssetData> mask3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

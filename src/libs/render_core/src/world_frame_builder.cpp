@@ -103,6 +103,19 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
         outFrame.techTiles.push_back(std::move(t));
     }
 
+    // MaskLandscape layer -> mask tiles (Mask3d assets, node-mask plate with
+    // a sloped skirt + the PBR-lite material, sharing the cliff pass).
+    for (const auto& obj : map.layer(game_data::LayerType::MaskLandscape)) {
+        if (obj.type != game_data::GameObjectType::Landscape) continue;
+        if (!obj.landscapeData) continue;
+
+        LandscapeTile t;
+        t.cell = obj.position;
+        t.assetUuid = obj.assetUuid;
+        t.tileIndex = obj.landscapeData->tileIndex;
+        outFrame.maskTiles.push_back(std::move(t));
+    }
+
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
         for (const auto& obj : map.layer(layerType)) {
             if (obj.type == game_data::GameObjectType::Landscape) continue;
@@ -311,6 +324,57 @@ static CliffParams techParamsFromAssetData(const game_data::Tech3dAssetData& d) 
     return params;
 }
 
+// game_data -> render_core parameter conversion for mask3d assets (the
+// editor's ModelFrameSource has its own BaseData twin). The mesh params ride
+// in CliffParams::maskField; CliffParams::field stays unused. materialPrefix
+// is the bundle-resolved <materialSet> path (empty = palette look: the
+// material strengths zero out, the renderer binds placeholders).
+static CliffParams maskParamsFromAssetData(
+    const game_data::Mask3dAssetData& d,
+    const std::filesystem::path& materialPrefix) {
+    CliffParams params;
+    params.heightScale = d.raisedHeight;
+    mask::MaskFieldParams m;
+    m.cellSize = d.cellSize;
+    m.padding = d.padding;
+    m.height = d.height;
+    m.spreadDistance = d.spreadDistance;
+    m.sinkFraction = d.sinkFraction;
+    m.blurPasses = d.blurPasses;
+    m.reliefDepth = d.reliefDepth;
+    m.reliefTiling = d.reliefTiling;
+    m.reliefFade = d.reliefFade;
+    // reliefMap stays null here — the renderer wires its cached raster in.
+    params.maskField = m;
+    params.maskMaterialPrefix = materialPrefix;
+    const bool hasMaterial = !materialPrefix.empty();
+    params.maskMatTiling = d.matTiling;
+    params.maskMatAlbedo = hasMaterial ? d.matAlbedo : 0.0f;
+    params.maskMatNormal = hasMaterial ? d.matNormal : 0.0f;
+    params.maskMatAo = hasMaterial ? d.matAo : 0.0f;
+    params.maskMatRough = hasMaterial ? d.matRough : 0.0f;
+    CliffShading& s = params.shading;
+    s.lightAzimuth = d.shading.lightAzimuth;
+    s.lightElevation = d.shading.lightElevation;
+    s.darkColor = d.shading.darkColor;
+    s.goldColor = d.shading.goldColor;
+    s.grassA = d.shading.grassA;
+    s.grassB = d.shading.grassB;
+    s.veinThreshold = d.shading.veinThreshold;
+    s.ambient = d.shading.ambient;
+    s.diffuse = d.shading.diffuse;
+    s.backLight = d.shading.backLight;
+    s.specStrength = d.shading.specStrength;
+    s.specPower = d.shading.specPower;
+    s.gamma = d.shading.gamma;
+    s.texScale = d.shading.texScale;
+    s.bottomDarken = d.shading.bottomDarken;
+    s.bottomBand = d.shading.bottomBand;
+    s.strataStrength = d.shading.strataStrength;
+    s.underwaterFade = d.shading.underwaterFade;
+    return params;
+}
+
 void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame& frame, WorldRenderer& renderer) {
     std::unordered_set<std::string> uniqueAssets;
     for (const auto& t : frame.landscapeTiles) uniqueAssets.insert(t.assetUuid);
@@ -320,6 +384,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
     for (const auto& t : frame.stoneTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.maskTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -356,6 +421,9 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
         }
         if (entry->isTech3d()) {
             renderer.ensureTechAsset(uuid, techParamsFromAssetData(entry->tech));
+        }
+        if (entry->isMask3d()) {
+            renderer.ensureMaskAsset(uuid, maskParamsFromAssetData(entry->mask, entry->materialPrefix));
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);
