@@ -252,16 +252,46 @@ void WorldRenderer::render(
     groundStitch.params = m_stitchParams;
     landscapeRenderer.render(frame.landscapeTiles, iso, camera, viewWidth, viewHeight, groundStitch);
 
-    // Texture-2D layer: ground-level too (drawn over the flat ground by
-    // painter order at the same constant depth), before the grid overlay.
+    landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
+
+    // Cliff/stone/tech/mask passes: shared sun via the stitch core block + the
+    // seam materials. The wall-foot AO shares the ground's AO switch. All tile
+    // sets go through ONE render call: they share the pipeline, the cache
+    // machinery and its per-frame scratch buffers — two calls in one frame
+    // would update the prototype-silhouette buffer twice, and sokol allows
+    // only one sg_update_buffer per buffer per frame.
+    CliffStitchContext cliffStitch;
+    cliffStitch.params = m_stitchParams;
+    cliffStitch.seam = seam;
+    cliffStitch.aoWallFade = stitch.aoEnabled ? stitch.aoWallFade : 0.0f;
+    scratchCliffStoneTiles.clear();
+    scratchCliffStoneTiles.reserve(frame.cliffTiles.size() + frame.stoneTiles.size() +
+        frame.techTiles.size() + frame.maskTiles.size());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.cliffTiles.begin(), frame.cliffTiles.end());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.stoneTiles.begin(), frame.stoneTiles.end());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.techTiles.begin(), frame.techTiles.end());
+    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.maskTiles.begin(), frame.maskTiles.end());
+    cliffRenderer.render(scratchCliffStoneTiles, iso, camera, viewWidth, viewHeight, nowSec, cliffStitch);
+    cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
+
+    // Texture-2D ground cover: drawn AFTER the 3D passes so it alpha-blends
+    // with what is actually under it (mask3d beach, flat ground, water)
+    // instead of punching an alpha-shaped hole into geometry drawn later.
+    // The pass depth-tests LESS_EQUAL against the published z — the baked
+    // cover lift (render_core/depth_levels.h) still arbitrates: above a low
+    // beach top, below any raised level. It does NOT write depth: the grid
+    // drawn next must stay visible over the painted cover, and the
+    // water-surface pass must keep reading the surface under the cover.
     landscapeRenderer.renderTexture(frame.textureTiles, iso, camera, viewWidth, viewHeight, groundStitch, textureBlend);
 
-    // Grid overlay: above the water and the flat ground, and ON the ground
-    // plane of the 3D world — the lines carry the same z as a mesh vertex of
-    // their own cell and write depth, so the 3D passes (drawn after them)
-    // overdraw the grid wherever they rise above the plane, while parts hanging
-    // below it — base slabs, the underwater foot of a tech shoreline — stay
-    // behind the grid lines in front of them and read as "under water".
+    // Grid overlay: above the water, the flat ground and the texture cover,
+    // and ON the ground plane of the 3D world. Drawn after the world passes,
+    // the lines test the published depth (LESS_EQUAL): kGridZBias keeps them
+    // on top of the co-planar ground, raised 3D hides them, and whatever hangs
+    // BELOW the plane — base slabs, the underwater foot of a tech shoreline —
+    // loses to them and reads as "under water". The texture cover publishes
+    // no depth, so the grid stays visible over it. The lines still write
+    // depth so the water-surface pass keeps discarding their pixels.
     // Sprites are painter-ordered (no depth test) and are not affected.
     scratchLines.clear();
 
@@ -300,27 +330,6 @@ void WorldRenderer::render(
     }
     overlayRenderer.render(scratchLines, viewWidth, viewHeight);
 
-    landscapeRenderer.renderRaised(frame.raisedTiles, iso, camera, viewWidth, viewHeight);
-
-    // Cliff/stone/tech/mask passes: shared sun via the stitch core block + the
-    // seam materials. The wall-foot AO shares the ground's AO switch. All tile
-    // sets go through ONE render call: they share the pipeline, the cache
-    // machinery and its per-frame scratch buffers — two calls in one frame
-    // would update the prototype-silhouette buffer twice, and sokol allows
-    // only one sg_update_buffer per buffer per frame.
-    CliffStitchContext cliffStitch;
-    cliffStitch.params = m_stitchParams;
-    cliffStitch.seam = seam;
-    cliffStitch.aoWallFade = stitch.aoEnabled ? stitch.aoWallFade : 0.0f;
-    scratchCliffStoneTiles.clear();
-    scratchCliffStoneTiles.reserve(frame.cliffTiles.size() + frame.stoneTiles.size() +
-        frame.techTiles.size() + frame.maskTiles.size());
-    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.cliffTiles.begin(), frame.cliffTiles.end());
-    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.stoneTiles.begin(), frame.stoneTiles.end());
-    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.techTiles.begin(), frame.techTiles.end());
-    scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.maskTiles.begin(), frame.maskTiles.end());
-    cliffRenderer.render(scratchCliffStoneTiles, iso, camera, viewWidth, viewHeight, nowSec, cliffStitch);
-    cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
     spriteRenderer.render(frame.sprites, iso, camera, viewWidth, viewHeight);
 
     // The cell cursor is an editor UI element — always on top (own buffer:

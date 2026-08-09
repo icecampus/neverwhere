@@ -78,10 +78,11 @@ TEST(DepthLevels, GridBiasKeepsGridOnPlane) {
 }
 
 TEST(DepthLevels, TextureCoverAboveBeachBelowRaised) {
-    // The texture2d ground cover bakes kTextureCoverLiftPx into its z (its
-    // pass compares ALWAYS for the co-planar tile union, so the written z is
-    // its only arbitration against the 3D passes): it must beat a low mask3d
-    // beach top and lose to any raised level (stone/cliff/tech/raised).
+    // The texture2d ground cover bakes kTextureCoverLiftPx into its z. Its
+    // pass runs after the 3D passes and depth-tests LESS_EQUAL against the
+    // published depth (writing none), so the lift is its only arbitration:
+    // it must beat a low mask3d beach top and lose to any raised level
+    // (stone/cliff/tech/raised).
     const float zFar = zFarFor(1000.0f);
     const float row = 1000.0f;
     const float zTexture = render_core::levelGroundZ(row + render_core::kTextureCoverLiftPx, zFar);

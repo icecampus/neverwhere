@@ -184,15 +184,16 @@ void OverlayRenderer::ensurePipeline() {
 
     if (depthFormat != SG_PIXELFORMAT_NONE) {
         // Grid variant: the lines sit on the scene's ground plane and write
-        // depth, so the later 3D passes overdraw them exactly where they are
-        // nearer (raised top beats the grid; anything hanging below the plane
-        // — base slabs, the underwater foot of a shoreline — loses to it).
-        // The compare is ALWAYS, not LESS_EQUAL: the texture2d ground cover
-        // writes a small cover lift (depth_levels.h) that beats the grid's
-        // kGridZBias, and the authoring grid must stay visible over painted
-        // ground cover. Overwriting the lift with the plane z at the 1-px
-        // lines is harmless — the 3D passes resolve the same either way.
-        pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+        // depth. The pass runs AFTER the world passes (WorldRenderer::render)
+        // and tests the published z with LESS_EQUAL: kGridZBias beats the
+        // co-planar flat ground, raised 3D is nearer and hides the lines, and
+        // whatever hangs BELOW the plane — base slabs, the underwater foot of
+        // a shoreline — loses to them and reads as "under water". The
+        // texture2d ground cover publishes no depth of its own, so the grid
+        // stays visible over painted cover. The depth write keeps the
+        // water-surface pass discarding the grid pixels (they are closer
+        // than the plane), same as the raised geometry.
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pip_desc.depth.write_enabled = true;
         pip_desc.label = "overlay-depth-pipeline";
         pipDepth = sg_make_pipeline(&pip_desc);

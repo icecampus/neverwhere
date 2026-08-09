@@ -1637,13 +1637,16 @@ void LandscapeRenderer::ensureTexturePipeline() {
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pip_desc.depth.pixel_format = depthFormat;
     if (depthFormat != SG_PIXELFORMAT_NONE) {
-        // Same story as the flat ground pass: the level-0 plane is resolved
-        // by painter order, not by testing interpolated z between co-planar
-        // fragments (they z-fight at the zFar-offset magnitude). ALWAYS +
-        // depth write: texture cells overdraw the ground (drawn later) and
-        // the plane depth stays published for the 3D/underwater passes.
-        pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
-        pip_desc.depth.write_enabled = true;
+        // The cover pass runs AFTER the 3D passes (WorldRenderer::render) and
+        // alpha-blends with what is already under it — beach, flat ground,
+        // water. LESS_EQUAL against the published z: the baked cover lift
+        // (depth_levels.h) beats the flat plane and a low mask3d beach top,
+        // any raised level beats the cover. No depth write: the per-cell
+        // fans tile exactly (no overlapping quads to arbitrate between), and
+        // the grid drawn after must stay visible over the painted cover —
+        // with the lift published it would lose to it.
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.write_enabled = false;
     } else {
         pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
         pip_desc.depth.write_enabled = false;
@@ -2423,9 +2426,10 @@ void LandscapeRenderer::renderTexture(
 
     sg_apply_pipeline(texturePip);
     // Same z-range block as the flat ground pass, plus the cover lift: the
-    // pass keeps compare=ALWAYS for its co-planar tile union, so the lift is
-    // what arbitrates against the 3D meshes (above a mask3d beach top, below
-    // any raised level — render_core/depth_levels.h).
+    // pass depth-tests LESS_EQUAL against the z the earlier passes published
+    // (it writes no depth of its own), so the lift is what arbitrates against
+    // the 3D meshes — above a mask3d beach top, below any raised level
+    // (render_core/depth_levels.h).
     const float groundCenterY = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y;
     float vs_params[6] = {
         (float)viewWidth,

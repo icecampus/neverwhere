@@ -37,14 +37,15 @@ constexpr float kDepthHeightFactor = 1.0f;
 constexpr float kGridZBias = 1e-5f;
 
 // Texture2d ground-cover lift, in field px of the baked ground-y. The
-// texture2d pass renders before the 3D passes with compare=ALWAYS (its tiles
-// are co-planar and union painter-style), so its only say against the 3D
-// meshes is the z it writes. Lifting the whole pass by this much puts the
-// ground cover ABOVE low ground-relief meshes (a mask3d beach top sits ~6-13
-// px over the plane: height*(1-sink) * raisedHeight) but still BELOW any
-// raised 3D (stone/cliff/tech/raised ride a full level, ~96+ px). Side
-// effect: the grid's small kGridZBias loses to the lift, so the grid
-// pipeline compensates with compare=ALWAYS (overlay_renderer.cpp).
+// texture2d pass renders AFTER the 3D passes (WorldRenderer::render) and
+// depth-tests LESS_EQUAL against the z they published — it writes no depth
+// of its own, so the grid drawn after it stays visible over the painted
+// cover and the water-surface pass keeps reading the surface underneath.
+// This lift is therefore the cover's only say against the other passes:
+// it puts the ground cover ABOVE low ground-relief meshes (a mask3d beach
+// top sits ~6-13 px over the plane: height*(1-sink) * raisedHeight) but
+// still BELOW any raised 3D (stone/cliff/tech/raised ride a full level,
+// ~96+ px).
 constexpr float kTextureCoverLiftPx = 24.0f;
 
 // Baked z-coordinate (field/world units, pre-normalization) for a vertex
