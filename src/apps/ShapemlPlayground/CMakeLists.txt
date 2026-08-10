@@ -11,6 +11,11 @@ nw_add_console_app(
         shapeml_ref
 )
 
+# C++17, not the project-wide C++20: GrammarHost.cpp pulls in shapeml headers
+# with the bundled Eigen 3.3.7, which relies on std::result_of (removed from
+# libc++ in C++20 mode) — same reason shapeml_ref itself is pinned to C++17.
+set_target_properties(${AppName} PROPERTIES CXX_STANDARD 17)
+
 # Sokol is header-only in this project (via vcpkg overlay).
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")
 if(NOT SOKOL_INCLUDE_DIRS)

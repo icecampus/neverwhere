@@ -1,0 +1,336 @@
+// Modular fence for ShapemlPlayground: stone posts + wrought-metal lattice
+// sections, to be assembled in the editor from pieces. Casual style with a
+// gothic touch (spearhead bars, captured rings, pyramid caps), everything
+// slightly aged: posts are stacked pillow-beveled boulders with random scars,
+// metal gets per-piece color jitter (rust / bare-metal kisses).
+//
+// Piece selection via the `piece` param (playground slider):
+//   0 = standard post, 1 = corner/gate post (taller, spike finial),
+//   2 = section, 3 = demo run (post + 2 sections + corner post).
+// Pivots: posts are centered on their axis, base at y = 0; a section starts
+// at the left post axis (x = 0) and spans to the next post (x = section_length).
+
+param piece = 3;                // 0 post, 1 corner post, 2 section, 3 demo run
+param metal = 1;                // 0 = aged iron, 1 = verdigris copper
+
+// --- Dimensions -------------------------------------------------------------
+param section_length = 2.0;     // post axis to post axis
+
+param plinth1_w = 0.36;
+param plinth1_h = 0.07;
+param plinth2_w = 0.30;
+param plinth2_h = 0.09;
+param shaft_w = 0.215;
+param shaft_h_base = 0.60;
+param shaft_h_extra = 0.12;     // corner posts are this much taller
+param shaft_blocks = 3;         // boulders stacked per post
+param boulder_bevel = 0.14;     // edge bevel, fraction of min boulder side
+param boulder_rot = 3.0;        // per-boulder yaw jitter, degrees
+param boulder_off = 0.008;      // per-boulder lateral jitter
+
+param cap_side = 0.30;          // cap base square side (overhangs the shaft)
+param cap_h = 0.125;
+param tile_t = 0.018;           // tile slab thickness
+param tile_w_ratio = 0.53;      // tile width, fraction of cap_side
+
+param finial_d = 0.10;          // ball finial diameter (standard post)
+param spike_w = 0.11;           // spike finial base (corner post)
+param spike_h = 0.20;
+
+param num_bars = 9;
+param bar_margin = 0.16;        // first/last bar center distance from post axis
+param bar_w = 0.032;
+param bar_lean = 1.3;           // max hand-forged lean, degrees
+param rail_h = 0.05;
+param rail_d = 0.05;
+param bot_rail_y = 0.12;
+param top_rail_y = 0.60;
+param spear_w = 0.085;
+param spear_h = 0.13;           // even bars
+param spear_h2 = 0.07;          // odd bars (alternating rhythm)
+
+param rings_enabled = true;
+param ring_d_ratio = 0.78;      // ring outer diameter, fraction of bar spacing
+param ring_tube_ratio = 0.18;   // ring tube thickness, fraction of ring diameter
+
+param moss = true;              // moss ring at the plinth foot
+
+// --- Colors -------------------------------------------------------------------
+param stone_base = "#8F897F";
+param stone_dark = "#7B756C";
+param stone_light = "#9B958B";
+param moss_color = "#5E7A45";
+param tile_base = "#4E5A6B";    // slate
+param tile_dark = "#3E4856";
+param tile_light = "#5D6A7D";
+param cap_core = "#2E333B";
+param iron_base = "#454B57";
+param iron_dark = "#31353E";
+param iron_rust = "#6E4B32";
+param copper_base = "#5E9482";  // verdigris
+param copper_dark = "#47766A";
+param copper_bare = "#B0723F";  // worn-through bare copper
+
+// --- Helpers --------------------------------------------------------------------
+func plinth_h = plinth1_h + plinth2_h;
+func cap_b = cap_side * 0.5;
+func slope_len = sqrt(cap_h * cap_h + cap_b * cap_b);
+func slope_deg = atan2(cap_h, cap_b);
+func bar_spacing = (section_length - 2.0 * bar_margin) / (num_bars - 1);
+func bar_cx(i) = bar_margin + bar_spacing * i;
+
+rule Axiom :: (piece == 0) = { Post(0.0) };
+rule Axiom :: (piece == 1) = { Post(1.0) };
+rule Axiom :: (piece == 2) = { Section };
+rule Axiom = {
+  [ Post(0.0) ]
+  [ translateX(section_length) Post(0.0) ]
+  [ translateX(section_length * 2.0) Post(1.0) ]
+  [ Section ]
+  [ translateX(section_length) Section ]
+};
+
+// --- Posts --------------------------------------------------------------------
+// v = 0: standard (ball finial), v = 1: corner/gate (taller, spike finial).
+
+rule Post(v) = {
+  [ // plinth, lower step
+    size(plinth1_w, plinth1_h, plinth1_w)
+    translate(plinth1_w * -0.5, 0.0, plinth1_w * -0.5)
+    cube
+    BoxBevel(0.09)
+    color(stone_dark)
+    Plinth_
+  ]
+  [ MossMaybe ]
+  [ // plinth, upper step
+    size(plinth2_w, plinth2_h, plinth2_w)
+    translate(plinth2_w * -0.5, plinth1_h, plinth2_w * -0.5)
+    cube
+    BoxBevel(0.09)
+    color(stone_base)
+    Plinth_
+  ]
+  [ ShaftBlocks(v) ]
+  [ Cap(v) ]
+  [ Finial(v) ]
+};
+
+// Pillow bevel for a box spanning 0..size_x/y/z (same trimPlane pattern as
+// stone_wall.shp): all 12 edges + 8 corners, then trim.
+rule BoxBevel(bf) = {
+  set("bv", min(size_x, min(size_y, size_z)) * bf)
+
+  // Edges parallel to x.
+  trimPlane( 0,  1,  1, 0, size_y, size_z - get("bv"))
+  trimPlane( 0,  1, -1, 0, size_y, get("bv"))
+  trimPlane( 0, -1,  1, 0, 0,      size_z - get("bv"))
+  trimPlane( 0, -1, -1, 0, 0,      get("bv"))
+
+  // Edges parallel to y.
+  trimPlane( 1,  0,  1, size_x - get("bv"), 0, size_z)
+  trimPlane( 1,  0, -1, size_x - get("bv"), 0, get("bv"))
+  trimPlane(-1,  0,  1, get("bv"),          0, size_z)
+  trimPlane(-1,  0, -1, get("bv"),          0, get("bv"))
+
+  // Edges parallel to z.
+  trimPlane( 1,  1,  0, size_x - get("bv"), size_y, 0)
+  trimPlane(-1,  1,  0, get("bv"),          size_y, 0)
+  trimPlane( 1, -1,  0, size_x - get("bv"), 0,      0)
+  trimPlane(-1, -1,  0, get("bv"),          0,      0)
+
+  // Corners (points on the y = 0 / y = size_y faces).
+  trimPlane( 1,  1,  1, size_x - get("bv"), size_y, size_z - get("bv"))
+  trimPlane(-1,  1,  1, get("bv"),          size_y, size_z - get("bv"))
+  trimPlane( 1,  1, -1, size_x - get("bv"), size_y, get("bv"))
+  trimPlane(-1,  1, -1, get("bv"),          size_y, get("bv"))
+  trimPlane( 1, -1,  1, size_x - get("bv"), 0,      size_z - get("bv"))
+  trimPlane(-1, -1,  1, get("bv"),          0,      size_z - get("bv"))
+  trimPlane( 1, -1, -1, size_x - get("bv"), 0,      get("bv"))
+  trimPlane(-1, -1, -1, get("bv"),          0,      get("bv"))
+
+  trim
+};
+
+rule ShaftBlocks(v) = {
+  repeat(shaft_blocks, { [ Boulder(v) ] })
+};
+
+// One boulder: a pillow-beveled box, slightly yawed and offset, with a random
+// scar on some of them. Blocks overlap vertically by 8% so yawed corners
+// never open gaps.
+rule Boulder(v) = {
+  set("bh", (shaft_h_base + v * shaft_h_extra) / shaft_blocks)
+  set("bw", shaft_w * rand_uniform(0.94, 1.05))
+  translate(rand_uniform(-boulder_off, boulder_off),
+            plinth_h + get("bh") * (index + 0.5),
+            rand_uniform(-boulder_off, boulder_off))
+  rotateY(rand_uniform(-boulder_rot, boulder_rot))
+  size(get("bw"), get("bh") * 1.08, get("bw"))
+  translate(get("bw") * -0.5, get("bh") * -0.54, get("bw") * -0.5)
+  cube
+  BoulderChipMaybe
+  BoxBevel(boulder_bevel)
+  BoulderPaint
+};
+
+// Random scar: one deeper trim plane somewhere on a vertical edge.
+rule BoulderChipMaybe : 2 = {
+  set("ca", rand_uniform(0.0, 360.0))
+  set("cd", rand_uniform(0.02, 0.05))
+  trimPlane(cos(ca), rand_uniform(-0.35, 0.35), sin(ca),
+            size_x * 0.5 + cos(ca) * (size_x * 0.5 - get("cd")),
+            size_y * rand_uniform(0.25, 0.75),
+            size_z * 0.5 + sin(ca) * (size_z * 0.5 - get("cd")))
+};
+rule BoulderChipMaybe : 3 = {};
+
+rule BoulderPaint : 10 = { color(stone_base) Boulder_ };
+rule BoulderPaint : 3  = { color(stone_dark) Boulder_ };
+rule BoulderPaint : 2  = { color(stone_light) Boulder_ };
+
+// Tiled pyramid cap: a slightly undersized dark solid core (reads as shadow
+// between the tiles) plus 2x2 slate slabs per slope with real thickness.
+// The 4-segment cone comes axis-aligned out of the box — no rotateY needed.
+rule Cap(v) = {
+  translate(0.0, plinth_h + shaft_h_base + v * shaft_h_extra, 0.0)
+  [ size(cap_side * 0.96, cap_h, cap_side * 0.96)
+    translate(cap_side * -0.48, 0.0, cap_side * -0.48)
+    coneFlat(4, 1, 1)
+    color(cap_core)
+    CapCore_ ]
+  repeat(4, { [ CapSlope ] })
+};
+
+rule CapSlope = {
+  rotateY(90.0 * index)
+  [ TileRow(0.0) ]
+  [ TileRow(1.0) ]
+};
+
+rule TileRow(row) = {
+  repeat(2, { [ TilePiece(row) ] })
+};
+
+// One tile slab on the slope: lower row (row = 0) overhangs the eave, upper
+// row (row = 1) reaches just past the apex. Origin is moved onto the slope
+// surface point first, then the slab is tilted by the slope angle.
+rule TilePiece(row) = {
+  set("tm", 0.24 + row * 0.49)
+  set("tl", slope_len * (0.72 - row * 0.14))
+  translate((index - 0.5) * cap_side * 0.5 + rand_uniform(-0.004, 0.004),
+            cap_h * get("tm") + rand_uniform(-0.004, 0.006),
+            cap_b * (1.0 - get("tm")))
+  rotateX(slope_deg)
+  rotateZ(rand_uniform(-2.0, 2.0))
+  size(cap_side * tile_w_ratio, tile_t, get("tl"))
+  translate(cap_side * tile_w_ratio * -0.5, tile_t * -0.5, get("tl") * -0.5)
+  cube
+  TilePaint
+};
+
+rule TilePaint : 9 = { color(tile_base) Tile_ };
+rule TilePaint : 3 = { color(tile_dark) Tile_ };
+rule TilePaint : 2 = { color(tile_light) Tile_ };
+rule TilePaint : 1 = { color(moss_color) Tile_ };  // rare mossy tile
+
+rule Finial(v) :: (v < 0.5) = {
+  translate(finial_d * -0.5,
+            plinth_h + shaft_h_base + cap_h - finial_d * 0.35,
+            finial_d * -0.5)
+  size(finial_d, finial_d, finial_d)
+  sphereFlat(8, 6)
+  MetalPaint
+};
+rule Finial(v) :: (v >= 0.5) = {
+  translate(spike_w * -0.5,
+            plinth_h + shaft_h_base + shaft_h_extra + cap_h - 0.02,
+            spike_w * -0.5)
+  size(spike_w, spike_h, spike_w)
+  coneFlat(4, 1, 1)
+  MetalPaint
+};
+
+rule MossMaybe :: moss = {
+  size(plinth1_w * 1.02, 0.02, plinth1_w * 1.02)
+  translate(plinth1_w * -0.51, 0.008, plinth1_w * -0.51)
+  cube
+  color(moss_color)
+  Moss_
+};
+rule MossMaybe :: !moss = {};
+
+// --- Section ------------------------------------------------------------------
+
+rule Section = {
+  [ // bottom rail
+    translate(0.0, bot_rail_y, rail_d * -0.5)
+    size(section_length, rail_h, rail_d)
+    cube
+    MetalPaint
+  ]
+  [ // top rail
+    translate(0.0, top_rail_y, rail_d * -0.5)
+    size(section_length, rail_h, rail_d)
+    cube
+    MetalPaint
+  ]
+  repeat(num_bars, { [ Bar ] })
+  RingsMaybe
+};
+
+rule Bar = {
+  translate(bar_cx(index) - bar_w * 0.5, bot_rail_y + rail_h, bar_w * -0.5)
+  rotateZ(rand_uniform(-bar_lean, bar_lean))  // hand-forged lean, pivot at base
+  [ size(bar_w, top_rail_y + rail_h - bot_rail_y, bar_w) cube MetalPaint ]
+  [ Spear ]
+};
+
+// Spearheads sit on the bar tops; odd bars get a shorter spear (rhythm).
+// The bracket inherits the bar scope including its lean, so the spear stays
+// aligned with the bar.
+rule Spear :: (index % 2) == 0 = {
+  translate(bar_w * 0.5 - spear_w * 0.5,
+            top_rail_y + rail_h - bot_rail_y - 0.03,
+            bar_w * 0.5 - spear_w * 0.5)
+  size(spear_w, spear_h, spear_w)
+  coneFlat(4, 1, 1)
+  MetalPaint
+};
+rule Spear :: (index % 2) == 1 = {
+  translate(bar_w * 0.5 - spear_w * 0.5,
+            top_rail_y + rail_h - bot_rail_y - 0.03,
+            bar_w * 0.5 - spear_w * 0.5)
+  size(spear_w, spear_h2, spear_w)
+  coneFlat(4, 1, 1)
+  MetalPaint
+};
+
+// Forged rings captured between adjacent bars, centered between the rails.
+rule RingsMaybe :: rings_enabled = {
+  repeat(num_bars - 1, { [ Ring ] })
+};
+rule RingsMaybe :: !rings_enabled = {};
+
+rule Ring = {
+  translate(bar_cx(index) + bar_spacing * 0.5,
+            (bot_rail_y + rail_h + top_rail_y) * 0.5, 0.0)
+  rotateX(90)  // torus axis (local y) -> world z: ring stands in the fence plane
+  size(bar_spacing * ring_d_ratio,
+       bar_spacing * ring_d_ratio * ring_tube_ratio,
+       bar_spacing * ring_d_ratio)
+  translate(bar_spacing * ring_d_ratio * -0.5,
+            bar_spacing * ring_d_ratio * ring_tube_ratio * -0.5,
+            bar_spacing * ring_d_ratio * -0.5)
+  torusFlat(4.5, 1.0, 14, 7)
+  MetalPaint
+};
+
+// Aged metal: mostly the base tone, some darker recessed pieces, rare rust
+// (iron) or bare-metal gleam (copper). One random roll per leaf.
+rule MetalPaint : 12 :: (metal == 0) = { color(iron_base) Metal_ };
+rule MetalPaint : 3  :: (metal == 0) = { color(iron_dark) Metal_ };
+rule MetalPaint : 1  :: (metal == 0) = { color(iron_rust) Metal_ };
+rule MetalPaint : 12 :: (metal == 1) = { color(copper_base) Metal_ };
+rule MetalPaint : 3  :: (metal == 1) = { color(copper_dark) Metal_ };
+rule MetalPaint : 1  :: (metal == 1) = { color(copper_bare) Metal_ };

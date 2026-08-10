@@ -1,0 +1,170 @@
+// Casual Christmas tree for ShapemlPlayground.
+// Chubby stylized low-poly tree: a trunk, a stack of faceted cone tiers with
+// a bright green ramp (bottom -> top), a ring of colorful baubles nested into
+// each tier, and a 5-pointed extruded polygon star on top. All knobs are
+// params -> live sliders in the playground.
+//
+// Frame: the tree stands upright along world +y, centered on the y-axis
+// (scope rotations pivot on the scope origin, so every ring/star first moves
+// its origin onto the axis and only then rotates).
+
+param tree_width = 5.6;         // edge of the lowest tier
+param trunk_height = 1.7;
+param trunk_width = 1.3;
+param trunk_segments = 10;
+
+param num_tiers = 4;            // 2..5 look sane
+param tier_shrink = 0.72;       // per-tier width multiplier
+param tier_h_w_ratio = 0.85;    // tier cone height / width (< 1 = chubby)
+param tier_overlap = 0.42;      // 0 = stacked tip to base, 1 = fully nested
+param tier_twist = 18.0;        // per-tier rotation, degrees
+param cone_segments = 8;        // facets of the tier pyramids
+
+param baubles_enabled = true;
+param baubles_per_ring = 7;
+param bauble_size = 0.4;
+param bauble_ring_radius = 0.42;  // fraction of tier width (cone surface ~0.42 at ring height)
+param bauble_ring_height = 0.16;  // fraction of tier cone height
+
+param star_enabled = true;
+param star_size = 1.9;
+param star_thickness = 0.35;
+param star_inner_ratio = 0.45;  // inner/outer vertex radius (chubby star)
+param star_nestle = 0.6;        // lift of the star base, fraction of last tier size
+
+param snow_base = true;
+
+param trunk_color = "#8B5E34";
+param tier_color_1 = "#2F9E44"; // bottom (darkest)
+param tier_color_2 = "#40C057";
+param tier_color_3 = "#51CF66";
+param tier_color_4 = "#69DB7C"; // top (lightest)
+param bauble_color_1 = "#FA5252";
+param bauble_color_2 = "#4DABF7";
+param bauble_color_3 = "#FFD43B";
+param star_color = "#FFD43B";
+param snow_color = "#F1F5F9";
+
+// Star polygon: 5 outer/inner vertex pairs, CCW, spanning 0..star_size.
+func star_ro = star_size * 0.5;
+func star_ri = star_size * 0.5 * star_inner_ratio;
+func spx(angle, r) = star_size * 0.5 + r * cos(angle);
+func spz(angle, r) = star_size * 0.5 + r * sin(angle);
+
+rule Axiom = {
+  size(tree_width, tree_width, tree_width)
+  centerAtOriginX
+  centerAtOriginZ
+
+  [ SnowBaseMaybe ]
+
+  [
+    size(trunk_width, trunk_height, trunk_width)
+    centerX
+    centerZ
+    cylinderFlat(trunk_segments, 1, 1)
+    color(trunk_color)
+    Trunk_
+  ]
+
+  translateY(trunk_height * 0.85)
+
+  repeatNoPush(num_tiers, {
+    [ Tier ]
+    [ BaubleRingMaybe ]
+    scale(tier_shrink)
+    rotateY(tier_twist)
+    centerX
+    centerZ
+    translateY(size_y * (1.0 - tier_overlap))
+  })
+
+  [ StarMaybe ]
+};
+
+// --- Tiers ------------------------------------------------------------------
+
+rule Tier = {
+  scaleY(tier_h_w_ratio)
+  coneFlat(cone_segments, 2, 1)
+  TierPaint
+};
+
+// Green ramp bottom -> top; tiers past the 4th reuse the lightest green.
+rule TierPaint :: (index == 0) = { color(tier_color_1) Tier_ };
+rule TierPaint :: (index == 1) = { color(tier_color_2) Tier_ };
+rule TierPaint :: (index == 2) = { color(tier_color_3) Tier_ };
+rule TierPaint = { color(tier_color_4) Tier_ };
+
+// --- Baubles ----------------------------------------------------------------
+
+rule BaubleRingMaybe :: baubles_enabled = { BaubleRing };
+rule BaubleRingMaybe :: !baubles_enabled = {};
+
+rule BaubleRing = {
+  scaleY(tier_h_w_ratio)  // match the cone box: size_y becomes the cone height
+  // Move the origin onto the tier axis at ring height (the scope box is
+  // centered on the axis, so half extents land exactly on it).
+  translate(size_x * 0.5, size_y * bauble_ring_height, size_z * 0.5)
+  repeat(baubles_per_ring, {
+    // size_x * 17 is a deterministic per-tier phase so the rings do not line
+    // up in vertical columns.
+    rotateY(360.0 / baubles_per_ring * index + size_x * 17.0)
+    translate(size_x * bauble_ring_radius - bauble_size * 0.5,
+              -bauble_size * 0.5, -bauble_size * 0.5)
+    Bauble
+  })
+};
+
+rule Bauble = {
+  size(bauble_size, bauble_size, bauble_size)
+  sphereFlat(8, 6)
+  BaublePaint
+};
+
+rule BaublePaint : 3 = { color(bauble_color_1) Bauble_ };
+rule BaublePaint : 2 = { color(bauble_color_2) Bauble_ };
+rule BaublePaint : 2 = { color(bauble_color_3) Bauble_ };
+
+// --- Star -------------------------------------------------------------------
+
+rule StarMaybe :: star_enabled = { Star };
+rule StarMaybe :: !star_enabled = {};
+
+rule Star = {
+  // Move the origin onto the axis just under the tip of the top cone...
+  translate(size_x * 0.5, size_y * star_nestle, size_z * 0.5)
+  // ...then stand the 2D polygon plane up: local z becomes world up, local y
+  // (the extrude direction) becomes world -z, i.e. the star thickness runs
+  // towards/away from the default camera.
+  rotateX(-90)
+  size(star_size, star_thickness, star_size)
+  translate(star_size * -0.5, star_thickness * -0.5, 0)
+  polygon(
+    spx(90, star_ro),  spz(90, star_ro),
+    spx(126, star_ri), spz(126, star_ri),
+    spx(162, star_ro), spz(162, star_ro),
+    spx(198, star_ri), spz(198, star_ri),
+    spx(234, star_ro), spz(234, star_ro),
+    spx(270, star_ri), spz(270, star_ri),
+    spx(306, star_ro), spz(306, star_ro),
+    spx(342, star_ri), spz(342, star_ri),
+    spx(18, star_ro),  spz(18, star_ro),
+    spx(54, star_ri),  spz(54, star_ri)
+  )
+  extrude(star_thickness)
+  color(star_color)
+  Star_
+};
+
+// --- Snow base ----------------------------------------------------------------
+
+rule SnowBaseMaybe :: snow_base = {
+  scale(0.85, 0.05, 0.85)
+  centerX
+  centerZ
+  cylinderFlat(18, 1, 1)
+  color(snow_color)
+  Snow_
+};
+rule SnowBaseMaybe :: !snow_base = {};
