@@ -2,10 +2,12 @@
 
 #include "FenceToolSmokeTest.h"
 
+#include <limits>
 #include <string>
 
 #include <spdlog/spdlog.h>
 
+#include "FenceMesh.h"
 #include "FenceModel.h"
 
 namespace {
@@ -203,6 +205,126 @@ bool runFenceToolSmokeTest() {
         spdlog::info("TEST PASS: fence tool smoke (all checks)");
     } else {
         spdlog::error("TEST FAIL: fence tool smoke, {} check(s) failed", g_failures);
+    }
+    return g_failures == 0;
+}
+
+namespace {
+
+void testMeshLoading(FenceMeshSet* meshes) {
+    std::string error;
+    check(loadFenceMeshSet(findRepoRoot() + "/resources/models/fence", meshes, &error),
+        "mesh: piece set loads");
+    if (!meshes->ok) {
+        spdlog::error("TEST FAIL: mesh: load error: {}", error);
+        return;
+    }
+    const std::pair<const char*, const FenceMesh*> all[4] = {
+        {"post", &meshes->post},
+        {"corner", &meshes->corner},
+        {"section2", &meshes->section2},
+        {"section3", &meshes->section3},
+    };
+    for (const auto& [name, mesh] : all) {
+        check(!mesh->vertices.empty() && !mesh->indices.empty(),
+            std::string("mesh: ") + name + " has geometry");
+        bool indicesOk = true;
+        for (const std::uint32_t idx : mesh->indices) {
+            indicesOk = indicesOk && idx < mesh->vertices.size();
+        }
+        check(indicesOk, std::string("mesh: ") + name + " indices in range");
+    }
+    // Piece contract of fence.shp: post base on the ground plane, section
+    // spans post axis to post axis.
+    check(std::abs(meshes->post.aabbMin.y) < 1e-3f, "mesh: post base at y=0");
+    check(meshes->post.aabbMax.y > 0.5f && meshes->post.aabbMax.y < 1.2f,
+        "mesh: post height around 0.8 m");
+    check(std::abs(meshes->section2.aabbMax.x - 2.0f) < 0.3f,
+        "mesh: 1-cell section spans 2 m");
+    check(std::abs(meshes->section3.aabbMax.x - 3.0f) < 0.3f,
+        "mesh: 2-cell section spans 3 m");
+}
+
+void testMeshInstancing(const FenceMeshSet& meshes) {
+    if (!meshes.ok) {
+        return;
+    }
+    const topology_core::DiamondIsometry iso;
+
+    // L-shaped fence: one post with two perpendicular sections -> corner.
+    FenceModel model;
+    model.reset(24, 24);
+    model.applyStroke({4, 4}, {1, 0}, 3); // P S1 P
+    model.applyStroke({4, 4}, {0, 1}, 3); // + S1 P from the elbow post
+    int cornerCount = 0;
+    int postCount = 0;
+    for (const FencePiece& piece : model.pieces()) {
+        if (piece.kind != FencePieceKind::Post) {
+            continue;
+        }
+        ++postCount;
+        if (isCornerPost(model, piece.id)) {
+            ++cornerCount;
+        }
+    }
+    check(postCount == 3, "mesh: L fence has 3 posts");
+    check(cornerCount == 1, "mesh: exactly the elbow post is a corner");
+
+    // Vertex accounting: total = sum of the per-piece mesh index counts.
+    const std::vector<FenceFieldVertex> verts =
+        buildFenceFieldTriangles(iso, model, meshes, -1);
+    size_t expected = 0;
+    for (const FencePiece& piece : model.pieces()) {
+        if (piece.kind == FencePieceKind::Post) {
+            expected += (isCornerPost(model, piece.id) ? meshes.corner : meshes.post).indices.size();
+        } else {
+            expected += (piece.length >= 2 ? meshes.section3 : meshes.section2).indices.size();
+        }
+    }
+    check(verts.size() == expected, "mesh: instance vertex accounting");
+
+    // Projection: the post apex lifts above its ground row (smaller screen y),
+    // and every z stays inside the (0,1) depth range.
+    FenceModel solo;
+    solo.reset(24, 24);
+    solo.applyStroke({10, 10}, {1, 0}, 3); // P S P
+    const std::vector<FenceFieldVertex> soloVerts =
+        buildFenceFieldTriangles(iso, solo, meshes, -1);
+    const float groundY = iso.mapToField({10, 10}).y;
+    float minY = std::numeric_limits<float>::max();
+    float minZ = 1.0f;
+    float maxZ = 0.0f;
+    for (const FenceFieldVertex& v : soloVerts) {
+        minY = std::min(minY, v.y);
+        minZ = std::min(minZ, v.z);
+        maxZ = std::max(maxZ, v.z);
+    }
+    check(minY < groundY - 20.0f, "mesh: post apex lifted above the ground row");
+    check(minZ > 0.0f && maxZ < 1.0f, "mesh: z within the depth range");
+
+    // Selection tint recolors the fence's pieces.
+    const int fenceId = solo.fenceAt({10, 10});
+    const std::vector<FenceFieldVertex> tinted =
+        buildFenceFieldTriangles(iso, solo, meshes, fenceId);
+    bool differs = false;
+    for (size_t i = 0; i < tinted.size() && !differs; ++i) {
+        differs = tinted[i].r != soloVerts[i].r || tinted[i].g != soloVerts[i].g ||
+            tinted[i].b != soloVerts[i].b;
+    }
+    check(fenceId >= 0 && differs, "mesh: selection tint recolors pieces");
+}
+
+} // namespace
+
+bool runFenceMeshSmokeTest() {
+    g_failures = 0;
+    FenceMeshSet meshes;
+    testMeshLoading(&meshes);
+    testMeshInstancing(meshes);
+    if (g_failures == 0) {
+        spdlog::info("TEST PASS: fence mesh smoke (all checks)");
+    } else {
+        spdlog::error("TEST FAIL: fence mesh smoke, {} check(s) failed", g_failures);
     }
     return g_failures == 0;
 }

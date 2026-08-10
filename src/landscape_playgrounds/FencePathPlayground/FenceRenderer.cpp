@@ -287,7 +287,8 @@ void FenceRenderer::render(
     const FenceModel& model,
     int selectedFence,
     const std::vector<FenceModel::StrokePiece>* ghost,
-    bool ghostValid) {
+    bool ghostValid,
+    bool drawSchematic) {
 
     if (!m_ready) {
         return;
@@ -303,25 +304,28 @@ void FenceRenderer::render(
     verts.reserve(model.pieces().size() * 6 + (ghost ? ghost->size() * 6 : 0) + 64);
 
     // Painter order inside one stream: section bands, post diamonds on top,
-    // the ghost preview last.
-    for (const FencePiece& piece : model.pieces()) {
-        if (piece.kind != FencePieceKind::Section) {
-            continue;
+    // the ghost preview last. The 3D mesh pass owns the committed pieces when
+    // active; then only the ghost remains here.
+    if (drawSchematic) {
+        for (const FencePiece& piece : model.pieces()) {
+            if (piece.kind != FencePieceKind::Section) {
+                continue;
+            }
+            const FencePiece* postA = model.pieceById(piece.postA);
+            const FencePiece* postB = model.pieceById(piece.postB);
+            if (!postA || !postB) {
+                continue;
+            }
+            const glm::vec4 color = piece.fenceId == selectedFence ? sectionSelected : sectionColor;
+            appendBand(verts, iso.mapToField(postA->cell), iso.mapToField(postB->cell), half.y * 0.4f, color);
         }
-        const FencePiece* postA = model.pieceById(piece.postA);
-        const FencePiece* postB = model.pieceById(piece.postB);
-        if (!postA || !postB) {
-            continue;
+        for (const FencePiece& piece : model.pieces()) {
+            if (piece.kind != FencePieceKind::Post) {
+                continue;
+            }
+            const glm::vec4 color = piece.fenceId == selectedFence ? postSelected : postColor;
+            appendDiamond(verts, iso.mapToField(piece.cell), half.x * 0.55f, half.y * 0.55f, color);
         }
-        const glm::vec4 color = piece.fenceId == selectedFence ? sectionSelected : sectionColor;
-        appendBand(verts, iso.mapToField(postA->cell), iso.mapToField(postB->cell), half.y * 0.4f, color);
-    }
-    for (const FencePiece& piece : model.pieces()) {
-        if (piece.kind != FencePieceKind::Post) {
-            continue;
-        }
-        const glm::vec4 color = piece.fenceId == selectedFence ? postSelected : postColor;
-        appendDiamond(verts, iso.mapToField(piece.cell), half.x * 0.55f, half.y * 0.55f, color);
     }
 
     if (ghost && !ghost->empty()) {

@@ -29,7 +29,9 @@
 // translucent ghost preview (stroke plan or move preview — both arrive as a
 // StrokePiece list; green = applicable, red = rejected). Same color pass and
 // bakedDepth ground-plane convention as GridRenderer; all geometry is
-// triangles, one dynamic buffer, one upload + one draw per frame.
+// triangles, one dynamic buffer, one upload + one draw per frame. With the 3D
+// piece meshes active (FenceMeshRenderer), drawSchematic=false skips the
+// committed pieces and only the ghost overlay remains.
 class FenceRenderer {
 public:
     void init();
@@ -43,7 +45,8 @@ public:
         const FenceModel& model,
         int selectedFence,
         const std::vector<FenceModel::StrokePiece>* ghost,
-        bool ghostValid);
+        bool ghostValid,
+        bool drawSchematic);
 
 private:
     sg_shader m_shader{};

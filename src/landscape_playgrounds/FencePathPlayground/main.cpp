@@ -11,6 +11,8 @@
 #include <topology_core/diamond_isometry.h>
 
 #include "FenceModel.h"
+#include "FenceMesh.h"
+#include "FenceMeshRenderer.h"
 #include "FenceRenderer.h"
 #include "FenceToolSmokeTest.h"
 #include "GridRenderer.h"
@@ -69,8 +71,12 @@ topology_core::DiamondIsometry g_iso;
 topology_core::Camera2D g_camera;
 GridRenderer g_grid;
 FenceRenderer g_fenceRenderer;
+FenceMeshRenderer g_fenceMesh;
 FenceModel g_fence;
 std::optional<glm::ivec2> g_hoverCell;
+// --flat-fence forces the schematic 2D rendering of committed pieces (debug
+// A/B against the 3D piece meshes); auto-enabled when the meshes are missing.
+bool g_flatFence = false;
 
 // The layout canvas: a square cell map, same dimensions the
 // SDFGeneratedLandscape brushes use.
@@ -212,6 +218,11 @@ void init() {
 
     g_grid.init();
     g_fenceRenderer.init();
+    g_fenceMesh.init();
+    if (!g_fenceMesh.loadMeshes(findRepoRoot() + "/resources/models/fence")) {
+        spdlog::error("FencePathPlayground: 3D fence meshes unavailable, falling back to flat");
+        g_flatFence = true;
+    }
     g_fence.reset(kMapW, kMapH);
     if (g_demoFences) {
         buildDemoFences();
@@ -245,6 +256,12 @@ void drawImGui(int w, int h) {
     ImGui::Text("Fences: %d, pieces: %d", g_fence.fenceCount(), static_cast<int>(g_fence.pieces().size()));
     ImGui::Text("Selected fence: %s", g_selectedFence >= 0 ? std::to_string(g_selectedFence).c_str() : "-");
     ImGui::Checkbox("Erase posts (LMB click)", &g_eraseMode);
+    if (g_fenceMesh.meshesOk()) {
+        bool use3d = !g_flatFence;
+        if (ImGui::Checkbox("3D fence pieces", &use3d)) {
+            g_flatFence = !use3d;
+        }
+    }
     if (g_selectedFence >= 0) {
         if (ImGui::Button("Delete selected fence")) {
             g_fence.eraseFence(g_selectedFence);
@@ -352,6 +369,12 @@ void frame() {
         g_hoverCell.value_or(glm::ivec2{-1, -1}),
         g_hoverCell.has_value());
 
+    // Committed pieces: 3D piece meshes unless the flat debug mode is on. The
+    // mesh pass writes depth, so it must run before the no-write overlays.
+    if (!g_flatFence && g_fenceMesh.meshesOk()) {
+        g_fenceMesh.render(g_iso, g_camera, canvasW, h, g_fence, g_selectedFence);
+    }
+
     // Ghost preview: the active stroke plan (green) or the rejected raw line
     // (red), or the move preview of the selected fence.
     std::vector<FenceModel::StrokePiece> ghost;
@@ -389,7 +412,8 @@ void frame() {
         g_fence,
         g_selectedFence,
         ghost.empty() ? nullptr : &ghost,
-        ghostValid);
+        ghostValid,
+        g_flatFence || !g_fenceMesh.meshesOk());
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -414,6 +438,7 @@ void frame() {
 void cleanup() {
     spdlog::info("FencePathPlayground: cleanup()");
     g_fenceRenderer.shutdown();
+    g_fenceMesh.shutdown();
     g_grid.shutdown();
     if (g_state.imgui_ok) {
         simgui_shutdown();
@@ -654,6 +679,9 @@ int main(int argc, char* argv[]) {
         if (arg == "--demo-fence") {
             g_demoFences = true;
         }
+        if (arg == "--flat-fence") {
+            g_flatFence = true;
+        }
         if (arg.rfind("--shot=", 0) == 0) {
             g_shotPath = arg.substr(7);
         }
@@ -669,7 +697,8 @@ int main(int argc, char* argv[]) {
         spdlog::set_level(spdlog::level::info);
         const bool projectionOk = runProjectionSmokeTest();
         const bool fenceOk = runFenceToolSmokeTest();
-        return (projectionOk && fenceOk) ? 0 : 1;
+        const bool meshOk = runFenceMeshSmokeTest();
+        return (projectionOk && fenceOk && meshOk) ? 0 : 1;
     }
 
     sapp_desc desc = {};

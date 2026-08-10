@@ -9,6 +9,10 @@
 //
 // CLI: --smoke  --shot <file.png>  --seed <n>  --dir <grammars dir>
 //      --grammar <name.shp|path>
+//      --export <dir> [--export-name <stem>] [--param name=value]...  — batch
+//      OBJ+MTL export: derives the grammar once with the given overrides and
+//      writes <dir>/<stem>.obj (the exporter appends .obj/.mtl itself), then
+//      quits.
 
 #include "pch.h"
 
@@ -49,6 +53,9 @@ struct CliOptions {
     std::string shotPath;
     std::string grammarDir;   // default: <repo>/external/shapeml/grammars
     std::string grammarName;  // file name inside dir, or a full path
+    std::string exportDir;    // --export: batch OBJ export target dir
+    std::string exportName;   // --export-name: output stem (default: grammar stem)
+    std::vector<std::pair<std::string, std::string>> paramOverrides; // --param name=value
 };
 
 struct AppState {
@@ -86,6 +93,7 @@ struct AppState {
     int logErrors = 0;
     int shotFrame = -1;
     bool smokeCheckOk = false;
+    bool exportQuit = false; // --export ran in init; quit on the first frame
 };
 
 AppState g_state;
@@ -113,6 +121,18 @@ CliOptions parseCli(int argc, char* argv[]) {
             cli.grammarDir = argv[++i];
         } else if (arg == "--grammar" && i + 1 < argc) {
             cli.grammarName = argv[++i];
+        } else if (arg == "--export" && i + 1 < argc) {
+            cli.exportDir = argv[++i];
+        } else if (arg == "--export-name" && i + 1 < argc) {
+            cli.exportName = argv[++i];
+        } else if (arg == "--param" && i + 1 < argc) {
+            const std::string spec = argv[++i];
+            const size_t eq = spec.find('=');
+            if (eq == std::string::npos || eq == 0) {
+                spdlog::error("--param expects name=value, got '{}'", spec);
+            } else {
+                cli.paramOverrides.emplace_back(spec.substr(0, eq), spec.substr(eq + 1));
+            }
         }
     }
     return cli;
@@ -215,6 +235,91 @@ void exportObj() {
         spdlog::error("export failed: {}", error);
         g_state.lastError = error;
     }
+}
+
+// --param name=value overrides, applied on top of the grammar defaults.
+// Conversion follows the declared param type; an unknown name is an error
+// (a typo in a bake script must not silently produce the default piece).
+bool applyParamOverrides() {
+    bool ok = true;
+    for (const auto& [name, value] : g_state.cli.paramOverrides) {
+        shapemlhost::Param* hit = nullptr;
+        for (shapemlhost::Param& p : g_state.params) {
+            if (p.name == name) {
+                hit = &p;
+                break;
+            }
+        }
+        if (!hit) {
+            spdlog::error("export: unknown param '{}'", name);
+            ok = false;
+            continue;
+        }
+        try {
+            switch (hit->type) {
+            case shapemlhost::Param::Type::Boolean:
+                hit->b = (value == "true" || value == "1");
+                break;
+            case shapemlhost::Param::Type::Int:
+                hit->i = std::stoi(value);
+                break;
+            case shapemlhost::Param::Type::Number:
+                hit->f = std::stod(value);
+                break;
+            case shapemlhost::Param::Type::String:
+                hit->s = value;
+                break;
+            }
+        } catch (const std::exception&) {
+            spdlog::error("export: bad value '{}' for param '{}'", value, name);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+// --export one-shot: derive with overrides, write <dir>/<stem>.obj (+.mtl).
+// The stem is passed WITHOUT an extension — the ShapeML exporter appends
+// .obj/.mtl itself.
+bool runExportCli() {
+    if (g_state.selectedGrammar < 0) {
+        spdlog::error("export: no grammar loaded (check --grammar)");
+        return false;
+    }
+    if (!applyParamOverrides()) {
+        return false;
+    }
+    if (!deriveAndUpload()) {
+        return false;
+    }
+    const std::string stem = !g_state.cli.exportName.empty()
+        ? g_state.cli.exportName
+        : std::filesystem::path(g_state.grammarFiles[g_state.selectedGrammar]).stem().string();
+    const std::filesystem::path dir = g_state.cli.exportDir;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const std::string file = (dir / stem).string();
+    std::string error;
+    if (!g_state.host.exportObj(file, &error)) {
+        spdlog::error("export failed: {}", error);
+        return false;
+    }
+    spdlog::info("export: OBJ written to {}.obj", file);
+    return true;
+}
+
+// --export one-shot runner: shared tail of both grammar-pick branches.
+void maybeRunExport() {
+    if (g_state.cli.exportDir.empty()) {
+        return;
+    }
+    if (runExportCli()) {
+        spdlog::info("TEST PASS: export scenario finished OK");
+    } else {
+        spdlog::error("TEST FAIL: export scenario failed");
+        ++g_state.logErrors;
+    }
+    g_state.exportQuit = true;
 }
 
 void drawUi() {
@@ -493,6 +598,7 @@ void init() {
                 g_state.lastError = error;
                 spdlog::error("grammar load failed: {}", error);
             }
+            maybeRunExport();
             return;
         }
         if (initial < 0) {
@@ -504,6 +610,7 @@ void init() {
     if (!g_state.grammarFiles.empty()) {
         loadGrammar(initial);
     }
+    maybeRunExport();
 }
 
 void frame() {
@@ -513,11 +620,17 @@ void frame() {
     ++g_state.frameIndex;
 
     if (!g_state.gfxOk) {
-        if (g_state.cli.smoke || !g_state.cli.shotPath.empty()) {
+        if (g_state.cli.smoke || !g_state.cli.shotPath.empty() ||
+            !g_state.cli.exportDir.empty()) {
             spdlog::error("TEST FAIL: sg_setup failed, no graphics device");
             ++g_state.logErrors;
             sapp_quit();
         }
+        return;
+    }
+
+    if (g_state.exportQuit) {
+        sapp_quit();
         return;
     }
 
