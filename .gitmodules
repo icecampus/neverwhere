@@ -4,3 +4,6 @@
 [submodule "toolchain/vcpkg"]
 	path = toolchain/vcpkg
 	url = https://github.com/microsoft/vcpkg/
+[submodule "external/shapeml"]
+	path = external/shapeml
+	url = https://github.com/stefalie/shapeml.git
