@@ -244,7 +244,7 @@ void MeshView::draw(const Camera& cam, int fbWidth, int fbHeight) {
     std::memcpy(vsu.mvp, &mvp, sizeof(vsu.mvp));
 
     FsUniforms fsu = {};
-    const float sunYaw = 2.2f;
+    const float sunYaw = -0.7f;
     const float sunPitch = 0.9f;
     fsu.lightDir[0] = std::cos(sunPitch) * std::sin(sunYaw);
     fsu.lightDir[1] = std::sin(sunPitch);

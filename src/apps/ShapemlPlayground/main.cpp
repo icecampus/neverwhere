@@ -55,7 +55,8 @@ struct AppState {
     CliOptions cli;
     std::string repoRoot;
     std::string grammarDir;
-    std::vector<std::string> grammarFiles;
+    std::vector<std::string> grammarFiles; // display names (file name only)
+    std::vector<std::string> grammarPaths; // full paths, same order
     int selectedGrammar = -1;
 
     shapemlhost::GrammarHost host;
@@ -178,9 +179,7 @@ bool loadGrammar(int index) {
     if (index < 0 || index >= static_cast<int>(g_state.grammarFiles.size())) {
         return false;
     }
-    const std::string path =
-        (std::filesystem::path(g_state.grammarDir) / g_state.grammarFiles[index])
-            .string();
+    const std::string& path = g_state.grammarPaths[index];
     std::string error;
     if (!g_state.host.load(path, &error)) {
         g_state.lastError = error;
@@ -363,8 +362,7 @@ bool runSmokeDerivations() {
             spdlog::info("smoke: {} skipped (heavy stress grammar)", name);
             continue;
         }
-        const std::string path =
-            (std::filesystem::path(g_state.grammarDir) / name).string();
+        const std::string& path = g_state.grammarPaths[i];
         shapemlhost::GrammarHost host;
         std::string error;
         if (!host.load(path, &error)) {
@@ -442,10 +440,23 @@ void init() {
         ? g_state.cli.grammarDir
         : (std::filesystem::path(g_state.repoRoot) / "external" / "shapeml" /
               "grammars").string();
-    g_state.grammarFiles =
-        shapemlhost::GrammarHost::scanGrammars(g_state.grammarDir);
-    spdlog::info("ShapemlPlayground: {} grammars in {}",
-        g_state.grammarFiles.size(), g_state.grammarDir);
+    // Own grammars first (playground folder), then the ShapeML stock ones.
+    // Entries keep the full path so both dirs can be listed together.
+    const std::string ownDir = (std::filesystem::path(g_state.repoRoot) /
+        "src" / "apps" / "ShapemlPlayground" / "grammars").string();
+    g_state.grammarFiles = shapemlhost::GrammarHost::scanGrammars(ownDir);
+    for (const std::string& name : g_state.grammarFiles) {
+        g_state.grammarPaths.push_back(
+            (std::filesystem::path(ownDir) / name).string());
+    }
+    for (const std::string& name :
+        shapemlhost::GrammarHost::scanGrammars(g_state.grammarDir)) {
+        g_state.grammarFiles.push_back(name);
+        g_state.grammarPaths.push_back(
+            (std::filesystem::path(g_state.grammarDir) / name).string());
+    }
+    spdlog::info("ShapemlPlayground: {} grammars (own: {}, stock dir: {})",
+        g_state.grammarFiles.size(), ownDir, g_state.grammarDir);
 
     g_state.seed = g_state.cli.seed;
     g_state.meshView.init();

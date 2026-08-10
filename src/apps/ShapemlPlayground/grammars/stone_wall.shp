@@ -1,0 +1,154 @@
+// Stone wall (ashlar masonry) for ShapemlPlayground.
+// A wall of individual beveled stones with running-bond offset, a plinth row,
+// a cap row, mortar gaps, per-stone jitter/color variation, and optional
+// missing stones. All knobs are params -> live sliders in the playground.
+//
+// Local frame: x = along the wall, z = up, y = wall thickness (the wall is
+// built "lying down" and stood up by the rotateX in Axiom).
+
+param wall_length = 12.0;
+param wall_height = 5.0;
+param wall_depth = 0.8;
+
+param stone_width = 0.9;    // target stone width within a row
+param stone_height = 0.45;  // field row height
+param base_height = 0.7;    // plinth row height
+param cap_height = 0.5;     // cap row height
+
+param gap = 0.06;               // mortar gap between stones
+param bevel_fraction = 0.12;    // edge bevel, fraction of min(stone w, h)
+param jitter_pos = 0.03;        // positional jitter
+param jitter_size = 0.06;       // per-stone width/height shrink variation
+param jitter_rot = 1.5;         // in-plane tilt, degrees
+param depth_variation = 0.10;   // how much stones protrude/recede
+param missing_stones = true;    // occasional fallen-out stones
+
+const mortar_r = 0.22;
+const mortar_g = 0.21;
+const mortar_b = 0.20;
+
+rule Axiom = {
+  rotateX(-90)  // stand the wall up: scope z becomes world up
+  rotateZ(180)  // face the default camera (rotate about the vertical)
+  size(wall_length, 0, wall_height)
+  // Solid mortar/backing slab behind the stones (visible in the gaps and in
+  // the holes of missing stones). NB: extrude() here grows towards -y, so
+  // the slab is sunk deeper than the stone backs: its faces must never be
+  // coplanar with the stone faces (z-fighting).
+  [
+    translateY(-0.25)
+    quad
+    extrude(0.2)
+    color(mortar_r, mortar_g, mortar_b)
+    Backing_
+  ]
+  quad  // splits need a mesh on the shape
+  splitZ(
+    "f(s)f",
+    base_height, { BaseRow },
+    stone_height, { FieldRow },
+    cap_height, { CapRow }
+  )
+};
+
+// --- Rows -----------------------------------------------------------------
+
+rule BaseRow = {
+  splitRepeatX(stone_width * 1.2, { StoneOrGap })
+};
+
+rule CapRow = {
+  splitRepeatX(stone_width * 1.6, { StoneOrGap })
+};
+
+// Running bond: even rows start on a full stone, odd rows on a half stone.
+rule FieldRow :: (index % 2) == 0 = {
+  splitRepeatX(stone_width, { StoneOrGap })
+};
+rule FieldRow :: (index % 2) == 1 = {
+  splitX(
+    "f(s)f",
+    stone_width * 0.5, { StoneOrGap },
+    stone_width,       { StoneOrGap },
+    stone_width * 0.5, { StoneOrGap }
+  )
+};
+
+// --- Stones ---------------------------------------------------------------
+
+rule StoneOrGap :: !missing_stones = { Stone };
+rule StoneOrGap : 19 :: missing_stones = { Stone };
+rule StoneOrGap : 1 :: missing_stones = {};  // fallen out, backing shows through
+
+rule Stone = {
+  // Shrink the scope symmetrically: what remains empty becomes the mortar gap.
+  scaleCenterX((size_x - gap) / size_x * rand_uniform(1.0 - jitter_size, 1.0))
+  scaleCenterZ((size_z - gap) / size_z * rand_uniform(1.0 - jitter_size, 1.0))
+  translate(rand_uniform(-jitter_pos, jitter_pos), 0,
+            rand_uniform(-jitter_pos, jitter_pos))
+  rotateY(rand_uniform(-jitter_rot, jitter_rot))
+  quad
+  extrude(wall_depth + rand_uniform(-depth_variation, depth_variation))
+  Bevel
+  StoneFinish
+};
+
+// Pillow-face bevel: trims all 12 edges + 8 corners of the extruded stone,
+// same trimPlane pattern as their castle_brick_arch.shp.
+rule Bevel = {
+  set("bv", min(size_x, size_z) * bevel_fraction)
+
+  // Front edges (y = size_y is the wall face after extrude).
+  trimPlane(-1,  1,  0,          get("bv"), size_y,               0)
+  trimPlane( 1,  1,  0, size_x - get("bv"), size_y,               0)
+  trimPlane( 0,  1, -1,               0, size_y,          get("bv"))
+  trimPlane( 0,  1,  1,               0, size_y, size_z - get("bv"))
+
+  // Back edges.
+  trimPlane(-1, -1,  0,          get("bv"),      0,               0)
+  trimPlane( 1, -1,  0, size_x - get("bv"),      0,               0)
+  trimPlane( 0, -1, -1,               0,      0,          get("bv"))
+  trimPlane( 0, -1,  1,               0,      0, size_z - get("bv"))
+
+  // Side edges.
+  trimPlane(-1,  0, -1,          get("bv"),      0,               0)
+  trimPlane( 1,  0, -1, size_x - get("bv"),      0,               0)
+  trimPlane( 1,  0,  1, size_x - get("bv"),      0, size_z         )
+  trimPlane(-1,  0,  1,          get("bv"),      0, size_z         )
+
+  // Front corners.
+  trimPlane(-1,  1, -1,          get("bv"), size_y,          get("bv"))
+  trimPlane( 1,  1, -1, size_x - get("bv"), size_y,          get("bv"))
+  trimPlane( 1,  1,  1, size_x - get("bv"), size_y, size_z - get("bv"))
+  trimPlane(-1,  1,  1,          get("bv"), size_y, size_z - get("bv"))
+
+  // Back corners.
+  trimPlane(-1, -1, -1,          get("bv"),      0,          get("bv"))
+  trimPlane( 1, -1, -1, size_x - get("bv"),      0,          get("bv"))
+  trimPlane( 1, -1,  1, size_x - get("bv"),      0, size_z - get("bv"))
+  trimPlane(-1, -1,  1,          get("bv"),      0, size_z - get("bv"))
+
+  trim
+};
+
+// Warm gray stone with per-stone brightness and tint variation; a few stones
+// run darker or rustier. NB: color() must sit inline in the rule that closes
+// with the terminal — a bare color-only rule in the middle of an op string
+// loses the material (hence the probabilistic finish rules here).
+rule StoneFinish : 17 = {
+  set("v", rand_uniform(0.82, 1.15))
+  color(0.58 * get("v") * rand_uniform(0.97, 1.03),
+        0.55 * get("v"),
+        0.50 * get("v") * rand_uniform(0.96, 1.04))
+  Stone_
+};
+rule StoneFinish : 2 = {
+  set("v", rand_uniform(0.85, 1.1))
+  color(0.38 * get("v"), 0.36 * get("v"), 0.34 * get("v"))
+  Stone_
+};
+rule StoneFinish : 1 = {
+  set("v", rand_uniform(0.85, 1.1))
+  color(0.58 * get("v"), 0.45 * get("v"), 0.34 * get("v"))
+  Stone_
+};
