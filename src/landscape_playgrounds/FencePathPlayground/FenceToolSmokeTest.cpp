@@ -312,6 +312,14 @@ void testMeshInstancing(const FenceMeshSet& meshes) {
             tinted[i].b != soloVerts[i].b;
     }
     check(fenceId >= 0 && differs, "mesh: selection tint recolors pieces");
+
+    // Placement contract: the piece pivot (post axis, ground) projects onto
+    // the cell CENTER — mapToField returns the diamond center for integer
+    // cell coords; a half-cell shift would put posts on grid nodes.
+    const glm::vec3 pivot = fenceWorldToField(iso, {10.0f, 0.0f, 10.0f});
+    const glm::vec2 center = iso.mapToField({10, 10});
+    check(std::abs(pivot.x - center.x) < 1e-4f && std::abs(pivot.y - center.y) < 1e-4f,
+        "mesh: piece pivot projects to the cell center");
 }
 
 } // namespace

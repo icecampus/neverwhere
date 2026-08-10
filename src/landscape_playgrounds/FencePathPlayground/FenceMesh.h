@@ -14,8 +14,11 @@
 // half of the 3D fence visualization: OBJ/MTL loading and instancing of the
 // pieces of a FenceModel into projected field-space vertices. No sokol here —
 // the GPU shell is FenceMeshRenderer. World convention: 1 cell = 1 meter,
-// y-up, cell (cx,cy) spans [cx,cx+1) x [cy,cy+1); the pieces keep the
-// fence.shp pivots (post axis at origin, base y=0; a section spans x
+// y-up, and cell (cx,cy) spans [cx-0.5,cx+0.5) x [cy-0.5,cy+0.5) so that the
+// cell CENTER sits at the integer world point (cx,cy) — matching
+// DiamondIsometry::mapToField, which returns the diamond center for integer
+// cell coords (nodes/corners live at half-integer coords). The pieces keep
+// the fence.shp pivots (post axis at origin, base y=0; a section spans x
 // 0..section_length from the first post axis).
 
 // Projected, lit vertex — the exact layout of GridColorVertex (GridRenderer.h)
@@ -61,6 +64,17 @@ std::string findRepoRoot();
 // A post with exactly two incident sections running along perpendicular axes
 // gets the taller corner/gate mesh.
 bool isCornerPost(const FenceModel& model, int postPieceId);
+
+// World (meters, y-up) -> field projection of the pieces: returns the field
+// point (screen y lifted by the height) and the baked depth in .z. Follows
+// the DiamondIsometry convention: fieldX = (x-z)*halfW + halfW, groundY =
+// (x+z)*halfH + halfH; depth = (kZFar - (groundY + y*m2p*0.5)) * kZScale —
+// the height term (inside the consistent 0<F<1 window) lets raised fragments
+// win their own ground row but lose to nearer rows.
+glm::vec3 fenceWorldToField(const topology_core::DiamondIsometry& iso, glm::vec3 world);
+
+// Meters -> screen points of vertical lift (DiamondIsometry-agnostic).
+constexpr float kFenceMetersToPoints = 96.0f;
 
 // Instantiates every piece of the model into projected field-space triangles
 // (camera/zoom are applied later in the vertex shader, so the result is cached

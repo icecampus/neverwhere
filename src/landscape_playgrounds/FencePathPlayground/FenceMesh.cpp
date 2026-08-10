@@ -231,23 +231,27 @@ bool isCornerPost(const FenceModel& model, int postPieceId) {
     return false;
 }
 
+glm::vec3 fenceWorldToField(const topology_core::DiamondIsometry& iso, glm::vec3 world) {
+    constexpr float kZFar = 100000.0f;
+    constexpr float kZScale = 1.0f / 200000.0f;
+    const float halfW = iso.dims.cellSize().x * 0.5f;
+    const float halfH = iso.dims.cellSize().y * 0.5f;
+    const float fieldX = (world.x - world.z) * halfW + halfW;
+    const float groundY = (world.x + world.z) * halfH + halfH;
+    const float screenY = groundY - world.y * kFenceMetersToPoints;
+    const float z =
+        (kZFar - (groundY + world.y * kFenceMetersToPoints * 0.5f)) * kZScale;
+    return {fieldX, screenY, z};
+}
+
 std::vector<FenceFieldVertex> buildFenceFieldTriangles(
     const topology_core::DiamondIsometry& iso,
     const FenceModel& model,
     const FenceMeshSet& meshes,
     int selectedFence) {
 
-    // Depth convention shared with GridRenderer: constant anchor, ground-y
-    // based; the height term (factor 0.5, inside the consistent 0<F<1 window)
-    // lets raised fragments win their own ground row but lose to nearer rows.
-    constexpr float kZFar = 100000.0f;
-    constexpr float kZScale = 1.0f / 200000.0f;
-    constexpr float kMetersToPoints = 96.0f;
     // Fixed sun + hemisphere ambient, baked into the vertex color.
     const glm::vec3 sun = glm::normalize(glm::vec3{-0.55f, 0.80f, -0.35f});
-
-    const float halfW = iso.dims.cellSize().x * 0.5f;
-    const float halfH = iso.dims.cellSize().y * 0.5f;
 
     std::vector<FenceFieldVertex> out;
 
@@ -258,7 +262,10 @@ std::vector<FenceFieldVertex> buildFenceFieldTriangles(
 
         if (piece.kind == FencePieceKind::Post) {
             mesh = isCornerPost(model, piece.id) ? &meshes.corner : &meshes.post;
-            offset = {piece.cell.x + 0.5f, 0.0f, piece.cell.y + 0.5f};
+            // Cell center is the integer world point (cx,cz) — the same
+            // convention mapToField uses (a +0.5 shift would land the post on
+            // the cell's Down corner node instead of inside the diamond).
+            offset = {static_cast<float>(piece.cell.x), 0.0f, static_cast<float>(piece.cell.y)};
             // Deterministic quarter-turn per post: cheap variety for the
             // random boulder scars.
             yawDeg = static_cast<float>((piece.id % 4) * 90);
@@ -269,7 +276,7 @@ std::vector<FenceFieldVertex> buildFenceFieldTriangles(
                 continue;
             }
             mesh = piece.length >= 2 ? &meshes.section3 : &meshes.section2;
-            offset = {postA->cell.x + 0.5f, 0.0f, postA->cell.y + 0.5f};
+            offset = {static_cast<float>(postA->cell.x), 0.0f, static_cast<float>(postA->cell.y)};
             // The section mesh spans +x from the first post axis; yaw maps +x
             // onto the postA->postB direction (rotY: +x -> +z at -90 deg).
             const glm::ivec2 d = postB->cell - postA->cell;
@@ -302,10 +309,7 @@ std::vector<FenceFieldVertex> buildFenceFieldTriangles(
                 v.nrm.y,
                 -v.nrm.x * sn + v.nrm.z * cs};
 
-            const float fieldX = (p.x - p.z) * halfW + halfW;
-            const float groundY = (p.x + p.z) * halfH + halfH;
-            const float screenY = groundY - p.y * kMetersToPoints;
-            const float z = (kZFar - (groundY + p.y * kMetersToPoints * 0.5f)) * kZScale;
+            const glm::vec3 field = fenceWorldToField(iso, p);
 
             const float diff = std::max(glm::dot(n, sun), 0.0f);
             const float up = n.y * 0.5f + 0.5f;
@@ -314,7 +318,7 @@ std::vector<FenceFieldVertex> buildFenceFieldTriangles(
             if (selected) {
                 rgb = glm::mix(rgb, glm::vec3{0.95f, 0.75f, 0.30f}, 0.5f);
             }
-            out.push_back({fieldX, screenY, z, rgb.r, rgb.g, rgb.b, 1.0f});
+            out.push_back({field.x, field.y, field.z, rgb.r, rgb.g, rgb.b, 1.0f});
         }
     }
     return out;
