@@ -70,7 +70,6 @@ topology_core::Camera2D g_camera;
 GridRenderer g_grid;
 FenceRenderer g_fenceRenderer;
 FenceModel g_fence;
-std::optional<glm::ivec2> g_hoverNode;
 std::optional<glm::ivec2> g_hoverCell;
 
 // The layout canvas: a square cell map, same dimensions the
@@ -150,14 +149,6 @@ glm::ivec2 clampToMap(glm::ivec2 cell) {
 void updateHover() {
     const glm::vec2 world =
         g_camera.screenToWorld({g_state.mouseX - panelWidth(), g_state.mouseY});
-    const glm::ivec2 node = g_iso.fieldToNode(world);
-    // Vertex nodes of a WxH cell map span (W+1)x(H+1); the border ones are
-    // valid too (their footprint simply clips to the in-map cells).
-    if (node.x >= 0 && node.y >= 0 && node.x <= kMapW && node.y <= kMapH) {
-        g_hoverNode = node;
-    } else {
-        g_hoverNode.reset();
-    }
     const glm::ivec2 cell = g_iso.fieldToMap(world);
     if (cell.x >= 0 && cell.y >= 0 && cell.x < kMapW && cell.y < kMapH) {
         g_hoverCell = cell;
@@ -358,8 +349,8 @@ void frame() {
         h,
         kMapW,
         kMapH,
-        g_hoverNode.value_or(glm::ivec2{-1, -1}),
-        g_hoverNode.has_value());
+        g_hoverCell.value_or(glm::ivec2{-1, -1}),
+        g_hoverCell.has_value());
 
     // Ghost preview: the active stroke plan (green) or the rejected raw line
     // (red), or the move preview of the selected fence.

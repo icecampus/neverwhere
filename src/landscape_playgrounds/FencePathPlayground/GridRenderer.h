@@ -31,10 +31,12 @@ struct GridColorVertex {
 };
 
 // The grid/hover overlay ported from SDFGeneratedLandscape's AtlasRenderer
-// (overlay pass only): diamond outlines for every map cell, the hovered
-// node's footprint (the 4 cells a node edit would touch) and a node marker.
-// Line and triangle streams share one dynamic vertex buffer and one shader;
-// the draw order is hover fill triangles first, then all the lines.
+// (overlay pass only): diamond outlines for every map cell plus the hovered
+// cell highlight (fill + outline). The cursor is cell-centric: fence pieces
+// occupy exactly one cell each, so the node footprint/marker of the original
+// overlay is gone. Line and triangle streams share one dynamic vertex buffer
+// and one shader; the draw order is hover fill triangles first, then all the
+// lines.
 class GridRenderer {
 public:
     // VS uniforms: camera only (20 bytes; the GL backend validates that the
@@ -55,7 +57,7 @@ public:
         int viewH,
         int mapW,
         int mapH,
-        glm::ivec2 hoverNode,
+        glm::ivec2 hoverCell,
         bool hasHover);
 
 private:

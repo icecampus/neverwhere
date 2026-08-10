@@ -178,28 +178,6 @@ void appendDiamondFill(
     }
 }
 
-void appendNodeMarker(
-    std::vector<GridColorVertex>& out,
-    const topology_core::DiamondIsometry& iso,
-    glm::ivec2 node,
-    glm::vec4 color) {
-
-    const glm::vec2 p = iso.nodeToField(node);
-    const float s = 6.0f;
-    const glm::vec2 pts[4] = {
-        {p.x - s, p.y},
-        {p.x, p.y - s * 0.5f},
-        {p.x + s, p.y},
-        {p.x, p.y + s * 0.5f},
-    };
-    for (int i = 0; i < 4; ++i) {
-        const glm::vec2 a = pts[i];
-        const glm::vec2 b = pts[(i + 1) % 4];
-        out.push_back({a.x, a.y, bakedDepth(a.y), color.r, color.g, color.b, color.a});
-        out.push_back({b.x, b.y, bakedDepth(b.y), color.r, color.g, color.b, color.a});
-    }
-}
-
 } // namespace
 
 void GridRenderer::init() {
@@ -283,7 +261,7 @@ void GridRenderer::render(
     int viewH,
     int mapW,
     int mapH,
-    glm::ivec2 hoverNode,
+    glm::ivec2 hoverCell,
     bool hasHover) {
 
     if (!m_ready) {
@@ -297,17 +275,12 @@ void GridRenderer::render(
     verts.reserve(static_cast<std::size_t>(mapW * mapH * 8 + 64));
 
     int fillVertCount = 0;
-    if (hasHover) {
-        // Node footprint preview: a node edit touches exactly the four cells
-        // sharing the hovered node, so tint those diamonds. Cells outside the
-        // map (edge/corner nodes) simply drop out.
-        const glm::vec4 cellFill{1.0f, 0.75f, 0.25f, 0.15f};
-        for (const glm::ivec2 cell : topology_core::DiamondIsometry::nodeNeighbourCells(hoverNode)) {
-            if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
-                continue;
-            }
-            appendDiamondFill(verts, iso, cell, cellFill);
-        }
+    const bool hoverInMap =
+        hasHover && hoverCell.x >= 0 && hoverCell.y >= 0 && hoverCell.x < mapW && hoverCell.y < mapH;
+    if (hoverInMap) {
+        // Single-cell cursor: a fence piece occupies exactly one cell, so the
+        // hover tint is that one diamond.
+        appendDiamondFill(verts, iso, hoverCell, {1.0f, 0.75f, 0.25f, 0.15f});
         fillVertCount = static_cast<int>(verts.size());
     }
 
@@ -318,16 +291,9 @@ void GridRenderer::render(
         }
     }
 
-    if (hasHover) {
-        // Footprint outlines go over the grid, the node marker on top.
-        const glm::vec4 cellEdge{1.0f, 0.75f, 0.25f, 0.85f};
-        for (const glm::ivec2 cell : topology_core::DiamondIsometry::nodeNeighbourCells(hoverNode)) {
-            if (cell.x < 0 || cell.y < 0 || cell.x >= mapW || cell.y >= mapH) {
-                continue;
-            }
-            appendDiamondOutline(verts, iso, cell, cellEdge);
-        }
-        appendNodeMarker(verts, iso, hoverNode, {1.0f, 0.25f, 0.2f, 1.0f});
+    if (hoverInMap) {
+        // The cursor outline goes over the grid.
+        appendDiamondOutline(verts, iso, hoverCell, {1.0f, 0.75f, 0.25f, 0.85f});
     }
 
     if (verts.empty()) {
