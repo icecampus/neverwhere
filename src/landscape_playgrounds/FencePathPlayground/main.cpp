@@ -10,6 +10,9 @@
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
+#include "FenceModel.h"
+#include "FenceRenderer.h"
+#include "FenceToolSmokeTest.h"
 #include "GridRenderer.h"
 #include "PlaygroundScreenshot.h"
 
@@ -64,18 +67,38 @@ struct AppState {
 AppState g_state;
 topology_core::DiamondIsometry g_iso;
 topology_core::Camera2D g_camera;
-GridRenderer g_renderer;
+GridRenderer g_grid;
+FenceRenderer g_fenceRenderer;
+FenceModel g_fence;
 std::optional<glm::ivec2> g_hoverNode;
+std::optional<glm::ivec2> g_hoverCell;
 
-// The layout canvas: a square node/cell map, same dimensions the
+// The layout canvas: a square cell map, same dimensions the
 // SDFGeneratedLandscape brushes use.
 constexpr int kMapW = 24;
 constexpr int kMapH = 24;
+
+// Fence tool state: the selected fence (double-click on a post), the active
+// stroke drag (axis-locked once it leaves the start cell) and the active move
+// drag (parallel shift of the selected fence).
+int g_selectedFence = -1;
+bool g_eraseMode = false;
+bool g_strokeDrag = false;
+glm::ivec2 g_strokeStart{0, 0};
+glm::ivec2 g_strokeDir{0, 0};
+int g_strokeCells = 0;
+bool g_moveDrag = false;
+glm::ivec2 g_moveStart{0, 0};
+glm::ivec2 g_moveDelta{0, 0};
+// Manual double-click detection: sokol_app has no double-click event.
+glm::ivec2 g_lastClickCell{-1, -1};
+double g_lastClickSec = -1.0;
 
 std::string g_shotPath;
 std::optional<float> g_cliZoom;
 std::optional<glm::ivec2> g_cliCenter;
 bool g_noUi = false;
+bool g_demoFences = false;
 
 // --- Units -----------------------------------------------------------------
 // sokol_app reports the framebuffer in pixels and mouse positions in those
@@ -113,6 +136,17 @@ void centerCamera(int viewW, int viewH) {
     g_camera.offset.y = static_cast<float>(viewH) * 0.5f - world.y * g_camera.zoom;
 }
 
+// Cell under the cursor in canvas space, unclamped (may leave the map).
+glm::ivec2 cellAtMouse() {
+    const glm::vec2 world =
+        g_camera.screenToWorld({g_state.mouseX - panelWidth(), g_state.mouseY});
+    return g_iso.fieldToMap(world);
+}
+
+glm::ivec2 clampToMap(glm::ivec2 cell) {
+    return {std::clamp(cell.x, 0, kMapW - 1), std::clamp(cell.y, 0, kMapH - 1)};
+}
+
 void updateHover() {
     const glm::vec2 world =
         g_camera.screenToWorld({g_state.mouseX - panelWidth(), g_state.mouseY});
@@ -124,6 +158,42 @@ void updateHover() {
     } else {
         g_hoverNode.reset();
     }
+    const glm::ivec2 cell = g_iso.fieldToMap(world);
+    if (cell.x >= 0 && cell.y >= 0 && cell.x < kMapW && cell.y < kMapH) {
+        g_hoverCell = cell;
+    } else {
+        g_hoverCell.reset();
+    }
+}
+
+// Dominant-axis lock of a stroke drag: the fence is always axis-parallel, so
+// the direction is the larger cell delta component (once it is non-zero).
+void updateStrokeDrag() {
+    const glm::ivec2 delta = clampToMap(cellAtMouse()) - g_strokeStart;
+    if (delta.x != 0 || delta.y != 0) {
+        if (std::abs(delta.x) >= std::abs(delta.y)) {
+            g_strokeDir = {delta.x > 0 ? 1 : -1, 0};
+            g_strokeCells = std::abs(delta.x);
+        } else {
+            g_strokeDir = {0, delta.y > 0 ? 1 : -1};
+            g_strokeCells = std::abs(delta.y);
+        }
+        // planStroke counts the cells to cover: a new fence covers the start
+        // cell too, an extension starts past the anchor post.
+        const FencePiece* startPiece = g_fence.pieceAt(g_strokeStart);
+        if (!startPiece) {
+            g_strokeCells += 1;
+        }
+    }
+}
+
+void buildDemoFences() {
+    // A long fence with a perpendicular branch (T-junction) and a second,
+    // independent fence below.
+    g_fence.applyStroke({2, 3}, {1, 0}, 10);
+    g_fence.applyStroke({8, 3}, {0, 1}, 6);
+    g_fence.applyStroke({14, 10}, {1, 0}, 7);
+    g_fence.applyStroke({17, 10}, {0, 1}, 4);
 }
 
 void init() {
@@ -149,7 +219,12 @@ void init() {
         g_state.imgui_ok = true;
     }
 
-    g_renderer.init();
+    g_grid.init();
+    g_fenceRenderer.init();
+    g_fence.reset(kMapW, kMapH);
+    if (g_demoFences) {
+        buildDemoFences();
+    }
 
     const glm::vec2 canvas = canvasSize();
     centerCamera(static_cast<int>(canvas.x), static_cast<int>(canvas.y));
@@ -167,21 +242,29 @@ void drawImGui(int w, int h) {
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(kPanelWidth, static_cast<float>(h)), ImGuiCond_Always);
 
-    const glm::vec2 world =
-        g_camera.screenToWorld({g_state.mouseX - panelWidth(), g_state.mouseY});
-    const glm::ivec2 cell = g_iso.fieldToMap(world);
-
     ImGui::Begin("Fence & Path", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
     ImGui::Text("Canvas: %dx%d cells", kMapW, kMapH);
-    ImGui::Text("Hover cell: %d, %d", cell.x, cell.y);
-    if (g_hoverNode) {
-        ImGui::Text("Hover node: %d, %d", g_hoverNode->x, g_hoverNode->y);
+    if (g_hoverCell) {
+        ImGui::Text("Hover cell: %d, %d", g_hoverCell->x, g_hoverCell->y);
     } else {
-        ImGui::Text("Hover node: -");
+        ImGui::Text("Hover cell: -");
     }
     ImGui::Text("Zoom: %.2f", g_camera.zoom);
     ImGui::Separator();
-    ImGui::TextWrapped("Fence/path tool controls land here — the interaction spec comes next.");
+    ImGui::Text("Fences: %d, pieces: %d", g_fence.fenceCount(), static_cast<int>(g_fence.pieces().size()));
+    ImGui::Text("Selected fence: %s", g_selectedFence >= 0 ? std::to_string(g_selectedFence).c_str() : "-");
+    ImGui::Checkbox("Erase posts (LMB click)", &g_eraseMode);
+    if (g_selectedFence >= 0) {
+        if (ImGui::Button("Delete selected fence")) {
+            g_fence.eraseFence(g_selectedFence);
+            g_selectedFence = -1;
+        }
+    }
+    ImGui::Separator();
+    ImGui::TextWrapped("LMB drag on empty cell: new fence line (axis-locked).");
+    ImGui::TextWrapped("LMB drag from a post: extend the fence.");
+    ImGui::TextWrapped("Double-click a post: select the whole fence; drag it to move, Del to delete.");
+    ImGui::TextWrapped("Del over a post (no selection): delete the post — the fence may split.");
     ImGui::Separator();
     if (ImGui::Button("Reset camera")) {
         centerCamera(w - static_cast<int>(panelWidth()), h);
@@ -268,7 +351,7 @@ void frame() {
     sg_apply_viewport(vpX, 0, vpW, vpH, true);
     sg_apply_scissor_rect(vpX, 0, vpW, vpH, true);
 
-    g_renderer.render(
+    g_grid.render(
         g_iso,
         g_camera,
         canvasW,
@@ -277,6 +360,45 @@ void frame() {
         kMapH,
         g_hoverNode.value_or(glm::ivec2{-1, -1}),
         g_hoverNode.has_value());
+
+    // Ghost preview: the active stroke plan (green) or the rejected raw line
+    // (red), or the move preview of the selected fence.
+    std::vector<FenceModel::StrokePiece> ghost;
+    bool ghostValid = false;
+    if (g_strokeDrag && g_strokeDir != glm::ivec2{0, 0} && g_strokeCells > 0) {
+        const FenceModel::StrokePlan plan = g_fence.planStroke(g_strokeStart, g_strokeDir, g_strokeCells);
+        if (plan.valid) {
+            ghost = plan.pieces;
+            ghostValid = true;
+        } else {
+            const bool lead = g_fence.pieceAt(g_strokeStart) == nullptr;
+            const glm::ivec2 runStart = lead ? g_strokeStart : g_strokeStart + g_strokeDir;
+            for (int i = 0; i < g_strokeCells; ++i) {
+                const glm::ivec2 cell = runStart + g_strokeDir * i;
+                if (cell.x < 0 || cell.y < 0 || cell.x >= kMapW || cell.y >= kMapH) {
+                    break;
+                }
+                ghost.push_back({FencePieceKind::Post, cell, glm::ivec2{0, 0}, 1});
+            }
+        }
+    } else if (g_moveDrag && g_moveDelta != glm::ivec2{0, 0} && g_selectedFence >= 0) {
+        ghostValid = g_fence.canTranslate(g_selectedFence, g_moveDelta);
+        for (const FencePiece& piece : g_fence.pieces()) {
+            if (piece.fenceId == g_selectedFence) {
+                ghost.push_back({piece.kind, piece.cell + g_moveDelta, piece.axis, piece.length});
+            }
+        }
+    }
+
+    g_fenceRenderer.render(
+        g_iso,
+        g_camera,
+        canvasW,
+        h,
+        g_fence,
+        g_selectedFence,
+        ghost.empty() ? nullptr : &ghost,
+        ghostValid);
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -300,7 +422,8 @@ void frame() {
 
 void cleanup() {
     spdlog::info("FencePathPlayground: cleanup()");
-    g_renderer.shutdown();
+    g_fenceRenderer.shutdown();
+    g_grid.shutdown();
     if (g_state.imgui_ok) {
         simgui_shutdown();
         g_state.imgui_ok = false;
@@ -332,7 +455,43 @@ void event(const sapp_event* ev) {
 
     switch (ev->type) {
     case SAPP_EVENTTYPE_MOUSE_DOWN:
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
+        if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+            if (!g_hoverCell) {
+                break;
+            }
+            const glm::ivec2 cell = *g_hoverCell;
+            const double nowSec = stm_sec(stm_now());
+            const bool doubleClick = g_lastClickCell == cell && (nowSec - g_lastClickSec) < 0.35;
+            g_lastClickCell = cell;
+            g_lastClickSec = nowSec;
+            if (doubleClick) {
+                // Select the whole fence by its post; the second click never
+                // starts a stroke/move.
+                g_strokeDrag = false;
+                g_moveDrag = false;
+                const FencePiece* piece = g_fence.pieceAt(cell);
+                if (piece && piece->kind == FencePieceKind::Post) {
+                    g_selectedFence = piece->fenceId;
+                }
+                break;
+            }
+            if (g_eraseMode) {
+                g_fence.erasePostAt(cell);
+                break;
+            }
+            if (g_selectedFence >= 0 && g_fence.pieceAt(cell) &&
+                g_fence.pieceAt(cell)->fenceId == g_selectedFence) {
+                // Drag on the selected fence = parallel shift of the whole fence.
+                g_moveDrag = true;
+                g_moveStart = cell;
+                g_moveDelta = glm::ivec2{0, 0};
+                break;
+            }
+            g_strokeDrag = true;
+            g_strokeStart = cell;
+            g_strokeDir = glm::ivec2{0, 0};
+            g_strokeCells = 0;
+        } else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.dragging = true;
             g_state.dragStartX = g_state.mouseX;
             g_state.dragStartY = g_state.mouseY;
@@ -341,7 +500,23 @@ void event(const sapp_event* ev) {
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_UP:
-        if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
+        if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+            if (g_strokeDrag) {
+                if (g_strokeDir != glm::ivec2{0, 0} && g_strokeCells > 0) {
+                    g_fence.applyStroke(g_strokeStart, g_strokeDir, g_strokeCells);
+                } else if (!g_fence.pieceAt(g_strokeStart)) {
+                    // Plain click on empty ground: drop the selection.
+                    g_selectedFence = -1;
+                }
+                g_strokeDrag = false;
+            }
+            if (g_moveDrag) {
+                if (g_moveDelta != glm::ivec2{0, 0} && g_selectedFence >= 0) {
+                    g_fence.translateFence(g_selectedFence, g_moveDelta);
+                }
+                g_moveDrag = false;
+            }
+        } else if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
             g_state.dragging = false;
         }
         break;
@@ -349,6 +524,25 @@ void event(const sapp_event* ev) {
         if (g_state.dragging) {
             g_camera.offset.x = g_state.camStartX + (g_state.mouseX - g_state.dragStartX);
             g_camera.offset.y = g_state.camStartY + (g_state.mouseY - g_state.dragStartY);
+        }
+        if (g_strokeDrag) {
+            updateStrokeDrag();
+        }
+        if (g_moveDrag) {
+            g_moveDelta = clampToMap(cellAtMouse()) - g_moveStart;
+        }
+        break;
+    case SAPP_EVENTTYPE_KEY_DOWN:
+        if (ev->key_code == SAPP_KEYCODE_ESCAPE) {
+            g_selectedFence = -1;
+        }
+        if (ev->key_code == SAPP_KEYCODE_DELETE || ev->key_code == SAPP_KEYCODE_BACKSPACE) {
+            if (g_selectedFence >= 0) {
+                g_fence.eraseFence(g_selectedFence);
+                g_selectedFence = -1;
+            } else if (g_hoverCell) {
+                g_fence.erasePostAt(*g_hoverCell);
+            }
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_SCROLL: {
@@ -466,6 +660,9 @@ int main(int argc, char* argv[]) {
         if (arg == "--no-ui") {
             g_noUi = true;
         }
+        if (arg == "--demo-fence") {
+            g_demoFences = true;
+        }
         if (arg.rfind("--shot=", 0) == 0) {
             g_shotPath = arg.substr(7);
         }
@@ -479,8 +676,9 @@ int main(int argc, char* argv[]) {
 
     if (smoke) {
         spdlog::set_level(spdlog::level::info);
-        const bool ok = runProjectionSmokeTest();
-        return ok ? 0 : 1;
+        const bool projectionOk = runProjectionSmokeTest();
+        const bool fenceOk = runFenceToolSmokeTest();
+        return (projectionOk && fenceOk) ? 0 : 1;
     }
 
     sapp_desc desc = {};
