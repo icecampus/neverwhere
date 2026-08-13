@@ -10,13 +10,16 @@
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
-#include "FenceModel.h"
-#include "FenceMesh.h"
+#include <fence_core/fence_model.h>
+#include <fence_core/fence_mesh.h>
+
 #include "FenceMeshRenderer.h"
 #include "FenceRenderer.h"
 #include "FenceToolSmokeTest.h"
 #include "GridRenderer.h"
 #include "PlaygroundScreenshot.h"
+
+using namespace fence_core;
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY

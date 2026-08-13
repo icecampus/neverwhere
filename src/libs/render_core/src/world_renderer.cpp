@@ -23,6 +23,7 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
     landscapeRenderer.init(depthFormat);
     cliffRenderer.init(depthFormat);
     cyclopeanRenderer.init(depthFormat);
+    fenceRenderer.init(depthFormat);
     spriteRenderer.init(depthFormat);
     overlayRenderer.init(depthFormat);
 
@@ -55,6 +56,7 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
 void WorldRenderer::shutdown() {
     overlayRenderer.shutdown();
     spriteRenderer.shutdown();
+    fenceRenderer.shutdown();
     cyclopeanRenderer.shutdown();
     cliffRenderer.shutdown();
     landscapeRenderer.shutdown();
@@ -105,6 +107,10 @@ void WorldRenderer::ensureMaskAsset(const std::string& assetUuid, const CliffPar
     // Mask3d shares the cliff renderer (mask field + the PBR-lite material
     // map set ride inside CliffParams).
     cliffRenderer.ensureMaskAsset(assetUuid, params);
+}
+
+void WorldRenderer::ensureFenceAsset(const std::string& assetUuid, const std::filesystem::path& meshDir, float metersToPoints) {
+    fenceRenderer.ensureFenceAsset(assetUuid, meshDir, metersToPoints);
 }
 
 void WorldRenderer::ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats) {
@@ -273,6 +279,11 @@ void WorldRenderer::render(
     scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.maskTiles.begin(), frame.maskTiles.end());
     cliffRenderer.render(scratchCliffStoneTiles, iso, camera, viewWidth, viewHeight, nowSec, cliffStitch);
     cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
+
+    // Fence3d piece meshes: own depth-writing 3D pass (baked vertex colors,
+    // per-asset instance streams), with the tool's ghost preview on top.
+    fenceRenderer.render(frame.fencePieces, frame.fenceGhost, frame.fenceGhostValid,
+        frame.selectedFenceId, iso, camera, viewWidth, viewHeight);
 
     // Texture-2D ground cover: drawn AFTER the 3D passes so it alpha-blends
     // with what is actually under it (mask3d beach, flat ground, water)

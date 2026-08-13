@@ -14,8 +14,13 @@
 
 #include <QUuid>
 
+#include <fence_core/fence_mesh.h>
+#include <fence_core/fence_model.h>
+
 #include "core/game_object.h"
 #include "core/assets_library/asset.h"
+#include "core/map/map_authoring.h"
+#include "core/map/map_model.h"
 
 namespace {
 
@@ -278,6 +283,7 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.textureTiles.clear();
     outFrame.techTiles.clear();
     outFrame.maskTiles.clear();
+    outFrame.fencePieces.clear();
     outFrame.sprites.clear();
 
     if (!m_mapModel) return;
@@ -399,6 +405,31 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         });
     }
 
+    // FenceLandscape layer -> fence pieces (Fence3d assets, baked piece
+    // meshes). fenceId/corner come from a whole-layer FenceModel (piece ids
+    // follow the layer object order — the FencePencil tool agrees on them).
+    if (LayerModel* layer = m_mapModel->layer(LayerTypes::FenceLandscape)) {
+        fence_core::FenceModel model = MapAuthoring::buildFenceModel(*layer);
+        std::size_t i = 0;
+        layer->iterate([&outFrame, &model, &i](GameObject& obj) {
+            if (obj.getType() != GameObjectTypes::Fence) return;
+            const BaseData::GameObject data = obj.getData();
+            if (!data.fenceData) return;
+
+            const fence_core::FencePiece& d = model.pieces()[i++];
+            render_core::FencePiece fp;
+            fp.cell = d.cell;
+            fp.kind = d.kind == fence_core::FencePieceKind::Section ? 1 : 0;
+            fp.axis = d.axis;
+            fp.length = d.length;
+            fp.assetUuid = boost::uuids::to_string(data.assetUuid);
+            fp.fenceId = d.fenceId;
+            fp.corner = d.kind == fence_core::FencePieceKind::Post &&
+                fence_core::isCornerPost(model, d.id);
+            outFrame.fencePieces.push_back(std::move(fp));
+        });
+    }
+
     // Decoration + GameplayInteractive -> sprites on top (client parity).
     for (const LayerTypes::Type layerType : {LayerTypes::Decoration, LayerTypes::GameplayInteractive}) {
         LayerModel* layer = m_mapModel->layer(layerType);
@@ -428,6 +459,8 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
     for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.maskTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.fencePieces) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.fenceGhost) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -492,6 +525,11 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
                 ? std::filesystem::path{}
                 : data.root() / data.mask3dData->materialSet;
             renderer.ensureMaskAsset(uuid, maskParamsFromAssetData(*data.mask3dData, materialPrefix));
+        }
+        if (data.fence3dData) {
+            // Fence pieces: the bundle root holds the conventional baked
+            // piece meshes; metersToPoints drives the vertical lift.
+            renderer.ensureFenceAsset(uuid, data.root(), data.fence3dData->metersToPoints);
         }
         if (data.imageData) {
             renderer.ensureSpriteImage(uuid, data.root() / data.imageData->imageFilename, data.imageData->width, data.pivot);

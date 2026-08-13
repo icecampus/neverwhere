@@ -5,8 +5,11 @@
 #include <unordered_set>
 #include <magic_enum/magic_enum.hpp>
 
+#include <fence_core/fence_model.h>
+
 #include "assets_library/asset.h"
 #include "assets_library/assets/slice_asset.h"
+#include "game_objects/fence.h"
 #include "game_objects/landscape.h"
 #include "game_objects/tile_2d.h"
 #include "map/map_model.h"
@@ -102,6 +105,138 @@ void MapAuthoring::updateLandscapeCell(LayerModel* layerModel, SliceAsset* slice
     }
 }
 
+namespace
+{
+
+// Flat piece list of the layer in object order (FenceModel derives its piece
+// ids and fenceIds from it deterministically — the tool and the frame builder
+// agree on them as long as both rebuild from the same layer).
+std::vector<fence_core::FencePieceData> fencePiecesFromLayer(LayerModel& layer)
+{
+    std::vector<fence_core::FencePieceData> pieces;
+    layer.iterate([&pieces](GameObject& obj)
+    {
+        if (obj.getType() != GameObjectTypes::Fence)
+            return;
+        const BaseData::GameObject data = obj.getData();
+        if (!data.fenceData)
+            return;
+        fence_core::FencePieceData p;
+        p.kind = data.fenceData->kind == 1
+            ? fence_core::FencePieceKind::Section
+            : fence_core::FencePieceKind::Post;
+        p.cell = {data.position.x, data.position.y};
+        p.axis = {data.fenceData->axisX, data.fenceData->axisY};
+        p.length = data.fenceData->length;
+        pieces.push_back(p);
+    });
+    return pieces;
+}
+
+} // namespace
+
+fence_core::FenceModel MapAuthoring::buildFenceModel(LayerModel& layer)
+{
+    fence_core::FenceModel model;
+    model.reset(); // unbounded — editor maps are unbounded
+    model.loadPieces(fencePiecesFromLayer(layer));
+    return model;
+}
+
+int MapAuthoring::applyFenceStroke(LayerModel& layer, const Asset* fenceAsset,
+    const math::ivec2& start, const math::ivec2& dir, int cells)
+{
+    if (!fenceAsset || fenceAsset->type != AssetTypes::fence3d)
+        return 0;
+
+    fence_core::FenceModel model = buildFenceModel(layer);
+    const fence_core::FenceModel::StrokePlan plan = model.planStroke(start, dir, cells);
+    if (!plan.valid)
+        return 0;
+
+    for (const fence_core::FenceModel::StrokePiece& sp : plan.pieces)
+    {
+        auto obj = std::make_unique<Fence>(&layer);
+        obj->setName(QString("Fence"));
+        obj->setPosition(math::ivec2(sp.cell.x, sp.cell.y));
+        obj->setAssetUiid(fenceAsset->uuid());
+        obj->setPiece(
+            sp.kind == fence_core::FencePieceKind::Section ? 1 : 0,
+            sp.axis.x, sp.axis.y, sp.length);
+        layer.addGameObject(std::move(obj));
+    }
+    return static_cast<int>(plan.pieces.size());
+}
+
+int MapAuthoring::eraseFenceAt(LayerModel& layer, const math::ivec2& cell, bool wholeFence)
+{
+    fence_core::FenceModel model = buildFenceModel(layer);
+    const fence_core::FencePiece* piece = model.pieceAt(cell);
+    if (!piece)
+        return 0;
+
+    // Anchor cells of the pieces to delete (a cell holds at most one piece;
+    // the piece object sits at its anchor cell).
+    std::unordered_set<math::ivec2> anchors;
+    if (wholeFence)
+    {
+        const int fenceId = piece->fenceId;
+        for (const fence_core::FencePiece& p : model.pieces())
+        {
+            if (p.fenceId == fenceId)
+                anchors.insert(math::ivec2(p.cell.x, p.cell.y));
+        }
+    }
+    else
+    {
+        if (piece->kind != fence_core::FencePieceKind::Post)
+            return 0; // sections go with their endpoint posts
+        const int postId = piece->id;
+        anchors.insert(cell);
+        for (const fence_core::FencePiece& p : model.pieces())
+        {
+            if (p.kind == fence_core::FencePieceKind::Section &&
+                (p.postA == postId || p.postB == postId))
+            {
+                anchors.insert(math::ivec2(p.cell.x, p.cell.y));
+            }
+        }
+    }
+
+    int removed = 0;
+    for (const math::ivec2& anchor : anchors)
+        removed += eraseTiles(layer, anchor);
+    return removed;
+}
+
+bool MapAuthoring::translateFenceAt(LayerModel& layer, const math::ivec2& cell,
+    const math::ivec2& delta)
+{
+    if (delta == math::ivec2(0, 0))
+        return false;
+
+    fence_core::FenceModel model = buildFenceModel(layer);
+    const int fenceId = model.fenceAt(cell);
+    if (fenceId < 0 || !model.canTranslate(fenceId, delta))
+        return false;
+
+    // Move the component's objects in place (setPosition keeps the object
+    // order, so derived piece/fence ids — and the tool selection — survive).
+    for (const fence_core::FencePiece& p : model.pieces())
+    {
+        if (p.fenceId != fenceId)
+            continue;
+        const math::ivec2 anchor(p.cell.x, p.cell.y);
+        const std::vector<GameObject*> objects = layer.getObjectsAt(anchor);
+        for (GameObject* obj : objects)
+        {
+            if (obj->getType() == GameObjectTypes::Fence)
+                obj->setPosition(anchor + delta);
+        }
+    }
+    return true;
+}
+
 QJsonObject MapAuthoring::dumpLayer(LayerModel& layer)
 {
     QJsonArray objects;
@@ -118,6 +253,13 @@ QJsonObject MapAuthoring::dumpLayer(LayerModel& layer)
         if (const Landscape* landObject = dynamic_cast<const Landscape*>(&gameObject))
         {
             o["tileIndex"] = static_cast<qint64>(landObject->getTileIndex());
+        }
+        if (const Fence* fenceObject = dynamic_cast<const Fence*>(&gameObject))
+        {
+            o["kind"] = fenceObject->getKind();
+            o["axisX"] = fenceObject->getAxisX();
+            o["axisY"] = fenceObject->getAxisY();
+            o["length"] = fenceObject->getLength();
         }
         objects.append(o);
     });

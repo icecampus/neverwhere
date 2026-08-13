@@ -1,6 +1,8 @@
 #include "pch.h"
 
-#include "FenceModel.h"
+#include "fence_core/fence_model.h"
+
+namespace fence_core {
 
 namespace {
 
@@ -11,10 +13,22 @@ bool isUnitAxis(glm::ivec2 d) {
 } // namespace
 
 void FenceModel::reset(int width, int height) {
+    m_bounded = true;
     m_width = width;
     m_height = height;
     m_pieces.clear();
-    m_cellPiece.assign(static_cast<std::size_t>(width) * height, -1);
+    m_cellPiece.clear();
+    m_nextPieceId = 0;
+    m_nextFenceId = 0;
+    ++m_version;
+}
+
+void FenceModel::reset() {
+    m_bounded = false;
+    m_width = 0;
+    m_height = 0;
+    m_pieces.clear();
+    m_cellPiece.clear();
     m_nextPieceId = 0;
     m_nextFenceId = 0;
     ++m_version;
@@ -22,16 +36,20 @@ void FenceModel::reset(int width, int height) {
 
 void FenceModel::clear() {
     m_pieces.clear();
-    std::fill(m_cellPiece.begin(), m_cellPiece.end(), -1);
+    m_cellPiece.clear();
     ++m_version;
 }
 
 bool FenceModel::inBounds(glm::ivec2 cell) const {
+    if (!m_bounded) {
+        return true;
+    }
     return cell.x >= 0 && cell.y >= 0 && cell.x < m_width && cell.y < m_height;
 }
 
-int FenceModel::cellIndex(glm::ivec2 cell) const {
-    return cell.y * m_width + cell.x;
+std::int64_t FenceModel::cellKey(glm::ivec2 cell) {
+    return (static_cast<std::int64_t>(cell.y) << 32) ^
+        static_cast<std::int64_t>(static_cast<std::uint32_t>(cell.x));
 }
 
 int FenceModel::indexOfPiece(int pieceId) const {
@@ -52,8 +70,48 @@ const FencePiece* FenceModel::pieceAt(glm::ivec2 cell) const {
     if (!inBounds(cell)) {
         return nullptr;
     }
-    const int id = m_cellPiece[cellIndex(cell)];
-    return id >= 0 ? pieceById(id) : nullptr;
+    const auto it = m_cellPiece.find(cellKey(cell));
+    return it != m_cellPiece.end() ? pieceById(it->second) : nullptr;
+}
+
+void FenceModel::loadPieces(const std::vector<FencePieceData>& pieces) {
+    m_pieces.clear();
+    m_pieces.reserve(pieces.size());
+    m_nextPieceId = 0;
+    m_nextFenceId = 0;
+
+    // First pass: instantiate pieces, remembering where the posts sit.
+    std::unordered_map<std::int64_t, int> postAt; // cell key -> piece id
+    for (const FencePieceData& d : pieces) {
+        FencePiece piece;
+        piece.id = m_nextPieceId++;
+        piece.kind = d.kind;
+        piece.cell = d.cell;
+        piece.axis = (d.kind == FencePieceKind::Section) ? d.axis : glm::ivec2{0, 0};
+        piece.length = (d.kind == FencePieceKind::Section) ? std::max(1, d.length) : 1;
+        if (piece.kind == FencePieceKind::Post) {
+            postAt[cellKey(piece.cell)] = piece.id;
+        }
+        m_pieces.push_back(piece);
+    }
+    // Second pass: wire section endpoints geometrically (a section covers
+    // [cell, cell+axis*(length-1)] and links the posts one cell before and
+    // one cell past its run).
+    for (FencePiece& piece : m_pieces) {
+        if (piece.kind != FencePieceKind::Section) {
+            continue;
+        }
+        const auto lookup = [&postAt](glm::ivec2 cell) -> int {
+            const auto it = postAt.find(cellKey(cell));
+            return it != postAt.end() ? it->second : -1;
+        };
+        piece.postA = lookup(piece.cell - piece.axis);
+        piece.postB = lookup(piece.cell + piece.axis * piece.length);
+    }
+
+    rebuildCells();
+    rebuildFences();
+    ++m_version;
 }
 
 FenceModel::StrokePlan FenceModel::planStroke(glm::ivec2 start, glm::ivec2 dir, int cells) const {
@@ -240,9 +298,9 @@ bool FenceModel::canTranslate(int fenceId, glm::ivec2 delta) const {
             if (!inBounds(target)) {
                 return false;
             }
-            const int occupant = m_cellPiece[cellIndex(target)];
-            if (occupant >= 0) {
-                const FencePiece* other = pieceById(occupant);
+            const auto it = m_cellPiece.find(cellKey(target));
+            if (it != m_cellPiece.end()) {
+                const FencePiece* other = pieceById(it->second);
                 if (other && other->fenceId != fenceId) {
                     return false;
                 }
@@ -286,12 +344,12 @@ bool FenceModel::eraseFence(int fenceId) {
 }
 
 void FenceModel::rebuildCells() {
-    std::fill(m_cellPiece.begin(), m_cellPiece.end(), -1);
+    m_cellPiece.clear();
     for (const FencePiece& piece : m_pieces) {
         for (int i = 0; i < piece.length; ++i) {
             const glm::ivec2 cell = piece.cell + piece.axis * i;
             if (inBounds(cell)) {
-                m_cellPiece[cellIndex(cell)] = piece.id;
+                m_cellPiece[cellKey(cell)] = piece.id;
             }
         }
     }
@@ -359,3 +417,5 @@ void FenceModel::rebuildFences() {
         }
     }
 }
+
+} // namespace fence_core

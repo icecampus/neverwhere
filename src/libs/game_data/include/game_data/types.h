@@ -16,6 +16,7 @@ enum class GameObjectType : int {
     Resource = 2,
     Buildings = 3,
     Cloud = 4,
+    Fence = 5,
 };
 
 // Matches string keys in existing map.json ("Decoration", "BaseLandscape", ...)
@@ -30,10 +31,20 @@ enum class LayerType : int {
     TextureLandscape = 7,
     TechLandscape = 8,
     MaskLandscape = 9,
+    FenceLandscape = 10,
 };
 
 struct LandscapeData {
     std::size_t tileIndex{};
+};
+
+// One fence piece (fence3d asset, FenceLandscape layer): a post (kind 0,
+// 1 cell) or a section (kind 1, `length` cells along (axisX,axisY)).
+struct FenceData {
+    int kind = 0;
+    int axisX = 0;
+    int axisY = 0;
+    int length = 1;
 };
 
 struct GameObject {
@@ -43,10 +54,18 @@ struct GameObject {
 
     // For MVP we only need landscapeData, but we keep the shape open.
     std::optional<LandscapeData> landscapeData;
+    std::optional<FenceData> fenceData;
 };
 
 inline void from_json(const nlohmann::json& j, LandscapeData& d) {
     j.at("tileIndex").get_to(d.tileIndex);
+}
+
+inline void from_json(const nlohmann::json& j, FenceData& d) {
+    d.kind = j.value("kind", 0);
+    d.axisX = j.value("axisX", 0);
+    d.axisY = j.value("axisY", 0);
+    d.length = j.value("length", 1);
 }
 
 inline void from_json(const nlohmann::json& j, GameObject& o) {
@@ -63,6 +82,11 @@ inline void from_json(const nlohmann::json& j, GameObject& o) {
         o.landscapeData = j["landscapeData"].get<LandscapeData>();
     } else {
         o.landscapeData.reset();
+    }
+    if (j.contains("fenceData") && !j["fenceData"].is_null()) {
+        o.fenceData = j["fenceData"].get<FenceData>();
+    } else {
+        o.fenceData.reset();
     }
 }
 

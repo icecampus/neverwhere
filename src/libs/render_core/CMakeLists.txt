@@ -30,6 +30,8 @@ nw_add_lib_sources(
         src/cliff_renderer.cpp
         include/render_core/cyclopean_renderer.h
         src/cyclopean_renderer.cpp
+        include/render_core/fence_renderer.h
+        src/fence_renderer.cpp
         src/atlas_tile_types.h
         include/render_core/sprite_renderer.h
         src/sprite_renderer.cpp
@@ -50,6 +52,7 @@ nw_add_lib_sources(
         landscape_mesh
         highground_core
         stone_gen
+        fence_core
         game_data
         spdlog::spdlog_header_only
 )

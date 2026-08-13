@@ -14,7 +14,8 @@ if(MSVC)
 			
 			math
 			base_data
-			utils			
+			utils
+			fence_core
 			)
 	
 else()
@@ -33,7 +34,8 @@ else()
 			
 			math
 			base_data
-			utils			
+			utils
+			fence_core
 			)
 
 endif()

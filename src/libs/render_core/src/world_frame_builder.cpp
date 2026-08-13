@@ -4,6 +4,9 @@
 
 #include <spdlog/spdlog.h>
 
+#include <fence_core/fence_mesh.h>
+#include <fence_core/fence_model.h>
+
 namespace render_core {
 
 void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
@@ -14,6 +17,8 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     outFrame.stoneTiles.clear();
     outFrame.textureTiles.clear();
     outFrame.techTiles.clear();
+    outFrame.maskTiles.clear();
+    outFrame.fencePieces.clear();
     outFrame.sprites.clear();
 
     for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
@@ -114,6 +119,45 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
         t.assetUuid = obj.assetUuid;
         t.tileIndex = obj.landscapeData->tileIndex;
         outFrame.maskTiles.push_back(std::move(t));
+    }
+
+    // FenceLandscape layer -> fence pieces (Fence3d assets, baked piece
+    // meshes in their own pass). fenceId/corner are annotated by a
+    // whole-layer FenceModel (piece ids follow the object order, so every
+    // consumer rebuilding from the same layer agrees on the components).
+    {
+        std::vector<fence_core::FencePieceData> pieces;
+        for (const auto& obj : map.layer(game_data::LayerType::FenceLandscape)) {
+            if (obj.type != game_data::GameObjectType::Fence || !obj.fenceData) continue;
+            fence_core::FencePieceData p;
+            p.kind = obj.fenceData->kind == 1
+                ? fence_core::FencePieceKind::Section
+                : fence_core::FencePieceKind::Post;
+            p.cell = obj.position;
+            p.axis = {obj.fenceData->axisX, obj.fenceData->axisY};
+            p.length = obj.fenceData->length;
+            pieces.push_back(p);
+        }
+        if (!pieces.empty()) {
+            fence_core::FenceModel model;
+            model.reset(); // unbounded — maps are unbounded
+            model.loadPieces(pieces);
+            std::size_t i = 0;
+            for (const auto& obj : map.layer(game_data::LayerType::FenceLandscape)) {
+                if (obj.type != game_data::GameObjectType::Fence || !obj.fenceData) continue;
+                const fence_core::FencePiece& d = model.pieces()[i++];
+                FencePiece fp;
+                fp.cell = d.cell;
+                fp.kind = d.kind == fence_core::FencePieceKind::Section ? 1 : 0;
+                fp.axis = d.axis;
+                fp.length = d.length;
+                fp.assetUuid = obj.assetUuid;
+                fp.fenceId = d.fenceId;
+                fp.corner = d.kind == fence_core::FencePieceKind::Post &&
+                    fence_core::isCornerPost(model, d.id);
+                outFrame.fencePieces.push_back(std::move(fp));
+            }
+        }
     }
 
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
@@ -385,6 +429,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
     for (const auto& t : frame.textureTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.maskTiles) uniqueAssets.insert(t.assetUuid);
+    for (const auto& t : frame.fencePieces) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
@@ -424,6 +469,9 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
         }
         if (entry->isMask3d()) {
             renderer.ensureMaskAsset(uuid, maskParamsFromAssetData(entry->mask, entry->materialPrefix));
+        }
+        if (entry->isFence3d()) {
+            renderer.ensureFenceAsset(uuid, entry->meshDir, entry->fence.metersToPoints);
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);

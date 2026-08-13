@@ -1,0 +1,350 @@
+{
+    "BaseLandscape": [],
+    "CliffLandscape": [],
+    "CyclopeanLandscape": [],
+    "Decoration": [],
+    "FenceLandscape": [
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 2,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 1,
+                "axisY": 0,
+                "kind": 1,
+                "length": 2
+            },
+            "position": {
+                "x": 3,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 5,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 1,
+                "axisY": 0,
+                "kind": 1,
+                "length": 2
+            },
+            "position": {
+                "x": 6,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 8,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 1,
+                "axisY": 0,
+                "kind": 1,
+                "length": 2
+            },
+            "position": {
+                "x": 9,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 11,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 1,
+                "axisY": 0,
+                "kind": 1,
+                "length": 2
+            },
+            "position": {
+                "x": 12,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 14,
+                "y": 8
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 1,
+                "kind": 1,
+                "length": 2
+            },
+            "position": {
+                "x": 8,
+                "y": 9
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 8,
+                "y": 11
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 1,
+                "kind": 1,
+                "length": 1
+            },
+            "position": {
+                "x": 8,
+                "y": 12
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 8,
+                "y": 13
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 1,
+                "kind": 1,
+                "length": 1
+            },
+            "position": {
+                "x": 8,
+                "y": 14
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 8,
+                "y": 15
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 16,
+                "y": 16
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 1,
+                "axisY": 0,
+                "kind": 1,
+                "length": 1
+            },
+            "position": {
+                "x": 17,
+                "y": 16
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 18,
+                "y": 16
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 1,
+                "axisY": 0,
+                "kind": 1,
+                "length": 1
+            },
+            "position": {
+                "x": 19,
+                "y": 16
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 20,
+                "y": 16
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 1,
+                "kind": 1,
+                "length": 1
+            },
+            "position": {
+                "x": 20,
+                "y": 17
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 20,
+                "y": 18
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 1,
+                "kind": 1,
+                "length": 1
+            },
+            "position": {
+                "x": 20,
+                "y": 19
+            },
+            "type": 5
+        },
+        {
+            "assetUuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+            "fenceData": {
+                "axisX": 0,
+                "axisY": 0,
+                "kind": 0,
+                "length": 1
+            },
+            "position": {
+                "x": 20,
+                "y": 20
+            },
+            "type": 5
+        }
+    ],
+    "GameplayInteractive": [],
+    "MaskLandscape": [],
+    "RaisedLandscape": [],
+    "StoneLandscape": [],
+    "TechLandscape": [],
+    "TextureLandscape": []
+}

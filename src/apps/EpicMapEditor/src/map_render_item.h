@@ -2,6 +2,7 @@
 
 #include <QQuickFramebufferObject>
 #include <QPoint>
+#include <QVariantMap>
 
 #include "frame_source.h"
 
@@ -17,6 +18,9 @@ class MapRenderItem : public QQuickFramebufferObject
     Q_PROPERTY(float cameraZoom READ cameraZoom WRITE setCameraZoom NOTIFY cameraZoomChanged)
     Q_PROPERTY(QPoint cursorCell READ cursorCell WRITE setCursorCell NOTIFY cursorCellChanged)
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
+    // Transient fence-tool state from AssetToolsSelector (ghost preview +
+    // selection): {selectedFenceId, valid, assetUuid, pieces:[...]}.
+    Q_PROPERTY(QVariantMap fenceToolState READ fenceToolState WRITE setFenceToolState NOTIFY fenceToolStateChanged)
 
 public:
     explicit MapRenderItem(QQuickItem* parent = nullptr);
@@ -41,6 +45,9 @@ public:
     bool showGrid() const { return m_showGrid; }
     void setShowGrid(bool show);
 
+    QVariantMap fenceToolState() const { return m_fenceToolState; }
+    void setFenceToolState(const QVariantMap& state);
+
 signals:
     void frameSourceChanged();
     void cameraXChanged();
@@ -48,6 +55,7 @@ signals:
     void cameraZoomChanged();
     void cursorCellChanged();
     void showGridChanged();
+    void fenceToolStateChanged();
 
 private:
     MapFrameSource* m_frameSource = nullptr;
@@ -56,6 +64,7 @@ private:
     float m_cameraZoom = 1.0f;
     QPoint m_cursorCell{0, 0};
     bool m_showGrid = true;
+    QVariantMap m_fenceToolState;
 };
 
 // Marks sokol unavailable for the editor — call from QGuiApplication::aboutToQuit.

@@ -7,6 +7,7 @@ nw_add_console_app(
         spdlog::spdlog_header_only
         imgui::imgui
         topology_core
+        fence_core
 )
 
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")

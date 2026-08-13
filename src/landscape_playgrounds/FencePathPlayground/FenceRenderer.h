@@ -22,7 +22,7 @@
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
-#include "FenceModel.h"
+#include <fence_core/fence_model.h>
 
 // Schematic fence renderer for the FencePathPlayground: posts as filled cell
 // diamonds, sections as thick bands between their endpoint posts, plus the
@@ -42,9 +42,9 @@ public:
         const topology_core::Camera2D& camera,
         int viewW,
         int viewH,
-        const FenceModel& model,
+        const fence_core::FenceModel& model,
         int selectedFence,
-        const std::vector<FenceModel::StrokePiece>* ghost,
+        const std::vector<fence_core::FenceModel::StrokePiece>* ghost,
         bool ghostValid,
         bool drawSchematic);
 

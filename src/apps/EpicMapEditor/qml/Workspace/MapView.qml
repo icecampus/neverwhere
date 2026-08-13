@@ -7,7 +7,7 @@ Rectangle
 {
     property var assetsContext: null
     property var chapter: null
-    property var hoveredCell: math.ivec2(1, 1)
+    property var hoveredCell: mouseArea.hoveredCell
     property bool showCoordinates: true
     property alias model: mapModel
     property alias isoView: isoView
@@ -71,6 +71,9 @@ Rectangle
 
         cursorCell: Qt.point(hoveredCell.x, hoveredCell.y)
         showGrid: true
+
+        // Fence tool transient state (ghost preview + selection tint).
+        fenceToolState: toolsSelector.fenceToolState
     }
 
     MapMouseArea
@@ -88,11 +91,16 @@ Rectangle
             toolsSelector.stroke(1, Qt.point(x, y), mapModel, isoView,
                 modifiers & Qt.ControlModifier, modifiers & Qt.ShiftModifier, modifiers & Qt.AltModifier)
         }
-        onStrokeFinish:
+        onStrokeFinish:(x, y)=>
         {
-            toolsSelector.stroke(2, Qt.point(0, 0), mapModel, isoView, false, false, false)
+            toolsSelector.stroke(2, Qt.point(x, y), mapModel, isoView, false, false, false)
         }
     }
+
+    // Fence tool keys: Delete/Backspace erases the selected fence, Escape
+    // clears the selection (forwarded to the active tool; others ignore it).
+    Shortcut { sequences: ["Del", "Backspace"]; onActivated: toolsSelector.keyPress(Qt.Key_Delete, mapModel) }
+    Shortcut { sequences: ["Esc"]; onActivated: toolsSelector.keyPress(Qt.Key_Escape, mapModel) }
 
 
     DiamondIsometryView

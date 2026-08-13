@@ -5,6 +5,7 @@
 #include "game_objects/resource.h"
 #include "game_objects/building.h"
 #include "game_objects/landscape.h"
+#include "game_objects/fence.h"
 #include <magic_enum/magic_enum.hpp>
 
 namespace fs = std::filesystem;
@@ -53,8 +54,15 @@ void LayerModel::load(const BaseData::Layer& layer)
             go->load(gameObject);
 
             addGameObject(std::move(go));
-        }   
-        
+        }
+        if (gameObject.fenceData)
+        {
+            auto go = std::make_unique<Fence>(this);
+            go->load(gameObject);
+
+            addGameObject(std::move(go));
+        }
+
     }
 }
 

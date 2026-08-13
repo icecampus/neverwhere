@@ -19,7 +19,8 @@ namespace AssetTypes
         stone3d,
         texture2d,
         tech3d,
-        mask3d
+        mask3d,
+        fence3d
     };
     Q_ENUM_NS(Type);
 }
@@ -259,6 +260,20 @@ namespace BaseData
 
         NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Texture2dAssetData,
             thumbnail, texture, tilingRepeats);
+    };
+
+    // Fence3D: fence brush (FenceLandscape layer, Fence piece objects). No
+    // atlas — the bundle carries the four baked piece meshes by convention
+    // (fence_post/fence_corner/fence_section2/fence_section3 .obj+.mtl in the
+    // bundle root); metersToPoints is the vertical lift of 1 m in screen
+    // points (fence_core::kFenceMetersToPoints default).
+    struct Fence3dAssetData
+    {
+        std::string thumbnail;
+        float metersToPoints{96.0f};
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Fence3dAssetData,
+            thumbnail, metersToPoints);
     };
 
     // Tech3D: the tech-field generator parameter set (mirror of
@@ -502,6 +517,7 @@ namespace BaseData
         std::optional<Texture2dAssetData> texture2dData;
         std::optional<Tech3dAssetData> tech3dData;
         std::optional<Mask3dAssetData> mask3dData;
+        std::optional<Fence3dAssetData> fence3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

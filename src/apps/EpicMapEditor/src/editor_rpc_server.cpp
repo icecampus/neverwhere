@@ -12,6 +12,7 @@
 #include <QSharedPointer>
 #include <QTcpSocket>
 #include <QWindow>
+#include <climits>
 #include <magic_enum/magic_enum.hpp>
 
 #include "editor_scene_registry.h"
@@ -112,6 +113,8 @@ QByteArray EditorRpcServer::_dispatch(const QJsonObject& req)
     if (op == "erase_tile")      return _cmdEraseTile(args);
     if (op == "fill_rect")       return _cmdFillRect(args);
     if (op == "set_landscape")   return _cmdSetLandscape(args);
+    if (op == "fence_stroke")    return _cmdFenceStroke(args);
+    if (op == "erase_fence")     return _cmdEraseFence(args);
     if (op == "get_map")         return _cmdGetMap(args);
     if (op == "set_camera")      return _cmdSetCamera(args);
     if (op == "screenshot")      return _cmdScreenshot(args);
@@ -367,6 +370,10 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     {
         if (tool == "mask_pencil" || tool == "0") index = 0;
     }
+    else if (cur->type == AssetTypes::fence3d)
+    {
+        if (tool == "fence_pencil" || tool == "0") index = 0;
+    }
     else
     {
         if (tool == "cursor" || tool == "0") index = 0;
@@ -570,6 +577,69 @@ QByteArray EditorRpcServer::_cmdSetLandscape(const QJsonObject& args)
     QJsonObject d;
     d["updates_applied"] = static_cast<qint64>(parsed.size());
     d["cells_recomputed"] = cells;
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdFenceStroke(const QJsonObject& args)
+{
+    const QString uuidStr = args.value("asset_uuid").toString().trimmed();
+    const QUuid uuid(uuidStr);
+    if (uuid.isNull())
+        return _error("invalid_input", "valid asset_uuid is required");
+
+    const int x = args.value("x").toInt(INT_MIN);
+    const int y = args.value("y").toInt(INT_MIN);
+    const int dirX = args.value("dirX").toInt(0);
+    const int dirY = args.value("dirY").toInt(0);
+    const int cells = args.value("cells").toInt(0);
+    const bool unitAxis = ((dirX == 0) != (dirY == 0)) && (std::abs(dirX) + std::abs(dirY) == 1);
+    if (x == INT_MIN || y == INT_MIN || !unitAxis || cells < 1)
+        return _error("invalid_input", "x, y, unit-axis dirX/dirY and cells >= 1 are required");
+
+    AssetsLibraryModel* lib = m_core ? m_core->getAssetsLibraty() : nullptr;
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!lib || !map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    Asset* asset = lib->getAsset(uuid);
+    if (!asset)
+        return _error("not_found", "asset not found: " + uuidStr);
+    if (asset->type != AssetTypes::fence3d)
+        return _error("invalid_input", "asset is not a fence3d asset: " + uuidStr);
+
+    // Plans and places the stroke exactly like the mouse tool would (starts
+    // on a post = extension; merges into a blocker post). Targets the layer
+    // dictated by the asset (FenceLandscape).
+    const int placed = MapAuthoring::applyFenceStroke(
+        *map->layer(asset->getLayerType()), asset,
+        math::ivec2(x, y), math::ivec2(dirX, dirY), cells);
+    if (placed == 0)
+        return _error("invalid_stroke", "stroke plan is not applicable (blocked or too short)");
+
+    QJsonObject d;
+    d["pieces_placed"] = placed;
+    return _ok(d);
+}
+
+QByteArray EditorRpcServer::_cmdEraseFence(const QJsonObject& args)
+{
+    const int x = args.value("x").toInt(INT_MIN);
+    const int y = args.value("y").toInt(INT_MIN);
+    if (x == INT_MIN || y == INT_MIN)
+        return _error("invalid_input", "x and y are required");
+    const bool wholeFence = args.value("wholeFence").toBool(true);
+
+    MapModel* map = m_registry ? m_registry->activeMapModel() : nullptr;
+    if (!map)
+        return _error("no_scene", "no active scene; load_chapter first");
+
+    // wholeFence=true: the whole fence covering the cell; false: just the
+    // post at the cell with its incident sections.
+    const int removed = MapAuthoring::eraseFenceAt(
+        *map->layer(LayerTypes::FenceLandscape), math::ivec2(x, y), wholeFence);
+
+    QJsonObject d;
+    d["pieces_removed"] = removed;
     return _ok(d);
 }
 

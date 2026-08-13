@@ -1,6 +1,6 @@
 #include "pch.h"
 
-#include "FenceMesh.h"
+#include "fence_core/fence_mesh.h"
 
 #include <cmath>
 #include <filesystem>
@@ -11,7 +11,7 @@
 #include <tuple>
 #include <unordered_map>
 
-#include <spdlog/spdlog.h>
+namespace fence_core {
 
 namespace {
 
@@ -231,29 +231,55 @@ bool isCornerPost(const FenceModel& model, int postPieceId) {
     return false;
 }
 
-glm::vec3 fenceWorldToField(const topology_core::DiamondIsometry& iso, glm::vec3 world) {
-    constexpr float kZFar = 100000.0f;
-    constexpr float kZScale = 1.0f / 200000.0f;
-    const float halfW = iso.dims.cellSize().x * 0.5f;
-    const float halfH = iso.dims.cellSize().y * 0.5f;
-    const float fieldX = (world.x - world.z) * halfW + halfW;
-    const float groundY = (world.x + world.z) * halfH + halfH;
-    const float screenY = groundY - world.y * kFenceMetersToPoints;
-    const float z =
-        (kZFar - (groundY + world.y * kFenceMetersToPoints * 0.5f)) * kZScale;
-    return {fieldX, screenY, z};
-}
-
-std::vector<FenceFieldVertex> buildFenceFieldTriangles(
-    const topology_core::DiamondIsometry& iso,
-    const FenceModel& model,
-    const FenceMeshSet& meshes,
-    int selectedFence) {
+void appendFenceInstance(
+    const FenceMesh& mesh,
+    glm::vec3 offset,
+    float yawDeg,
+    FenceInstanceShading shading,
+    glm::vec4 flatColor,
+    std::vector<FenceWorldVertex>& out) {
 
     // Fixed sun + hemisphere ambient, baked into the vertex color.
     const glm::vec3 sun = glm::normalize(glm::vec3{-0.55f, 0.80f, -0.35f});
 
-    std::vector<FenceFieldVertex> out;
+    const float rad = yawDeg * 3.14159265358979f / 180.0f;
+    const float cs = std::cos(rad);
+    const float sn = std::sin(rad);
+
+    out.reserve(out.size() + mesh.indices.size());
+    for (const std::uint32_t idx : mesh.indices) {
+        const FenceMesh::Vertex& v = mesh.vertices[idx];
+        // rotY: x' = x*c + z*s, z' = -x*s + z*c.
+        const glm::vec3 p{
+            v.pos.x * cs + v.pos.z * sn + offset.x,
+            v.pos.y + offset.y,
+            -v.pos.x * sn + v.pos.z * cs + offset.z};
+
+        glm::vec4 rgba = flatColor;
+        if (shading != FenceInstanceShading::Flat) {
+            const glm::vec3 n{
+                v.nrm.x * cs + v.nrm.z * sn,
+                v.nrm.y,
+                -v.nrm.x * sn + v.nrm.z * cs};
+            const float diff = std::max(glm::dot(n, sun), 0.0f);
+            const float up = n.y * 0.5f + 0.5f;
+            const float light = std::min(0.40f + 0.30f * up + 0.55f * diff, 1.25f);
+            glm::vec3 rgb = v.rgb * light;
+            if (shading == FenceInstanceShading::Selected) {
+                rgb = glm::mix(rgb, glm::vec3{0.95f, 0.75f, 0.30f}, 0.5f);
+            }
+            rgba = {rgb.r, rgb.g, rgb.b, 1.0f};
+        }
+        out.push_back({{p.x, p.y, p.z}, {rgba.r, rgba.g, rgba.b, rgba.a}});
+    }
+}
+
+std::vector<FenceWorldVertex> buildFenceWorldTriangles(
+    const FenceModel& model,
+    const FenceMeshSet& meshes,
+    int selectedFence) {
+
+    std::vector<FenceWorldVertex> out;
 
     for (const FencePiece& piece : model.pieces()) {
         const FenceMesh* mesh = nullptr;
@@ -291,35 +317,13 @@ std::vector<FenceFieldVertex> buildFenceFieldTriangles(
             }
         }
 
-        const float rad = yawDeg * 3.14159265358979f / 180.0f;
-        const float cs = std::cos(rad);
-        const float sn = std::sin(rad);
         const bool selected = piece.fenceId == selectedFence && selectedFence >= 0;
-
-        out.reserve(out.size() + mesh->indices.size());
-        for (const std::uint32_t idx : mesh->indices) {
-            const FenceMesh::Vertex& v = mesh->vertices[idx];
-            // rotY: x' = x*c + z*s, z' = -x*s + z*c.
-            const glm::vec3 p{
-                v.pos.x * cs + v.pos.z * sn + offset.x,
-                v.pos.y + offset.y,
-                -v.pos.x * sn + v.pos.z * cs + offset.z};
-            const glm::vec3 n{
-                v.nrm.x * cs + v.nrm.z * sn,
-                v.nrm.y,
-                -v.nrm.x * sn + v.nrm.z * cs};
-
-            const glm::vec3 field = fenceWorldToField(iso, p);
-
-            const float diff = std::max(glm::dot(n, sun), 0.0f);
-            const float up = n.y * 0.5f + 0.5f;
-            const float light = std::min(0.40f + 0.30f * up + 0.55f * diff, 1.25f);
-            glm::vec3 rgb = v.rgb * light;
-            if (selected) {
-                rgb = glm::mix(rgb, glm::vec3{0.95f, 0.75f, 0.30f}, 0.5f);
-            }
-            out.push_back({field.x, field.y, field.z, rgb.r, rgb.g, rgb.b, 1.0f});
-        }
+        appendFenceInstance(
+            *mesh, offset, yawDeg,
+            selected ? FenceInstanceShading::Selected : FenceInstanceShading::Lit,
+            glm::vec4{0.0f}, out);
     }
     return out;
 }
+
+} // namespace fence_core

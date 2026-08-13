@@ -33,6 +33,10 @@ public:
     // support continuous painting (LandscapePencil) override this.
     virtual void stroke(StrokeKind kind, QPoint screenPos, Asset* currentAsset, LayerModel* mapModel,
         DiamondIsometryView* iso, bool ctrlModifier, bool shiftModifier, bool altModifier);
+
+    // Keyboard entry point (Delete/Escape etc. — wired via MapView Shortcuts
+    // through AssetToolsSelector.keyPress). Default: no-op.
+    virtual void keyPress(int key, Asset* currentAsset, LayerModel* mapModel);
 private:
     QString _name;
     QString _icon;

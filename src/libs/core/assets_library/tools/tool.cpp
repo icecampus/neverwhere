@@ -27,3 +27,7 @@ void Tool::stroke(StrokeKind kind, QPoint screenPos, Asset* currentAsset, LayerM
     }
 }
 
+void Tool::keyPress(int /*key*/, Asset* /*currentAsset*/, LayerModel* /*mapModel*/)
+{
+}
+

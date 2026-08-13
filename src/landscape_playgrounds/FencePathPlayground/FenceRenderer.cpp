@@ -5,6 +5,8 @@
 #include <cmath>
 #include <vector>
 
+using namespace fence_core;
+
 namespace {
 
 struct FenceColorVertex {

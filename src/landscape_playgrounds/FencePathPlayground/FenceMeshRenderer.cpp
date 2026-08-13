@@ -2,6 +2,8 @@
 
 #include "FenceMeshRenderer.h"
 
+#include "FenceFieldProject.h"
+
 #include <spdlog/spdlog.h>
 
 namespace {
@@ -203,7 +205,7 @@ void FenceMeshRenderer::shutdown() {
 
 bool FenceMeshRenderer::loadMeshes(const std::string& dir) {
     std::string error;
-    if (!loadFenceMeshSet(dir, &m_meshes, &error)) {
+    if (!fence_core::loadFenceMeshSet(dir, &m_meshes, &error)) {
         spdlog::error("FenceMeshRenderer: mesh load failed: {}", error);
         return false;
     }
@@ -220,7 +222,7 @@ void FenceMeshRenderer::render(
     const topology_core::Camera2D& camera,
     int viewW,
     int viewH,
-    const FenceModel& model,
+    const fence_core::FenceModel& model,
     int selectedFence) {
 
     if (!m_ready || !m_meshes.ok) {

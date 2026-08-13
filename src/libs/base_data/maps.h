@@ -18,7 +18,8 @@ namespace GameObjectTypes
         Landscape,
         Resource,
         Buildings,
-        Cloud
+        Cloud,
+        Fence
     };
     Q_ENUM_NS(Type);
 }
@@ -37,7 +38,8 @@ namespace LayerTypes
         StoneLandscape,
         TextureLandscape,
         TechLandscape,
-        MaskLandscape
+        MaskLandscape,
+        FenceLandscape
     };
     Q_ENUM_NS(Type);
 }
@@ -64,6 +66,17 @@ namespace BaseData
     
     };
 
+    // One fence piece (fence3d asset, FenceLandscape layer): a post (kind 0,
+    // 1 cell) or a section (kind 1, `length` cells along (axisX,axisY)).
+    // Endpoint links and fence components are derived state (fence_core).
+    struct FenceData
+    {
+        int kind = 0;
+        int axisX = 0;
+        int axisY = 0;
+        int length = 1;
+    };
+
 
     //GameObject
     struct GameObject
@@ -76,6 +89,7 @@ namespace BaseData
         std::optional<ResourceData> resourceData;
         std::optional<LandscapeData> landscapeData;
         std::optional<BuildingData> buildingData;
+        std::optional<FenceData> fenceData;
     };
 
     void to_json(nlohmann::json& j, const Tile2DData&);
@@ -89,6 +103,9 @@ namespace BaseData
 
     void to_json(nlohmann::json& j, const LandscapeData& data);
     void from_json(const nlohmann::json& j, LandscapeData& data);
+
+    void to_json(nlohmann::json& j, const FenceData& data);
+    void from_json(const nlohmann::json& j, FenceData& data);
 
     void to_json(nlohmann::json& j, const GameObject& obj);
     void from_json(const nlohmann::json& j, GameObject& obj);

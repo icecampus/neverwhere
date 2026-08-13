@@ -21,8 +21,8 @@
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
-#include "FenceMesh.h"
-#include "FenceModel.h"
+#include <fence_core/fence_mesh.h>
+#include <fence_core/fence_model.h>
 
 // 3D fence pass of the FencePathPlayground: instances the baked ShapeML piece
 // meshes (FenceMeshSet) per FenceModel piece into projected field-space
@@ -53,7 +53,7 @@ public:
         const topology_core::Camera2D& camera,
         int viewW,
         int viewH,
-        const FenceModel& model,
+        const fence_core::FenceModel& model,
         int selectedFence);
 
 private:
@@ -62,7 +62,7 @@ private:
     sg_buffer m_vbuf{};
     bool m_ready = false;
 
-    FenceMeshSet m_meshes;
+    fence_core::FenceMeshSet m_meshes;
     // Instance cache: rebuilt only when the content key changes (camera and
     // zoom are vertex-shader state and do not invalidate it).
     std::uint64_t m_cacheVersion = ~0ull;

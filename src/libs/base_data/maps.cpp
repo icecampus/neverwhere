@@ -25,6 +25,24 @@ namespace BaseData
         j.at("tileIndex").get_to(data.tileIndex);
     }
 
+    void to_json(nlohmann::json& j, const FenceData& data)
+    {
+        j = nlohmann::json{
+            {"kind", data.kind},
+            {"axisX", data.axisX},
+            {"axisY", data.axisY},
+            {"length", data.length}
+        };
+    }
+
+    void from_json(const nlohmann::json& j, FenceData& data)
+    {
+        data.kind = j.value("kind", 0);
+        data.axisX = j.value("axisX", 0);
+        data.axisY = j.value("axisY", 0);
+        data.length = j.value("length", 1);
+    }
+
     void to_json(nlohmann::json& j, const GameObject& obj) 
     {
         j = nlohmann::json
@@ -50,6 +68,10 @@ namespace BaseData
         {
             j["buildingData"] = *obj.buildingData;
         }
+        if (obj.fenceData)
+        {
+            j["fenceData"] = *obj.fenceData;
+        }
     }
 
     void from_json(const nlohmann::json& j, GameObject& obj) 
@@ -74,6 +96,10 @@ namespace BaseData
         if (j.contains("buildingData"))
         {
             obj.buildingData = j["buildingData"].get<BuildingData>();
+        }
+        if (j.contains("fenceData"))
+        {
+            obj.fenceData = j["fenceData"].get<FenceData>();
         }
     }
 

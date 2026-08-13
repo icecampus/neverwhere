@@ -12,6 +12,7 @@
 #include "landscape/texture_pencil.h"
 #include "landscape/tech_pencil.h"
 #include "landscape/mask_pencil.h"
+#include "fence/fence_pencil.h"
 
 
 //AssetToolsModel
@@ -53,6 +54,14 @@ void AssetToolsModel::stroke(StrokeKind kind, QPoint screenPos, Asset* currentAs
     }
 }
 
+void AssetToolsModel::keyPress(int key, Asset* currentAsset, LayerModel* layerModel)
+{
+    if (currentTool >= 0 && currentAsset && layerModel)
+    {
+        element(currentTool)->keyPress(key, currentAsset, layerModel);
+    }
+}
+
 //ToolsModel
 AssetToolsSelector::AssetToolsSelector(QObject* parent):
     QObject(parent)
@@ -87,6 +96,10 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
     assetType2ToolsModel[AssetTypes::mask3d].reset(new AssetToolsModel(this));
     assetType2ToolsModel[AssetTypes::mask3d]->addElement<MaskPencil>(this);
 
+    assetType2ToolsModel[AssetTypes::fence3d].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::fence3d]->addElement<FencePencil>(this);
+    fencePencil = static_cast<FencePencil*>(assetType2ToolsModel[AssetTypes::fence3d]->element(0));
+
 }
 
 Asset* AssetToolsSelector::getCurrentAsset()
@@ -102,6 +115,7 @@ void AssetToolsSelector::setCurrentAsset(Asset* asset)
     
         emit currentAssetChanged();
         emit toolsModelChanged();
+        emit fenceToolStateChanged();
         
     }
 }
@@ -114,6 +128,23 @@ AssetToolsModel* AssetToolsSelector::getToolsModel()
     }
 
     return nullptr;
+}
+
+QVariantMap AssetToolsSelector::getFenceToolState() const
+{
+    QVariantMap state;
+    state["selectedFenceId"] = -1;
+    state["valid"] = false;
+    state["assetUuid"] = QString();
+    state["pieces"] = QVariantList();
+    if (fencePencil && currentAsset && currentAsset->type == AssetTypes::fence3d)
+    {
+        state["selectedFenceId"] = fencePencil->selectedFenceId();
+        state["valid"] = fencePencil->ghostValid();
+        state["assetUuid"] = currentAsset->uuid().toString(QUuid::WithoutBraces);
+        state["pieces"] = fencePencil->ghostPieces();
+    }
+    return state;
 }
 
 void AssetToolsSelector::click(QPoint screenPos, MapModel* mapModel, DiamondIsometryView* iso,
@@ -145,4 +176,20 @@ void AssetToolsSelector::stroke(int kind, QPoint screenPos, MapModel* mapModel, 
                 ctrlModifier, shiftModifier, altModifier);
         }
     }
+    emit fenceToolStateChanged();
+}
+
+void AssetToolsSelector::keyPress(int key, MapModel* mapModel)
+{
+    AssetToolsModel* currentToolsModel = getToolsModel();
+    if (currentToolsModel && currentAsset && mapModel)
+    {
+        LayerModel* layerModel = mapModel->layer(currentAsset->getLayerType());
+
+        if (layerModel)
+        {
+            currentToolsModel->keyPress(key, currentAsset, layerModel);
+        }
+    }
+    emit fenceToolStateChanged();
 }

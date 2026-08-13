@@ -9,6 +9,7 @@
 #include "render_core/landscape_renderer.h"
 #include "render_core/cliff_renderer.h"
 #include "render_core/cyclopean_renderer.h"
+#include "render_core/fence_renderer.h"
 #include "render_core/overlay_renderer.h"
 #include "render_core/sprite_renderer.h"
 #include "render_core/scene_stitch.h"
@@ -29,7 +30,15 @@ struct WorldFrame {
     std::vector<LandscapeTile> textureTiles; // TextureLandscape layer (texture2d: tiling world-UV textures, multi-texture blend)
     std::vector<LandscapeTile> techTiles;   // TechLandscape layer (tech3d: TechnicalGrass ridge/valley heightfield, shares the cliff pass)
     std::vector<LandscapeTile> maskTiles;   // MaskLandscape layer (mask3d: node-mask plate with a sloped skirt + PBR-lite material, shares the cliff pass)
+    std::vector<FencePiece> fencePieces;    // FenceLandscape layer (fence3d: baked piece meshes, own pass)
     std::vector<SpriteInstance> sprites;
+
+    // Fence tool transient state (editor only): the ghost preview piece list
+    // (stroke plan / move preview; green = applicable, red = rejected) and
+    // the selected fence (amber tint), -1 = no selection.
+    std::vector<FencePiece> fenceGhost;
+    bool fenceGhostValid = false;
+    int selectedFenceId = -1;
 
     bool showGrid = true;
     glm::vec4 gridColor{0.5f, 0.5f, 0.5f, 1.0f}; // QML "grey"
@@ -44,7 +53,8 @@ struct WorldFrame {
 // where it rises above the plane and stays behind it where it hangs below —
 // base slabs, the underwater foot of a tech shoreline), raised landscape (cliff
 // walls + lifted tops), cliff3d meshes, stone3d+tech3d meshes (same cliff
-// pass), cyclopean3d meshes, Tile2D sprites (painter-ordered, no depth test),
+// pass), cyclopean3d meshes, fence3d piece meshes (+ the tool's ghost preview
+// on top), texture2d cover, Tile2D sprites (painter-ordered, no depth test),
 // and finally the cell cursor overlay on top.
 //
 // Scene stitching (HighgroundWithEffects port): the ground and the highground
@@ -67,6 +77,7 @@ public:
     void ensureStoneAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureTechAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureMaskAsset(const std::string& assetUuid, const CliffParams& params);
+    void ensureFenceAsset(const std::string& assetUuid, const std::filesystem::path& meshDir, float metersToPoints);
     void ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
 
@@ -98,6 +109,7 @@ private:
     LandscapeRenderer landscapeRenderer;
     CliffRenderer cliffRenderer;
     CyclopeanRenderer cyclopeanRenderer;
+    FenceRenderer fenceRenderer;
     SpriteRenderer spriteRenderer;
     OverlayRenderer overlayRenderer;
 

@@ -4,6 +4,8 @@
 #include <utility>
 #include <vector>
 
+#include <fence_core/fence_model.h>
+
 #include "base_data/lib.h"
 #include "math/lib.h"
 #include "topology/topology_common.h"
@@ -43,6 +45,30 @@ struct MapAuthoring
     // shared by LandscapePencil, NoiseGenerator and applyLandscapeUpdates.
     static void updateLandscapeCell(LayerModel* layerModel, SliceAsset* sliceAsset,
         const math::ivec2& cellPosition, TileSet::TileType tileType);
+
+    // Fence authoring (fence3d assets, FenceLandscape layer): the stroke UX of
+    // the FencePathPlayground as cell-coordinate operations. The fence graph
+    // (endpoint links, components) is derived per call from the layer content
+    // via fence_core::FenceModel — the layer stays the single source of truth.
+    //
+    // Whole-layer fence model (unbounded; piece ids follow the layer object
+    // order, so every consumer rebuilding from the same layer — the fence ops,
+    // the frame builder, the tool — agrees on piece/fence ids).
+    static fence_core::FenceModel buildFenceModel(LayerModel& layer);
+    // Plans and places a fence stroke (dir = unit axis, cells = cells to
+    // cover; start on a post = extension). Returns placed piece count.
+    static int applyFenceStroke(LayerModel& layer, const Asset* fenceAsset,
+        const math::ivec2& start, const math::ivec2& dir, int cells);
+
+    // Erases the post at `cell` with its incident sections (wholeFence=false)
+    // or the whole fence covering the cell (wholeFence=true). Returns removed
+    // piece count.
+    static int eraseFenceAt(LayerModel& layer, const math::ivec2& cell, bool wholeFence);
+
+    // Moves the fence covering `cell` by `delta` cells (object positions are
+    // edited in place, so piece/fence ids — and any selection — survive).
+    static bool translateFenceAt(LayerModel& layer, const math::ivec2& cell,
+        const math::ivec2& delta);
 
     // JSON read-back for automation: layer objects (type, x, y, assetUuid,
     // tileIndex for Landscape — persisted fields only) and a per-layer map

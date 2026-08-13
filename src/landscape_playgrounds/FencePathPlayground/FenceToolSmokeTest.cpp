@@ -7,8 +7,12 @@
 
 #include <spdlog/spdlog.h>
 
-#include "FenceMesh.h"
-#include "FenceModel.h"
+#include <fence_core/fence_mesh.h>
+#include <fence_core/fence_model.h>
+
+#include "FenceFieldProject.h"
+
+using namespace fence_core;
 
 namespace {
 

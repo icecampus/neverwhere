@@ -23,6 +23,7 @@ target_link_libraries(neverwhere_tests PRIVATE
     landscape_mesh
     highground_core
     stone_gen
+    fence_core
     render_core
     topology_core
     utils

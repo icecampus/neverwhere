@@ -16,7 +16,12 @@ MouseArea
     // AssetToolsSelector.stroke).
     signal strokeStart(real x, real y, int modifiers)
     signal strokeMove(real x, real y, int modifiers)
-    signal strokeFinish()
+    signal strokeFinish(real x, real y)
+
+    // Hovered map cell (MapView binds cursorCell to this). Must be declared
+    // here — assigning to the parent's property from this file's scope does
+    // not reach it (and silently threw per mouse-move).
+    property var hoveredCell: math.ivec2(0, 0)
 
     property int startX: 0
     property int startY: 0
@@ -53,7 +58,7 @@ MouseArea
         else if(mouse.button === Qt.LeftButton )
         {
             painting = false
-            strokeFinish()
+            strokeFinish(mouse.x, mouse.y)
         }
     }
 

@@ -277,6 +277,14 @@ struct Texture2dAssetData {
     float tilingRepeats = 1.0f;   // texture repeats per cell width
 };
 
+// Fence3D: fence brush (FenceLandscape layer, Fence piece objects). The bundle
+// carries the four baked piece meshes by convention (fence_post/fence_corner/
+// fence_section2/fence_section3 .obj+.mtl in the bundle root).
+struct Fence3dAssetData {
+    std::string thumbnail;
+    float metersToPoints = 96.0f; // vertical lift of 1 m in screen points
+};
+
 struct AssetData {
     std::filesystem::path indexPath;
     std::string uuid;
@@ -292,6 +300,7 @@ struct AssetData {
     std::optional<Texture2dAssetData> texture2d;
     std::optional<Tech3dAssetData> tech3d;
     std::optional<Mask3dAssetData> mask3d;
+    std::optional<Fence3dAssetData> fence3d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -429,6 +438,11 @@ inline void from_json(const nlohmann::json& j, Texture2dAssetData& d) {
     if (j.contains("tilingRepeats")) j.at("tilingRepeats").get_to(d.tilingRepeats);
 }
 
+inline void from_json(const nlohmann::json& j, Fence3dAssetData& d) {
+    if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("metersToPoints")) j.at("metersToPoints").get_to(d.metersToPoints);
+}
+
 inline void from_json(const nlohmann::json& j, Tech3dAssetData& d) {
     if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
     if (j.contains("raisedHeight")) j.at("raisedHeight").get_to(d.raisedHeight);
@@ -490,6 +504,7 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
     else if (layerStr == "TextureLandscape") a.layerType = LayerType::TextureLandscape;
     else if (layerStr == "TechLandscape") a.layerType = LayerType::TechLandscape;
     else if (layerStr == "MaskLandscape") a.layerType = LayerType::MaskLandscape;
+    else if (layerStr == "FenceLandscape") a.layerType = LayerType::FenceLandscape;
 
     if (j.contains("slice") && !j["slice"].is_null()) {
         a.slice = j["slice"].get<SliceAssetData>();
@@ -525,6 +540,10 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("mask3d") && !j["mask3d"].is_null()) {
         a.mask3d = j["mask3d"].get<Mask3dAssetData>();
+    }
+
+    if (j.contains("fence3d") && !j["fence3d"].is_null()) {
+        a.fence3d = j["fence3d"].get<Fence3dAssetData>();
     }
 }
 
@@ -584,6 +603,12 @@ struct AssetIndexEntry {
     Mask3dAssetData mask;
     std::filesystem::path materialPrefix;
 
+    // Fence3D assets — fence brush with baked piece meshes, no atlas; meshDir
+    // is the bundle root holding fence_{post,corner,section2,section3}.obj.
+    bool fence3d = false;
+    Fence3dAssetData fence;
+    std::filesystem::path meshDir;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
     bool isShape3d() const { return shape3d; }
@@ -593,6 +618,7 @@ struct AssetIndexEntry {
     bool isTexture2d() const { return texture2d; }
     bool isTech3d() const { return tech3d; }
     bool isMask3d() const { return mask3d; }
+    bool isFence3d() const { return fence3d; }
 };
 
 struct AssetIndex {

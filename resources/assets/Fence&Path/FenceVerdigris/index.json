@@ -1,0 +1,12 @@
+{
+    "uuid": "0309580c-9007-4225-b23c-eacc585ab6a5",
+    "layerType": "FenceLandscape",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "fence3d": {
+        "thumbnail": "thumbnail.png",
+        "metersToPoints": 96.0
+    }
+}

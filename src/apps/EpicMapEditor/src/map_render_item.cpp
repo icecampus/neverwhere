@@ -118,6 +118,28 @@ public:
             m_frame.sprites.clear();
         }
 
+        // Fence tool transient state (ghost preview + selection) from QML;
+        // the frame source does not own these (client parity leaves them
+        // empty — the play tab has no tool).
+        {
+            const QVariantMap fenceState = mapItem->fenceToolState();
+            m_frame.selectedFenceId = fenceState.value("selectedFenceId", -1).toInt();
+            m_frame.fenceGhostValid = fenceState.value("valid", false).toBool();
+            m_frame.fenceGhost.clear();
+            const std::string ghostUuid = fenceState.value("assetUuid").toString().toStdString();
+            const QVariantList ghostPieces = fenceState.value("pieces").toList();
+            for (const QVariant& v : ghostPieces) {
+                const QVariantMap p = v.toMap();
+                render_core::FencePiece fp;
+                fp.cell = {p.value("x").toInt(), p.value("y").toInt()};
+                fp.kind = p.value("kind").toInt();
+                fp.axis = {p.value("axisX").toInt(), p.value("axisY").toInt()};
+                fp.length = p.value("length").toInt();
+                fp.assetUuid = ghostUuid;
+                m_frame.fenceGhost.push_back(std::move(fp));
+            }
+        }
+
         // QML coordinates (mouse, camera, isoView) are logical pixels;
         // capture the item's logical size for DPI-correct rendering.
         m_logicalWidth = (float)mapItem->width();
@@ -403,6 +425,13 @@ void MapRenderItem::setShowGrid(bool show) {
     if (m_showGrid == show) return;
     m_showGrid = show;
     emit showGridChanged();
+    update();
+}
+
+void MapRenderItem::setFenceToolState(const QVariantMap& state) {
+    if (m_fenceToolState == state) return;
+    m_fenceToolState = state;
+    emit fenceToolStateChanged();
     update();
 }
 

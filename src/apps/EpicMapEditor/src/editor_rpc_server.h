@@ -26,8 +26,10 @@ class EditorSceneRegistry;
 //    active scene (screen pixels, depends on camera/zoom);
 //  - cell-coordinate authoring: set_tile / erase_tile / fill_rect /
 //    set_landscape write directly into the map model via MapAuthoring
-//    (idempotent, camera-independent). get_map reads the content back,
-//    set_camera + screenshot provide visual verification.
+//    (idempotent, camera-independent); fence3d assets are authored with
+//    fence_stroke / erase_fence (the same planStroke/erase the mouse tool
+//    uses). get_map reads the content back, set_camera + screenshot provide
+//    visual verification.
 class EditorRpcServer : public QObject
 {
     Q_OBJECT
@@ -70,6 +72,8 @@ private:
     QByteArray _cmdEraseTile(const QJsonObject& args);
     QByteArray _cmdFillRect(const QJsonObject& args);
     QByteArray _cmdSetLandscape(const QJsonObject& args);
+    QByteArray _cmdFenceStroke(const QJsonObject& args);
+    QByteArray _cmdEraseFence(const QJsonObject& args);
     QByteArray _cmdGetMap(const QJsonObject& args);
     QByteArray _cmdSetCamera(const QJsonObject& args);
     QByteArray _cmdScreenshot(const QJsonObject& args);
