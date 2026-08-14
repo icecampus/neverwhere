@@ -251,7 +251,8 @@ void BuildingRenderer::ensureBuildingAsset(const std::string& assetUuid, const B
         && gpu.params.footprintWidth == params.footprintWidth
         && gpu.params.footprintHeight == params.footprintHeight
         && gpu.params.heightScale == params.heightScale
-        && gpu.params.yawDegrees == params.yawDegrees;
+        && gpu.params.yawDegrees == params.yawDegrees
+        && gpu.params.scale == params.scale;
     gpu.params = params;
     if (!same) {
         destroyAsset(gpu);
@@ -353,7 +354,7 @@ void BuildingRenderer::loadAsset(AssetGpu& gpu) {
         return;
     }
     fitGltfMeshToFootprint(mesh, static_cast<float>(gpu.params.footprintWidth),
-        static_cast<float>(gpu.params.footprintHeight), gpu.params.yawDegrees);
+        static_cast<float>(gpu.params.footprintHeight), gpu.params.yawDegrees, gpu.params.scale);
 
     std::vector<Vertex> verts(mesh.vertices.size());
     for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {

@@ -28,7 +28,9 @@ bool loadGltfMesh(const std::filesystem::path& path, GltfMesh& out, std::string*
 
 // Uniform scale so the XZ AABB fits inside footprintW x footprintH (cell
 // units), XZ-centered at the origin, Y min at 0 (sits on the ground plane).
-// yawDegrees rotates around +Y after the fit (asset-facing correction).
-void fitGltfMeshToFootprint(GltfMesh& mesh, float footprintW, float footprintH, float yawDegrees = 0.0f);
+// yawDegrees rotates around +Y after the fit (asset-facing correction);
+// scale multiplies the fitted size (>1 overshoots the footprint).
+void fitGltfMeshToFootprint(GltfMesh& mesh, float footprintW, float footprintH, float yawDegrees = 0.0f,
+    float scale = 1.0f);
 
 } // namespace render_core

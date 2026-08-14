@@ -37,6 +37,7 @@ TEST(Building3dAssetData, BaseDataDefaultsWhenPayloadEmpty) {
     EXPECT_EQ(d.footprintHeight, 3);
     EXPECT_FLOAT_EQ(d.heightScale, 96.0f);
     EXPECT_FLOAT_EQ(d.yawDegrees, 0.0f);
+    EXPECT_FLOAT_EQ(d.scale, 1.0f);
 }
 
 TEST(Building3dAssetData, BaseDataRoundTripPreservesAllFields) {
@@ -49,6 +50,7 @@ TEST(Building3dAssetData, BaseDataRoundTripPreservesAllFields) {
     d.footprintHeight = 3;
     d.heightScale = 64.0f;
     d.yawDegrees = 180.0f;
+    d.scale = 1.25f;
 
     nlohmann::json j;
     BaseData::to_json(j, asset);
@@ -64,6 +66,7 @@ TEST(Building3dAssetData, BaseDataRoundTripPreservesAllFields) {
     EXPECT_EQ(b.footprintHeight, 3);
     EXPECT_FLOAT_EQ(b.heightScale, 64.0f);
     EXPECT_FLOAT_EQ(b.yawDegrees, 180.0f);
+    EXPECT_FLOAT_EQ(b.scale, 1.25f);
 }
 
 TEST(Building3dAssetData, GameDataFromJson) {
@@ -76,6 +79,7 @@ TEST(Building3dAssetData, GameDataFromJson) {
         {"footprintHeight", 3},
         {"heightScale", 96.0},
         {"yawDegrees", 180.0},
+        {"scale", 1.5},
     };
     const game_data::AssetData asset = j.get<game_data::AssetData>();
 
@@ -87,6 +91,7 @@ TEST(Building3dAssetData, GameDataFromJson) {
     EXPECT_EQ(asset.building3d->footprintHeight, 3);
     EXPECT_FLOAT_EQ(asset.building3d->heightScale, 96.0f);
     EXPECT_FLOAT_EQ(asset.building3d->yawDegrees, 180.0f);
+    EXPECT_FLOAT_EQ(asset.building3d->scale, 1.5f);
 
     const game_data::AssetData def = minimalPayload().get<game_data::AssetData>();
     ASSERT_TRUE(def.building3d.has_value());
@@ -94,6 +99,7 @@ TEST(Building3dAssetData, GameDataFromJson) {
     EXPECT_EQ(def.building3d->footprintWidth, 3);
     EXPECT_FLOAT_EQ(def.building3d->heightScale, 96.0f);
     EXPECT_FLOAT_EQ(def.building3d->yawDegrees, 0.0f);
+    EXPECT_FLOAT_EQ(def.building3d->scale, 1.0f);
 }
 
 TEST(Building3dAssetData, AssetIndexLoadMapsBuildingEntry) {
@@ -109,6 +115,7 @@ TEST(Building3dAssetData, AssetIndexLoadMapsBuildingEntry) {
         payload["building3d"]["footprintWidth"] = 3;
         payload["building3d"]["footprintHeight"] = 3;
         payload["building3d"]["yawDegrees"] = 180.0;
+        payload["building3d"]["scale"] = 1.1;
         std::ofstream file(assetDir / "index.json");
         file << payload.dump(2);
     }
@@ -124,6 +131,7 @@ TEST(Building3dAssetData, AssetIndexLoadMapsBuildingEntry) {
     EXPECT_EQ(entry->building.footprintHeight, 3);
     EXPECT_FLOAT_EQ(entry->building.heightScale, 96.0f);
     EXPECT_FLOAT_EQ(entry->building.yawDegrees, 180.0f);
+    EXPECT_FLOAT_EQ(entry->building.scale, 1.1f);
     EXPECT_EQ(entry->modelPath, assetDir / "home.glb");
     EXPECT_EQ(entry->albedoPath, assetDir / "albedo.png");
     EXPECT_FALSE(entry->isSlice());

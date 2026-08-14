@@ -127,6 +127,18 @@ Rectangle
             border.color: "transparent"
         }
 
+        // Building3d placement params (same embedding contract as CliffSettings).
+        BuildingSettings
+        {
+            width: parent.width
+            asset: assetSettings.asset
+            activeAsset: assetSettings.asset && assetSettings.asset.isBuilding3d
+            showTitle: false
+            showSaveButton: false
+            color: "transparent"
+            border.color: "transparent"
+        }
+
         Row
         { 
             anchors.horizontalCenter: parent.horizontalCenter

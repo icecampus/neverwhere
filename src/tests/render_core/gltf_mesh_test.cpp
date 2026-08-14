@@ -130,3 +130,25 @@ TEST(GltfMesh, FitToFootprintYaw180NegatesXZ) {
     EXPECT_NEAR(mesh.vertices[2].pos.z, -1.0f, 1e-5f);
     EXPECT_NEAR(mesh.vertices[0].pos.y, 0.f, 1e-5f);
 }
+
+TEST(GltfMesh, FitToFootprintScaleMultipliesTheFit) {
+    const std::vector<std::uint8_t> bytes = triangleGlb();
+    render_core::GltfMesh mesh;
+    std::string error;
+    ASSERT_TRUE(render_core::loadGltfMeshFromGlbBytes(bytes.data(), bytes.size(), mesh, &error)) << error;
+
+    render_core::fitGltfMeshToFootprint(mesh, 2.f, 2.f, 0.f, 1.5f);
+
+    glm::vec3 mn(1e9f), mx(-1e9f);
+    for (const auto& v : mesh.vertices) {
+        mn = glm::min(mn, v.pos);
+        mx = glm::max(mx, v.pos);
+    }
+    // Base fit: X spans 1, Z spans 2 (see FitToFootprintCentersAndSitsOnGround);
+    // scale 1.5 overshoots the 2x2 footprint in Z.
+    EXPECT_NEAR(mx.x - mn.x, 1.5f, 1e-5f);
+    EXPECT_NEAR(mx.z - mn.z, 3.0f, 1e-5f);
+    EXPECT_NEAR((mn.x + mx.x) * 0.5f, 0.f, 1e-5f);
+    EXPECT_NEAR((mn.z + mx.z) * 0.5f, 0.f, 1e-5f);
+    EXPECT_NEAR(mn.y, 0.f, 1e-5f);
+}

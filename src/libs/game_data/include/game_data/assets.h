@@ -279,6 +279,7 @@ struct Building3dAssetData {
     int footprintHeight = 3;
     float heightScale = 96.0f;
     float yawDegrees = 0.0f;
+    float scale = 1.0f; // uniform multiplier on top of the footprint fit
 };
 
 // Tiling-texture landscape brush (multi-texture blend layer).
@@ -489,6 +490,7 @@ inline void from_json(const nlohmann::json& j, Building3dAssetData& d) {
     if (j.contains("footprintHeight")) j.at("footprintHeight").get_to(d.footprintHeight);
     if (j.contains("heightScale")) j.at("heightScale").get_to(d.heightScale);
     if (j.contains("yawDegrees")) j.at("yawDegrees").get_to(d.yawDegrees);
+    if (j.contains("scale")) j.at("scale").get_to(d.scale);
 }
 
 inline void from_json(const nlohmann::json& j, AssetData& a) {

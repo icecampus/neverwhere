@@ -30,6 +30,7 @@ struct BuildingParams {
     int footprintHeight = 3;
     float heightScale = 96.0f;
     float yawDegrees = 0.0f;
+    float scale = 1.0f; // uniform multiplier on top of the footprint fit
 };
 
 class BuildingRenderer {

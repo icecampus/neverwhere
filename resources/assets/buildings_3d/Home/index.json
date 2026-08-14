@@ -12,6 +12,7 @@
         "footprintWidth": 3,
         "footprintHeight": 3,
         "heightScale": 96.0,
-        "yawDegrees": 180.0
+        "yawDegrees": 180.0,
+        "scale": 1.0
     }
 }

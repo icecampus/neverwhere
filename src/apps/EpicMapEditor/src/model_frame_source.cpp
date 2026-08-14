@@ -515,6 +515,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
             params.footprintHeight = data.building3dData->footprintHeight;
             params.heightScale = data.building3dData->heightScale;
             params.yawDegrees = data.building3dData->yawDegrees;
+            params.scale = data.building3dData->scale;
             renderer.ensureBuildingAsset(uuid, params);
         }
     }

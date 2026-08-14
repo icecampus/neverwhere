@@ -406,7 +406,7 @@ bool loadGltfMesh(const std::filesystem::path& path, GltfMesh& out, std::string*
     return loadGltfMeshFromGlbBytes(bytes.data(), bytes.size(), out, error);
 }
 
-void fitGltfMeshToFootprint(GltfMesh& mesh, float footprintW, float footprintH, float yawDegrees) {
+void fitGltfMeshToFootprint(GltfMesh& mesh, float footprintW, float footprintH, float yawDegrees, float scale) {
     if (mesh.vertices.empty()) return;
     glm::vec3 mn(std::numeric_limits<float>::max());
     glm::vec3 mx(std::numeric_limits<float>::lowest());
@@ -419,13 +419,13 @@ void fitGltfMeshToFootprint(GltfMesh& mesh, float footprintW, float footprintH, 
     const float fpH = footprintH > 1e-4f ? footprintH : 1.0f;
     const float sx = size.x > 1e-6f ? fpW / size.x : 1.0f;
     const float sz = size.z > 1e-6f ? fpH / size.z : 1.0f;
-    const float scale = std::min(sx, sz);
+    const float fit = std::min(sx, sz) * (scale > 1e-4f ? scale : 1.0f);
     const glm::vec3 center((mn.x + mx.x) * 0.5f, mn.y, (mn.z + mx.z) * 0.5f);
     const glm::mat3 yaw = std::fabs(yawDegrees) > 1e-4f
         ? glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(yawDegrees), glm::vec3(0.0f, 1.0f, 0.0f)))
         : glm::mat3(1.0f);
     for (GltfVertex& v : mesh.vertices) {
-        v.pos = yaw * ((v.pos - center) * scale);
+        v.pos = yaw * ((v.pos - center) * fit);
         if (glm::length(v.normal) > 1e-6f) {
             v.normal = glm::normalize(yaw * v.normal);
         } else {

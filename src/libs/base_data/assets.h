@@ -497,9 +497,11 @@ namespace BaseData
         int footprintHeight{3};
         float heightScale{96.0f}; // field px per 1.0 world height (same as cliffs)
         float yawDegrees{0.0f};   // yaw around +Y after fit (Home faces the camera at 180)
+        float scale{1.0f};        // uniform multiplier on top of the footprint fit
+                                  // (>1 overshoots the cells, <1 leaves a margin)
 
         NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Building3dAssetData,
-            thumbnail, model, albedo, footprintWidth, footprintHeight, heightScale, yawDegrees);
+            thumbnail, model, albedo, footprintWidth, footprintHeight, heightScale, yawDegrees, scale);
     };
 
     //Asset

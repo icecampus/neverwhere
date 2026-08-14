@@ -446,6 +446,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
             params.footprintHeight = entry->building.footprintHeight;
             params.heightScale = entry->building.heightScale;
             params.yawDegrees = entry->building.yawDegrees;
+            params.scale = entry->building.scale;
             renderer.ensureBuildingAsset(uuid, params);
         }
     }
