@@ -13,6 +13,7 @@
 #include "landscape/tech_pencil.h"
 #include "landscape/mask_pencil.h"
 #include "fence/fence_pencil.h"
+#include "building/building3d_pencil.h"
 
 
 //AssetToolsModel
@@ -99,6 +100,10 @@ AssetToolsSelector::AssetToolsSelector(QObject* parent):
     assetType2ToolsModel[AssetTypes::fence3d].reset(new AssetToolsModel(this));
     assetType2ToolsModel[AssetTypes::fence3d]->addElement<FencePencil>(this);
     fencePencil = static_cast<FencePencil*>(assetType2ToolsModel[AssetTypes::fence3d]->element(0));
+
+    assetType2ToolsModel[AssetTypes::building3d].reset(new AssetToolsModel(this));
+    assetType2ToolsModel[AssetTypes::building3d]->addElement<Building3dPencil>(this);
+    assetType2ToolsModel[AssetTypes::building3d]->addElement<Building3dEraser>(this);
 
 }
 

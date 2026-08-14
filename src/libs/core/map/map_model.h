@@ -32,6 +32,7 @@ public:
     void addGameObject(std::unique_ptr<GameObject> gameObject);
     void remove(const math::ivec2& cellPosition);
     void removeAll(const math::ivec2& cellPosition);
+    void removeGameObject(GameObject* obj);
 
     GameObject *getGameObject(int index) const;
     std::vector<GameObject*> getObjectsAt(const math::ivec2& position);

@@ -12,9 +12,6 @@ namespace BaseData
     void to_json(nlohmann::json& j, const ResourceData&) { j = {}; }
     void from_json(const nlohmann::json&, ResourceData&) {}
 
-    void to_json(nlohmann::json& j, const BuildingData&) { j = {}; }
-    void from_json(const nlohmann::json&, BuildingData&) {}
-
     void to_json(nlohmann::json& j, const LandscapeData& data) 
     {
         j = nlohmann::json{ {"tileIndex", data.tileIndex} };

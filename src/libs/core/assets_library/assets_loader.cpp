@@ -12,6 +12,7 @@
 #include "assets/tech_asset.h"
 #include "assets/mask_asset.h"
 #include "assets/fence_asset.h"
+#include "assets/building3d_asset.h"
 #include "assets_pack_model.h"
 #include "base_data/lib.h"
 
@@ -106,6 +107,13 @@ void AssetsLoader::loadAsset(const BaseData::AssetData& assetData, AssetsPackMod
     if (assetData.fence3dData.has_value() )
     {
         auto asset = std::make_unique<FenceAsset>(pack);
+        asset->load(assetData);
+        pack->addElement(std::move(asset));
+    }
+
+    if (assetData.building3dData.has_value() )
+    {
+        auto asset = std::make_unique<Building3dAsset>(pack);
         asset->load(assetData);
         pack->addElement(std::move(asset));
     }

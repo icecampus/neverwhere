@@ -27,6 +27,7 @@ class Asset : public QObject
     Q_PROPERTY(bool isTech3d READ getIsTech3d CONSTANT)
     Q_PROPERTY(bool isMask3d READ getIsMask3d CONSTANT)
     Q_PROPERTY(bool isFence3d READ getIsFence3d CONSTANT)
+    Q_PROPERTY(bool isBuilding3d READ getIsBuilding3d CONSTANT)
 
     // pivot - это смещение ЦЕНТРА картинки относительно центра клетки игрового поля в размере клеток игрового поля
     // (0,0) - нет смешения, 
@@ -54,6 +55,7 @@ class Asset : public QObject
     bool getIsTech3d() const { return type == AssetTypes::tech3d; }
     bool getIsMask3d() const { return type == AssetTypes::mask3d; }
     bool getIsFence3d() const { return type == AssetTypes::fence3d; }
+    bool getIsBuilding3d() const { return type == AssetTypes::building3d; }
 
     math::vec2 getPivot() const;
     void setPivot(const math::vec2& pivot);

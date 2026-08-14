@@ -10,6 +10,7 @@
 #include "render_core/cliff_renderer.h"
 #include "render_core/cyclopean_renderer.h"
 #include "render_core/fence_renderer.h"
+#include "render_core/building_renderer.h"
 #include "render_core/overlay_renderer.h"
 #include "render_core/sprite_renderer.h"
 #include "render_core/scene_stitch.h"
@@ -32,6 +33,7 @@ struct WorldFrame {
     std::vector<LandscapeTile> maskTiles;   // MaskLandscape layer (mask3d: node-mask plate with a sloped skirt + PBR-lite material, shares the cliff pass)
     std::vector<FencePiece> fencePieces;    // FenceLandscape layer (fence3d: baked piece meshes, own pass)
     std::vector<SpriteInstance> sprites;
+    std::vector<BuildingInstance> buildings; // building3d GLB instances (GameplayInteractive)
 
     // Fence tool transient state (editor only): the ghost preview piece list
     // (stroke plan / move preview; green = applicable, red = rejected) and
@@ -44,6 +46,7 @@ struct WorldFrame {
     glm::vec4 gridColor{0.5f, 0.5f, 0.5f, 1.0f}; // QML "grey"
 
     std::optional<glm::ivec2> cursorCell;
+    glm::ivec2 cursorFootprint{1, 1}; // cell cursor size (building3d paints a 3x3, etc.)
     glm::vec4 cursorColor{1.0f, 0.0f, 0.0f, 1.0f}; // QML "red"
 };
 
@@ -80,6 +83,7 @@ public:
     void ensureFenceAsset(const std::string& assetUuid, const std::filesystem::path& meshDir, float metersToPoints);
     void ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
+    void ensureBuildingAsset(const std::string& assetUuid, const BuildingParams& params);
 
     // Scene stitching knobs (playground defaults). C++ API only for now (no
     // QML); edits apply from the next prepare().
@@ -110,6 +114,7 @@ private:
     CliffRenderer cliffRenderer;
     CyclopeanRenderer cyclopeanRenderer;
     FenceRenderer fenceRenderer;
+    BuildingRenderer buildingRenderer;
     SpriteRenderer spriteRenderer;
     OverlayRenderer overlayRenderer;
 

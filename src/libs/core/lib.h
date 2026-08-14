@@ -18,6 +18,7 @@
 #include "assets_library/assets/tech_asset.h"
 #include "assets_library/assets/mask_asset.h"
 #include "assets_library/assets/fence_asset.h"
+#include "assets_library/assets/building3d_asset.h"
 #include "assets_library/assets_library_model.h"
 #include "assets_library/assets_context.h"
 #include "assets_library/assets_image_provider.h"

@@ -270,6 +270,18 @@ struct Mask3dAssetData {
     Cliff3dShadingData shading;
 };
 
+// Building3D: a placed GLB mesh occupying a cell footprint (default 3x3).
+struct Building3dAssetData {
+    std::string thumbnail;
+    std::string model;
+    std::string albedo;
+    int footprintWidth = 3;
+    int footprintHeight = 3;
+    float heightScale = 96.0f;
+    float yawDegrees = 0.0f;
+    float scale = 1.0f; // uniform multiplier on top of the footprint fit
+};
+
 // Tiling-texture landscape brush (multi-texture blend layer).
 struct Texture2dAssetData {
     std::string thumbnail;
@@ -301,6 +313,7 @@ struct AssetData {
     std::optional<Tech3dAssetData> tech3d;
     std::optional<Mask3dAssetData> mask3d;
     std::optional<Fence3dAssetData> fence3d;
+    std::optional<Building3dAssetData> building3d;
 
     std::filesystem::path root() const { return indexPath.parent_path(); }
 };
@@ -483,6 +496,17 @@ inline void from_json(const nlohmann::json& j, Mask3dAssetData& d) {
     if (j.contains("shading")) from_json(j["shading"], d.shading);
 }
 
+inline void from_json(const nlohmann::json& j, Building3dAssetData& d) {
+    if (j.contains("thumbnail")) j.at("thumbnail").get_to(d.thumbnail);
+    if (j.contains("model")) j.at("model").get_to(d.model);
+    if (j.contains("albedo")) j.at("albedo").get_to(d.albedo);
+    if (j.contains("footprintWidth")) j.at("footprintWidth").get_to(d.footprintWidth);
+    if (j.contains("footprintHeight")) j.at("footprintHeight").get_to(d.footprintHeight);
+    if (j.contains("heightScale")) j.at("heightScale").get_to(d.heightScale);
+    if (j.contains("yawDegrees")) j.at("yawDegrees").get_to(d.yawDegrees);
+    if (j.contains("scale")) j.at("scale").get_to(d.scale);
+}
+
 inline void from_json(const nlohmann::json& j, AssetData& a) {
     j.at("uuid").get_to(a.uuid);
     // pivot may be omitted in older assets; default (0,0)
@@ -544,6 +568,9 @@ inline void from_json(const nlohmann::json& j, AssetData& a) {
 
     if (j.contains("fence3d") && !j["fence3d"].is_null()) {
         a.fence3d = j["fence3d"].get<Fence3dAssetData>();
+    }
+    if (j.contains("building3d") && !j["building3d"].is_null()) {
+        a.building3d = j["building3d"].get<Building3dAssetData>();
     }
 }
 
@@ -609,6 +636,12 @@ struct AssetIndexEntry {
     Fence3dAssetData fence;
     std::filesystem::path meshDir;
 
+    // Building3D — GLB mesh instances on GameplayInteractive.
+    bool building3d = false;
+    Building3dAssetData building;
+    std::filesystem::path modelPath;
+    std::filesystem::path albedoPath;
+
     bool isSlice() const { return !atlasPath.empty(); }
     bool isImage() const { return !imagePath.empty(); }
     bool isShape3d() const { return shape3d; }
@@ -619,6 +652,7 @@ struct AssetIndexEntry {
     bool isTech3d() const { return tech3d; }
     bool isMask3d() const { return mask3d; }
     bool isFence3d() const { return fence3d; }
+    bool isBuilding3d() const { return building3d; }
 };
 
 struct AssetIndex {

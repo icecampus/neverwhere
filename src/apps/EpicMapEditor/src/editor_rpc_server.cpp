@@ -374,6 +374,11 @@ QByteArray EditorRpcServer::_cmdSelectTool(const QJsonObject& args)
     {
         if (tool == "fence_pencil" || tool == "0") index = 0;
     }
+    else if (cur->type == AssetTypes::building3d)
+    {
+        if (tool == "pencil" || tool == "building3d_pencil" || tool == "0") index = 0;
+        else if (tool == "eraser" || tool == "building3d_eraser" || tool == "1") index = 1;
+    }
     else
     {
         if (tool == "cursor" || tool == "0") index = 0;
@@ -476,7 +481,7 @@ QByteArray EditorRpcServer::_cmdSetTile(const QJsonObject& args)
 
     const math::ivec2 cell(args.value("x").toInt(), args.value("y").toInt());
     if (!MapAuthoring::setTile(*map->layer(*layerType), cell, asset))
-        return _error("invalid_input", "set_tile supports image assets only; use set_landscape for slice assets");
+        return _error("invalid_input", "set_tile supports image and building3d assets; use set_landscape for slice assets");
 
     QJsonObject d;
     d["x"] = cell.x;
@@ -496,7 +501,9 @@ QByteArray EditorRpcServer::_cmdEraseTile(const QJsonObject& args)
         return _error("no_scene", "no active scene; load_chapter first");
 
     const math::ivec2 cell(args.value("x").toInt(), args.value("y").toInt());
-    const int removed = MapAuthoring::eraseTiles(*map->layer(*layerType), cell);
+    int removed = MapAuthoring::eraseTiles(*map->layer(*layerType), cell);
+    if (removed == 0)
+        removed = MapAuthoring::eraseBuildingAt(*map->layer(*layerType), cell);
 
     QJsonObject d;
     d["x"] = cell.x;

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <boost/uuid/string_generator.hpp>
 #include <filesystem>
@@ -7,7 +8,9 @@
 
 #include "assets_library/assets/image_asset.h"
 #include "assets_library/assets/slice_asset.h"
+#include "assets_library/assets/building3d_asset.h"
 #include "game_objects/landscape.h"
+#include "map/building_footprint.h"
 #include "map/map_authoring.h"
 #include "map/map_model.h"
 
@@ -41,9 +44,26 @@ std::unique_ptr<SliceAsset> makeSliceAsset(const char* uuidStr, const char* name
     return asset;
 }
 
+std::unique_ptr<Building3dAsset> makeBuilding3dAsset(const char* uuidStr, const char* name, int w, int h)
+{
+    auto asset = std::make_unique<Building3dAsset>(nullptr);
+    BaseData::AssetData data;
+    data.uuid = boost::uuids::string_generator()(uuidStr);
+    data.name = name;
+    data.layerType = LayerTypes::GameplayInteractive;
+    BaseData::Building3dAssetData payload;
+    payload.model = "home.glb";
+    payload.footprintWidth = w;
+    payload.footprintHeight = h;
+    data.building3dData = payload;
+    asset->load(data);
+    return asset;
+}
+
 constexpr const char* kGrassUuid = "11111111-2222-3333-4444-555555555555";
 constexpr const char* kStoneUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 constexpr const char* kSliceUuid = "00000000-1111-2222-3333-444444444444";
+constexpr const char* kHouseUuid = "5d46e934-edf2-4c27-81ac-bd6aad9900be";
 } // namespace
 
 TEST(MapAuthoringTest, SetTileReplacesCellContent)
@@ -547,6 +567,117 @@ TEST(MapAuthoringTest, DumpSaveLoadRoundTrip)
 
     EXPECT_EQ(QJsonDocument(before).toJson(QJsonDocument::Compact),
               QJsonDocument(after).toJson(QJsonDocument::Compact));
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(MapAuthoringTest, BuildingFootprintHelpers)
+{
+    const math::ivec2 min = buildingFootprintMin(math::ivec2(5, 5), 3, 3);
+    EXPECT_EQ(min.x, 4);
+    EXPECT_EQ(min.y, 4);
+    EXPECT_TRUE(buildingFootprintContains(math::ivec2(5, 5), 3, 3, math::ivec2(4, 4)));
+    EXPECT_TRUE(buildingFootprintContains(math::ivec2(5, 5), 3, 3, math::ivec2(6, 6)));
+    EXPECT_FALSE(buildingFootprintContains(math::ivec2(5, 5), 3, 3, math::ivec2(3, 5)));
+    EXPECT_TRUE(buildingFootprintOverlaps(math::ivec2(5, 5), 3, 3, math::ivec2(7, 7), 3, 3));
+    EXPECT_FALSE(buildingFootprintOverlaps(math::ivec2(5, 5), 3, 3, math::ivec2(8, 8), 3, 3));
+}
+
+TEST(MapAuthoringTest, SetTilePlacesBuilding3dOnOrigin)
+{
+    LayerModel layer(nullptr);
+    auto house = makeBuilding3dAsset(kHouseUuid, "Home", 3, 3);
+
+    ASSERT_TRUE(MapAuthoring::setTile(layer, math::ivec2(5, 5), house.get()));
+
+    const std::vector<GameObject*> origin = layer.getObjectsAt(math::ivec2(5, 5));
+    ASSERT_EQ(origin.size(), 1u);
+    EXPECT_EQ(origin[0]->getType(), GameObjectTypes::Buildings);
+    EXPECT_EQ(origin[0]->getAssetUuid(), house->uuid());
+    const BaseData::GameObject data = origin[0]->getData();
+    ASSERT_TRUE(data.buildingData.has_value());
+    EXPECT_EQ(data.buildingData->footprintWidth, 3);
+    EXPECT_EQ(data.buildingData->footprintHeight, 3);
+
+    // Occupancy is by footprint, not by a per-cell object at every covered cell.
+    EXPECT_TRUE(layer.getObjectsAt(math::ivec2(4, 4)).empty());
+    EXPECT_TRUE(layer.getObjectsAt(math::ivec2(6, 6)).empty());
+
+    const QJsonObject dump = MapAuthoring::dumpLayer(layer);
+    ASSERT_EQ(dump["count"].toInt(), 1);
+    const QJsonObject obj = dump["objects"].toArray().at(0).toObject();
+    EXPECT_EQ(obj["footprintWidth"].toInt(), 3);
+    EXPECT_EQ(obj["footprintHeight"].toInt(), 3);
+}
+
+TEST(MapAuthoringTest, SetTileBuilding3dReplacesOverlappingFootprint)
+{
+    LayerModel layer(nullptr);
+    auto house = makeBuilding3dAsset(kHouseUuid, "Home", 3, 3);
+
+    ASSERT_TRUE(MapAuthoring::setTile(layer, math::ivec2(5, 5), house.get()));
+    ASSERT_TRUE(MapAuthoring::setTile(layer, math::ivec2(7, 7), house.get()));
+
+    int total = 0;
+    layer.iterate([&total](GameObject&) { ++total; });
+    EXPECT_EQ(total, 1);
+    EXPECT_TRUE(layer.getObjectsAt(math::ivec2(5, 5)).empty());
+    ASSERT_EQ(layer.getObjectsAt(math::ivec2(7, 7)).size(), 1u);
+
+    ASSERT_TRUE(MapAuthoring::setTile(layer, math::ivec2(20, 20), house.get()));
+    total = 0;
+    layer.iterate([&total](GameObject&) { ++total; });
+    EXPECT_EQ(total, 2);
+}
+
+TEST(MapAuthoringTest, EraseBuildingAtHitsAnyFootprintCell)
+{
+    LayerModel layer(nullptr);
+    auto house = makeBuilding3dAsset(kHouseUuid, "Home", 3, 3);
+
+    ASSERT_TRUE(MapAuthoring::setTile(layer, math::ivec2(5, 5), house.get()));
+    EXPECT_EQ(MapAuthoring::eraseBuildingAt(layer, math::ivec2(4, 6)), 1);
+    EXPECT_TRUE(layer.getObjectsAt(math::ivec2(5, 5)).empty());
+    EXPECT_EQ(MapAuthoring::eraseBuildingAt(layer, math::ivec2(4, 6)), 0);
+}
+
+TEST(MapAuthoringTest, FillRectRejectsBuilding3d)
+{
+    LayerModel layer(nullptr);
+    auto house = makeBuilding3dAsset(kHouseUuid, "Home", 3, 3);
+
+    EXPECT_EQ(MapAuthoring::fillRect(layer, math::ivec2(0, 0), math::ivec2(2, 2), house.get()), 0);
+    int total = 0;
+    layer.iterate([&total](GameObject&) { ++total; });
+    EXPECT_EQ(total, 0);
+}
+
+TEST(MapAuthoringTest, Building3dSaveLoadRoundTrip)
+{
+    MapModel map;
+    auto house = makeBuilding3dAsset(kHouseUuid, "Home", 3, 3);
+
+    ASSERT_TRUE(MapAuthoring::setTile(*map.layer(LayerTypes::GameplayInteractive), math::ivec2(5, 5), house.get()));
+    const QJsonObject before = MapAuthoring::dumpMap(map);
+
+    const std::filesystem::path tmpPath =
+        std::filesystem::temp_directory_path() / "map_authoring_building3d_roundtrip_test.json";
+    map.save(QString::fromStdString(tmpPath.string()));
+
+    MapModel loaded;
+    loaded.load(QString::fromStdString(tmpPath.string()));
+    const QJsonObject after = MapAuthoring::dumpMap(loaded);
+
+    EXPECT_EQ(QJsonDocument(before).toJson(QJsonDocument::Compact),
+              QJsonDocument(after).toJson(QJsonDocument::Compact));
+
+    const std::vector<GameObject*> origin =
+        loaded.layer(LayerTypes::GameplayInteractive)->getObjectsAt(math::ivec2(5, 5));
+    ASSERT_EQ(origin.size(), 1u);
+    EXPECT_EQ(origin[0]->getType(), GameObjectTypes::Buildings);
+    ASSERT_TRUE(origin[0]->getData().buildingData.has_value());
+    EXPECT_EQ(origin[0]->getData().buildingData->footprintWidth, 3);
+    EXPECT_EQ(origin[0]->getData().buildingData->footprintHeight, 3);
 
     std::filesystem::remove(tmpPath);
 }

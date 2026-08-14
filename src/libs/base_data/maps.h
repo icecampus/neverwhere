@@ -63,7 +63,10 @@ namespace BaseData
 
     struct BuildingData
     {
-    
+        int footprintWidth{1};
+        int footprintHeight{1};
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BuildingData, footprintWidth, footprintHeight);
     };
 
     // One fence piece (fence3d asset, FenceLandscape layer): a post (kind 0,
@@ -97,9 +100,6 @@ namespace BaseData
 
     void to_json(nlohmann::json& j, const ResourceData&);
     void from_json(const nlohmann::json&, ResourceData&);
-
-    void to_json(nlohmann::json& j, const BuildingData&);
-    void from_json(const nlohmann::json&, BuildingData&);
 
     void to_json(nlohmann::json& j, const LandscapeData& data);
     void from_json(const nlohmann::json& j, LandscapeData& data);

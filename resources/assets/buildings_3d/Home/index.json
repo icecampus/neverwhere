@@ -1,0 +1,18 @@
+{
+    "uuid": "5d46e934-edf2-4c27-81ac-bd6aad9900be",
+    "layerType": "GameplayInteractive",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "building3d": {
+        "model": "home.glb",
+        "albedo": "albedo.png",
+        "thumbnail": "thumbnail.png",
+        "footprintWidth": 3,
+        "footprintHeight": 3,
+        "heightScale": 96.0,
+        "yawDegrees": 180.0,
+        "scale": 1.0
+    }
+}

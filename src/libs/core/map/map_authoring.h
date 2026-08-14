@@ -23,12 +23,17 @@ class MapModel;
 struct MapAuthoring
 {
     // Replaces the cell content with a tile built from `asset`.
-    // `asset` must be an image asset; slice (landscape) assets are edited
-    // through applyLandscapeUpdates instead. Returns false on bad input.
+    // image → Tile2D; building3d → Buildings GameObject occupying the
+    // asset footprint (default 3x3, centered on `cell`). Slice (landscape)
+    // assets are edited through applyLandscapeUpdates. Returns false on bad input.
     static bool setTile(LayerModel& layer, const math::ivec2& cell, const Asset* asset);
 
     // Removes every object in the cell. Returns the number of removed objects.
     static int eraseTiles(LayerModel& layer, const math::ivec2& cell);
+
+    // Removes the building3d object whose footprint covers `cell` (origin
+    // may sit on a neighbour). Returns the number of removed objects.
+    static int eraseBuildingAt(LayerModel& layer, const math::ivec2& cell);
 
     // Fills the inclusive rect [from..to] with `asset` tiles (setTile each).
     // Returns the number of written cells.
