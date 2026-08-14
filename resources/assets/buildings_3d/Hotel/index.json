@@ -1,0 +1,18 @@
+{
+    "building3d": {
+        "albedo": "albedo.png",
+        "footprintHeight": 3,
+        "footprintWidth": 3,
+        "heightScale": 96.0,
+        "model": "hotel.glb",
+        "scale": 1.0,
+        "thumbnail": "thumbnail.png",
+        "yawDegrees": 90.0
+    },
+    "layerType": "GameplayInteractive",
+    "pivot": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "uuid": "5fe936fa-c1a1-4a5d-b5f4-442697c00467"
+}
