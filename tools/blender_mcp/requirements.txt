@@ -1,0 +1,8 @@
+# Official Blender Lab MCP server (stdio bridge to the Blender MCP add-on
+# socket on 127.0.0.1:9876 — Blender must be running with the "MCP" add-on
+# enabled). Pinned to the upstream repo, subdirectory mcp (package blmcp).
+#
+# mcp<2: the server imports mcp.server.fastmcp, removed in mcp SDK 2.0
+# (upstream declares `mcp[cli]>=1.2.0` with no upper bound).
+mcp[cli]>=1.2.0,<2.0
+blender-mcp @ git+https://projects.blender.org/lab/blender_mcp.git#subdirectory=mcp

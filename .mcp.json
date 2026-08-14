@@ -1,7 +1,15 @@
 {
   "mcpServers": {
     "blender": {
-      "url": "http://localhost:9876/sse"
+      "command": "/bin/sh",
+      "args": [
+        "tools/run_blender_mcp_server.sh"
+      ],
+      "cwd": ".",
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
     },
     "neverwhere-debug": {
       "command": "powershell",

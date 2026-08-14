@@ -35,6 +35,9 @@ tools/debug_mcp/.venv/
 # Editor MCP server venv (macOS)
 tools/editor_mcp/.venv/
 
+# Blender MCP server venv (macOS)
+tools/blender_mcp/.venv/
+
 # Shadertoy fetcher venv + persistent Chrome profile (Cloudflare clearance)
 tools/shadertoy/.venv/
 tools/shadertoy/.chrome-profile/
