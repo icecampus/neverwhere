@@ -7,25 +7,64 @@
 
 #include "assets_library/asset.h"
 #include "assets_library/assets/slice_asset.h"
+#include "assets_library/assets/building3d_asset.h"
 #include "game_objects/landscape.h"
 #include "game_objects/tile_2d.h"
+#include "game_objects/building.h"
+#include "map/building_footprint.h"
 #include "map/map_model.h"
 #include "topology/diamond_isometry.h"
 #include "topology/diamond_tiled_landscape.h"
 
 bool MapAuthoring::setTile(LayerModel& layer, const math::ivec2& cell, const Asset* asset)
 {
-    if (!asset || asset->type != AssetTypes::image)
-        return false;
+    if (!asset) return false;
 
-    layer.removeAll(cell);
+    if (asset->type == AssetTypes::image)
+    {
+        layer.removeAll(cell);
 
-    auto tile = std::make_unique<Tile2D>();
-    tile->setName(asset->name());
-    tile->setPosition(cell);
-    tile->setAssetUiid(asset->uuid());
-    layer.addGameObject(std::move(tile));
-    return true;
+        auto tile = std::make_unique<Tile2D>();
+        tile->setName(asset->name());
+        tile->setPosition(cell);
+        tile->setAssetUiid(asset->uuid());
+        layer.addGameObject(std::move(tile));
+        return true;
+    }
+
+    if (asset->type == AssetTypes::building3d)
+    {
+        const auto* buildingAsset = dynamic_cast<const Building3dAsset*>(asset);
+        const int fpW = buildingAsset ? buildingAsset->footprintWidth() : 3;
+        const int fpH = buildingAsset ? buildingAsset->footprintHeight() : 3;
+
+        std::vector<GameObject*> overlapping;
+        layer.iterate([&](GameObject& obj)
+        {
+            if (obj.getType() != GameObjectTypes::Buildings) return;
+            const BaseData::GameObject data = obj.getData();
+            const int w = data.buildingData ? data.buildingData->footprintWidth : 1;
+            const int h = data.buildingData ? data.buildingData->footprintHeight : 1;
+            if (buildingFootprintOverlaps(data.position, w, h, cell, fpW, fpH))
+            {
+                overlapping.push_back(&obj);
+            }
+        });
+        for (GameObject* obj : overlapping)
+        {
+            layer.removeGameObject(obj);
+        }
+
+        auto building = std::make_unique<Building>();
+        building->setName(asset->name());
+        building->setPosition(cell);
+        building->setAssetUiid(asset->uuid());
+        building->setFootprint(fpW, fpH);
+        layer.addGameObject(std::move(building));
+        return true;
+    }
+
+    return false;
 }
 
 int MapAuthoring::eraseTiles(LayerModel& layer, const math::ivec2& cell)
@@ -33,6 +72,27 @@ int MapAuthoring::eraseTiles(LayerModel& layer, const math::ivec2& cell)
     const int removed = static_cast<int>(layer.getObjectsAt(cell).size());
     layer.removeAll(cell);
     return removed;
+}
+
+int MapAuthoring::eraseBuildingAt(LayerModel& layer, const math::ivec2& cell)
+{
+    std::vector<GameObject*> hits;
+    layer.iterate([&](GameObject& obj)
+    {
+        if (obj.getType() != GameObjectTypes::Buildings) return;
+        const BaseData::GameObject data = obj.getData();
+        const int w = data.buildingData ? data.buildingData->footprintWidth : 1;
+        const int h = data.buildingData ? data.buildingData->footprintHeight : 1;
+        if (buildingFootprintContains(data.position, w, h, cell))
+        {
+            hits.push_back(&obj);
+        }
+    });
+    for (GameObject* obj : hits)
+    {
+        layer.removeGameObject(obj);
+    }
+    return static_cast<int>(hits.size());
 }
 
 int MapAuthoring::fillRect(LayerModel& layer, const math::ivec2& from, const math::ivec2& to, const Asset* asset)
@@ -118,6 +178,14 @@ QJsonObject MapAuthoring::dumpLayer(LayerModel& layer)
         if (const Landscape* landObject = dynamic_cast<const Landscape*>(&gameObject))
         {
             o["tileIndex"] = static_cast<qint64>(landObject->getTileIndex());
+        }
+        if (gameObject.getType() == GameObjectTypes::Buildings)
+        {
+            const BaseData::GameObject data = gameObject.getData();
+            const int w = data.buildingData ? data.buildingData->footprintWidth : 1;
+            const int h = data.buildingData ? data.buildingData->footprintHeight : 1;
+            o["footprintWidth"] = w;
+            o["footprintHeight"] = h;
         }
         objects.append(o);
     });

@@ -19,7 +19,8 @@ namespace AssetTypes
         stone3d,
         texture2d,
         tech3d,
-        mask3d
+        mask3d,
+        building3d
     };
     Q_ENUM_NS(Type);
 }
@@ -484,6 +485,23 @@ namespace BaseData
         }
     };
 
+    // Building3D: a placed GLB mesh occupying a cell footprint (default 3x3).
+    // Discrete GameObject (Buildings), not a landscape node brush. Lives on
+    // GameplayInteractive; the renderer instances the mesh at the origin cell.
+    struct Building3dAssetData
+    {
+        std::string thumbnail;
+        std::string model;   // .glb, relative to the bundle root
+        std::string albedo;  // optional sidecar albedo (PNG/JPEG); empty = white
+        int footprintWidth{3};
+        int footprintHeight{3};
+        float heightScale{96.0f}; // field px per 1.0 world height (same as cliffs)
+        float yawDegrees{0.0f};   // yaw around +Y after fit (Home faces the camera at 180)
+
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Building3dAssetData,
+            thumbnail, model, albedo, footprintWidth, footprintHeight, heightScale, yawDegrees);
+    };
+
     //Asset
     struct AssetData
     {
@@ -502,6 +520,7 @@ namespace BaseData
         std::optional<Texture2dAssetData> texture2dData;
         std::optional<Tech3dAssetData> tech3dData;
         std::optional<Mask3dAssetData> mask3dData;
+        std::optional<Building3dAssetData> building3dData;
 
         static AssetData load(const std::filesystem::path& assetsPath);
         static void save(const AssetData& assetData, const std::filesystem::path& assetsPath);

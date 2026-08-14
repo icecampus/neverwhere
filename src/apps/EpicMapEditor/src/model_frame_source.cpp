@@ -279,6 +279,7 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
     outFrame.techTiles.clear();
     outFrame.maskTiles.clear();
     outFrame.sprites.clear();
+    outFrame.buildings.clear();
 
     if (!m_mapModel) return;
 
@@ -407,6 +408,13 @@ void ModelFrameSource::buildWorldFrame(render_core::WorldFrame& outFrame) {
         layer->iterate([&outFrame](GameObject& obj) {
             const BaseData::GameObject data = obj.getData();
             if (data.type == GameObjectTypes::Landscape) return;
+            if (data.type == GameObjectTypes::Buildings) {
+                render_core::BuildingInstance b;
+                b.cell = data.position;
+                b.assetUuid = boost::uuids::to_string(data.assetUuid);
+                outFrame.buildings.push_back(std::move(b));
+                return;
+            }
 
             render_core::SpriteInstance s;
             s.cell = data.position;
@@ -429,6 +437,7 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
     for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.maskTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
+    for (const auto& b : frame.buildings) uniqueAssets.insert(b.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
         Asset* asset = m_assetsLibrary->getAsset(QUuid::fromString(QString::fromStdString(uuid)));
@@ -495,6 +504,18 @@ void ModelFrameSource::ensureFrameAssets(const render_core::WorldFrame& frame, r
         }
         if (data.imageData) {
             renderer.ensureSpriteImage(uuid, data.root() / data.imageData->imageFilename, data.imageData->width, data.pivot);
+        }
+        if (data.building3dData) {
+            render_core::BuildingParams params;
+            params.modelPath = data.root() / data.building3dData->model;
+            if (!data.building3dData->albedo.empty()) {
+                params.albedoPath = data.root() / data.building3dData->albedo;
+            }
+            params.footprintWidth = data.building3dData->footprintWidth;
+            params.footprintHeight = data.building3dData->footprintHeight;
+            params.heightScale = data.building3dData->heightScale;
+            params.yawDegrees = data.building3dData->yawDegrees;
+            renderer.ensureBuildingAsset(uuid, params);
         }
     }
 }

@@ -29,7 +29,7 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
 
         AssetData asset = j.get<AssetData>();
         asset.indexPath = entry.path();
-        if (!asset.slice && !asset.image && !asset.shape3d && !asset.cliff3d && !asset.cyclopean3d && !asset.stone3d && !asset.texture2d && !asset.tech3d && !asset.mask3d) continue; // nothing renderable
+        if (!asset.slice && !asset.image && !asset.shape3d && !asset.cliff3d && !asset.cyclopean3d && !asset.stone3d && !asset.texture2d && !asset.tech3d && !asset.mask3d && !asset.building3d) continue; // nothing renderable
 
         AssetIndexEntry idx;
         idx.uuid = asset.uuid;
@@ -106,6 +106,17 @@ AssetIndex AssetIndex::load(const fs::path& assetsRoot) {
             idx.mask = *asset.mask3d;
             if (!asset.mask3d->materialSet.empty()) {
                 idx.materialPrefix = asset.root() / asset.mask3d->materialSet;
+            }
+        }
+
+        if (asset.building3d) {
+            idx.building3d = true;
+            idx.building = *asset.building3d;
+            if (!asset.building3d->model.empty()) {
+                idx.modelPath = asset.root() / asset.building3d->model;
+            }
+            if (!asset.building3d->albedo.empty()) {
+                idx.albedoPath = asset.root() / asset.building3d->albedo;
             }
         }
 

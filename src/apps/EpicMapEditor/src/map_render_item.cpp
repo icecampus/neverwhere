@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 
@@ -107,6 +108,7 @@ public:
         m_cameraOffset = {mapItem->cameraX(), mapItem->cameraY()};
         m_cameraZoom = mapItem->cameraZoom();
         m_cursorCell = mapItem->cursorCell();
+        m_cursorFootprint = mapItem->cursorFootprint();
         m_showGrid = mapItem->showGrid();
         m_frameSource = mapItem->frameSource();
 
@@ -168,6 +170,7 @@ public:
 
         m_frame.showGrid = m_showGrid;
         m_frame.cursorCell = glm::ivec2(m_cursorCell.x(), m_cursorCell.y());
+        m_frame.cursorFootprint = glm::ivec2(std::max(1, m_cursorFootprint.x()), std::max(1, m_cursorFootprint.y()));
 
         if (m_frameSource) {
             m_frameSource->ensureFrameAssets(m_frame, m_worldRenderer);
@@ -337,6 +340,7 @@ private:
     glm::vec2 m_cameraOffset{0.0f, 0.0f};
     float m_cameraZoom = 1.0f;
     QPoint m_cursorCell{0, 0};
+    QPoint m_cursorFootprint{1, 1};
     bool m_showGrid = true;
     float m_logicalWidth = 0.0f;
     float m_logicalHeight = 0.0f;
@@ -396,6 +400,14 @@ void MapRenderItem::setCursorCell(const QPoint& cell) {
     if (m_cursorCell == cell) return;
     m_cursorCell = cell;
     emit cursorCellChanged();
+    update();
+}
+
+void MapRenderItem::setCursorFootprint(const QPoint& size) {
+    const QPoint clamped(std::max(1, size.x()), std::max(1, size.y()));
+    if (m_cursorFootprint == clamped) return;
+    m_cursorFootprint = clamped;
+    emit cursorFootprintChanged();
     update();
 }
 

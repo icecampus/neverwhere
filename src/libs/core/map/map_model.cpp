@@ -47,7 +47,7 @@ void LayerModel::load(const BaseData::Layer& layer)
             addGameObject(std::move(go));
             
         }
-        if (gameObject.buildingData)
+        if (gameObject.type == GameObjectTypes::Buildings)
         {
             auto go = std::make_unique<Building>(this);
             go->load(gameObject);
@@ -198,6 +198,33 @@ void LayerModel::removeAll(const math::ivec2& cellPosition)
         _gameObjects.erase(_gameObjects.begin() + rowIndex);
         endRemoveRows();
     }
+}
+
+void LayerModel::removeGameObject(GameObject* obj)
+{
+    if (!obj) return;
+
+    auto it = std::find_if(_gameObjects.begin(), _gameObjects.end(),
+        [obj](const std::unique_ptr<GameObject>& p) { return p.get() == obj; });
+    if (it == _gameObjects.end()) return;
+
+    const int rowIndex = static_cast<int>(std::distance(_gameObjects.begin(), it));
+    const math::ivec2 cellPosition = obj->getPosition();
+
+    beginRemoveRows(QModelIndex(), rowIndex, rowIndex);
+
+    auto posIt = _positionMap.find(cellPosition);
+    if (posIt != _positionMap.end()) {
+        auto& vec = posIt->second;
+        vec.erase(std::remove(vec.begin(), vec.end(), obj), vec.end());
+        if (vec.empty()) {
+            _positionMap.erase(posIt);
+        }
+    }
+    _objectOldPositions.erase(obj);
+    _gameObjects.erase(it);
+
+    endRemoveRows();
 }
 
 GameObject* LayerModel::getGameObject(int index) const 

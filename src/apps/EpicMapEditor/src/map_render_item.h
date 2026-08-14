@@ -16,6 +16,7 @@ class MapRenderItem : public QQuickFramebufferObject
     Q_PROPERTY(float cameraY READ cameraY WRITE setCameraY NOTIFY cameraYChanged)
     Q_PROPERTY(float cameraZoom READ cameraZoom WRITE setCameraZoom NOTIFY cameraZoomChanged)
     Q_PROPERTY(QPoint cursorCell READ cursorCell WRITE setCursorCell NOTIFY cursorCellChanged)
+    Q_PROPERTY(QPoint cursorFootprint READ cursorFootprint WRITE setCursorFootprint NOTIFY cursorFootprintChanged)
     Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY showGridChanged)
 
 public:
@@ -38,6 +39,9 @@ public:
     QPoint cursorCell() const { return m_cursorCell; }
     void setCursorCell(const QPoint& cell);
 
+    QPoint cursorFootprint() const { return m_cursorFootprint; }
+    void setCursorFootprint(const QPoint& size);
+
     bool showGrid() const { return m_showGrid; }
     void setShowGrid(bool show);
 
@@ -47,6 +51,7 @@ signals:
     void cameraYChanged();
     void cameraZoomChanged();
     void cursorCellChanged();
+    void cursorFootprintChanged();
     void showGridChanged();
 
 private:
@@ -55,6 +60,7 @@ private:
     float m_cameraY = 0.0f;
     float m_cameraZoom = 1.0f;
     QPoint m_cursorCell{0, 0};
+    QPoint m_cursorFootprint{1, 1};
     bool m_showGrid = true;
 };
 

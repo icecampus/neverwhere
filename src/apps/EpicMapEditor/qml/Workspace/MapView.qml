@@ -70,6 +70,12 @@ Rectangle
         cameraZoom: isoView.cameraZoom
 
         cursorCell: Qt.point(hoveredCell.x, hoveredCell.y)
+        cursorFootprint: {
+            var a = toolsSelector.currentAsset
+            if (a && a.isBuilding3d)
+                return Qt.point(a.footprintWidth, a.footprintHeight)
+            return Qt.point(1, 1)
+        }
         showGrid: true
     }
 

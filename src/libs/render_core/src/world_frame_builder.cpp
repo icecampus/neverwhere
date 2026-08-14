@@ -14,7 +14,9 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     outFrame.stoneTiles.clear();
     outFrame.textureTiles.clear();
     outFrame.techTiles.clear();
+    outFrame.maskTiles.clear();
     outFrame.sprites.clear();
+    outFrame.buildings.clear();
 
     for (const auto& obj : map.layer(game_data::LayerType::BaseLandscape)) {
         if (obj.type != game_data::GameObjectType::Landscape) continue;
@@ -119,6 +121,13 @@ void collectWorldFrame(const game_data::Map& map, WorldFrame& outFrame) {
     for (const game_data::LayerType layerType : {game_data::LayerType::Decoration, game_data::LayerType::GameplayInteractive}) {
         for (const auto& obj : map.layer(layerType)) {
             if (obj.type == game_data::GameObjectType::Landscape) continue;
+            if (obj.type == game_data::GameObjectType::Buildings) {
+                BuildingInstance b;
+                b.cell = obj.position;
+                b.assetUuid = obj.assetUuid;
+                outFrame.buildings.push_back(std::move(b));
+                continue;
+            }
 
             SpriteInstance s;
             s.cell = obj.position;
@@ -386,6 +395,7 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
     for (const auto& t : frame.techTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& t : frame.maskTiles) uniqueAssets.insert(t.assetUuid);
     for (const auto& s : frame.sprites) uniqueAssets.insert(s.assetUuid);
+    for (const auto& b : frame.buildings) uniqueAssets.insert(b.assetUuid);
 
     for (const auto& uuid : uniqueAssets) {
         const game_data::AssetIndexEntry* entry = assetIndex.find(uuid);
@@ -427,6 +437,16 @@ void ensureWorldAssets(const game_data::AssetIndex& assetIndex, const WorldFrame
         }
         if (entry->isImage()) {
             renderer.ensureSpriteImage(uuid, entry->imagePath, entry->widthCells, entry->pivot);
+        }
+        if (entry->isBuilding3d()) {
+            BuildingParams params;
+            params.modelPath = entry->modelPath;
+            params.albedoPath = entry->albedoPath;
+            params.footprintWidth = entry->building.footprintWidth;
+            params.footprintHeight = entry->building.footprintHeight;
+            params.heightScale = entry->building.heightScale;
+            params.yawDegrees = entry->building.yawDegrees;
+            renderer.ensureBuildingAsset(uuid, params);
         }
     }
 }

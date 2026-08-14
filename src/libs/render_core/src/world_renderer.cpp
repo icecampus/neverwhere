@@ -23,6 +23,7 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
     landscapeRenderer.init(depthFormat);
     cliffRenderer.init(depthFormat);
     cyclopeanRenderer.init(depthFormat);
+    buildingRenderer.init(depthFormat);
     spriteRenderer.init(depthFormat);
     overlayRenderer.init(depthFormat);
 
@@ -55,6 +56,7 @@ void WorldRenderer::init(sg_pixel_format depthFormat) {
 void WorldRenderer::shutdown() {
     overlayRenderer.shutdown();
     spriteRenderer.shutdown();
+    buildingRenderer.shutdown();
     cyclopeanRenderer.shutdown();
     cliffRenderer.shutdown();
     landscapeRenderer.shutdown();
@@ -113,6 +115,10 @@ void WorldRenderer::ensureTextureAsset(const std::string& assetUuid, const std::
 
 void WorldRenderer::ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot) {
     spriteRenderer.ensureImage(assetUuid, imagePath, widthCells, pivot);
+}
+
+void WorldRenderer::ensureBuildingAsset(const std::string& assetUuid, const BuildingParams& params) {
+    buildingRenderer.ensureBuildingAsset(assetUuid, params);
 }
 
 void WorldRenderer::prepare(const WorldFrame& frame, double /*nowSec*/) {
@@ -273,6 +279,7 @@ void WorldRenderer::render(
     scratchCliffStoneTiles.insert(scratchCliffStoneTiles.end(), frame.maskTiles.begin(), frame.maskTiles.end());
     cliffRenderer.render(scratchCliffStoneTiles, iso, camera, viewWidth, viewHeight, nowSec, cliffStitch);
     cyclopeanRenderer.render(frame.cyclopeanTiles, iso, camera, viewWidth, viewHeight, nowSec);
+    buildingRenderer.render(frame.buildings, iso, camera, viewWidth, viewHeight, stitch);
 
     // Texture-2D ground cover: drawn AFTER the 3D passes so it alpha-blends
     // with what is actually under it (mask3d beach, flat ground, water)
@@ -338,9 +345,17 @@ void WorldRenderer::render(
     if (frame.cursorCell) {
         const glm::vec2 cellSize = iso.dims.cellSize();
         const glm::vec2 halfSizeScreen = cellSize * 0.5f * camera.zoom;
-        const glm::vec2 screenCenter = camera.worldToScreen(iso.mapToField(*frame.cursorCell));
+        const int fpW = std::max(1, frame.cursorFootprint.x);
+        const int fpH = std::max(1, frame.cursorFootprint.y);
+        const int x0 = frame.cursorCell->x - (fpW - 1) / 2;
+        const int y0 = frame.cursorCell->y - (fpH - 1) / 2;
         // Depth is unused on the top channel (no test, no write).
-        appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.cursorColor, 0.0f, 0.0f);
+        for (int y = 0; y < fpH; ++y) {
+            for (int x = 0; x < fpW; ++x) {
+                const glm::vec2 screenCenter = camera.worldToScreen(iso.mapToField({x0 + x, y0 + y}));
+                appendCellDiamond(scratchLines, screenCenter, halfSizeScreen, frame.cursorColor, 0.0f, 0.0f);
+            }
+        }
     }
     overlayRenderer.renderTop(scratchLines, viewWidth, viewHeight);
 }

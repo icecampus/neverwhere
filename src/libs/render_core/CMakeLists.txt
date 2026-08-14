@@ -1,4 +1,5 @@
 find_package(glm CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # Sokol headers (from vcpkg, header-only)
 find_path(SOKOL_INCLUDE_DIRS "sokol_gfx.h")
@@ -30,6 +31,10 @@ nw_add_lib_sources(
         src/cliff_renderer.cpp
         include/render_core/cyclopean_renderer.h
         src/cyclopean_renderer.cpp
+        include/render_core/gltf_mesh.h
+        src/gltf_mesh.cpp
+        include/render_core/building_renderer.h
+        src/building_renderer.cpp
         src/atlas_tile_types.h
         include/render_core/sprite_renderer.h
         src/sprite_renderer.cpp
@@ -45,6 +50,7 @@ nw_add_lib_sources(
         src/scene_stitch.cpp
     LIBS
         glm::glm-header-only
+        nlohmann_json::nlohmann_json
         topology_core
         landscape_core
         landscape_mesh

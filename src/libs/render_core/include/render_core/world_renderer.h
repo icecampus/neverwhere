@@ -9,6 +9,7 @@
 #include "render_core/landscape_renderer.h"
 #include "render_core/cliff_renderer.h"
 #include "render_core/cyclopean_renderer.h"
+#include "render_core/building_renderer.h"
 #include "render_core/overlay_renderer.h"
 #include "render_core/sprite_renderer.h"
 #include "render_core/scene_stitch.h"
@@ -30,11 +31,13 @@ struct WorldFrame {
     std::vector<LandscapeTile> techTiles;   // TechLandscape layer (tech3d: TechnicalGrass ridge/valley heightfield, shares the cliff pass)
     std::vector<LandscapeTile> maskTiles;   // MaskLandscape layer (mask3d: node-mask plate with a sloped skirt + PBR-lite material, shares the cliff pass)
     std::vector<SpriteInstance> sprites;
+    std::vector<BuildingInstance> buildings; // building3d GLB instances (GameplayInteractive)
 
     bool showGrid = true;
     glm::vec4 gridColor{0.5f, 0.5f, 0.5f, 1.0f}; // QML "grey"
 
     std::optional<glm::ivec2> cursorCell;
+    glm::ivec2 cursorFootprint{1, 1}; // cell cursor size (building3d paints a 3x3, etc.)
     glm::vec4 cursorColor{1.0f, 0.0f, 0.0f, 1.0f}; // QML "red"
 };
 
@@ -69,6 +72,7 @@ public:
     void ensureMaskAsset(const std::string& assetUuid, const CliffParams& params);
     void ensureTextureAsset(const std::string& assetUuid, const std::filesystem::path& texturePath, float tilingRepeats);
     void ensureSpriteImage(const std::string& assetUuid, const std::filesystem::path& imagePath, float widthCells, const glm::vec2& pivot);
+    void ensureBuildingAsset(const std::string& assetUuid, const BuildingParams& params);
 
     // Scene stitching knobs (playground defaults). C++ API only for now (no
     // QML); edits apply from the next prepare().
@@ -98,6 +102,7 @@ private:
     LandscapeRenderer landscapeRenderer;
     CliffRenderer cliffRenderer;
     CyclopeanRenderer cyclopeanRenderer;
+    BuildingRenderer buildingRenderer;
     SpriteRenderer spriteRenderer;
     OverlayRenderer overlayRenderer;
 
