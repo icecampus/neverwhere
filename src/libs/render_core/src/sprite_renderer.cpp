@@ -1,12 +1,14 @@
 #include "render_core/sprite_renderer.h"
 
+#include "render_core/depth_levels.h"
+
 #include <algorithm>
 
 namespace render_core {
 
 static const char* vs_src_glsl = R"(
 #version 330
-layout(location=0) in vec2 pos;
+layout(location=0) in vec3 pos;
 layout(location=1) in vec2 uv0;
 layout(location=2) in vec4 color0;
 out vec2 v_uv;
@@ -17,7 +19,7 @@ void main() {
         (pos.x / view_size.x) * 2.0 - 1.0,
         1.0 - (pos.y / view_size.y) * 2.0
     );
-    gl_Position = vec4(clip_pos, 0.0, 1.0);
+    gl_Position = vec4(clip_pos, pos.z, 1.0);
     v_uv = uv0;
     v_color = color0;
 }
@@ -38,14 +40,14 @@ void main() {
 // Minimal HLSL for D3D11 backend
 static const char* vs_src_hlsl = R"(
 cbuffer vs_params: register(b0) { float2 view_size; };
-struct VSIn { float2 pos: TEXCOORD0; float2 uv0: TEXCOORD1; float4 color0: TEXCOORD2; };
+struct VSIn { float3 pos: TEXCOORD0; float2 uv0: TEXCOORD1; float4 color0: TEXCOORD2; };
 struct VSOut { float4 pos: SV_Position; float2 uv0: TEXCOORD0; float4 color0: TEXCOORD1; };
 VSOut main(VSIn inp) {
     VSOut o;
     float2 clip;
     clip.x = (inp.pos.x / view_size.x) * 2.0 - 1.0;
     clip.y = 1.0 - (inp.pos.y / view_size.y) * 2.0;
-    o.pos = float4(clip, 0.0, 1.0);
+    o.pos = float4(clip, inp.pos.z, 1.0);
     o.uv0 = inp.uv0;
     o.color0 = inp.color0;
     return o;
@@ -73,7 +75,7 @@ struct VsParams {
 };
 
 struct VSIn {
-    float2 pos [[attribute(0)]];
+    float3 pos [[attribute(0)]];
     float2 uv0 [[attribute(1)]];
     float4 color0 [[attribute(2)]];
 };
@@ -90,7 +92,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
         (in.pos.x / params.view_size.x) * 2.0 - 1.0,
         1.0 - (in.pos.y / params.view_size.y) * 2.0
     );
-    o.pos = float4(clip, 0.0, 1.0);
+    o.pos = float4(clip, in.pos.z, 1.0);
     o.uv0 = in.uv0;
     o.color0 = in.color0;
     return o;
@@ -198,7 +200,7 @@ void SpriteRenderer::ensurePipeline() {
 
     sg_pipeline_desc pip_desc = {};
     pip_desc.shader = shd;
-    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2; // pos
+    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3; // pos (x,y screen px + baked z)
     pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2; // uv
     pip_desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4; // color
     pip_desc.colors[0].blend.enabled = true;
@@ -210,9 +212,14 @@ void SpriteRenderer::ensurePipeline() {
     pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     // The depth format must match the pass we render into (sokol_app swapchain
-    // has depth-stencil; a Qt FBO wrapper has none). We don't depth-test either way.
+    // has depth-stencil; the editor FBO pass carries its own depth-stencil
+    // image). Sprites test the depth published by the 3D passes (their baked z
+    // follows the shared depth_levels.h convention) but write none of their
+    // own: they are the last world pass, so the test alone arbitrates both
+    // directions, sprite-vs-sprite stays painter-ordered without z-fighting,
+    // and the water-surface pass keeps reading the surface underneath.
     pip_desc.depth.pixel_format = depthFormat;
-    pip_desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     pip_desc.depth.write_enabled = false;
     pip_desc.label = "sprite-pipeline";
     pip = sg_make_pipeline(&pip_desc);
@@ -277,6 +284,25 @@ void SpriteRenderer::render(
 
     const glm::vec2 cellSize = iso.dims.cellSize();
 
+    // Per-frame z anchor — the same constant the grid/building/fence passes
+    // use (camera-centre anchored; this vertex stream is rebuilt every frame,
+    // so a camera-derived anchor is correct here).
+    const float zFar = camera.screenToWorld({viewWidth * 0.5f, viewHeight * 0.5f}).y + kZFarOffset;
+
+    // Clip z of a quad vertex at screen (sx, sy): the sprite is a vertical
+    // plane standing on its baseline (the image's bottom edge), so the vertex
+    // depth follows the shared depth-levels formula — ground-y of the baseline
+    // point below the vertex plus its lift in field px (the top of the plane
+    // is closer than its feet, exactly like a real 3D wall). The formula is
+    // affine in screen coords, so vertex interpolation yields the exact
+    // per-fragment z without perspective tricks.
+    const float invZoom = (camera.zoom > 0.0f) ? (1.0f / camera.zoom) : 0.0f;
+    auto cornerZ = [&](float sx, float sy, float baseScreenY) {
+        const float anchorY = camera.screenToWorld({sx, baseScreenY}).y;
+        const float liftPx = (baseScreenY - sy) * invZoom;
+        return levelGroundZ(liftedGroundY(anchorY, liftPx), zFar) - kSpriteZBias;
+    };
+
     for (auto& [uuid, group] : groups) {
         auto it = sprites.find(uuid);
         if (it == sprites.end() || !it->second.texture.valid()) {
@@ -310,14 +336,20 @@ void SpriteRenderer::render(
 
             const float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
 
-            // 2 triangles (TL, TR, BL) (BL, TR, BR)
-            scratchVerts.push_back({{tl.x, tl.y}, {uv.uv0.x, uv.uv0.y}, {r, g, b, a}});
-            scratchVerts.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
-            scratchVerts.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
+            // Ground baseline = the image's bottom edge (br.y).
+            const float zTL = cornerZ(tl.x, tl.y, br.y);
+            const float zTR = cornerZ(br.x, tl.y, br.y);
+            const float zBL = cornerZ(tl.x, br.y, br.y);
+            const float zBR = cornerZ(br.x, br.y, br.y);
 
-            scratchVerts.push_back({{tl.x, br.y}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
-            scratchVerts.push_back({{br.x, tl.y}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
-            scratchVerts.push_back({{br.x, br.y}, {uv.uv1.x, uv.uv1.y}, {r, g, b, a}});
+            // 2 triangles (TL, TR, BL) (BL, TR, BR)
+            scratchVerts.push_back({{tl.x, tl.y, zTL}, {uv.uv0.x, uv.uv0.y}, {r, g, b, a}});
+            scratchVerts.push_back({{br.x, tl.y, zTR}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
+            scratchVerts.push_back({{tl.x, br.y, zBL}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
+
+            scratchVerts.push_back({{tl.x, br.y, zBL}, {uv.uv0.x, uv.uv1.y}, {r, g, b, a}});
+            scratchVerts.push_back({{br.x, tl.y, zTR}, {uv.uv1.x, uv.uv0.y}, {r, g, b, a}});
+            scratchVerts.push_back({{br.x, br.y, zBR}, {uv.uv1.x, uv.uv1.y}, {r, g, b, a}});
         }
 
         scratchDraws.push_back({&sprite, baseVertex, (int)scratchVerts.size() - baseVertex});

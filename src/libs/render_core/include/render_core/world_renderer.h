@@ -57,8 +57,9 @@ struct WorldFrame {
 // base slabs, the underwater foot of a tech shoreline), raised landscape (cliff
 // walls + lifted tops), cliff3d meshes, stone3d+tech3d meshes (same cliff
 // pass), cyclopean3d meshes, fence3d piece meshes (+ the tool's ghost preview
-// on top), texture2d cover, Tile2D sprites (painter-ordered, no depth test),
-// and finally the cell cursor overlay on top.
+// on top), texture2d cover, Tile2D sprites (vertical planes testing the
+// published depth, LESS_EQUAL without depth write, painter order between
+// themselves), and finally the cell cursor overlay on top.
 //
 // Scene stitching (HighgroundWithEffects port): the ground and the highground
 // share one sun/tone block, the ground darkens around the highground

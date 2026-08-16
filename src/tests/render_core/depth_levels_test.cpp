@@ -92,4 +92,65 @@ TEST(DepthLevels, TextureCoverAboveBeachBelowRaised) {
     EXPECT_LT(zStone, zTexture);
 }
 
+TEST(DepthLevels, SpriteBaselineSitsBetweenGridAndGround) {
+    // Sprite bias sandwich: a sprite's ground baseline must keep covering the
+    // co-planar grid lines (kSpriteZBias > kGridZBias) while sitting on the
+    // ground plane itself.
+    EXPECT_GT(render_core::kSpriteZBias, render_core::kGridZBias);
+    const float groundY = 777.0f;
+    const float zFar = zFarFor(groundY);
+    const float zGround = render_core::levelGroundZ(render_core::liftedGroundY(groundY, 0.0f), zFar);
+    const float zGrid = zGround - render_core::kGridZBias;
+    const float zSprite = zGround - render_core::kSpriteZBias;
+    EXPECT_LT(zSprite, zGrid);
+    EXPECT_LT(zGrid, zGround);
+}
+
+TEST(DepthLevels, SpriteWallMatchesReal3dWallDepth) {
+    // A sprite is a vertical plane on its baseline row B: its fragment at
+    // screen row R carries the same baked depth as a real 3D vertex of the
+    // matching height standing at B — that is what makes sprites interleave
+    // with the depth-writing 3D passes per-pixel.
+    const float baseRow = 1000.0f;
+    const float worldY = kLevelHeight; // fragment height (world units)
+    const float zFar = zFarFor(baseRow);
+    const float zSpriteFrag = render_core::levelGroundZ(
+        render_core::liftedGroundY(baseRow, worldY * kHeightScale), zFar) - render_core::kSpriteZBias;
+    const float z3dFrag = zAtRow(baseRow - worldY * kHeightScale, worldY, zFar);
+    EXPECT_FLOAT_EQ(zSpriteFrag, z3dFrag - render_core::kSpriteZBias);
+}
+
+TEST(DepthLevels, SpriteBeatsFarther3dAndLosesToNearer3d) {
+    // The core 2D<->3D contract on a shared screen row R: a sprite standing
+    // at baseline row B loses to 3D geometry in front of it (larger ground-y)
+    // and wins against 3D geometry behind it — painter order alone could
+    // never express this.
+    const float baseRow = 1000.0f;                    // sprite baseline (screen row of its feet)
+    const float worldY = kLevelHeight;                // sprite fragment height
+    const float row = baseRow - worldY * kHeightScale; // screen row of the fragment
+    const float zFar = zFarFor(baseRow);
+    const float zSprite = zAtRow(row, worldY, zFar) - render_core::kSpriteZBias;
+
+    // 3D fragment on the same row, standing 30 field px IN FRONT of the sprite
+    // (taller lift to reach the same row from a nearer ground row).
+    const float z3dNear = zAtRow(row, worldY + 30.0f / kHeightScale, zFar);
+    // 3D fragment on the same row, standing 30 field px BEHIND the sprite.
+    const float z3dFar = zAtRow(row, worldY - 30.0f / kHeightScale, zFar);
+
+    EXPECT_LT(z3dNear, zSprite);
+    EXPECT_LT(zSprite, z3dFar);
+}
+
+TEST(DepthLevels, SpriteTopIsCloserThanItsFeet) {
+    // Like a real wall: the higher a fragment on the sprite plane, the closer
+    // it is (its screen row belongs to ground farther back).
+    const float baseRow = 1200.0f;
+    const float zFar = zFarFor(baseRow);
+    const float zFeet = render_core::levelGroundZ(render_core::liftedGroundY(baseRow, 0.0f), zFar)
+        - render_core::kSpriteZBias;
+    const float zTop = render_core::levelGroundZ(
+        render_core::liftedGroundY(baseRow, kLevelHeight * kHeightScale), zFar) - render_core::kSpriteZBias;
+    EXPECT_LT(zTop, zFeet);
+}
+
 } // namespace

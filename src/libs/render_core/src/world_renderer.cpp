@@ -310,7 +310,8 @@ void WorldRenderer::render(
     // loses to them and reads as "under water". The texture cover publishes
     // no depth, so the grid stays visible over it. The lines still write
     // depth so the water-surface pass keeps discarding their pixels.
-    // Sprites are painter-ordered (no depth test) and are not affected.
+    // Sprites render after the grid and depth-test it (their kSpriteZBias
+    // keeps their baselines on top of co-planar grid lines).
     scratchLines.clear();
 
     if (frame.showGrid && viewWidth > 0 && viewHeight > 0 && camera.zoom > 0.0f) {

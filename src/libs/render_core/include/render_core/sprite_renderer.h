@@ -21,6 +21,13 @@ struct SpriteInstance {
     std::string assetUuid;
 };
 
+// Sprites are vertical textured planes standing on their ground baseline (the
+// image's bottom edge): every vertex carries a CPU-baked clip z computed with
+// the shared depth-levels convention (render_core/depth_levels.h), so sprites
+// interleave per-pixel with the depth-writing 3D passes. The pipeline tests
+// LESS_EQUAL but writes no depth — sprites are the last world pass, so the
+// test alone arbitrates both directions, painter order stays as the
+// sprite-vs-sprite tie-breaker, and z-fighting between sprites is impossible.
 class SpriteRenderer {
 public:
     // See LandscapeRenderer::init for the depthFormat contract.
@@ -40,7 +47,7 @@ public:
 
 private:
     struct Vertex {
-        float pos[2];
+        float pos[3]; // screen px x,y + CPU-baked clip z (depth_levels.h convention)
         float uv[2];
         float color[4];
     };

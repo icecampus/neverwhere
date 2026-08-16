@@ -36,6 +36,12 @@ constexpr float kDepthHeightFactor = 1.0f;
 // flat ground (both are affine in ground-y and would otherwise z-fight).
 constexpr float kGridZBias = 1e-5f;
 
+// Sprite depth bias: Tile2D sprites render after the grid overlay and must
+// keep covering it at co-planar baselines (the grid has kGridZBias); the bias
+// also absorbs ULP noise against the ground plane written by the
+// ALWAYS-compare flat ground pass.
+constexpr float kSpriteZBias = 2e-5f; // strictly greater than kGridZBias
+
 // Texture2d ground-cover lift, in field px of the baked ground-y. The
 // texture2d pass renders AFTER the 3D passes (WorldRenderer::render) and
 // depth-tests LESS_EQUAL against the z they published — it writes no depth
