@@ -84,19 +84,21 @@ NodeField g_nodes;
 
 BrepGenParams g_genParams;
 
-// Material (ambientCG Ground061 by default): uniform strengths (instant, no
-// mesh rebuild). With no maps loaded everything falls back to the plain
-// baked quad colors (strengths zeroed in init()). The albedo channel
-// defaults to 0 so the baked masonry/green quad colors stay the macro look;
-// the micro relief (normal/AO/roughness) stays on.
+// Material: marble_cliff_01 (Poly Haven naming, tmp/ — the EXR maps were
+// converted to PNG next to the sources; stb cannot read EXR). The walls are
+// fully covered by the material: the composer contributes GEOMETRY ONLY, so
+// the albedo strength defaults to 1 and the baked quad colors are just the
+// fallback (strengths zeroed in init() if no maps load). The set has no AO
+// map, that channel stays off.
 std::filesystem::path g_dataRoot;
 int g_matMapsLoaded = 0;
-std::string g_matDir = "resources/textures/ambientcg/Ground061";
-float g_matTiling = 1.0f;
-float g_matAlbedo = 0.0f;
+std::string g_matDir = "tmp/marble_cliff_01";
+std::string g_matSet = "marble_cliff_01";
+float g_matTiling = 0.35f;
+float g_matAlbedo = 1.0f;
 float g_matNormal = 1.0f;
-float g_matAo = 1.0f;
-float g_matRough = 0.7f;
+float g_matAo = 0.0f;
+float g_matRough = 1.0f;
 
 // Fixed sun (no lighting UI in v1): same defaults the SDF playgrounds use.
 constexpr float kLightAzimuth = 2.23f;   // radians
@@ -115,6 +117,7 @@ std::optional<float> g_cliHeight;
 std::optional<int> g_cliSeed;
 std::optional<int> g_cliStyle; // 0 = Cyclopean, 1 = BlockCliff
 std::string g_cliMatDir;
+std::string g_cliMatSet;
 std::optional<float> g_cliMatTiling;
 bool g_noUi = false;
 
@@ -215,7 +218,7 @@ void paintAtMouse() {
 }
 
 void reloadMaterial() {
-    g_matMapsLoaded = g_brep.loadMaterialMaps((g_dataRoot / g_matDir).string());
+    g_matMapsLoaded = g_brep.loadMaterialMaps((g_dataRoot / g_matDir).string(), g_matSet);
     if (g_matMapsLoaded == 0) {
         // Palette fallback: the shader with all-zero strengths is bit-for-bit
         // the plain baked quad color.
@@ -334,7 +337,7 @@ void drawImGui(int w, int h) {
         ImGui::SliderFloat("Height scale", &g_genParams.heightScale, 32.0f, 192.0f, "%.0f px");
     }
 
-    if (ImGui::CollapsingHeader("Material (Ground061)", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(("Material (" + g_matSet + ")").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Text("Maps: %d/4%s", g_matMapsLoaded, g_matMapsLoaded > 0 ? "" : " (quad-color look)");
         ImGui::SliderFloat("Mat tiling", &g_matTiling, 0.05f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Albedo", &g_matAlbedo, 0.0f, 1.0f, "%.2f");
@@ -485,6 +488,7 @@ void frame() {
     fs.params0[2] = kSpecStrength;
     fs.params0[3] = kSpecPower;
     fs.params1[0] = kGamma;
+    fs.params1[1] = g_brep.materialVTile();
     fs.params2[0] = g_matTiling;
     fs.params2[1] = g_matAlbedo;
     fs.params2[2] = g_matNormal;
@@ -647,9 +651,9 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --height=H              plateau height in world units (default 3.0)
 // --seed=N                rock displacement seed (default 1337)
 // --style=cyclopean|block wall style (default cyclopean)
-// --mat-dir=path          material set directory
-//                         (default resources/textures/ambientcg/Ground061)
-// --mat-tiling=T          material tiling repeats per world unit (default 1.0)
+// --mat-dir=path          material set directory (default tmp/marble_cliff_01)
+// --mat-set=name          material file prefix (default marble_cliff_01)
+// --mat-tiling=T          material tiling repeats per world unit (default 0.35)
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -689,12 +693,18 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--mat-dir=", 0) == 0) {
             g_cliMatDir = arg.substr(10);
         }
+        if (arg.rfind("--mat-set=", 0) == 0) {
+            g_cliMatSet = arg.substr(10);
+        }
         if (arg.rfind("--mat-tiling=", 0) == 0) {
             g_cliMatTiling = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
     }
     if (!g_cliMatDir.empty()) {
         g_matDir = g_cliMatDir;
+    }
+    if (!g_cliMatSet.empty()) {
+        g_matSet = g_cliMatSet;
     }
     if (g_cliMatTiling) {
         g_matTiling = *g_cliMatTiling;

@@ -53,7 +53,7 @@ out vec4 frag_color;
 uniform vec4 light_dir;   // xyz: direction towards the sun
 uniform vec4 view_dir;    // xyz: constant iso view direction (viewer -> scene)
 uniform vec4 params0;     // x: ambient, y: diffuse, z: spec strength, w: spec power
-uniform vec4 params1;     // x: gamma
+uniform vec4 params1;     // x: gamma, y: material V tiling factor (map aspect)
 uniform vec4 params2;     // x: material tiling, y: albedo, z: normal, w: AO
 uniform vec4 params3;     // x: roughness
 uniform sampler2D mat_color;
@@ -61,10 +61,11 @@ uniform sampler2D mat_normal;
 uniform sampler2D mat_ao;
 uniform sampler2D mat_rough;
 
-// Material UV: the Ground061 maps are 2:1, so V tiles twice as fast to keep
-// the features square in world space.
+// Material UV: 2:1 sets (Ground061) tile V twice as fast to keep the features
+// square in world space; square sets (marble_cliff_01) use the 1x factor. The
+// factor arrives in params1.y, measured from the map aspect at load.
 vec2 matuv(vec2 q) {
-    return q * vec2(params2.x, params2.x * 2.0);
+    return q * vec2(params2.x, params2.x * params1.y);
 }
 
 void main() {
@@ -86,8 +87,8 @@ void main() {
         duv = p.xy; tang = vec3(1.0, 0.0, 0.0); bitang = vec3(0.0, 1.0, 0.0);
     }
 
-    // --- Material (ambientCG Ground061): each strength at 0 disables its
-    // channel — at all zeros the shader is bit-for-bit the plain quad color.
+    // --- Material set: each strength at 0 disables its channel — at all
+    // zeros the shader is bit-for-bit the plain quad color.
     // Albedo: triplanar over the world position (the mesh has no UVs),
     // weights sharpened to ^4 towards the dominant axis.
     if (params2.y > 0.0) {
@@ -163,7 +164,7 @@ cbuffer fs_params: register(b0) {
     float4 light_dir;
     float4 view_dir;
     float4 params0; // x: ambient, y: diffuse, z: spec strength, w: spec power
-    float4 params1; // x: gamma
+    float4 params1; // x: gamma, y: material V tiling factor (map aspect)
     float4 params2; // x: material tiling, y: albedo, z: normal, w: AO
     float4 params3; // x: roughness
 };
@@ -174,10 +175,10 @@ Texture2D mat_ao: register(t2);
 Texture2D mat_rough: register(t3);
 SamplerState mat_smp: register(s0);
 
-// Material UV: the Ground061 maps are 2:1, so V tiles twice as fast to keep
-// the features square in world space.
+// Material UV: 2:1 sets tile V twice as fast; square sets use the 1x factor
+// (params1.y, measured from the map aspect at load).
 float2 matuv(float2 q) {
-    return q * float2(params2.x, params2.x * 2.0);
+    return q * float2(params2.x, params2.x * params1.y);
 }
 
 struct PSIn {
@@ -283,7 +284,7 @@ struct FsParams {
     float4 light_dir;
     float4 view_dir;
     float4 params0; // x: ambient, y: diffuse, z: spec strength, w: spec power
-    float4 params1; // x: gamma
+    float4 params1; // x: gamma, y: material V tiling factor (map aspect)
     float4 params2; // x: material tiling, y: albedo, z: normal, w: AO
     float4 params3; // x: roughness
 };
@@ -295,11 +296,11 @@ struct PSIn {
     float4 color;
 };
 
-// Material UV: the Ground061 maps are 2:1, so V tiles twice as fast to keep
-// the features square in world space. MSL helpers cannot see the uniform
-// block, so the tiling arrives as an argument.
-float2 matuv(float2 q, float tiling) {
-    return q * float2(tiling, tiling * 2.0);
+// Material UV: 2:1 sets tile V twice as fast; square sets use the 1x factor.
+// MSL helpers cannot see the uniform block, so tiling and the V factor arrive
+// as arguments.
+float2 matuv(float2 q, float tiling, float vTile) {
+    return q * float2(tiling, tiling * vTile);
 }
 
 fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
@@ -329,13 +330,13 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
         float3 tw = an * an;
         tw = tw * tw;
         tw /= (tw.x + tw.y + tw.z);
-        float3 alb = tw.x * mat_color.sample(mat_smp, matuv(p.zy, fs.params2.x)).rgb +
-            tw.y * mat_color.sample(mat_smp, matuv(p.xz, fs.params2.x)).rgb +
-            tw.z * mat_color.sample(mat_smp, matuv(p.xy, fs.params2.x)).rgb;
+        float3 alb = tw.x * mat_color.sample(mat_smp, matuv(p.zy, fs.params2.x, fs.params1.y)).rgb +
+            tw.y * mat_color.sample(mat_smp, matuv(p.xz, fs.params2.x, fs.params1.y)).rgb +
+            tw.z * mat_color.sample(mat_smp, matuv(p.xy, fs.params2.x, fs.params1.y)).rgb;
         base = mix(base, alb, fs.params2.y);
     }
     if (fs.params2.z > 0.0) {
-        float3 nts = mat_normal.sample(mat_smp, matuv(duv, fs.params2.x)).rgb * 2.0 - 1.0;
+        float3 nts = mat_normal.sample(mat_smp, matuv(duv, fs.params2.x, fs.params1.y)).rgb * 2.0 - 1.0;
         float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
         n = normalize(mix(n, nm, fs.params2.z));
     }
@@ -344,12 +345,12 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
     float ndl = dot(n, l);
     float ambient = fs.params0.x;
     if (fs.params2.w > 0.0) {
-        ambient *= mix(1.0, mat_ao.sample(mat_smp, matuv(duv, fs.params2.x)).r, fs.params2.w);
+        ambient *= mix(1.0, mat_ao.sample(mat_smp, matuv(duv, fs.params2.x, fs.params1.y)).r, fs.params2.w);
     }
     float3 col = base * (ambient + fs.params0.y * max(ndl, 0.0));
     float specAmt = fs.params0.z;
     if (fs.params3.x > 0.0) {
-        specAmt *= mix(1.0, 1.0 - mat_rough.sample(mat_smp, matuv(duv, fs.params2.x)).r, fs.params3.x);
+        specAmt *= mix(1.0, 1.0 - mat_rough.sample(mat_smp, matuv(duv, fs.params2.x, fs.params1.y)).r, fs.params3.x);
     }
     col += specAmt * pow(max(dot(normalize(l - rd), n), 0.0), fs.params0.w);
     return float4(pow(clamp(col, 0.0, 1.0), float3(fs.params1.x)), in.color.a);
@@ -636,31 +637,53 @@ bool BrepRenderer::uploadSlotMipmapped(
 }
 
 int BrepRenderer::loadMaterialMaps(const std::string& dir, const std::string& setName) {
-    const char* suffixes[4] = {"_Color.jpg", "_NormalGL.jpg", "_AmbientOcclusion.jpg", "_Roughness.jpg"};
+    // Naming conventions probed per channel (stb-readable formats only — EXR
+    // sources must be converted to PNG first): ambientCG "<set>_Color.jpg" and
+    // Poly Haven "<set>_diff_4k.jpg" style.
+    const char* candidates[4][6] = {
+        {"_Color.jpg", "_Color.png", "_diff_4k.jpg", "_diff_4k.png", "_diff.jpg", "_diff.png"},
+        {"_NormalGL.jpg", "_NormalGL.png", "_nor_gl_4k.jpg", "_nor_gl_4k.png", "_nor_gl.jpg", "_nor_gl.png"},
+        {"_AmbientOcclusion.jpg", "_AmbientOcclusion.png", "_ao_4k.jpg", "_ao_4k.png", "_ao.jpg", "_ao.png"},
+        {"_Roughness.jpg", "_Roughness.png", "_rough_4k.jpg", "_rough_4k.png", "_rough.jpg", "_rough.png"},
+    };
     const char* labels[4] = {"mat-color", "mat-normal", "mat-ao", "mat-rough"};
     int loaded = 0;
     for (int i = 0; i < 4; ++i) {
-        const std::string path = dir + "/" + setName + suffixes[i];
-        int w = 0, h = 0, comp = 0;
-        stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
-        if (!pixels || w <= 0 || h <= 0) {
-            // Missing map: the placeholder stays bound and the shader falls
-            // back towards the quad color for that channel.
-            spdlog::warn("BrepRenderer: material map '{}' not loaded: {}", path, stbi_failure_reason());
-            if (pixels) {
-                stbi_image_free(pixels);
+        for (const char* suffix : candidates[i]) {
+            if (!suffix) {
+                break;
             }
-            continue;
+            const std::string path = dir + "/" + setName + suffix;
+            int w = 0, h = 0, comp = 0;
+            stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+            if (!pixels || w <= 0 || h <= 0) {
+                if (pixels) {
+                    stbi_image_free(pixels);
+                }
+                continue;
+            }
+            // V tiling factor from the map aspect: 2 for 2:1 sets (Ground061),
+            // 1 for square ones (marble_cliff_01) — keeps features square in
+            // world space. All maps of a set share the aspect; first wins.
+            if (loaded == 0) {
+                m_matVTile = static_cast<float>(std::max(1, static_cast<int>(std::lround(
+                    static_cast<double>(w) / static_cast<double>(h)))));
+            }
+            const bool ok = uploadSlotMipmapped(m_matMaps[i], pixels, w, h, labels[i]);
+            stbi_image_free(pixels);
+            if (!ok) {
+                spdlog::error("BrepRenderer: material map '{}' upload failed", path);
+                break;
+            }
+            spdlog::info("BrepRenderer: {} <- {} ({}x{})", labels[i], path, w, h);
+            ++loaded;
+            break;
         }
-        const bool ok = uploadSlotMipmapped(m_matMaps[i], pixels, w, h, labels[i]);
-        stbi_image_free(pixels);
-        if (!ok) {
-            spdlog::error("BrepRenderer: material map '{}' upload failed", path);
-            continue;
-        }
-        ++loaded;
+        // Missing map: the placeholder stays bound and the shader falls back
+        // towards the quad color for that channel.
     }
-    spdlog::info("BrepRenderer: material '{}' from '{}': {}/4 maps loaded", setName, dir, loaded);
+    spdlog::info("BrepRenderer: material '{}' from '{}': {}/4 maps loaded, vTile={}",
+        setName, dir, loaded, m_matVTile);
     return loaded;
 }
 

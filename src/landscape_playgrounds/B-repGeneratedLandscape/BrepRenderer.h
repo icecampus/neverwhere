@@ -82,11 +82,12 @@ struct BrepFsParams {
     float lightDir[4];   // xyz: direction towards the sun
     float viewDir[4];    // xyz: constant iso view direction (viewer -> scene)
     float params0[4];    // ambient, diffuse, spec strength, spec power
-    float params1[4];    // gamma, spare x3
-    float params2[4];    // material tiling (repeats per world unit; the
-                         // Ground061 maps are 2:1, V tiles 2x faster),
-                         // albedo strength (0 = plain quad color),
-                         // normal-map strength, AO strength
+    float params1[4];    // gamma, material V tiling factor (2 for 2:1 sets
+                         // like Ground061, 1 for square like marble_cliff_01;
+                         // measured from the map aspect at load), spare x2
+    float params2[4];    // material tiling (repeats per world unit, multiplied
+                         // by the V factor for V), albedo strength (0 = plain
+                         // quad color), normal-map strength, AO strength
     float params3[4];    // roughness strength, spare x3
 };
 
@@ -119,13 +120,19 @@ public:
     void init();
     void shutdown();
 
-    // Loads an ambientCG material set (`<setName>_Color.jpg`,
-    // `<setName>_NormalGL.jpg`, `<setName>_AmbientOcclusion.jpg`,
-    // `<setName>_Roughness.jpg`) into texture views 0..3. Each missing/failed
-    // file keeps its 1x1 placeholder bound (white color, flat normal, white
-    // AO/roughness), so the shader stays valid and just falls back towards
-    // the quad color. Returns the number of maps successfully loaded (0..4).
+    // Loads a material set into texture views 0..3. Both naming conventions
+    // are probed per channel: ambientCG (`<setName>_Color/_NormalGL/
+    // _AmbientOcclusion/_Roughness.jpg`) and Poly Haven (`<setName>_diff_4k/
+    // _nor_gl_4k/_ao_4k/_rough_4k.jpg|png`). Only stb-readable formats — EXR
+    // sources must be converted to PNG first. Each missing/failed file keeps
+    // its 1x1 placeholder bound (white color, flat normal, white AO/roughness),
+    // so the shader stays valid and just falls back towards the quad color.
+    // Returns the number of maps successfully loaded (0..4).
     int loadMaterialMaps(const std::string& dir, const std::string& setName = "Ground061");
+
+    // V tiling factor measured from the loaded map aspect (2 for 2:1 sets, 1
+    // for square ones); 2.0 until anything loads. Feed into params1[1].
+    float materialVTile() const { return m_matVTile; }
 
     // Feed the current node field + generation params (call every frame; the
     // change detection lives inside). Node/generation changes mark the mesh
@@ -177,5 +184,6 @@ private:
     std::vector<landscape_mesh::MeshQuad> m_quads;
     std::vector<BrepVertex> m_stream;
     BrepStats m_stats;
+    float m_matVTile = 2.0f; // from the loaded map aspect (2:1 sets vs square)
     bool m_ready = false;
 };

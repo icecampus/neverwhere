@@ -57,11 +57,21 @@ bool findDefaultMatDir(std::filesystem::path& out) {
     if (dir.empty()) {
         dir = std::filesystem::current_path(ec);
     }
+    // Default set: tmp/marble_cliff_01 (untracked). The loader consumes the
+    // diffuse jpg plus the PNG conversions of the EXR normal/roughness maps.
+    const char* files[3] = {
+        "marble_cliff_01_diff_4k.jpg",
+        "marble_cliff_01_nor_gl_4k.png",
+        "marble_cliff_01_rough_4k.png",
+    };
     for (int i = 0; i < 16; ++i) {
-        const std::filesystem::path candidate =
-            dir / "resources" / "textures" / "ambientcg" / "Ground061" / "Ground061_Color.jpg";
-        if (std::filesystem::exists(candidate, ec)) {
-            out = candidate;
+        const std::filesystem::path setDir = dir / "tmp" / "marble_cliff_01";
+        bool allPresent = true;
+        for (const char* file : files) {
+            allPresent = allPresent && std::filesystem::exists(setDir / file, ec);
+        }
+        if (allPresent) {
+            out = setDir;
             return true;
         }
         if (!dir.has_parent_path()) {
@@ -202,9 +212,9 @@ bool runBrepSmokeTest() {
 
     // --- Material set ------------------------------------------------------------
     {
-        std::filesystem::path matMap;
-        check(findDefaultMatDir(matMap),
-            "default material set (Ground061) present under resources/");
+        std::filesystem::path matDir;
+        check(findDefaultMatDir(matDir),
+            "default material set (marble_cliff_01, incl. EXR->PNG conversions) present under tmp/");
     }
 
     if (failures == 0) {
