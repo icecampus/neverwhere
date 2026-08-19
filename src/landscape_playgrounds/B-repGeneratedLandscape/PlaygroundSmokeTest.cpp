@@ -147,6 +147,158 @@ bool runBrepSmokeTest() {
     check(!blockCliff.quads.empty() && blockCliff.seams.passed,
         "block-cliff compose produces a seamed plateau");
 
+    // --- Multi-level compose -----------------------------------------------------
+    {
+        // 6x6 terrace at level 1 plus a 3x3 cap at level 2.
+        auto nodes = makeNodes(12, 12);
+        for (int y = 3; y <= 8; ++y) {
+            for (int x = 3; x <= 8; ++x) {
+                nodes[static_cast<std::size_t>(y) * 12 + x] = 1;
+            }
+        }
+        for (int y = 5; y <= 7; ++y) {
+            for (int x = 5; x <= 7; ++x) {
+                nodes[static_cast<std::size_t>(y) * 12 + x] = 2;
+            }
+        }
+        const auto composeLevel = [&](int level, int maxLevel) {
+            auto levelNodes = makeNodes(12, 12);
+            for (std::size_t i = 0; i < nodes.size(); ++i) {
+                levelNodes[i] = nodes[i] >= level ? std::uint8_t{1} : std::uint8_t{0};
+            }
+            brepmesh::MeshBuildSettings settings;
+            settings.cellSize = 1.0f;
+            settings.levelHeight = 3.0f;
+            settings.wallStyle = brepmesh::WallStyleId::Cyclopean;
+            settings.wallHorizontalSubdivisions = 16;
+            settings.wallVerticalSubdivisions = 16;
+            brepmesh::SolidMeshBuildRequest request;
+            request.mask = brepmesh::solidMaskFromNodes(levelNodes.data(), 12, 12);
+            request.baseHeight = static_cast<float>(level - 1) * 3.0f;
+            request.topHeight = static_cast<float>(level) * 3.0f;
+            request.level = static_cast<std::uint8_t>(level);
+            request.maxLevel = static_cast<std::uint8_t>(maxLevel);
+            request.includeWalls = true;
+            request.fadeWallDisplacementAtBottom = false;
+            return brepmesh::composeSolidMaskMesh(request, settings);
+        };
+        const brepmesh::CompositionResult level1 = composeLevel(1, 2);
+        const brepmesh::CompositionResult level2 = composeLevel(2, 2);
+        check(level1.seams.passed, "multi-level: level 1 seams pass");
+        check(level2.seams.passed && !level2.quads.empty(), "multi-level: level 2 seams pass");
+        // The level-2 band tops sit at 2H and its walls rise from 1H.
+        bool capTop = false;
+        bool capWall = false;
+        for (const brepmesh::MeshQuad& quad : level2.quads) {
+            const float ys[4] = {quad.a.y, quad.b.y, quad.c.y, quad.d.y};
+            const float mn = std::min(std::min(ys[0], ys[1]), std::min(ys[2], ys[3]));
+            const float mx = std::max(std::max(ys[0], ys[1]), std::max(ys[2], ys[3]));
+            if (!quad.cliffWall && std::abs(mx - 6.0f) < 1e-3f && std::abs(mn - 6.0f) < 1e-3f) {
+                capTop = true;
+            }
+            if (quad.cliffWall && mn >= 3.0f - 1e-3f) {
+                capWall = true;
+            }
+        }
+        check(capTop, "multi-level: level 2 top at 2H");
+        check(capWall, "multi-level: level 2 walls rise from 1H");
+    }
+
+    // --- Wall profile (batter/flare/ledges) --------------------------------------
+    {
+        brepmesh::MeshBoundarySegment segment;
+        segment.a = {0.0f, 0.0f, 0.0f};
+        segment.b = {2.0f, 0.0f, 0.0f};
+        segment.normal = {0.0f, 0.0f, -1.0f};
+        segment.startNormal = segment.normal;
+        segment.endNormal = segment.normal;
+
+        brepmesh::MeshBuildSettings profileSettings;
+        profileSettings.cellSize = 1.0f;
+        profileSettings.levelHeight = 3.0f;
+        profileSettings.rockEnabled = false; // isolate the macro-profile
+        profileSettings.wallHorizontalSubdivisions = 8;
+        profileSettings.wallVerticalSubdivisions = 8;
+        profileSettings.wallBatter = 0.3f;
+
+        const std::vector<brepmesh::MeshQuad> quads = brepmesh::buildWallQuadsFromBoundarySegment(
+            segment, 0.0f, 3.0f, false, 0.0f, profileSettings);
+
+        // Crest row pinned to the original line (z == 0 at y == 3); the foot
+        // row pushed out along the outward normal by the batter (z == -0.3).
+        bool crestPinned = !quads.empty();
+        bool footBattered = !quads.empty();
+        for (const brepmesh::MeshQuad& quad : quads) {
+            const brepmesh::Vec3 corners[4] = {quad.a, quad.b, quad.c, quad.d};
+            for (const brepmesh::Vec3& v : corners) {
+                if (std::abs(v.y - 3.0f) < 1e-4f) {
+                    crestPinned = crestPinned && std::abs(v.z) < 1e-4f;
+                }
+                if (std::abs(v.y) < 1e-4f) {
+                    footBattered = footBattered && std::abs(v.z + 0.3f) < 1e-3f;
+                }
+            }
+        }
+        check(crestPinned, "profile: crest row pinned to the boundary line");
+        check(footBattered, "profile: foot row pushed out by the batter");
+
+        // Ledges: mid rows bulge, crest stays pinned.
+        profileSettings.wallBatter = 0.0f;
+        profileSettings.wallLedgeAmp = 0.1f;
+        profileSettings.wallLedgeCount = 2;
+        const std::vector<brepmesh::MeshQuad> ledgeQuads = brepmesh::buildWallQuadsFromBoundarySegment(
+            segment, 0.0f, 3.0f, false, 0.0f, profileSettings);
+        bool ledgeCrestPinned = !ledgeQuads.empty();
+        bool anyLedge = false;
+        for (const brepmesh::MeshQuad& quad : ledgeQuads) {
+            const brepmesh::Vec3 corners[4] = {quad.a, quad.b, quad.c, quad.d};
+            for (const brepmesh::Vec3& v : corners) {
+                if (std::abs(v.y - 3.0f) < 1e-4f) {
+                    ledgeCrestPinned = ledgeCrestPinned && std::abs(v.z) < 1e-4f;
+                } else if (std::abs(v.z) > 1e-3f) {
+                    anyLedge = true;
+                }
+            }
+        }
+        check(ledgeCrestPinned, "profile: ledges keep the crest pinned");
+        check(anyLedge, "profile: ledges bulge the mid rows");
+
+        // Talus apron: one quad per wall column; the top edge stitches to the
+        // wall row (y == 0.75, z == 0), the bottom edge rests on the ground
+        // pushed outward (y == 0, z == -0.5).
+        profileSettings.wallLedgeAmp = 0.0f;
+        profileSettings.talusWidth = 0.5f;
+        profileSettings.talusHeightFrac = 0.25f;
+        const std::vector<brepmesh::MeshQuad> talusQuads = brepmesh::buildWallQuadsFromBoundarySegment(
+            segment, 0.0f, 3.0f, false, 0.0f, profileSettings);
+        int apronCount = 0;
+        int apronFlags = 0;
+        bool apronStitched = true;
+        for (const brepmesh::MeshQuad& quad : talusQuads) {
+            if (quad.talus) {
+                ++apronFlags;
+            }
+            const brepmesh::Vec3 corners[4] = {quad.a, quad.b, quad.c, quad.d};
+            bool hasGroundFoot = false;
+            bool hasWallEdge = false;
+            for (const brepmesh::Vec3& v : corners) {
+                if (std::abs(v.y) < 1e-4f && std::abs(v.z + 0.5f) < 1e-3f) {
+                    hasGroundFoot = true;
+                }
+                if (std::abs(v.y - 0.75f) < 1e-3f && std::abs(v.z) < 1e-4f) {
+                    hasWallEdge = true;
+                }
+            }
+            if (hasGroundFoot) {
+                ++apronCount;
+                apronStitched = apronStitched && hasWallEdge;
+            }
+        }
+        check(apronCount == 8, "talus: one apron quad per wall column");
+        check(apronStitched, "talus: apron stitches to the wall row");
+        check(apronFlags == 8, "talus: apron quads flagged for the bake channel");
+    }
+
     // --- Vertex bake -------------------------------------------------------------
     // Default iso dims (128x64 cell), lift scale 96 px per world unit.
     {
@@ -177,7 +329,10 @@ bool runBrepSmokeTest() {
 
         if (topQuad) {
             std::vector<BrepVertex> verts;
-            appendBrepQuadVertices(*topQuad, origin, kHalfW, kHalfH, kHeightScale, verts);
+            BrepDeformParams noDeform;
+            noDeform.reliefAmp = 0.0f;
+            noDeform.wobbleAmp = 0.0f;
+            appendBrepQuadVertices(*topQuad, origin, kHalfW, kHalfH, kHeightScale, kTopHeight, noDeform, verts);
             bool heightOk = verts.size() == 6;
             bool depthOk = true;
             bool bboxOk = true;
@@ -201,7 +356,10 @@ bool runBrepSmokeTest() {
 
         if (wallQuad) {
             std::vector<BrepVertex> verts;
-            appendBrepQuadVertices(*wallQuad, origin, kHalfW, kHalfH, kHeightScale, verts);
+            BrepDeformParams noDeform;
+            noDeform.reliefAmp = 0.0f;
+            noDeform.wobbleAmp = 0.0f;
+            appendBrepQuadVertices(*wallQuad, origin, kHalfW, kHalfH, kHeightScale, kTopHeight, noDeform, verts);
             // litWallNormal: horizontal, unit length (mesh-authoritative
             // outward hint, not the displaced facet normal).
             bool normalOk = verts.size() == 6;
@@ -211,6 +369,52 @@ bool runBrepSmokeTest() {
             }
             check(normalOk, "bake: wall normals horizontal unit (litWallNormal)");
         }
+    }
+
+    // --- Bake deformation ------------------------------------------------------
+    {
+        const BrepDeformParams deform; // defaults: relief 0.25/4.5, wobble 0.2/4.0
+
+        // Zero amps: identity (the pre-deformation bake contract).
+        BrepDeformParams off;
+        off.reliefAmp = 0.0f;
+        off.wobbleAmp = 0.0f;
+        const glm::vec3 p{4.25f, 3.0f, 7.5f};
+        const glm::vec3 id = brepDeformVertex(p, 1.0f, off);
+        check(id == p, "deform: zero amps are the identity");
+
+        // Determinism: identical inputs displace identically (the seam-safety
+        // contract is purity — no per-call state).
+        const glm::vec3 d1 = brepDeformVertex(p, 1.0f, deform);
+        const glm::vec3 d2 = brepDeformVertex(p, 1.0f, deform);
+        check(d1 == d2, "deform: deterministic for shared vertices");
+
+        // Grounded foot: heightFrac 0 pins the vertex even with amps on.
+        const glm::vec3 foot = brepDeformVertex(p, 0.0f, deform);
+        check(foot == p, "deform: heightFrac 0 keeps the foot grounded");
+
+        // Amplitude bounds across a sample grid: |lift| <= reliefAmp (the two
+        // octaves sum to <= 1), |wander| <= wobbleAmp, both scaled by hfrac.
+        bool boundsOk = true;
+        for (int i = -20; i <= 20 && boundsOk; ++i) {
+            for (int j = -20; j <= 20; ++j) {
+                const glm::vec3 q{0.37f * (float)i, 3.0f, 0.41f * (float)j};
+                const glm::vec3 dq = brepDeformVertex(q, 0.5f, deform);
+                boundsOk = boundsOk &&
+                    std::abs(dq.y - q.y) <= deform.reliefAmp * 0.5f + 1e-4f &&
+                    std::abs(dq.x - q.x) <= deform.wobbleAmp * 0.5f + 1e-4f &&
+                    std::abs(dq.z - q.z) <= deform.wobbleAmp * 0.5f + 1e-4f;
+            }
+        }
+        check(boundsOk, "deform: relief/wobble within amplitude bounds");
+
+        // Relief actually lifts (not a constant zero field).
+        bool anyLift = false;
+        for (int i = -20; i <= 20 && !anyLift; ++i) {
+            const glm::vec3 q{0.37f * (float)i, 3.0f, 0.19f * (float)i};
+            anyLift = std::abs(brepDeformVertex(q, 1.0f, deform).y - q.y) > 1e-3f;
+        }
+        check(anyLift, "deform: relief is not flat");
     }
 
     // --- Material set ------------------------------------------------------------

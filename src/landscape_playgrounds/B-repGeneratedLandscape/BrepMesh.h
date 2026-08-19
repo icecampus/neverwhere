@@ -60,6 +60,9 @@ struct MeshQuad {
     Vec3 normal{0.0f, 1.0f, 0.0f};
     ColorRgba color;
     bool cliffWall = false;
+    // Playground addition: talus apron quad (debris slope at the wall base).
+    // The bake converts it into the per-vertex apron shading channel.
+    bool talus = false;
     // Signed rock displacement of the panel: >0 protruding ridge, <0 recessed crevice.
     float relief = 0.0f;
     // Vertical position of the wall panel: 0 at the base, 1 at the top.
@@ -113,6 +116,18 @@ struct MeshBuildSettings {
     int wallVerticalSubdivisions = 6;
     int terraceSteps = 4;
     WallStyleId wallStyle = WallStyleId::BlockCliff;
+    // Wall macro-profile (playground addition): applied to the base wall rows
+    // BEFORE the style displacement, so it is not capped by the anti-fold
+    // clamp. All terms pin to 0 at the crest (heightT == 1) so the band still
+    // stitches to the top surface; the foot is free on the plateau.
+    float wallBatter = 0.0f;    // linear lean-back: foot pushed out, cells
+    float wallFootFlare = 0.0f; // extra outward swell near the ground, cells
+    float wallLedgeAmp = 0.0f;  // strata ledges amplitude, cells
+    int wallLedgeCount = 3;     // strata ledges per wall height
+    // Talus apron (playground addition): a debris slope leaning against the
+    // wall base, built per wall segment inside buildWallQuadsFromBoundarySegment.
+    float talusWidth = 0.0f;     // ground projection of the apron, cells (0 = off)
+    float talusHeightFrac = 0.25f; // apron top edge, fraction of the wall height
 };
 
 struct CompositionStats {

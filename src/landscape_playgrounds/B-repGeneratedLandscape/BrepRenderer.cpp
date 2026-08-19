@@ -29,9 +29,11 @@ layout(location=0) in vec3 pos;
 layout(location=1) in vec3 normal;
 layout(location=2) in vec3 world;
 layout(location=3) in vec4 color;
+layout(location=4) in vec2 misc;
 out vec3 v_normal;
 out vec3 v_world;
 out vec4 v_color;
+out vec2 v_misc;
 uniform vec2 view_size;
 uniform vec2 camera_offset;
 uniform float camera_zoom;
@@ -42,6 +44,7 @@ void main() {
     v_normal = normal;
     v_world = world;
     v_color = color;
+    v_misc = misc;
 }
 )";
 
@@ -50,6 +53,7 @@ static const char* kBrepFsGlsl = R"(
 in vec3 v_normal;
 in vec3 v_world;
 in vec4 v_color;
+in vec2 v_misc;
 out vec4 frag_color;
 uniform vec4 light_dir;   // xyz: direction towards the sun
 uniform vec4 view_dir;    // xyz: constant iso view direction (viewer -> scene)
@@ -113,11 +117,23 @@ void main() {
         grassW = smoothstep(0.75, 0.92, n.y) * params4.x;
         base = mix(base, texture(grass_color, p.xz * params4.y).rgb, grassW);
     }
+    // Relief readout: the bake tags plateau-top vertices with their relief
+    // lift in [-1,1]; crests brighten, dips stay neutral (reads through the
+    // busy grass texture; walls are always 0).
+    base *= 1.0 + v_misc.x * 0.18;
+    // Talus apron: the bake tags apron vertices with their height fraction in
+    // the apron (0 at the ground contact) — flatten the rock detail and
+    // darken towards the contact (cheap grounding shadow).
+    float screeW = 0.0;
+    if (v_misc.y >= 0.0) {
+        screeW = (1.0 - v_misc.y) * 0.75;
+        base *= 1.0 - screeW * 0.35;
+    }
     // Normal detail along the dominant axis, NormalGL (Y+) convention.
     if (params2.z > 0.0) {
         vec3 nts = texture(mat_normal, matuv(duv)).rgb * 2.0 - 1.0;
         vec3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
-        n = normalize(mix(n, nm, params2.z * (1.0 - grassW)));
+        n = normalize(mix(n, nm, params2.z * (1.0 - grassW) * (1.0 - screeW)));
     }
     // Cheap sun lambert + ambient + Blinn spec; the iso view direction is
     // constant (viewer -> scene, so the Blinn half vector is l - rd).
@@ -151,12 +167,14 @@ struct VSIn {
     float3 normal: TEXCOORD1;
     float3 world: TEXCOORD2;
     float4 color: TEXCOORD3;
+    float2 misc: TEXCOORD4;
 };
 struct VSOut {
     float4 pos: SV_Position;
     float3 normal: TEXCOORD0;
     float3 world: TEXCOORD1;
     float4 color: TEXCOORD2;
+    float2 misc: TEXCOORD3;
 };
 VSOut main(VSIn inp) {
     VSOut o;
@@ -168,6 +186,7 @@ VSOut main(VSIn inp) {
     o.normal = inp.normal;
     o.world = inp.world;
     o.color = inp.color;
+    o.misc = inp.misc;
     return o;
 }
 )";
@@ -201,6 +220,7 @@ struct PSIn {
     float3 normal: TEXCOORD0;
     float3 world: TEXCOORD1;
     float4 color: TEXCOORD2;
+    float2 misc: TEXCOORD3;
 };
 
 float4 main(PSIn inp): SV_Target {
@@ -236,10 +256,18 @@ float4 main(PSIn inp): SV_Target {
         grassW = smoothstep(0.75, 0.92, n.y) * params4.x;
         base = lerp(base, grass_color.Sample(mat_smp, p.xz * params4.y).rgb, grassW);
     }
+    // Relief readout via the baked per-vertex channel (see the GLSL twin).
+    base *= 1.0 + inp.misc.x * 0.18;
+    // Talus apron (see the GLSL twin).
+    float screeW = 0.0;
+    if (inp.misc.y >= 0.0) {
+        screeW = (1.0 - inp.misc.y) * 0.75;
+        base *= 1.0 - screeW * 0.35;
+    }
     if (params2.z > 0.0) {
         float3 nts = mat_normal.Sample(mat_smp, matuv(duv)).rgb * 2.0 - 1.0;
         float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
-        n = normalize(lerp(n, nm, params2.z * (1.0 - grassW)));
+        n = normalize(lerp(n, nm, params2.z * (1.0 - grassW) * (1.0 - screeW)));
     }
     float3 l = normalize(light_dir.xyz);
     float3 rd = view_dir.xyz;
@@ -273,6 +301,7 @@ struct VSIn {
     float3 normal [[attribute(1)]];
     float3 world [[attribute(2)]];
     float4 color [[attribute(3)]];
+    float2 misc [[attribute(4)]];
 };
 
 struct VSOut {
@@ -280,6 +309,7 @@ struct VSOut {
     float3 normal;
     float3 world;
     float4 color;
+    float2 misc;
 };
 
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]) {
@@ -293,6 +323,7 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& params [[buffer(0)]]
     o.normal = in.normal;
     o.world = in.world;
     o.color = in.color;
+    o.misc = in.misc;
     return o;
 }
 )";
@@ -316,6 +347,7 @@ struct PSIn {
     float3 normal;
     float3 world;
     float4 color;
+    float2 misc;
 };
 
 // Material UV: 2:1 sets tile V twice as fast; square sets use the 1x factor.
@@ -364,10 +396,19 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
         grassW = smoothstep(0.75, 0.92, n.y) * fs.params4.x;
         base = mix(base, grass_color.sample(mat_smp, p.xz * fs.params4.y).rgb, grassW);
     }
+    // Relief readout (see the GLSL twin).
+    // Relief readout via the baked per-vertex channel (see the GLSL twin).
+    base *= 1.0 + in.misc.x * 0.18;
+    // Talus apron (see the GLSL twin).
+    float screeW = 0.0;
+    if (in.misc.y >= 0.0) {
+        screeW = (1.0 - in.misc.y) * 0.75;
+        base *= 1.0 - screeW * 0.35;
+    }
     if (fs.params2.z > 0.0) {
         float3 nts = mat_normal.sample(mat_smp, matuv(duv, fs.params2.x, fs.params1.y)).rgb * 2.0 - 1.0;
         float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
-        n = normalize(mix(n, nm, fs.params2.z * (1.0 - grassW)));
+        n = normalize(mix(n, nm, fs.params2.z * (1.0 - grassW) * (1.0 - screeW)));
     }
     float3 l = normalize(fs.light_dir.xyz);
     float3 rd = fs.view_dir.xyz;
@@ -449,7 +490,80 @@ std::vector<std::vector<std::uint8_t>> buildMipChain(const std::uint8_t* rgba, i
     return levels;
 }
 
+// --- Bake deformation noise ---------------------------------------------------
+// Deterministic lattice hash -> [0,1). The deformation must be a pure function
+// of position (shared vertices sample identically), so no state, no FastNoise
+// handles — a hand-rolled value noise is enough.
+float deformHash(int x, int y, int seed) {
+    std::uint32_t h = static_cast<std::uint32_t>(x) * 0x8da6b343u ^
+        static_cast<std::uint32_t>(y) * 0xd8163841u ^
+        static_cast<std::uint32_t>(seed) * 0xcb1ab31fu;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return static_cast<float>(h & 0xFFFFFFu) / static_cast<float>(0x1000000u);
+}
+
+// Smooth value noise in [-1, 1]: bilinear over the hashed lattice with the
+// smoothstep ease curve.
+float deformNoise2(float x, float y, int seed) {
+    const int xi = static_cast<int>(std::floor(x));
+    const int yi = static_cast<int>(std::floor(y));
+    const float fx = x - static_cast<float>(xi);
+    const float fy = y - static_cast<float>(yi);
+    const float sx = fx * fx * (3.0f - 2.0f * fx);
+    const float sy = fy * fy * (3.0f - 2.0f * fy);
+    const float v00 = deformHash(xi, yi, seed);
+    const float v10 = deformHash(xi + 1, yi, seed);
+    const float v01 = deformHash(xi, yi + 1, seed);
+    const float v11 = deformHash(xi + 1, yi + 1, seed);
+    const float v0 = v00 + (v10 - v00) * sx;
+    const float v1 = v01 + (v11 - v01) * sx;
+    return (v0 + (v1 - v0) * sy) * 2.0f - 1.0f;
+}
+
+// The relief lift at full height (heightFrac == 1): two octaves of value
+// noise. Kept separate so the bake can also finite-difference it for the
+// smooth top normals.
+float reliefLift(float x, float z, const BrepDeformParams& p) {
+    if (p.reliefAmp <= 0.0f) {
+        return 0.0f;
+    }
+    const float wl = std::max(p.reliefWavelength, 0.25f);
+    const float s1 = deformNoise2(x / wl, z / wl, p.seed);
+    const float s2 = deformNoise2(x / (wl * 0.43f) + 17.7f, z / (wl * 0.43f) + 9.1f, p.seed + 101);
+    return p.reliefAmp * (0.7f * s1 + 0.3f * s2);
+}
+
+// Smooth top normal from the relief slope (finite differences). Wall quads
+// keep their mesh-authoritative litWallNormal; this is for the plateau top
+// and the crest band (both cliffWall == false, normal.y ~ 1).
+glm::vec3 reliefTopNormal(float x, float z, const BrepDeformParams& p) {
+    const float e = 0.05f * std::max(p.reliefWavelength, 0.25f);
+    const float dx = (reliefLift(x + e, z, p) - reliefLift(x - e, z, p)) / (2.0f * e);
+    const float dz = (reliefLift(x, z + e, p) - reliefLift(x, z - e, p)) / (2.0f * e);
+    return glm::normalize(glm::vec3(-dx, 1.0f, -dz));
+}
+
 } // namespace
+
+glm::vec3 brepDeformVertex(glm::vec3 worldPos, float heightFrac, const BrepDeformParams& params) {
+    const float h = std::clamp(heightFrac, 0.0f, 1.0f);
+    if (h <= 0.0f) {
+        return worldPos;
+    }
+    worldPos.y += reliefLift(worldPos.x, worldPos.z, params) * h;
+    if (params.wobbleAmp > 0.0f) {
+        const float wl = std::max(params.wobbleWavelength, 0.25f);
+        const float wx = deformNoise2(worldPos.x / wl + 31.3f, worldPos.z / wl + 47.9f, params.seed + 202);
+        const float wz = deformNoise2(worldPos.x / wl + 3.1f, worldPos.z / wl + 73.7f, params.seed + 303);
+        worldPos.x += params.wobbleAmp * wx * h;
+        worldPos.z += params.wobbleAmp * wz * h;
+    }
+    return worldPos;
+}
 
 void appendBrepQuadVertices(
     const brepmesh::MeshQuad& quad,
@@ -457,34 +571,66 @@ void appendBrepQuadVertices(
     float halfW,
     float halfH,
     float heightScale,
+    float raisedHeight,
+    const BrepDeformParams& deform,
     std::vector<BrepVertex>& out) {
 
     // Wall panels take the mesh-authoritative outward normal (the displaced
     // facet normal would shade the rock displacement twice); flat parts use
     // their own facet normal.
     const brepmesh::Vec3 n = quad.cliffWall ? brepmesh::litWallNormal(quad) : quad.normal;
+    // Plateau-top and crest-band quads get smooth relief-slope normals; the
+    // walls keep the (horizontal) mesh-authoritative hint.
+    const bool smoothTop = !quad.cliffWall && quad.normal.y > 0.9f && deform.reliefAmp > 0.0f;
+    const float invHeight = raisedHeight > 1e-6f ? 1.0f / raisedHeight : 0.0f;
+    // Talus apron: per-quad height range (foot = min corner y, wall edge =
+    // max); the apron shading channel interpolates between them.
+    float talusMinY = 0.0f;
+    float talusRange = 1.0f;
+    if (quad.talus) {
+        const float ys[4] = {quad.a.y, quad.b.y, quad.c.y, quad.d.y};
+        talusMinY = std::min(std::min(ys[0], ys[1]), std::min(ys[2], ys[3]));
+        const float mx = std::max(std::max(ys[0], ys[1]), std::max(ys[2], ys[3]));
+        talusRange = std::max(mx - talusMinY, 1e-4f);
+    }
     const auto push = [&](const brepmesh::Vec3& v) {
         // The composer runs at cellSize 1, so mesh units ARE map cells; the
         // projection matches DiamondIsometry::nodeToField (no +halfH on y).
-        const float mapX = static_cast<float>(origin.x) + v.x;
-        const float mapZ = static_cast<float>(origin.y) + v.z;
-        const float fieldX = (mapX - mapZ) * halfW + halfW;
-        const float fieldY = (mapX + mapZ) * halfH;
-        const float liftPx = v.y * heightScale;
+        const glm::vec3 world = brepDeformVertex(
+            {static_cast<float>(origin.x) + v.x, v.y, static_cast<float>(origin.y) + v.z},
+            v.y * invHeight,
+            deform);
+        const float fieldX = (world.x - world.z) * halfW + halfW;
+        const float fieldY = (world.x + world.z) * halfH;
+        const float liftPx = world.y * heightScale;
+        glm::vec3 normal{n.x, n.y, n.z};
+        float reliefT = 0.0f;
+        if (smoothTop) {
+            normal = reliefTopNormal(world.x, world.z, deform);
+            reliefT = std::clamp(
+                reliefLift(world.x, world.z, deform) / std::max(deform.reliefAmp, 1e-6f),
+                -1.0f,
+                1.0f);
+        }
+        const float talusH = quad.talus
+            ? std::clamp((v.y - talusMinY) / talusRange, 0.0f, 1.0f)
+            : -1.0f;
         out.push_back(BrepVertex{
             fieldX,
             fieldY - liftPx,
             brepBakedDepth(fieldY, liftPx),
-            n.x,
-            n.y,
-            n.z,
-            mapX,
-            v.y,
-            mapZ,
+            normal.x,
+            normal.y,
+            normal.z,
+            world.x,
+            world.y,
+            world.z,
             quad.color.r / 255.0f,
             quad.color.g / 255.0f,
             quad.color.b / 255.0f,
-            quad.color.a / 255.0f});
+            quad.color.a / 255.0f,
+            reliefT,
+            talusH});
     };
     push(quad.a);
     push(quad.b);
@@ -506,7 +652,7 @@ void BrepRenderer::init() {
     shd.vertex_func.source = kBrepVsGlsl;
     shd.fragment_func.source = kBrepFsGlsl;
 #endif
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         shd.attrs[i].hlsl_sem_name = "TEXCOORD";
         shd.attrs[i].hlsl_sem_index = i;
     }
@@ -548,6 +694,7 @@ void BrepRenderer::init() {
     pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3; // normal
     pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT3; // world
     pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4; // color
+    pip.layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT2; // misc (reliefT, talusH)
     pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     // The only depth-writing pass here: the mesh must self-occlude (displaced
     // wall panels fold over themselves). Quads arrive in either winding, so
@@ -783,14 +930,30 @@ void BrepRenderer::setContent(
         params.rockEnabled != m_params.rockEnabled ||
         params.wallSubdivH != m_params.wallSubdivH ||
         params.wallSubdivV != m_params.wallSubdivV ||
-        params.wallStyle != m_params.wallStyle;
-    const bool streamParamsChanged = params.heightScale != m_params.heightScale;
+        params.wallStyle != m_params.wallStyle ||
+        params.wallBatter != m_params.wallBatter ||
+        params.wallFootFlare != m_params.wallFootFlare ||
+        params.wallLedgeAmp != m_params.wallLedgeAmp ||
+        params.wallLedgeCount != m_params.wallLedgeCount ||
+        params.talusWidth != m_params.talusWidth ||
+        params.talusHeightFrac != m_params.talusHeightFrac;
+    const bool streamParamsChanged =
+        params.heightScale != m_params.heightScale ||
+        params.deform.reliefAmp != m_params.deform.reliefAmp ||
+        params.deform.reliefWavelength != m_params.deform.reliefWavelength ||
+        params.deform.wobbleAmp != m_params.deform.wobbleAmp ||
+        params.deform.wobbleWavelength != m_params.deform.wobbleWavelength ||
+        params.deform.seed != m_params.deform.seed;
 
     if (nodesChanged || meshParamsChanged) {
         if (count > 0 && nodes) {
             m_nodes.assign(nodes, nodes + count);
         } else {
             m_nodes.clear();
+        }
+        m_nodeMaxLevel = 0;
+        for (std::uint8_t value : m_nodes) {
+            m_nodeMaxLevel = std::max(m_nodeMaxLevel, value);
         }
         m_nodesX = nodesX;
         m_nodesY = nodesY;
@@ -801,9 +964,10 @@ void BrepRenderer::setContent(
         m_stats.pending = true;
     } else if (streamParamsChanged) {
         m_params.heightScale = params.heightScale;
+        m_params.deform = params.deform;
         if (!m_meshDirty) {
-            // Cheap path: re-bake the cached quads with the new lift, no
-            // composer run and no debounce (the slider stays live).
+            // Cheap path: re-bake the cached quads with the new lift/deform,
+            // no composer run and no debounce (the sliders stay live).
             m_streamDirty = true;
             m_stats.pending = true;
         }
@@ -872,51 +1036,66 @@ void BrepRenderer::rebuildMesh(const topology_core::DiamondIsometry& iso) {
         maxY += 1;
         const int bboxNodesX = maxX - minX + 1;
         const int bboxNodesY = maxY - minY + 1;
-        std::vector<std::uint8_t> bboxNodes(static_cast<std::size_t>(bboxNodesX) * bboxNodesY, 0);
-        for (int y = 0; y < m_nodesY; ++y) {
-            for (int x = 0; x < m_nodesX; ++x) {
-                if (m_nodes[static_cast<std::size_t>(y) * m_nodesX + x] != 0) {
-                    bboxNodes[static_cast<std::size_t>(y - minY) * bboxNodesX + (x - minX)] = 1;
+
+        // One plateau band per painted level: mask_k = nodes with value >= k
+        // (a subset of mask_(k-1) by construction), stacked base=(k-1)*H ->
+        // top=k*H. All bands share the union bbox, so one origin covers every
+        // quad at the bake.
+        const std::uint8_t maxLevel = std::max<std::uint8_t>(1, m_nodeMaxLevel);
+        for (int lv = 1; lv <= maxLevel; ++lv) {
+            std::vector<std::uint8_t> bboxNodes(static_cast<std::size_t>(bboxNodesX) * bboxNodesY, 0);
+            for (int y = 0; y < m_nodesY; ++y) {
+                for (int x = 0; x < m_nodesX; ++x) {
+                    if (m_nodes[static_cast<std::size_t>(y) * m_nodesX + x] >= lv) {
+                        bboxNodes[static_cast<std::size_t>(y - minY) * bboxNodesX + (x - minX)] = 1;
+                    }
                 }
             }
-        }
 
-        brepmesh::SolidMeshBuildRequest request;
-        request.mask = brepmesh::solidMaskFromNodes(bboxNodes.data(), bboxNodesX, bboxNodesY);
-        request.baseHeight = 0.0f;
-        request.topHeight = m_params.raisedHeight;
-        request.level = 1;
-        request.maxLevel = 1;
-        request.includeWalls = true;
-        request.fadeWallDisplacementAtBottom = false;
+            brepmesh::SolidMeshBuildRequest request;
+            request.mask = brepmesh::solidMaskFromNodes(bboxNodes.data(), bboxNodesX, bboxNodesY);
+            request.baseHeight = static_cast<float>(lv - 1) * m_params.raisedHeight;
+            request.topHeight = static_cast<float>(lv) * m_params.raisedHeight;
+            request.level = static_cast<std::uint8_t>(lv);
+            request.maxLevel = maxLevel;
+            request.includeWalls = true;
+            request.fadeWallDisplacementAtBottom = false;
 
-        // Single-level plateau: the level height equals the plateau top.
-        brepmesh::MeshBuildSettings settings;
-        settings.cellSize = 1.0f;
-        settings.levelHeight = m_params.raisedHeight;
-        settings.cornerBevel = m_params.cornerBevel;
-        settings.rockEnabled = m_params.rockEnabled;
-        settings.rockSeed = m_params.rockSeed;
-        settings.rockAmplitude = m_params.rockAmplitude;
-        settings.wallHorizontalSubdivisions = m_params.wallSubdivH;
-        settings.wallVerticalSubdivisions = m_params.wallSubdivV;
-        settings.wallStyle = m_params.wallStyle;
+            // Single-height plateau bands: the level height equals the band top.
+            brepmesh::MeshBuildSettings settings;
+            settings.cellSize = 1.0f;
+            settings.levelHeight = m_params.raisedHeight;
+            settings.cornerBevel = m_params.cornerBevel;
+            settings.rockEnabled = m_params.rockEnabled;
+            settings.rockSeed = m_params.rockSeed;
+            settings.rockAmplitude = m_params.rockAmplitude;
+            settings.wallHorizontalSubdivisions = m_params.wallSubdivH;
+            settings.wallVerticalSubdivisions = m_params.wallSubdivV;
+            settings.wallStyle = m_params.wallStyle;
+            settings.wallBatter = m_params.wallBatter;
+            settings.wallFootFlare = m_params.wallFootFlare;
+            settings.wallLedgeAmp = m_params.wallLedgeAmp;
+            settings.wallLedgeCount = m_params.wallLedgeCount;
+            settings.talusWidth = m_params.talusWidth;
+            settings.talusHeightFrac = m_params.talusHeightFrac;
 
-        const brepmesh::CompositionResult result =
-            brepmesh::composeSolidMaskMesh(request, settings);
-        if (!result.seams.passed) {
-            spdlog::warn("BrepRenderer: wall mesh seam validation failed ({} of {} edges)",
-                result.seams.mismatches, result.seams.checkedEdges);
+            const brepmesh::CompositionResult result =
+                brepmesh::composeSolidMaskMesh(request, settings);
+            if (!result.seams.passed) {
+                spdlog::warn("BrepRenderer: wall mesh seam validation failed ({} of {} edges)",
+                    result.seams.mismatches, result.seams.checkedEdges);
+            }
+
+            m_stats.quadCount += static_cast<int>(result.quads.size());
+            m_stats.topQuadCount += result.stats.topQuadCount;
+            m_stats.wallQuadCount += result.stats.cliffWallQuadCount;
+            m_stats.seamsPassed = m_stats.seamsPassed && result.seams.passed;
+            m_stats.seamMismatches += result.seams.mismatches;
+            m_stats.seamCheckedEdges += result.seams.checkedEdges;
+            m_quads.insert(m_quads.end(), result.quads.begin(), result.quads.end());
         }
 
         m_origin = {minX, minY};
-        m_stats.quadCount = static_cast<int>(result.quads.size());
-        m_stats.topQuadCount = result.stats.topQuadCount;
-        m_stats.wallQuadCount = result.stats.cliffWallQuadCount;
-        m_stats.seamsPassed = result.seams.passed;
-        m_stats.seamMismatches = result.seams.mismatches;
-        m_stats.seamCheckedEdges = result.seams.checkedEdges;
-        m_quads = result.quads;
     }
 
     rebakeStream(iso);
@@ -934,7 +1113,15 @@ void BrepRenderer::rebakeStream(const topology_core::DiamondIsometry& iso) {
     const float halfH = cellSz.y * 0.5f;
     m_stream.reserve(m_quads.size() * 6);
     for (const brepmesh::MeshQuad& quad : m_quads) {
-        appendBrepQuadVertices(quad, m_origin, halfW, halfH, m_params.heightScale, m_stream);
+        appendBrepQuadVertices(
+            quad,
+            m_origin,
+            halfW,
+            halfH,
+            m_params.heightScale,
+            m_params.raisedHeight,
+            m_params.deform,
+            m_stream);
     }
     m_stats.vertexCount = static_cast<int>(m_stream.size());
     uploadStream();

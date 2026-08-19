@@ -219,6 +219,29 @@ Vec3 applyWallShade(const Vec3& base, const Vec3& normal, float offset, float ma
     return {base.x + normal.x * o, base.y, base.z + normal.z * o};
 }
 
+// Wall macro-profile (playground addition): lean-back batter, foot flare and
+// strata ledges. Applied to the base wall rows (before the style displacement
+// and outside its anti-fold clamp) as an offset along the row's outward
+// normal. Every term pins to 0 at heightT == 1, so the crest row stays on the
+// original boundary line and stitches to the top surface; the foot (heightT
+// == 0) is free on the plateau. The ledge phase is a function of world
+// position only, so vertices shared by adjacent segments offset identically.
+float wallProfileOffset(const MeshBuildSettings& settings, float heightT, const Vec3& worldPos) {
+    const float t = std::clamp(heightT, 0.0f, 1.0f);
+    float offset = 0.0f;
+    // Batter: the wall leans back linearly as it rises (foot out, crest in).
+    offset += settings.wallBatter * (1.0f - t);
+    // Foot flare: extra swell concentrated near the ground (talus-ish base).
+    offset += settings.wallFootFlare * (1.0f - t) * (1.0f - t);
+    // Strata ledges: smooth horizontal benches wandering gently along the wall.
+    if (settings.wallLedgeAmp > 0.0f && settings.wallLedgeCount > 0) {
+        const float phase = std::sin(worldPos.x * 0.9f + worldPos.z * 1.7f) * 0.9f;
+        offset += settings.wallLedgeAmp *
+            std::sin(t * (float)settings.wallLedgeCount * 6.2831853f + phase) * (1.0f - t);
+    }
+    return offset;
+}
+
 bool tryBoundaryVertexNormal(const SolidMaskGrid& mask, const std::vector<BoundarySegment>& segments, const Int2& vertex, Vec3& outNormal) {
     Vec3 sum{};
     bool found = false;
@@ -1279,6 +1302,7 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
         const float topT = 1.0f - v;
         const Vec3 rowA = lerp(bottomA, topA, topT);
         const Vec3 rowB = lerp(bottomB, topB, topT);
+        const float heightT = 1.0f - v;
         for (int column = 0; column < vertexColumns; column++) {
             const float u = (float)column / (float)settings.wallHorizontalSubdivisions;
             const std::size_t index = (std::size_t)row * (std::size_t)vertexColumns + (std::size_t)column;
@@ -1289,6 +1313,12 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
                 wallNormals[index] = segment.endNormal;
             } else {
                 wallNormals[index] = segment.normal;
+            }
+            // Macro-profile (batter/flare/ledges) bends the base rows before
+            // the style displacement; pinned at the crest, world-pos phased.
+            const float profile = wallProfileOffset(settings, heightT, wallPoints[index]);
+            if (profile != 0.0f) {
+                wallPoints[index] = add(wallPoints[index], scale(wallNormals[index], profile));
             }
         }
     }
@@ -1381,6 +1411,51 @@ std::vector<MeshQuad> buildWallQuadsFromBoundarySegment(
             wall.cliffWall = true;
             assignWallQuadMetadata(wall, segment.side, quadOutward);
             quads.push_back(wall);
+        }
+    }
+
+    // Talus apron (playground addition): a straight debris slope leaning
+    // against the wall base. The top edge reuses the wall's displaced row at
+    // talusHeightFrac, so the apron stitches to the band exactly; the bottom
+    // edge is the same contour pushed outward at ground level (shared corner
+    // vertices get identical positions, so neighbouring segments stay
+    // continuous). Plateau-only: a faded foot has no ground to rest on.
+    if (settings.talusWidth > 0.0f && !fadeWallDisplacementAtBottom) {
+        const float talusT = std::clamp(settings.talusHeightFrac, 0.05f, 0.6f);
+        const int talusRow = std::clamp(
+            (int)std::lround((1.0f - talusT) * (float)settings.wallVerticalSubdivisions),
+            0,
+            settings.wallVerticalSubdivisions);
+        for (int column = 0; column + 1 < vertexColumns; column++) {
+            const std::size_t i0 = (std::size_t)talusRow * (std::size_t)vertexColumns + (std::size_t)column;
+            const std::size_t i1 = i0 + 1;
+            const Vec3& n0 = wallNormals[i0];
+            const Vec3& n1 = wallNormals[i1];
+            MeshQuad talus;
+            talus.a = displaced[i0];
+            talus.b = displaced[i1];
+            talus.c = {
+                displaced[i1].x + n1.x * settings.talusWidth,
+                baseHeight,
+                displaced[i1].z + n1.z * settings.talusWidth};
+            talus.d = {
+                displaced[i0].x + n0.x * settings.talusWidth,
+                baseHeight,
+                displaced[i0].z + n0.z * settings.talusWidth};
+            talus.normal = displacedFaceNormal(
+                talus.a, talus.b, talus.c, talus.d,
+                talus.a, talus.b, talus.c, talus.d,
+                {0.0f, 1.0f, 0.0f});
+            talus.relief = 0.0f;
+            talus.heightFraction = 0.0f;
+            talus.color = useStyle->color(WallPart::Face, segment.side, 0.0f, 0.0f);
+            // Not a wall: the renderer shades it by the facet normal (a sloped
+            // apron must catch sky light, not the wall's horizontal hint).
+            talus.cliffWall = false;
+            talus.talus = true;
+            talus.boundarySide = segment.side;
+            talus.outwardHint = segment.normal;
+            quads.push_back(talus);
         }
     }
 

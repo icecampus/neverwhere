@@ -33,6 +33,11 @@ struct BrepVertex {
     float nx, ny, nz;
     float wx, wy, wz;
     float r, g, b, a;
+    // Shading channels baked per vertex: x = relief lift normalized to [-1,1]
+    // (plateau tops only, 0 elsewhere — the FS brightens crests), y = talus
+    // apron height fraction (0 at the ground contact, 1 at the wall edge;
+    // -1 = not an apron quad — the FS darkens/flattens towards the contact).
+    float reliefT, talusH;
 };
 
 // Baked depth anchor: a constant, NOT camera-derived. The grid overlay
@@ -49,16 +54,37 @@ inline constexpr float brepBakedDepth(float fieldY, float liftPx) {
     return (kBrepZFar - (fieldY + liftPx)) * kBrepZScale;
 }
 
+// Bake-time deformation (stream-only, live sliders): every vertex is
+// displaced by a pure function of its ORIGINAL world position and height
+// fraction, so vertices shared by neighbouring quads get identical offsets
+// and the mesh stays watertight by construction. Amps at 0 disable the
+// deformation bit-for-bit.
+struct BrepDeformParams {
+    float reliefAmp = 0.25f;       // vertical wave amplitude, world units
+    float reliefWavelength = 4.5f; // cells
+    float wobbleAmp = 0.2f;        // horizontal rim wander, cells
+    float wobbleWavelength = 4.0f; // cells
+    int seed = 1337;
+};
+
+// Displace one vertex: the relief lift and the rim wander both scale with
+// heightFrac (0 at the grounded foot, 1 at the top), so the formation rides
+// the wave and only the crest/plateau wander. Exposed for the smoke test.
+glm::vec3 brepDeformVertex(glm::vec3 worldPos, float heightFrac, const BrepDeformParams& params);
+
 // Triangulate one composed quad into a vertex stream (a-b-c, a-c-d):
 // projects the mesh-world position into field space (origin = bbox min node,
-// the composer runs at cellSize 1) and bakes z from the ground fieldY plus
-// the height lift. Shared by the renderer's re-bake and the smoke test.
+// the composer runs at cellSize 1), applies the bake deformation and bakes z
+// from the ground fieldY plus the height lift. Shared by the renderer's
+// re-bake and the smoke test.
 void appendBrepQuadVertices(
     const brepmesh::MeshQuad& quad,
     glm::ivec2 origin,
     float halfW,
     float halfH,
     float heightScale,
+    float raisedHeight,
+    const BrepDeformParams& deform,
     std::vector<BrepVertex>& out);
 
 // Filesystem-only twin of BrepRenderer::loadMaterialMaps: probes the same
@@ -67,9 +93,10 @@ void appendBrepQuadVertices(
 // by the material set picker to list loadable sets and by the smoke test.
 int probeMaterialMaps(const std::string& dir, const std::string& setName);
 
-// Generation params of the B-rep composer. Everything but heightScale feeds
-// composeSolidMaskMesh (heavy: debounced mesh rebuild); heightScale only
-// scales the vertex lift (cheap: stream re-bake of the cached quads).
+// Generation params of the B-rep composer. Everything but heightScale and
+// deform feeds composeSolidMaskMesh (heavy: debounced mesh rebuild);
+// heightScale and deform only reshape the baked vertices (cheap: stream
+// re-bake of the cached quads, live sliders).
 struct BrepGenParams {
     float raisedHeight = 3.0f;   // plateau height, world units
     int rockSeed = 1337;
@@ -79,7 +106,16 @@ struct BrepGenParams {
     int wallSubdivH = 16;        // wall subdivisions, horizontal
     int wallSubdivV = 16;        // wall subdivisions, vertical
     brepmesh::WallStyleId wallStyle = brepmesh::WallStyleId::Cyclopean;
+    // Wall macro-profile (mesh rebuild, debounced): lean-back, foot swell,
+    // strata ledges. Zero = the straight vertical band of the library fork.
+    float wallBatter = 0.22f;
+    float wallFootFlare = 0.12f;
+    float wallLedgeAmp = 0.06f;
+    int wallLedgeCount = 3;
+    float talusWidth = 0.35f;    // debris apron projection, cells (0 = off)
+    float talusHeightFrac = 0.25f; // apron top edge, fraction of the height
     float heightScale = 96.0f;   // field px per 1.0 world height (stream-only)
+    BrepDeformParams deform;     // bake deformation (stream-only, live)
 };
 
 // Fragment-shader uniforms of the B-rep pass (16-byte blocks; the GL backend
@@ -192,6 +228,7 @@ private:
     std::vector<std::uint8_t> m_nodes;
     int m_nodesX = 0;
     int m_nodesY = 0;
+    std::uint8_t m_nodeMaxLevel = 0; // highest painted plateau level
     BrepGenParams m_params;
 
     bool m_meshDirty = false;   // composer rebuild needed (heavy)

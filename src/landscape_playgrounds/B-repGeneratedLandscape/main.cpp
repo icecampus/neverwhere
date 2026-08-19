@@ -82,6 +82,7 @@ bool g_ctrlDown = false;
 constexpr int kMapW = 24;
 constexpr int kMapH = 24;
 NodeField g_nodes;
+int g_paintLevel = 1; // plateau level painted by LMB (1..kMaxNodeLevel)
 
 BrepGenParams g_genParams;
 
@@ -129,6 +130,8 @@ std::string g_shotPath;
 std::optional<float> g_cliZoom;
 std::optional<glm::ivec2> g_cliCenter;
 std::vector<glm::ivec2> g_cliNodes;
+std::vector<glm::ivec2> g_cliNodes2;
+std::vector<glm::ivec2> g_cliNodes3;
 std::optional<float> g_cliHeight;
 std::optional<int> g_cliSeed;
 std::optional<int> g_cliStyle; // 0 = Cyclopean, 1 = BlockCliff
@@ -137,6 +140,15 @@ std::string g_cliMatSet;
 std::optional<float> g_cliMatTiling;
 std::string g_cliGrassPath;
 std::optional<float> g_cliGrassTiling;
+std::optional<float> g_cliRelief;
+std::optional<float> g_cliReliefWavelength;
+std::optional<float> g_cliWobble;
+std::optional<float> g_cliWobbleWavelength;
+std::optional<float> g_cliBatter;
+std::optional<float> g_cliFootFlare;
+std::optional<float> g_cliLedges;
+std::optional<float> g_cliTalus;
+std::optional<float> g_cliBevel;
 bool g_noUi = false;
 
 // --- Units -----------------------------------------------------------------
@@ -224,13 +236,13 @@ void paintAtMouse() {
     if (!g_hoverNode) {
         return;
     }
-    const bool on = !g_ctrlDown && !g_state.eraseMode;
+    const int level = (!g_ctrlDown && !g_state.eraseMode) ? g_paintLevel : 0;
     if (g_lastPaintNode && *g_lastPaintNode != *g_hoverNode) {
         // Bresenham between drag events: a fast stroke must not leave holes
         // in the node field (they read as torn partial tiles in the mesh).
-        paintNodeLine(g_nodes, *g_lastPaintNode, *g_hoverNode, on);
+        paintNodeLine(g_nodes, *g_lastPaintNode, *g_hoverNode, level);
     } else {
-        g_nodes.setNode(*g_hoverNode, on);
+        g_nodes.setNode(*g_hoverNode, level);
     }
     g_lastPaintNode = g_hoverNode;
 }
@@ -377,22 +389,39 @@ void init() {
             : brepmesh::WallStyleId::BlockCliff;
     }
     for (const glm::ivec2& node : g_cliNodes) {
-        g_nodes.setNode(node, true);
+        g_nodes.setNode(node, 1);
+    }
+    for (const glm::ivec2& node : g_cliNodes2) {
+        g_nodes.setNode(node, 2);
+    }
+    for (const glm::ivec2& node : g_cliNodes3) {
+        g_nodes.setNode(node, 3);
     }
 
     const glm::vec2 canvas = canvasSize();
     centerCamera(static_cast<int>(canvas.x), static_cast<int>(canvas.y));
-    if (g_cliZoom || g_cliCenter || !g_cliNodes.empty()) {
+    const bool hasCliNodes = !g_cliNodes.empty() || !g_cliNodes2.empty() || !g_cliNodes3.empty();
+    if (g_cliZoom || g_cliCenter || hasCliNodes) {
         // Deterministic framing for screenshot comparisons.
         glm::vec2 worldCenter;
         if (g_cliCenter) {
             worldCenter = g_iso.mapToField(*g_cliCenter);
-        } else if (!g_cliNodes.empty()) {
+        } else if (hasCliNodes) {
             glm::vec2 acc(0.0f);
+            int count = 0;
             for (const glm::ivec2& node : g_cliNodes) {
                 acc += g_iso.nodeToField(node);
+                ++count;
             }
-            worldCenter = acc / static_cast<float>(g_cliNodes.size());
+            for (const glm::ivec2& node : g_cliNodes2) {
+                acc += g_iso.nodeToField(node);
+                ++count;
+            }
+            for (const glm::ivec2& node : g_cliNodes3) {
+                acc += g_iso.nodeToField(node);
+                ++count;
+            }
+            worldCenter = acc / static_cast<float>(std::max(count, 1));
         } else {
             worldCenter = g_iso.mapToField({kMapW / 2, kMapH / 2});
         }
@@ -413,13 +442,21 @@ void drawImGui(int w, int h) {
     ImGui::Text("Vertex-node land brush (B-rep walls)");
     ImGui::Text("LMB paint  |  Ctrl+LMB erase  |  RMB pan  |  wheel zoom");
     if (g_hoverNode) {
-        ImGui::Text("Hover node: (%d, %d) %s",
-            g_hoverNode->x, g_hoverNode->y, g_nodes.isOn(*g_hoverNode) ? "ON" : "off");
+        ImGui::Text("Hover node: (%d, %d) L%d",
+            g_hoverNode->x, g_hoverNode->y, (int)g_nodes.levelAt(*g_hoverNode));
     } else {
         ImGui::Text("Hover node: (out of bounds)");
     }
-    ImGui::Text("On nodes: %d", g_nodes.onNodeCount());
+    ImGui::Text("On nodes: %d (max level %d)", g_nodes.onNodeCount(), (int)g_nodes.maxLevel());
     ImGui::Checkbox("Erase mode", &g_state.eraseMode);
+    ImGui::Text("Paint level:");
+    ImGui::SameLine();
+    for (int lv = 1; lv <= (int)kMaxNodeLevel; ++lv) {
+        if (lv > 1) {
+            ImGui::SameLine();
+        }
+        ImGui::RadioButton(std::to_string(lv).c_str(), &g_paintLevel, lv);
+    }
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("B-rep generation", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -438,7 +475,21 @@ void drawImGui(int w, int h) {
                 ? brepmesh::WallStyleId::Cyclopean
                 : brepmesh::WallStyleId::BlockCliff;
         }
+        ImGui::Separator();
+        ImGui::TextDisabled("Wall profile (rebuild)");
+        ImGui::SliderFloat("Batter", &g_genParams.wallBatter, 0.0f, 0.5f, "%.2f");
+        ImGui::SliderFloat("Foot flare", &g_genParams.wallFootFlare, 0.0f, 0.4f, "%.2f");
+        ImGui::SliderFloat("Ledges", &g_genParams.wallLedgeAmp, 0.0f, 0.2f, "%.2f");
+        ImGui::SliderInt("Ledge count", &g_genParams.wallLedgeCount, 1, 6);
+        ImGui::SliderFloat("Talus width", &g_genParams.talusWidth, 0.0f, 0.8f, "%.2f");
+        ImGui::SliderFloat("Talus height", &g_genParams.talusHeightFrac, 0.05f, 0.5f, "%.2f");
         ImGui::SliderFloat("Height scale", &g_genParams.heightScale, 32.0f, 192.0f, "%.0f px");
+        ImGui::Separator();
+        ImGui::TextDisabled("Deformation (live, no rebuild)");
+        ImGui::SliderFloat("Top relief", &g_genParams.deform.reliefAmp, 0.0f, 0.6f, "%.2f");
+        ImGui::SliderFloat("Relief wavelength", &g_genParams.deform.reliefWavelength, 1.0f, 8.0f, "%.1f");
+        ImGui::SliderFloat("Rim wobble", &g_genParams.deform.wobbleAmp, 0.0f, 0.4f, "%.2f");
+        ImGui::SliderFloat("Wobble wavelength", &g_genParams.deform.wobbleWavelength, 1.0f, 8.0f, "%.1f");
     }
 
     if (ImGui::CollapsingHeader(("Material (" + g_matSet + ")").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -771,7 +822,8 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --zoom=Z                camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy          camera center in cell coords
 //                         (default: bbox center of --nodes)
-// --nodes="x,y;x,y;..."   paint these nodes on startup (screenshot scenes)
+// --nodes="x,y;x,y;..."   paint these nodes (level 1) on startup
+// --nodes2= / --nodes3=   same for plateau levels 2 and 3 (terraces)
 // --height=H              plateau height in world units (default 3.0)
 // --seed=N                rock displacement seed (default 1337)
 // --style=cyclopean|block wall style (default cyclopean)
@@ -785,6 +837,15 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --grass=path            grass-top albedo texture
 //                         (default resources/textures/grass.png)
 // --grass-tiling=T        grass tiling repeats per world unit (default 0.5)
+// --relief=A              top relief amplitude, world units (default 0.25, 0=off)
+// --relief-wavelength=L   top relief wavelength, cells (default 4.5)
+// --wobble=A              rim wander amplitude, cells (default 0.2, 0=off)
+// --wobble-wavelength=L   rim wander wavelength, cells (default 4.0)
+// --batter=A              wall lean-back at the foot, cells (default 0.22)
+// --foot-flare=A          extra foot swell, cells (default 0.12)
+// --ledges=A              strata ledges amplitude, cells (default 0.06)
+// --talus=W               talus apron width, cells (default 0.35, 0=off)
+// --bevel=B               corner bevel 0..0.45 (default 0.3)
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -806,6 +867,12 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--nodes=", 0) == 0) {
             g_cliNodes = parseNodesArg(arg.substr(8));
+        }
+        if (arg.rfind("--nodes2=", 0) == 0) {
+            g_cliNodes2 = parseNodesArg(arg.substr(9));
+        }
+        if (arg.rfind("--nodes3=", 0) == 0) {
+            g_cliNodes3 = parseNodesArg(arg.substr(9));
         }
         if (arg.rfind("--height=", 0) == 0) {
             g_cliHeight = static_cast<float>(std::atof(arg.substr(9).c_str()));
@@ -836,6 +903,33 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--grass-tiling=", 0) == 0) {
             g_cliGrassTiling = static_cast<float>(std::atof(arg.substr(15).c_str()));
         }
+        if (arg.rfind("--relief=", 0) == 0) {
+            g_cliRelief = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--relief-wavelength=", 0) == 0) {
+            g_cliReliefWavelength = static_cast<float>(std::atof(arg.substr(20).c_str()));
+        }
+        if (arg.rfind("--wobble=", 0) == 0) {
+            g_cliWobble = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--wobble-wavelength=", 0) == 0) {
+            g_cliWobbleWavelength = static_cast<float>(std::atof(arg.substr(20).c_str()));
+        }
+        if (arg.rfind("--batter=", 0) == 0) {
+            g_cliBatter = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--foot-flare=", 0) == 0) {
+            g_cliFootFlare = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
+        if (arg.rfind("--ledges=", 0) == 0) {
+            g_cliLedges = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--talus=", 0) == 0) {
+            g_cliTalus = static_cast<float>(std::atof(arg.substr(8).c_str()));
+        }
+        if (arg.rfind("--bevel=", 0) == 0) {
+            g_cliBevel = static_cast<float>(std::atof(arg.substr(8).c_str()));
+        }
     }
     if (!g_cliMatDir.empty()) {
         g_matDir = g_cliMatDir;
@@ -852,6 +946,33 @@ int main(int argc, char* argv[]) {
     }
     if (g_cliGrassTiling) {
         g_grassTiling = *g_cliGrassTiling;
+    }
+    if (g_cliRelief) {
+        g_genParams.deform.reliefAmp = *g_cliRelief;
+    }
+    if (g_cliReliefWavelength) {
+        g_genParams.deform.reliefWavelength = *g_cliReliefWavelength;
+    }
+    if (g_cliWobble) {
+        g_genParams.deform.wobbleAmp = *g_cliWobble;
+    }
+    if (g_cliWobbleWavelength) {
+        g_genParams.deform.wobbleWavelength = *g_cliWobbleWavelength;
+    }
+    if (g_cliBatter) {
+        g_genParams.wallBatter = *g_cliBatter;
+    }
+    if (g_cliFootFlare) {
+        g_genParams.wallFootFlare = *g_cliFootFlare;
+    }
+    if (g_cliLedges) {
+        g_genParams.wallLedgeAmp = *g_cliLedges;
+    }
+    if (g_cliTalus) {
+        g_genParams.talusWidth = *g_cliTalus;
+    }
+    if (g_cliBevel) {
+        g_genParams.cornerBevel = *g_cliBevel;
     }
 
     if (smoke) {
