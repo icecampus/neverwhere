@@ -6,8 +6,9 @@
 #include <filesystem>
 
 #include <spdlog/spdlog.h>
+#include <stb_image.h>
 
-#include <landscape_mesh/landscape_mesh.h>
+#include "BrepMesh.h"
 
 #include "BrepRenderer.h"
 #include "NodeField.h"
@@ -24,7 +25,7 @@ void setNode(std::vector<std::uint8_t>& nodes, int nodesX, int x, int y) {
 
 // The 6x6 on-node plateau block from the landscape test-suite
 // (CyclopeanPipelineProducesSeamedPlateau), composed with the given style.
-landscape_mesh::CompositionResult composePlateau(landscape_mesh::WallStyleId style) {
+brepmesh::CompositionResult composePlateau(brepmesh::WallStyleId style) {
     auto nodes = makeNodes(12, 12);
     for (int y = 3; y <= 8; ++y) {
         for (int x = 3; x <= 8; ++x) {
@@ -32,15 +33,15 @@ landscape_mesh::CompositionResult composePlateau(landscape_mesh::WallStyleId sty
         }
     }
 
-    landscape_mesh::MeshBuildSettings settings;
+    brepmesh::MeshBuildSettings settings;
     settings.cellSize = 1.0f;
     settings.levelHeight = 3.0f;
     settings.wallStyle = style;
     settings.wallHorizontalSubdivisions = 16;
     settings.wallVerticalSubdivisions = 16;
 
-    landscape_mesh::SolidMeshBuildRequest request;
-    request.mask = landscape_mesh::solidMaskFromNodes(nodes.data(), 12, 12);
+    brepmesh::SolidMeshBuildRequest request;
+    request.mask = brepmesh::solidMaskFromNodes(nodes.data(), 12, 12);
     request.baseHeight = 0.0f;
     request.topHeight = 3.0f;
     request.level = 1;
@@ -48,7 +49,7 @@ landscape_mesh::CompositionResult composePlateau(landscape_mesh::WallStyleId sty
     request.includeWalls = true;
     request.fadeWallDisplacementAtBottom = false;
 
-    return landscape_mesh::composeSolidMaskMesh(request, settings);
+    return brepmesh::composeSolidMaskMesh(request, settings);
 }
 
 bool findDefaultMatDir(std::filesystem::path& out) {
@@ -132,8 +133,8 @@ bool runBrepSmokeTest() {
     }
 
     // --- Composer pipelines ----------------------------------------------------
-    const landscape_mesh::CompositionResult cyclopean =
-        composePlateau(landscape_mesh::WallStyleId::Cyclopean);
+    const brepmesh::CompositionResult cyclopean =
+        composePlateau(brepmesh::WallStyleId::Cyclopean);
     check(!cyclopean.quads.empty(), "cyclopean compose produces quads");
     check(cyclopean.stats.topQuadCount > 0, "cyclopean top quads present");
     check(cyclopean.stats.cliffWallQuadCount > 0, "cyclopean wall quads present");
@@ -141,8 +142,8 @@ bool runBrepSmokeTest() {
     check(cyclopean.normalOrientation.outwardFailCount == 0,
         "cyclopean normals face outward");
 
-    const landscape_mesh::CompositionResult blockCliff =
-        composePlateau(landscape_mesh::WallStyleId::BlockCliff);
+    const brepmesh::CompositionResult blockCliff =
+        composePlateau(brepmesh::WallStyleId::BlockCliff);
     check(!blockCliff.quads.empty() && blockCliff.seams.passed,
         "block-cliff compose produces a seamed plateau");
 
@@ -156,9 +157,9 @@ bool runBrepSmokeTest() {
         const glm::ivec2 origin{0, 0};
 
         // A plateau-top quad: all four corners at the top height.
-        const landscape_mesh::MeshQuad* topQuad = nullptr;
-        const landscape_mesh::MeshQuad* wallQuad = nullptr;
-        for (const landscape_mesh::MeshQuad& quad : cyclopean.quads) {
+        const brepmesh::MeshQuad* topQuad = nullptr;
+        const brepmesh::MeshQuad* wallQuad = nullptr;
+        for (const brepmesh::MeshQuad& quad : cyclopean.quads) {
             const float ys[4] = {quad.a.y, quad.b.y, quad.c.y, quad.d.y};
             const bool allTop = std::abs(ys[0] - kTopHeight) < 1e-4f &&
                 std::abs(ys[1] - kTopHeight) < 1e-4f &&
@@ -223,6 +224,38 @@ bool runBrepSmokeTest() {
             const int mask = probeMaterialMaps(matDir.string(), "marble_cliff_01");
             check((mask & 0xB) == 0xB,
                 "probeMaterialMaps finds color+normal+roughness of marble_cliff_01");
+        }
+    }
+
+    // --- Grass top texture -----------------------------------------------------
+    {
+        // Same walk-up as findDefaultMatDir: resources/textures/grass.png.
+        std::error_code ec;
+        std::filesystem::path dir = std::filesystem::weakly_canonical(std::filesystem::current_path(), ec);
+        if (dir.empty()) {
+            dir = std::filesystem::current_path(ec);
+        }
+        std::filesystem::path grassPath;
+        for (int i = 0; i < 16; ++i) {
+            const std::filesystem::path candidate = dir / "resources" / "textures" / "grass.png";
+            if (std::filesystem::exists(candidate, ec)) {
+                grassPath = candidate;
+                break;
+            }
+            if (!dir.has_parent_path()) {
+                break;
+            }
+            const std::filesystem::path parent = dir.parent_path();
+            if (parent == dir) {
+                break;
+            }
+            dir = parent;
+        }
+        check(!grassPath.empty(), "default grass texture present under resources/textures/");
+        if (!grassPath.empty()) {
+            int w = 0, h = 0, comp = 0;
+            check(stbi_info(grassPath.string().c_str(), &w, &h, &comp) == 1 && w > 0 && h > 0,
+                "default grass texture decodable (stb)");
         }
     }
 

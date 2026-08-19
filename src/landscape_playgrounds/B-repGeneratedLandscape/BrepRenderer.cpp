@@ -57,10 +57,12 @@ uniform vec4 params0;     // x: ambient, y: diffuse, z: spec strength, w: spec p
 uniform vec4 params1;     // x: gamma, y: material V tiling factor (map aspect)
 uniform vec4 params2;     // x: material tiling, y: albedo, z: normal, w: AO
 uniform vec4 params3;     // x: roughness
+uniform vec4 params4;     // x: grass strength, y: grass tiling
 uniform sampler2D mat_color;
 uniform sampler2D mat_normal;
 uniform sampler2D mat_ao;
 uniform sampler2D mat_rough;
+uniform sampler2D grass_color;
 
 // Material UV: 2:1 sets (Ground061) tile V twice as fast to keep the features
 // square in world space; square sets (marble_cliff_01) use the 1x factor. The
@@ -101,11 +103,21 @@ void main() {
             tw.z * texture(mat_color, matuv(p.xy)).rgb;
         base = mix(base, alb, params2.y);
     }
+    // Grass top: up-facing fragments trade the rock albedo for the grass
+    // texture (world-XZ projection). The weight reads the shading normal
+    // BEFORE the normal-map detail, so walls (horizontal litWallNormal) stay
+    // bare and only the plateau top plus a soft rim fringe go green; the rock
+    // normal detail fades out where the grass is full.
+    float grassW = 0.0;
+    if (params4.x > 0.0) {
+        grassW = smoothstep(0.75, 0.92, n.y) * params4.x;
+        base = mix(base, texture(grass_color, p.xz * params4.y).rgb, grassW);
+    }
     // Normal detail along the dominant axis, NormalGL (Y+) convention.
     if (params2.z > 0.0) {
         vec3 nts = texture(mat_normal, matuv(duv)).rgb * 2.0 - 1.0;
         vec3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
-        n = normalize(mix(n, nm, params2.z));
+        n = normalize(mix(n, nm, params2.z * (1.0 - grassW)));
     }
     // Cheap sun lambert + ambient + Blinn spec; the iso view direction is
     // constant (viewer -> scene, so the Blinn half vector is l - rd).
@@ -168,12 +180,14 @@ cbuffer fs_params: register(b0) {
     float4 params1; // x: gamma, y: material V tiling factor (map aspect)
     float4 params2; // x: material tiling, y: albedo, z: normal, w: AO
     float4 params3; // x: roughness
+    float4 params4; // x: grass strength, y: grass tiling
 };
 
 Texture2D mat_color: register(t0);
 Texture2D mat_normal: register(t1);
 Texture2D mat_ao: register(t2);
 Texture2D mat_rough: register(t3);
+Texture2D grass_color: register(t4);
 SamplerState mat_smp: register(s0);
 
 // Material UV: 2:1 sets tile V twice as fast; square sets use the 1x factor
@@ -216,10 +230,16 @@ float4 main(PSIn inp): SV_Target {
             tw.z * mat_color.Sample(mat_smp, matuv(p.xy)).rgb;
         base = lerp(base, alb, params2.y);
     }
+    // Grass top (see the GLSL twin).
+    float grassW = 0.0;
+    if (params4.x > 0.0) {
+        grassW = smoothstep(0.75, 0.92, n.y) * params4.x;
+        base = lerp(base, grass_color.Sample(mat_smp, p.xz * params4.y).rgb, grassW);
+    }
     if (params2.z > 0.0) {
         float3 nts = mat_normal.Sample(mat_smp, matuv(duv)).rgb * 2.0 - 1.0;
         float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
-        n = normalize(lerp(n, nm, params2.z));
+        n = normalize(lerp(n, nm, params2.z * (1.0 - grassW)));
     }
     float3 l = normalize(light_dir.xyz);
     float3 rd = view_dir.xyz;
@@ -288,6 +308,7 @@ struct FsParams {
     float4 params1; // x: gamma, y: material V tiling factor (map aspect)
     float4 params2; // x: material tiling, y: albedo, z: normal, w: AO
     float4 params3; // x: roughness
+    float4 params4; // x: grass strength, y: grass tiling
 };
 
 struct PSIn {
@@ -309,6 +330,7 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
                       texture2d<float> mat_normal [[texture(1)]],
                       texture2d<float> mat_ao [[texture(2)]],
                       texture2d<float> mat_rough [[texture(3)]],
+                      texture2d<float> grass_color [[texture(4)]],
                       sampler mat_smp [[sampler(0)]]) {
     float3 n = normalize(in.normal);
     float3 p = in.world;
@@ -336,10 +358,16 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& fs [[buffer(1)]],
             tw.z * mat_color.sample(mat_smp, matuv(p.xy, fs.params2.x, fs.params1.y)).rgb;
         base = mix(base, alb, fs.params2.y);
     }
+    // Grass top (see the GLSL twin).
+    float grassW = 0.0;
+    if (fs.params4.x > 0.0) {
+        grassW = smoothstep(0.75, 0.92, n.y) * fs.params4.x;
+        base = mix(base, grass_color.sample(mat_smp, p.xz * fs.params4.y).rgb, grassW);
+    }
     if (fs.params2.z > 0.0) {
         float3 nts = mat_normal.sample(mat_smp, matuv(duv, fs.params2.x, fs.params1.y)).rgb * 2.0 - 1.0;
         float3 nm = normalize(tang * nts.x + bitang * nts.y + n * nts.z);
-        n = normalize(mix(n, nm, fs.params2.z));
+        n = normalize(mix(n, nm, fs.params2.z * (1.0 - grassW)));
     }
     float3 l = normalize(fs.light_dir.xyz);
     float3 rd = fs.view_dir.xyz;
@@ -381,8 +409,8 @@ void fillFsUniformDesc(sg_shader_uniform_block* block) {
     block->msl_buffer_n = 1;
     block->wgsl_group0_binding_n = 1;
     block->spirv_set0_binding_n = 1;
-    const char* names[6] = {"light_dir", "view_dir", "params0", "params1", "params2", "params3"};
-    for (int i = 0; i < 6; ++i) {
+    const char* names[7] = {"light_dir", "view_dir", "params0", "params1", "params2", "params3", "params4"};
+    for (int i = 0; i < 7; ++i) {
         block->glsl_uniforms[i].glsl_name = names[i];
         block->glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
     }
@@ -424,7 +452,7 @@ std::vector<std::vector<std::uint8_t>> buildMipChain(const std::uint8_t* rgba, i
 } // namespace
 
 void appendBrepQuadVertices(
-    const landscape_mesh::MeshQuad& quad,
+    const brepmesh::MeshQuad& quad,
     glm::ivec2 origin,
     float halfW,
     float halfH,
@@ -434,8 +462,8 @@ void appendBrepQuadVertices(
     // Wall panels take the mesh-authoritative outward normal (the displaced
     // facet normal would shade the rock displacement twice); flat parts use
     // their own facet normal.
-    const landscape_mesh::Vec3 n = quad.cliffWall ? landscape_mesh::litWallNormal(quad) : quad.normal;
-    const auto push = [&](const landscape_mesh::Vec3& v) {
+    const brepmesh::Vec3 n = quad.cliffWall ? brepmesh::litWallNormal(quad) : quad.normal;
+    const auto push = [&](const brepmesh::Vec3& v) {
         // The composer runs at cellSize 1, so mesh units ARE map cells; the
         // projection matches DiamondIsometry::nodeToField (no +halfH on y).
         const float mapX = static_cast<float>(origin.x) + v.x;
@@ -485,10 +513,11 @@ void BrepRenderer::init() {
     fillVsUniformDesc(&shd.uniform_blocks[0]);
     fillFsUniformDesc(&shd.uniform_blocks[1]);
 
-    // Material maps: color/normal/AO/roughness as texture views 0..3, all
-    // sampled with the one shared REPEAT sampler (slot 0).
-    const char* matGlslNames[4] = {"mat_color", "mat_normal", "mat_ao", "mat_rough"};
-    for (int i = 0; i < 4; ++i) {
+    // Material maps: color/normal/AO/roughness as texture views 0..3 plus the
+    // grass-top albedo at view 4, all sampled with the one shared REPEAT
+    // sampler (slot 0).
+    const char* matGlslNames[5] = {"mat_color", "mat_normal", "mat_ao", "mat_rough", "grass_color"};
+    for (int i = 0; i < 5; ++i) {
         shd.views[i].texture.stage = SG_SHADERSTAGE_FRAGMENT;
         shd.views[i].texture.image_type = SG_IMAGETYPE_2D;
         shd.views[i].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
@@ -542,16 +571,20 @@ void BrepRenderer::init() {
     matSmp.label = "brep-mat-smp";
     m_matSampler = sg_make_sampler(&matSmp);
 
-    // Placeholders until a material set loads: keeps the bindings valid (the
-    // shader always samples; strengths live in params2/params3). White color,
-    // flat tangent normal (128,128,255), white AO/roughness.
-    const std::uint32_t placeholderPx[4] = {
+    // Placeholders until a material set / grass texture loads: keeps the
+    // bindings valid (the shader always samples; strengths live in
+    // params2/params3/params4). White color, flat tangent normal
+    // (128,128,255), white AO/roughness, white grass.
+    const std::uint32_t placeholderPx[5] = {
         0xFFFFFFFFu, // color: white
         0xFFFF8080u, // normal: flat (little-endian RGBA bytes 128,128,255,255)
         0xFFFFFFFFu, // AO: white
         0xFFFFFFFFu, // roughness: white
+        0xFFFFFFFFu, // grass: white
     };
-    for (int i = 0; i < 4; ++i) {
+    MatSlot* placeholderSlots[5] = {
+        &m_matMaps[0], &m_matMaps[1], &m_matMaps[2], &m_matMaps[3], &m_grassMap};
+    for (int i = 0; i < 5; ++i) {
         sg_image_desc img = {};
         img.width = 1;
         img.height = 1;
@@ -559,10 +592,10 @@ void BrepRenderer::init() {
         img.data.mip_levels[0].ptr = &placeholderPx[i];
         img.data.mip_levels[0].size = sizeof(placeholderPx[i]);
         img.label = "brep-mat-placeholder";
-        m_matMaps[i].image = sg_make_image(&img);
+        placeholderSlots[i]->image = sg_make_image(&img);
         sg_view_desc view = {};
-        view.texture.image = m_matMaps[i].image;
-        m_matMaps[i].view = sg_make_view(&view);
+        view.texture.image = placeholderSlots[i]->image;
+        placeholderSlots[i]->view = sg_make_view(&view);
     }
 
     m_ready = true;
@@ -589,6 +622,7 @@ void BrepRenderer::shutdown() {
     for (int i = 0; i < 4; ++i) {
         destroySlot(m_matMaps[i]);
     }
+    destroySlot(m_grassMap);
     m_ready = false;
 }
 
@@ -711,6 +745,26 @@ int BrepRenderer::loadMaterialMaps(const std::string& dir, const std::string& se
     return loaded;
 }
 
+bool BrepRenderer::loadGrassMap(const std::string& path) {
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+    if (!pixels || w <= 0 || h <= 0) {
+        if (pixels) {
+            stbi_image_free(pixels);
+        }
+        spdlog::error("BrepRenderer: grass map '{}' load failed", path);
+        return false;
+    }
+    const bool ok = uploadSlotMipmapped(m_grassMap, pixels, w, h, "grass-top");
+    stbi_image_free(pixels);
+    if (!ok) {
+        spdlog::error("BrepRenderer: grass map '{}' upload failed", path);
+    } else {
+        spdlog::info("BrepRenderer: grass-top <- {} ({}x{})", path, w, h);
+    }
+    return ok;
+}
+
 void BrepRenderer::setContent(
     const std::uint8_t* nodes,
     int nodesX,
@@ -779,8 +833,9 @@ void BrepRenderer::rebuildMesh(const topology_core::DiamondIsometry& iso) {
 
     // Full path for the whole node field: on-nodes -> bbox node grid (1-cell
     // margin, the boundary walls/bevels must not cross the grid border) ->
-    // cell solid-mask -> landscape_mesh compose -> quad cache. The editor's
-    // CyclopeanRenderer::rebuildMesh runs this same pipeline.
+    // cell solid-mask -> brepmesh compose -> quad cache. Forked from the
+    // pipeline the editor's CyclopeanRenderer::rebuildMesh runs — changes
+    // here stay in the playground.
     m_quads.clear();
     m_stats.quadCount = 0;
     m_stats.topQuadCount = 0;
@@ -826,8 +881,8 @@ void BrepRenderer::rebuildMesh(const topology_core::DiamondIsometry& iso) {
             }
         }
 
-        landscape_mesh::SolidMeshBuildRequest request;
-        request.mask = landscape_mesh::solidMaskFromNodes(bboxNodes.data(), bboxNodesX, bboxNodesY);
+        brepmesh::SolidMeshBuildRequest request;
+        request.mask = brepmesh::solidMaskFromNodes(bboxNodes.data(), bboxNodesX, bboxNodesY);
         request.baseHeight = 0.0f;
         request.topHeight = m_params.raisedHeight;
         request.level = 1;
@@ -836,7 +891,7 @@ void BrepRenderer::rebuildMesh(const topology_core::DiamondIsometry& iso) {
         request.fadeWallDisplacementAtBottom = false;
 
         // Single-level plateau: the level height equals the plateau top.
-        landscape_mesh::MeshBuildSettings settings;
+        brepmesh::MeshBuildSettings settings;
         settings.cellSize = 1.0f;
         settings.levelHeight = m_params.raisedHeight;
         settings.cornerBevel = m_params.cornerBevel;
@@ -847,8 +902,8 @@ void BrepRenderer::rebuildMesh(const topology_core::DiamondIsometry& iso) {
         settings.wallVerticalSubdivisions = m_params.wallSubdivV;
         settings.wallStyle = m_params.wallStyle;
 
-        const landscape_mesh::CompositionResult result =
-            landscape_mesh::composeSolidMaskMesh(request, settings);
+        const brepmesh::CompositionResult result =
+            brepmesh::composeSolidMaskMesh(request, settings);
         if (!result.seams.passed) {
             spdlog::warn("BrepRenderer: wall mesh seam validation failed ({} of {} edges)",
                 result.seams.mismatches, result.seams.checkedEdges);
@@ -878,7 +933,7 @@ void BrepRenderer::rebakeStream(const topology_core::DiamondIsometry& iso) {
     const float halfW = cellSz.x * 0.5f;
     const float halfH = cellSz.y * 0.5f;
     m_stream.reserve(m_quads.size() * 6);
-    for (const landscape_mesh::MeshQuad& quad : m_quads) {
+    for (const brepmesh::MeshQuad& quad : m_quads) {
         appendBrepQuadVertices(quad, m_origin, halfW, halfH, m_params.heightScale, m_stream);
     }
     m_stats.vertexCount = static_cast<int>(m_stream.size());
@@ -930,6 +985,7 @@ void BrepRenderer::render(
     for (int i = 0; i < 4; ++i) {
         bind.views[i] = m_matMaps[i].view;
     }
+    bind.views[4] = m_grassMap.view;
     bind.samplers[0] = m_matSampler;
 
     sg_apply_pipeline(m_pip);

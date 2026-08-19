@@ -109,6 +109,13 @@ float g_matNormal = 1.0f;
 float g_matAo = 0.0f;
 float g_matRough = 1.0f;
 
+// Grass top: the up-facing plateau surface trades the rock albedo for a tiled
+// grass texture (view slot 4, shader weight smoothstep on the up-normal).
+// Strength 0 disables it bit-for-bit.
+std::string g_grassPath = "resources/textures/grass.png";
+float g_grassStrength = 1.0f;
+float g_grassTiling = 0.5f;
+
 // Fixed sun (no lighting UI in v1): same defaults the SDF playgrounds use.
 constexpr float kLightAzimuth = 2.23f;   // radians
 constexpr float kLightElevation = 0.85f; // radians
@@ -128,6 +135,8 @@ std::optional<int> g_cliStyle; // 0 = Cyclopean, 1 = BlockCliff
 std::string g_cliMatDir;
 std::string g_cliMatSet;
 std::optional<float> g_cliMatTiling;
+std::string g_cliGrassPath;
+std::optional<float> g_cliGrassTiling;
 bool g_noUi = false;
 
 // --- Units -----------------------------------------------------------------
@@ -244,6 +253,13 @@ void reloadMaterial() {
     }
 }
 
+void reloadGrass() {
+    if (!g_brep.loadGrassMap((g_dataRoot / g_grassPath).string())) {
+        // No texture -> no grass (strength 0 keeps the bindings placeholder).
+        g_grassStrength = 0.0f;
+    }
+}
+
 // Strength defaults for a freshly picked set: full coverage, AO on only when
 // the set actually ships an AO map (Poly Haven cliff packs don't, Rock064
 // does).
@@ -347,6 +363,7 @@ void init() {
     }
     reloadMaterial();
     applySetDefaults();
+    reloadGrass();
 
     if (g_cliHeight) {
         g_genParams.raisedHeight = *g_cliHeight;
@@ -356,8 +373,8 @@ void init() {
     }
     if (g_cliStyle) {
         g_genParams.wallStyle = *g_cliStyle == 0
-            ? landscape_mesh::WallStyleId::Cyclopean
-            : landscape_mesh::WallStyleId::BlockCliff;
+            ? brepmesh::WallStyleId::Cyclopean
+            : brepmesh::WallStyleId::BlockCliff;
     }
     for (const glm::ivec2& node : g_cliNodes) {
         g_nodes.setNode(node, true);
@@ -415,11 +432,11 @@ void drawImGui(int w, int h) {
         ImGui::SliderInt("Wall subdiv V", &g_genParams.wallSubdivV, 4, 16);
         ImGui::Checkbox("Rock displacement", &g_genParams.rockEnabled);
         const char* styles[] = {"Cyclopean", "BlockCliff"};
-        int styleIdx = g_genParams.wallStyle == landscape_mesh::WallStyleId::Cyclopean ? 0 : 1;
+        int styleIdx = g_genParams.wallStyle == brepmesh::WallStyleId::Cyclopean ? 0 : 1;
         if (ImGui::Combo("Wall style", &styleIdx, styles, 2)) {
             g_genParams.wallStyle = styleIdx == 0
-                ? landscape_mesh::WallStyleId::Cyclopean
-                : landscape_mesh::WallStyleId::BlockCliff;
+                ? brepmesh::WallStyleId::Cyclopean
+                : brepmesh::WallStyleId::BlockCliff;
         }
         ImGui::SliderFloat("Height scale", &g_genParams.heightScale, 32.0f, 192.0f, "%.0f px");
     }
@@ -448,6 +465,10 @@ void drawImGui(int w, int h) {
         if (ImGui::Button("Reload material")) {
             reloadMaterial();
         }
+        ImGui::Separator();
+        ImGui::TextDisabled("Grass top (%s)", g_grassStrength > 0.0f ? g_grassPath.c_str() : "missing");
+        ImGui::SliderFloat("Grass", &g_grassStrength, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Grass tiling", &g_grassTiling, 0.05f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     }
 
     if (ImGui::CollapsingHeader("Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -595,6 +616,8 @@ void frame() {
     fs.params2[2] = g_matNormal;
     fs.params2[3] = g_matAo;
     fs.params3[0] = g_matRough;
+    fs.params4[0] = g_grassStrength;
+    fs.params4[1] = g_grassTiling;
 
     g_brep.render(g_camera, canvasW, h, fs);
 
@@ -759,6 +782,9 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 //                         a color map is also switchable live from the
 //                         Material panel combo
 // --mat-tiling=T          material tiling repeats per world unit (default 0.35)
+// --grass=path            grass-top albedo texture
+//                         (default resources/textures/grass.png)
+// --grass-tiling=T        grass tiling repeats per world unit (default 0.5)
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -804,6 +830,12 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--mat-tiling=", 0) == 0) {
             g_cliMatTiling = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
+        if (arg.rfind("--grass=", 0) == 0) {
+            g_cliGrassPath = arg.substr(8);
+        }
+        if (arg.rfind("--grass-tiling=", 0) == 0) {
+            g_cliGrassTiling = static_cast<float>(std::atof(arg.substr(15).c_str()));
+        }
     }
     if (!g_cliMatDir.empty()) {
         g_matDir = g_cliMatDir;
@@ -814,6 +846,12 @@ int main(int argc, char* argv[]) {
     }
     if (g_cliMatTiling) {
         g_matTiling = *g_cliMatTiling;
+    }
+    if (!g_cliGrassPath.empty()) {
+        g_grassPath = g_cliGrassPath;
+    }
+    if (g_cliGrassTiling) {
+        g_grassTiling = *g_cliGrassTiling;
     }
 
     if (smoke) {

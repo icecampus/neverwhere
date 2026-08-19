@@ -1,4 +1,6 @@
 find_package(imgui CONFIG REQUIRED)
+# The brepmesh fork (BrepMesh.cpp/BrepWallStyle.cpp) uses FastNoise2 directly.
+find_package(FastNoise2 CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
@@ -8,12 +10,11 @@ nw_add_console_app(
         imgui::imgui
         topology_core
         landscape_core
-        landscape_mesh
+        FastNoise2::FastNoise
 )
 
 if(WIN32)
-    # landscape_mesh links FastNoise2 (shared): deploy the DLL next to the exe.
-    find_package(FastNoise2 CONFIG REQUIRED)
+    # FastNoise2 is shared: deploy the DLL next to the exe.
     add_custom_command(TARGET ${AppName} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:FastNoise2::FastNoise>

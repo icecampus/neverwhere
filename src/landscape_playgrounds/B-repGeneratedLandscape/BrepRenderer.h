@@ -20,7 +20,7 @@
 
 #include <sokol_gfx.h>
 
-#include <landscape_mesh/landscape_mesh.h>
+#include "BrepMesh.h"
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
@@ -54,7 +54,7 @@ inline constexpr float brepBakedDepth(float fieldY, float liftPx) {
 // the composer runs at cellSize 1) and bakes z from the ground fieldY plus
 // the height lift. Shared by the renderer's re-bake and the smoke test.
 void appendBrepQuadVertices(
-    const landscape_mesh::MeshQuad& quad,
+    const brepmesh::MeshQuad& quad,
     glm::ivec2 origin,
     float halfW,
     float halfH,
@@ -78,7 +78,7 @@ struct BrepGenParams {
     bool rockEnabled = true;
     int wallSubdivH = 16;        // wall subdivisions, horizontal
     int wallSubdivV = 16;        // wall subdivisions, vertical
-    landscape_mesh::WallStyleId wallStyle = landscape_mesh::WallStyleId::Cyclopean;
+    brepmesh::WallStyleId wallStyle = brepmesh::WallStyleId::Cyclopean;
     float heightScale = 96.0f;   // field px per 1.0 world height (stream-only)
 };
 
@@ -95,6 +95,8 @@ struct BrepFsParams {
                          // by the V factor for V), albedo strength (0 = plain
                          // quad color), normal-map strength, AO strength
     float params3[4];    // roughness strength, spare x3
+    float params4[4];    // grass top: albedo strength (0 = off), tiling
+                         // (repeats per world unit), spare x2
 };
 
 // Rebuild/render status for the UI and the --shot settle check.
@@ -111,7 +113,8 @@ struct BrepStats {
 };
 
 // The B-rep pass: vertex nodes -> solid mask -> composeSolidMaskMesh
-// (landscape_mesh, Cyclopean wall style by default) -> baked vertex stream.
+// (brepmesh — the playground fork of libs/landscape_mesh, Cyclopean wall
+// style by default) -> baked vertex stream.
 // The composer runs on the CPU and is debounced (0.3 s) after the last edit;
 // the stream upload is one sg_update_buffer per rebuild.
 class BrepRenderer {
@@ -137,6 +140,12 @@ public:
     // Returns the bitmask of the channels successfully loaded
     // (bit0 color, bit1 normal, bit2 AO, bit3 roughness).
     int loadMaterialMaps(const std::string& dir, const std::string& setName = "Ground061");
+
+    // Loads the grass-top albedo texture into texture view 4 (any stb-readable
+    // file; tiled with the same mipmapped REPEAT sampler as the material).
+    // On failure the white placeholder stays bound — pair with a zero grass
+    // strength (params4[0]) and the shader is bit-for-bit the no-grass look.
+    bool loadGrassMap(const std::string& path);
 
     // V tiling factor measured from the loaded map aspect (2 for 2:1 sets, 1
     // for square ones); 2.0 until anything loads. Feed into params1[1].
@@ -177,6 +186,7 @@ private:
     std::size_t m_vbufSize = 0;
     sg_sampler m_matSampler{};
     MatSlot m_matMaps[4]{};
+    MatSlot m_grassMap{};
 
     // Last content fed by setContent (kept for the debounced rebuild).
     std::vector<std::uint8_t> m_nodes;
@@ -189,7 +199,7 @@ private:
     double m_pendingSince = -1.0;
 
     glm::ivec2 m_origin{0, 0}; // node coords of the cached bbox min corner
-    std::vector<landscape_mesh::MeshQuad> m_quads;
+    std::vector<brepmesh::MeshQuad> m_quads;
     std::vector<BrepVertex> m_stream;
     BrepStats m_stats;
     float m_matVTile = 2.0f; // from the loaded map aspect (2:1 sets vs square)
