@@ -57,15 +57,17 @@ bool findDefaultMatDir(std::filesystem::path& out) {
     if (dir.empty()) {
         dir = std::filesystem::current_path(ec);
     }
-    // Default set: tmp/marble_cliff_01 (untracked). The loader consumes the
-    // diffuse jpg plus the PNG conversions of the EXR normal/roughness maps.
+    // Default set: resources/textures/polyhaven/marble_cliff_01. The loader
+    // consumes the diffuse jpg plus the PNG conversions of the EXR
+    // normal/roughness maps.
     const char* files[3] = {
         "marble_cliff_01_diff_4k.jpg",
         "marble_cliff_01_nor_gl_4k.png",
         "marble_cliff_01_rough_4k.png",
     };
     for (int i = 0; i < 16; ++i) {
-        const std::filesystem::path setDir = dir / "tmp" / "marble_cliff_01";
+        const std::filesystem::path setDir =
+            dir / "resources" / "textures" / "polyhaven" / "marble_cliff_01";
         bool allPresent = true;
         for (const char* file : files) {
             allPresent = allPresent && std::filesystem::exists(setDir / file, ec);
@@ -214,7 +216,7 @@ bool runBrepSmokeTest() {
     {
         std::filesystem::path matDir;
         check(findDefaultMatDir(matDir),
-            "default material set (marble_cliff_01, incl. EXR->PNG conversions) present under tmp/");
+            "default material set (marble_cliff_01, incl. EXR->PNG conversions) present under resources/textures/");
         if (!matDir.empty()) {
             // The picker's filesystem probe sees color+normal+roughness (the
             // set ships no AO map).

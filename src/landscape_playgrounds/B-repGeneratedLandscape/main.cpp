@@ -85,17 +85,23 @@ NodeField g_nodes;
 
 BrepGenParams g_genParams;
 
-// Material sets live untracked under tmp/<name>/ (extracted Poly Haven /
-// ambientCG packs; EXR maps converted to PNG by tmp/convert_exr.py — stb
-// cannot read EXR). Every tmp/ subdirectory with a loadable color map shows
-// up in the picker (name == directory name). The walls are fully covered by
-// the material: the composer contributes GEOMETRY ONLY, so the albedo
-// strength defaults to 1 and the baked quad colors are just the fallback
-// (strengths zeroed in reloadMaterial() if no maps load).
+// Material sets live under resources/textures/<vendor>/<name>/ (Poly Haven
+// packs in polyhaven/, ambientCG in ambientcg/; name == leaf directory name
+// == file prefix). The Poly Haven EXR maps were transcoded to PNG by
+// tmp/convert_exr.py (stb cannot read EXR). Every directory with a loadable
+// color map shows up in the picker (scanned two levels deep: vendor dirs).
+// The walls are fully covered by the material: the composer contributes
+// GEOMETRY ONLY, so the albedo strength defaults to 1 and the baked quad
+// colors are just the fallback (strengths zeroed in reloadMaterial() if no
+// maps load).
+struct MatSetEntry {
+    std::string name; // file prefix == leaf directory name
+    std::string dir;  // path relative to the data root
+};
 std::filesystem::path g_dataRoot;
 int g_matMapsMask = 0; // bit0 color, bit1 normal, bit2 AO, bit3 roughness
-std::vector<std::string> g_matSets; // tmp/ subdirectories with a color map
-std::string g_matDir = "tmp/marble_cliff_01";
+std::vector<MatSetEntry> g_matSets;
+std::string g_matDir = "resources/textures/polyhaven/marble_cliff_01";
 std::string g_matSet = "marble_cliff_01";
 float g_matTiling = 0.35f;
 float g_matAlbedo = 1.0f;
@@ -249,35 +255,48 @@ void applySetDefaults() {
     g_matAo = (g_matMapsMask & 4) ? 0.5f : 0.0f;
 }
 
-// Every tmp/ subdirectory with a loadable color map is a material set
-// (name == directory name == file prefix).
+// Every directory with a loadable color map under resources/textures (two
+// levels deep: <vendor>/<name>/) is a material set (name == leaf directory
+// name == file prefix).
 void scanMaterialSets() {
     g_matSets.clear();
     std::error_code ec;
-    const std::filesystem::path tmpRoot = g_dataRoot / "tmp";
-    for (const std::filesystem::directory_entry& entry :
-        std::filesystem::directory_iterator(tmpRoot, ec)) {
-        if (!entry.is_directory()) {
-            continue;
-        }
-        const std::string name = entry.path().filename().string();
-        if (name.empty() || name[0] == '.') {
-            continue; // tooling dirs (.venv-exr) stay out
-        }
-        if (probeMaterialMaps(entry.path().string(), name) & 1) {
-            g_matSets.push_back(name);
+    const std::filesystem::path texRoot = g_dataRoot / "resources" / "textures";
+    std::vector<std::filesystem::path> parents{texRoot};
+    for (const std::filesystem::directory_entry& vendor :
+        std::filesystem::directory_iterator(texRoot, ec)) {
+        if (vendor.is_directory()) {
+            parents.push_back(vendor.path());
         }
     }
-    std::sort(g_matSets.begin(), g_matSets.end());
-    spdlog::info("B-repGeneratedLandscape: {} material set(s) under tmp/", g_matSets.size());
-    for (const std::string& name : g_matSets) {
-        spdlog::info("  material set: {}", name);
+    for (const std::filesystem::path& parent : parents) {
+        for (const std::filesystem::directory_entry& entry :
+            std::filesystem::directory_iterator(parent, ec)) {
+            if (!entry.is_directory()) {
+                continue;
+            }
+            const std::string name = entry.path().filename().string();
+            if (name.empty() || name[0] == '.') {
+                continue;
+            }
+            if (probeMaterialMaps(entry.path().string(), name) & 1) {
+                g_matSets.push_back({name, entry.path().lexically_relative(g_dataRoot).string()});
+            }
+        }
+    }
+    std::sort(
+        g_matSets.begin(),
+        g_matSets.end(),
+        [](const MatSetEntry& a, const MatSetEntry& b) { return a.name < b.name; });
+    spdlog::info("B-repGeneratedLandscape: {} material set(s) under resources/textures", g_matSets.size());
+    for (const MatSetEntry& set : g_matSets) {
+        spdlog::info("  material set: {} ({})", set.name, set.dir);
     }
 }
 
-void pickMaterialSet(const std::string& name) {
-    g_matSet = name;
-    g_matDir = "tmp/" + name;
+void pickMaterialSet(const MatSetEntry& set) {
+    g_matSet = set.name;
+    g_matDir = set.dir;
     reloadMaterial();
     applySetDefaults();
 }
@@ -316,6 +335,16 @@ void init() {
     }
     spdlog::info("dataRoot={}", g_dataRoot.string());
     scanMaterialSets();
+    if (g_cliMatDir.empty()) {
+        // The default and --mat-set names resolve vendor-agnostically
+        // through the scanned list.
+        for (const MatSetEntry& set : g_matSets) {
+            if (set.name == g_matSet) {
+                g_matDir = set.dir;
+                break;
+            }
+        }
+    }
     reloadMaterial();
     applySetDefaults();
 
@@ -398,10 +427,10 @@ void drawImGui(int w, int h) {
     if (ImGui::CollapsingHeader(("Material (" + g_matSet + ")").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (!g_matSets.empty()) {
             if (ImGui::BeginCombo("Set", g_matSet.c_str())) {
-                for (const std::string& name : g_matSets) {
-                    const bool selected = name == g_matSet;
-                    if (ImGui::Selectable(name.c_str(), selected)) {
-                        pickMaterialSet(name);
+                for (const MatSetEntry& set : g_matSets) {
+                    const bool selected = set.name == g_matSet;
+                    if (ImGui::Selectable(set.name.c_str(), selected)) {
+                        pickMaterialSet(set);
                     }
                     if (selected) {
                         ImGui::SetItemDefaultFocus();
@@ -723,10 +752,12 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --height=H              plateau height in world units (default 3.0)
 // --seed=N                rock displacement seed (default 1337)
 // --style=cyclopean|block wall style (default cyclopean)
-// --mat-dir=path          material set directory (default tmp/marble_cliff_01)
+// --mat-dir=path          material set directory
+//                         (default resources/textures/polyhaven/marble_cliff_01)
 // --mat-set=name          material file prefix (default marble_cliff_01);
-//                         every tmp/<name>/ dir with a color map is also
-//                         switchable live from the Material panel combo
+//                         every resources/textures/<vendor>/<name>/ dir with
+//                         a color map is also switchable live from the
+//                         Material panel combo
 // --mat-tiling=T          material tiling repeats per world unit (default 0.35)
 int main(int argc, char* argv[]) {
     bool smoke = false;
@@ -778,11 +809,8 @@ int main(int argc, char* argv[]) {
         g_matDir = g_cliMatDir;
     }
     if (!g_cliMatSet.empty()) {
+        // The name resolves through the scanned list in init().
         g_matSet = g_cliMatSet;
-        if (g_cliMatDir.empty()) {
-            // --mat-set alone implies the standard tmp/<name>/ layout.
-            g_matDir = "tmp/" + g_matSet;
-        }
     }
     if (g_cliMatTiling) {
         g_matTiling = *g_cliMatTiling;
