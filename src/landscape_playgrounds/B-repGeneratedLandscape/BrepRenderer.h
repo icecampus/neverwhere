@@ -61,6 +61,12 @@ void appendBrepQuadVertices(
     float heightScale,
     std::vector<BrepVertex>& out);
 
+// Filesystem-only twin of BrepRenderer::loadMaterialMaps: probes the same
+// candidate table (no GPU work) and returns the bitmask of channels whose
+// map file exists (bit0 color, bit1 normal, bit2 AO, bit3 roughness). Used
+// by the material set picker to list loadable sets and by the smoke test.
+int probeMaterialMaps(const std::string& dir, const std::string& setName);
+
 // Generation params of the B-rep composer. Everything but heightScale feeds
 // composeSolidMaskMesh (heavy: debounced mesh rebuild); heightScale only
 // scales the vertex lift (cheap: stream re-bake of the cached quads).
@@ -123,11 +129,13 @@ public:
     // Loads a material set into texture views 0..3. Both naming conventions
     // are probed per channel: ambientCG (`<setName>_Color/_NormalGL/
     // _AmbientOcclusion/_Roughness.jpg`) and Poly Haven (`<setName>_diff_4k/
-    // _nor_gl_4k/_ao_4k/_rough_4k.jpg|png`). Only stb-readable formats — EXR
-    // sources must be converted to PNG first. Each missing/failed file keeps
-    // its 1x1 placeholder bound (white color, flat normal, white AO/roughness),
+    // _nor_gl_4k/_ao_4k/_rough_4k.jpg|png`, plus the `_2k` variants). Only
+    // stb-readable formats — EXR sources must be converted to PNG first
+    // (tmp/convert_exr.py). Each missing/failed file keeps its 1x1
+    // placeholder bound (white color, flat normal, white AO/roughness),
     // so the shader stays valid and just falls back towards the quad color.
-    // Returns the number of maps successfully loaded (0..4).
+    // Returns the bitmask of the channels successfully loaded
+    // (bit0 color, bit1 normal, bit2 AO, bit3 roughness).
     int loadMaterialMaps(const std::string& dir, const std::string& setName = "Ground061");
 
     // V tiling factor measured from the loaded map aspect (2 for 2:1 sets, 1

@@ -215,6 +215,13 @@ bool runBrepSmokeTest() {
         std::filesystem::path matDir;
         check(findDefaultMatDir(matDir),
             "default material set (marble_cliff_01, incl. EXR->PNG conversions) present under tmp/");
+        if (!matDir.empty()) {
+            // The picker's filesystem probe sees color+normal+roughness (the
+            // set ships no AO map).
+            const int mask = probeMaterialMaps(matDir.string(), "marble_cliff_01");
+            check((mask & 0xB) == 0xB,
+                "probeMaterialMaps finds color+normal+roughness of marble_cliff_01");
+        }
     }
 
     if (failures == 0) {

@@ -1,5 +1,6 @@
 #include "pch.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -84,14 +85,16 @@ NodeField g_nodes;
 
 BrepGenParams g_genParams;
 
-// Material: marble_cliff_01 (Poly Haven naming, tmp/ — the EXR maps were
-// converted to PNG next to the sources; stb cannot read EXR). The walls are
-// fully covered by the material: the composer contributes GEOMETRY ONLY, so
-// the albedo strength defaults to 1 and the baked quad colors are just the
-// fallback (strengths zeroed in init() if no maps load). The set has no AO
-// map, that channel stays off.
+// Material sets live untracked under tmp/<name>/ (extracted Poly Haven /
+// ambientCG packs; EXR maps converted to PNG by tmp/convert_exr.py — stb
+// cannot read EXR). Every tmp/ subdirectory with a loadable color map shows
+// up in the picker (name == directory name). The walls are fully covered by
+// the material: the composer contributes GEOMETRY ONLY, so the albedo
+// strength defaults to 1 and the baked quad colors are just the fallback
+// (strengths zeroed in reloadMaterial() if no maps load).
 std::filesystem::path g_dataRoot;
-int g_matMapsLoaded = 0;
+int g_matMapsMask = 0; // bit0 color, bit1 normal, bit2 AO, bit3 roughness
+std::vector<std::string> g_matSets; // tmp/ subdirectories with a color map
 std::string g_matDir = "tmp/marble_cliff_01";
 std::string g_matSet = "marble_cliff_01";
 float g_matTiling = 0.35f;
@@ -217,13 +220,66 @@ void paintAtMouse() {
     g_lastPaintNode = g_hoverNode;
 }
 
+int countSetBits(int mask) {
+    int n = 0;
+    while (mask) {
+        n += mask & 1;
+        mask >>= 1;
+    }
+    return n;
+}
+
 void reloadMaterial() {
-    g_matMapsLoaded = g_brep.loadMaterialMaps((g_dataRoot / g_matDir).string(), g_matSet);
-    if (g_matMapsLoaded == 0) {
+    g_matMapsMask = g_brep.loadMaterialMaps((g_dataRoot / g_matDir).string(), g_matSet);
+    if (g_matMapsMask == 0) {
         // Palette fallback: the shader with all-zero strengths is bit-for-bit
         // the plain baked quad color.
         g_matAlbedo = g_matNormal = g_matAo = g_matRough = 0.0f;
     }
+}
+
+// Strength defaults for a freshly picked set: full coverage, AO on only when
+// the set actually ships an AO map (Poly Haven cliff packs don't, Rock064
+// does).
+void applySetDefaults() {
+    if (g_matMapsMask == 0) {
+        return;
+    }
+    g_matAlbedo = g_matNormal = g_matRough = 1.0f;
+    g_matAo = (g_matMapsMask & 4) ? 0.5f : 0.0f;
+}
+
+// Every tmp/ subdirectory with a loadable color map is a material set
+// (name == directory name == file prefix).
+void scanMaterialSets() {
+    g_matSets.clear();
+    std::error_code ec;
+    const std::filesystem::path tmpRoot = g_dataRoot / "tmp";
+    for (const std::filesystem::directory_entry& entry :
+        std::filesystem::directory_iterator(tmpRoot, ec)) {
+        if (!entry.is_directory()) {
+            continue;
+        }
+        const std::string name = entry.path().filename().string();
+        if (name.empty() || name[0] == '.') {
+            continue; // tooling dirs (.venv-exr) stay out
+        }
+        if (probeMaterialMaps(entry.path().string(), name) & 1) {
+            g_matSets.push_back(name);
+        }
+    }
+    std::sort(g_matSets.begin(), g_matSets.end());
+    spdlog::info("B-repGeneratedLandscape: {} material set(s) under tmp/", g_matSets.size());
+    for (const std::string& name : g_matSets) {
+        spdlog::info("  material set: {}", name);
+    }
+}
+
+void pickMaterialSet(const std::string& name) {
+    g_matSet = name;
+    g_matDir = "tmp/" + name;
+    reloadMaterial();
+    applySetDefaults();
 }
 
 void init() {
@@ -259,7 +315,9 @@ void init() {
         g_dataRoot = std::filesystem::current_path();
     }
     spdlog::info("dataRoot={}", g_dataRoot.string());
+    scanMaterialSets();
     reloadMaterial();
+    applySetDefaults();
 
     if (g_cliHeight) {
         g_genParams.raisedHeight = *g_cliHeight;
@@ -338,7 +396,21 @@ void drawImGui(int w, int h) {
     }
 
     if (ImGui::CollapsingHeader(("Material (" + g_matSet + ")").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Text("Maps: %d/4%s", g_matMapsLoaded, g_matMapsLoaded > 0 ? "" : " (quad-color look)");
+        if (!g_matSets.empty()) {
+            if (ImGui::BeginCombo("Set", g_matSet.c_str())) {
+                for (const std::string& name : g_matSets) {
+                    const bool selected = name == g_matSet;
+                    if (ImGui::Selectable(name.c_str(), selected)) {
+                        pickMaterialSet(name);
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        }
+        ImGui::Text("Maps: %d/4%s", countSetBits(g_matMapsMask), g_matMapsMask != 0 ? "" : " (quad-color look)");
         ImGui::SliderFloat("Mat tiling", &g_matTiling, 0.05f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Albedo", &g_matAlbedo, 0.0f, 1.0f, "%.2f");
         ImGui::SliderFloat("Normal map", &g_matNormal, 0.0f, 1.0f, "%.2f");
@@ -652,7 +724,9 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --seed=N                rock displacement seed (default 1337)
 // --style=cyclopean|block wall style (default cyclopean)
 // --mat-dir=path          material set directory (default tmp/marble_cliff_01)
-// --mat-set=name          material file prefix (default marble_cliff_01)
+// --mat-set=name          material file prefix (default marble_cliff_01);
+//                         every tmp/<name>/ dir with a color map is also
+//                         switchable live from the Material panel combo
 // --mat-tiling=T          material tiling repeats per world unit (default 0.35)
 int main(int argc, char* argv[]) {
     bool smoke = false;
@@ -705,6 +779,10 @@ int main(int argc, char* argv[]) {
     }
     if (!g_cliMatSet.empty()) {
         g_matSet = g_cliMatSet;
+        if (g_cliMatDir.empty()) {
+            // --mat-set alone implies the standard tmp/<name>/ layout.
+            g_matDir = "tmp/" + g_matSet;
+        }
     }
     if (g_cliMatTiling) {
         g_matTiling = *g_cliMatTiling;

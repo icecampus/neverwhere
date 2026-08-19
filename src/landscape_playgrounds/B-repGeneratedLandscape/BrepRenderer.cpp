@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 
 #include <spdlog/spdlog.h>
 
@@ -636,53 +637,76 @@ bool BrepRenderer::uploadSlotMipmapped(
     return slot.view.id != SG_INVALID_ID;
 }
 
+namespace {
+
+// Naming conventions probed per channel (stb-readable formats only — EXR
+// sources must be converted to PNG first, tmp/convert_exr.py): ambientCG
+// "<set>_Color.jpg" style and Poly Haven "<set>_diff_4k.jpg" style, plus the
+// `_2k` variants of the latter (e.g. marble_cliff_03 ships 2k maps).
+constexpr const char* kMatCandidates[4][8] = {
+    {"_Color.jpg", "_Color.png", "_diff_4k.jpg", "_diff_4k.png", "_diff_2k.jpg", "_diff_2k.png", "_diff.jpg", "_diff.png"},
+    {"_NormalGL.jpg", "_NormalGL.png", "_nor_gl_4k.jpg", "_nor_gl_4k.png", "_nor_gl_2k.jpg", "_nor_gl_2k.png", "_nor_gl.jpg", "_nor_gl.png"},
+    {"_AmbientOcclusion.jpg", "_AmbientOcclusion.png", "_ao_4k.jpg", "_ao_4k.png", "_ao_2k.jpg", "_ao_2k.png", "_ao.jpg", "_ao.png"},
+    {"_Roughness.jpg", "_Roughness.png", "_rough_4k.jpg", "_rough_4k.png", "_rough_2k.jpg", "_rough_2k.png", "_rough.jpg", "_rough.png"},
+};
+constexpr const char* kMatLabels[4] = {"mat-color", "mat-normal", "mat-ao", "mat-rough"};
+
+// First existing candidate path for a channel, or "".
+std::string findMatCandidate(const std::string& dir, const std::string& setName, int channel) {
+    std::error_code ec;
+    for (const char* suffix : kMatCandidates[channel]) {
+        const std::string path = dir + "/" + setName + suffix;
+        if (std::filesystem::exists(path, ec)) {
+            return path;
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+int probeMaterialMaps(const std::string& dir, const std::string& setName) {
+    int mask = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!findMatCandidate(dir, setName, i).empty()) {
+            mask |= 1 << i;
+        }
+    }
+    return mask;
+}
+
 int BrepRenderer::loadMaterialMaps(const std::string& dir, const std::string& setName) {
-    // Naming conventions probed per channel (stb-readable formats only — EXR
-    // sources must be converted to PNG first): ambientCG "<set>_Color.jpg" and
-    // Poly Haven "<set>_diff_4k.jpg" style.
-    const char* candidates[4][6] = {
-        {"_Color.jpg", "_Color.png", "_diff_4k.jpg", "_diff_4k.png", "_diff.jpg", "_diff.png"},
-        {"_NormalGL.jpg", "_NormalGL.png", "_nor_gl_4k.jpg", "_nor_gl_4k.png", "_nor_gl.jpg", "_nor_gl.png"},
-        {"_AmbientOcclusion.jpg", "_AmbientOcclusion.png", "_ao_4k.jpg", "_ao_4k.png", "_ao.jpg", "_ao.png"},
-        {"_Roughness.jpg", "_Roughness.png", "_rough_4k.jpg", "_rough_4k.png", "_rough.jpg", "_rough.png"},
-    };
-    const char* labels[4] = {"mat-color", "mat-normal", "mat-ao", "mat-rough"};
     int loaded = 0;
     for (int i = 0; i < 4; ++i) {
-        for (const char* suffix : candidates[i]) {
-            if (!suffix) {
-                break;
-            }
-            const std::string path = dir + "/" + setName + suffix;
+        const std::string path = findMatCandidate(dir, setName, i);
+        if (!path.empty()) {
             int w = 0, h = 0, comp = 0;
             stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
-            if (!pixels || w <= 0 || h <= 0) {
-                if (pixels) {
-                    stbi_image_free(pixels);
+            if (pixels && w > 0 && h > 0) {
+                // V tiling factor from the map aspect: 2 for 2:1 sets
+                // (Ground061), 1 for square ones (Poly Haven cliffs) — keeps
+                // features square in world space. All maps of a set share the
+                // aspect; first wins.
+                if (loaded == 0) {
+                    m_matVTile = static_cast<float>(std::max(1, static_cast<int>(std::lround(
+                        static_cast<double>(w) / static_cast<double>(h)))));
                 }
-                continue;
+                const bool ok = uploadSlotMipmapped(m_matMaps[i], pixels, w, h, kMatLabels[i]);
+                stbi_image_free(pixels);
+                if (!ok) {
+                    spdlog::error("BrepRenderer: material map '{}' upload failed", path);
+                } else {
+                    spdlog::info("BrepRenderer: {} <- {} ({}x{})", kMatLabels[i], path, w, h);
+                    loaded |= 1 << i;
+                }
+            } else if (pixels) {
+                stbi_image_free(pixels);
             }
-            // V tiling factor from the map aspect: 2 for 2:1 sets (Ground061),
-            // 1 for square ones (marble_cliff_01) — keeps features square in
-            // world space. All maps of a set share the aspect; first wins.
-            if (loaded == 0) {
-                m_matVTile = static_cast<float>(std::max(1, static_cast<int>(std::lround(
-                    static_cast<double>(w) / static_cast<double>(h)))));
-            }
-            const bool ok = uploadSlotMipmapped(m_matMaps[i], pixels, w, h, labels[i]);
-            stbi_image_free(pixels);
-            if (!ok) {
-                spdlog::error("BrepRenderer: material map '{}' upload failed", path);
-                break;
-            }
-            spdlog::info("BrepRenderer: {} <- {} ({}x{})", labels[i], path, w, h);
-            ++loaded;
-            break;
         }
         // Missing map: the placeholder stays bound and the shader falls back
         // towards the quad color for that channel.
     }
-    spdlog::info("BrepRenderer: material '{}' from '{}': {}/4 maps loaded, vTile={}",
+    spdlog::info("BrepRenderer: material '{}' from '{}': mask={:#x}, vTile={}",
         setName, dir, loaded, m_matVTile);
     return loaded;
 }
