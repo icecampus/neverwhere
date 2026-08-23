@@ -82,6 +82,16 @@ constexpr int kMapW = 24;
 constexpr int kMapH = 24;
 NodeField g_nodes;
 StoneCutParams g_cutParams;
+// Companion-stone composition (generateCutStonePair): a second, smaller stone
+// carved with the big one's side imprint, standing a slit away from it.
+bool g_pairEnabled = false;
+int g_pairSide = 0; // 0:+x 1:-x 2:+z 3:-z
+float g_pairGap = 0.06f;
+float g_pairOverlap = 0.30f;
+float g_pairShift = 0.0f;
+float g_pairSizeFactor = 0.60f;
+float g_pairHeightFactor = 0.60f;
+int g_pairSeed = 1234;
 // Tear-hunt debug render: unlit green rock on a red background, no grid.
 bool g_flat = false;
 StoneMesh g_stoneMesh;
@@ -293,6 +303,23 @@ void drawImGui(int w, int h) {
         ImGui::Text("Tris: %d", g_stoneMesh.triCount);
     }
 
+    if (ImGui::CollapsingHeader("Companion stone")) {
+        bool edited = false;
+        edited |= ImGui::Checkbox("Enabled", &g_pairEnabled);
+        const char* kSides[] = {"+X", "-X", "+Z", "-Z"};
+        edited |= ImGui::Combo("Side", &g_pairSide, kSides, 4);
+        edited |= ImGui::SliderInt("Seed 2", &g_pairSeed, 0, 9999);
+        edited |= ImGui::SliderFloat("Size factor", &g_pairSizeFactor, 0.3f, 1.0f);
+        edited |= ImGui::SliderFloat("Height factor", &g_pairHeightFactor, 0.3f, 1.0f);
+        edited |= ImGui::SliderFloat("Gap", &g_pairGap, 0.0f, 0.3f);
+        edited |= ImGui::SliderFloat("Overlap", &g_pairOverlap, 0.05f, 0.8f);
+        edited |= ImGui::SliderFloat("Shift", &g_pairShift, -1.5f, 1.5f);
+        if (edited) {
+            g_stoneDirty = true;
+        }
+        ImGui::TextDisabled("Carved with the big stone's side imprint");
+    }
+
     ImGui::Separator();
     if (ImGui::Button("Clear nodes")) {
         g_nodes.clear();
@@ -333,6 +360,26 @@ bool capturePlaygroundPng(const char* path) {
 #endif
 }
 
+// Mesh rebuild entry point: single stone, or a big+companion pair carved with
+// each other's contact imprint when the pair mode is on.
+StoneMesh buildStoneMesh() {
+    if (!g_pairEnabled) {
+        return generateCutStone(g_cutParams);
+    }
+    StonePairParams pp;
+    pp.big = g_cutParams;
+    pp.small = g_cutParams; // same cut recipe, own seed and scaled-down sizes
+    pp.small.seed = g_pairSeed;
+    pp.small.sizeX = g_cutParams.sizeX * g_pairSizeFactor;
+    pp.small.sizeZ = g_cutParams.sizeZ * g_pairSizeFactor;
+    pp.small.height = g_cutParams.height * g_pairHeightFactor;
+    pp.side = g_pairSide;
+    pp.gap = g_pairGap;
+    pp.overlap = g_pairOverlap;
+    pp.shift = g_pairShift;
+    return generateCutStonePair(pp);
+}
+
 void frame() {
     const uint64_t now = stm_now();
     g_state.dt = static_cast<float>(stm_sec(stm_diff(now, g_state.last_time)));
@@ -354,7 +401,7 @@ void frame() {
         g_stoneDirty = true; // the rock anchor follows the painted silhouette
     }
     if (g_stoneDirty) {
-        g_stoneMesh = generateCutStone(g_cutParams);
+        g_stoneMesh = buildStoneMesh();
         g_stoneWorldPos = stoneAnchorWorld();
         ++g_stoneContentKey;
         g_stoneDirty = false;
@@ -589,6 +636,10 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --cut-sx= / --cut-sz= / --cut-height=       starting box extents
 // --grooves= / --groove-depth= / --groove-angle= / --groove-len=   V-channels
 // --pits= / --pit-depth= / --pit-angle=       trihedral dents
+// --pair                      add a companion stone carved with the big one's imprint
+// --pair-side=0..3            contact side (+x, -x, +z, -z)
+// --pair-gap= / --pair-overlap= / --pair-shift=   slit, carve depth, slide
+// --pair-size= / --pair-height= / --pair-seed=    companion scale factors, seed
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -658,6 +709,30 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--sink=", 0) == 0) {
             g_cutParams.sink = static_cast<float>(std::atof(arg.substr(7).c_str()));
+        }
+        if (arg == "--pair") {
+            g_pairEnabled = true;
+        }
+        if (arg.rfind("--pair-side=", 0) == 0) {
+            g_pairSide = std::atoi(arg.substr(12).c_str()) & 3;
+        }
+        if (arg.rfind("--pair-gap=", 0) == 0) {
+            g_pairGap = static_cast<float>(std::atof(arg.substr(11).c_str()));
+        }
+        if (arg.rfind("--pair-overlap=", 0) == 0) {
+            g_pairOverlap = static_cast<float>(std::atof(arg.substr(15).c_str()));
+        }
+        if (arg.rfind("--pair-shift=", 0) == 0) {
+            g_pairShift = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
+        if (arg.rfind("--pair-size=", 0) == 0) {
+            g_pairSizeFactor = static_cast<float>(std::atof(arg.substr(12).c_str()));
+        }
+        if (arg.rfind("--pair-height=", 0) == 0) {
+            g_pairHeightFactor = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--pair-seed=", 0) == 0) {
+            g_pairSeed = std::atoi(arg.substr(12).c_str());
         }
     }
 

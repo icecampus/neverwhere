@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <CGAL/Exact_predicates_exact_constructions_kernel.h>
+#include <CGAL/Aff_transformation_3.h>
 #include <CGAL/Nef_polyhedron_3.h>
 #include <CGAL/Surface_mesh.h>
 #include <CGAL/boost/graph/convert_nef_polyhedron_to_polygon_mesh.h>
@@ -21,6 +22,7 @@ using CK = CGAL::Exact_predicates_exact_constructions_kernel;
 using Nef = CGAL::Nef_polyhedron_3<CK>;
 using CMesh = CGAL::Surface_mesh<CK::Point_3>;
 using CPoint = CK::Point_3;
+using AffT = CGAL::Aff_transformation_3<CK>;
 
 constexpr double kPi = 3.14159265358979323846;
 
@@ -569,9 +571,18 @@ float planeTint(const glm::dvec3& n, double offset, std::uint64_t seed, float ji
     return 1.0f + jitter * (h - 0.5f) * 2.0f;
 }
 
-} // namespace
+// --- Body assembly -----------------------------------------------------------
 
-StoneMesh generateCutStone(const StoneCutParams& params) {
+// One stone body: box -> optional carve of another body -> corner cuts ->
+// grooves -> pits -> ground clip. `offset` is the XZ center (and base height)
+// of the starting box. `subtract` (nullable) is boolean-carved out of the box
+// before any cutting; carvedOk reports whether that carve survived the retries.
+Nef buildStoneBody(
+    const StoneCutParams& params, const glm::dvec3& offset, const Nef* subtract,
+    bool* carvedOk = nullptr) {
+    if (carvedOk) {
+        *carvedOk = true;
+    }
     std::mt19937_64 rng(mixSeed(params.seed));
 
     const double sx = std::max(static_cast<double>(params.sizeX), 0.05);
@@ -580,8 +591,30 @@ StoneMesh generateCutStone(const StoneCutParams& params) {
     const double minExtent = std::min({sx, sz, h});
     const double clipExtent = 64.0 * std::max({sx, sz, h});
 
-    // Starting parallelepiped: base on y=0, centered on the XZ origin.
-    Nef body = nefBox({-sx, 0.0, -sz}, {sx, h, sz});
+    Nef body = nefBox(
+        {offset.x - sx, offset.y, offset.z - sz},
+        {offset.x + sx, offset.y + h, offset.z + sz});
+
+    if (subtract) {
+        const Nef& operand = *subtract;
+        const bool ok = tryBoolean(body, [&](int attempt) {
+            if (attempt == 0) {
+                return body - operand;
+            }
+            // Retry: nudge the tool by a micron — same geometry class, but the
+            // exact-arithmetic degeneracy that tripped CGAL is sidestepped.
+            Nef shifted(operand);
+            const double e = 1e-6 * static_cast<double>(attempt);
+            shifted.transform(AffT(CGAL::TRANSLATION, CK::Vector_3(e, 2.0 * e, -e)));
+            return body - shifted;
+        });
+        if (!ok) {
+            spdlog::warn("buildStoneBody: carve subtraction failed, body left uncarved");
+        }
+        if (carvedOk) {
+            *carvedOk = ok;
+        }
+    }
 
     for (int cut = 0, cuts = std::clamp(params.cuts, 0, 64); cut < cuts; ++cut) {
         applyCornerCut(body, params, h, clipExtent, rng);
@@ -599,19 +632,30 @@ StoneMesh generateCutStone(const StoneCutParams& params) {
             tilted(glm::dvec3{0.0, -1.0, 0.0}, attempt),
             static_cast<double>(params.sink), clipExtent);
     });
+    return body;
+}
 
-    StoneMesh out;
+// Append a body's triangle soup to the mesh: flat normals, baked sun +
+// hemisphere light, per-plane tint hash. `albedoMul` shades one body of a
+// composition darker so the stones read as separate rocks.
+void emitInto(
+    StoneMesh& out, const Nef& body, std::uint64_t seedBits, float tintJitter,
+    float albedoMul) {
     const Soup soup = snapshot(body, /*triangulate=*/true);
     if (soup.verts.empty()) {
-        return out;
+        return;
     }
 
     // Family light: same fixed sun + hemisphere as the rest of the playground.
     const glm::dvec3 sun = glm::normalize(glm::dvec3{-0.55, 0.80, -0.35});
-    const glm::dvec3 albedo{0.74, 0.68, 0.57}; // warm beige, tmp/rock_example
-    const std::uint64_t seedBits = mixSeed(params.seed);
+    const glm::dvec3 albedo = glm::dvec3{0.74, 0.68, 0.57} * static_cast<double>(albedoMul); // warm beige, tmp/rock_example
 
     glm::dvec3 emin{1e30}, emax{-1e30};
+    int tris = 0;
+    if (out.triCount > 0) {
+        emin = glm::dvec3(out.extentMin);
+        emax = glm::dvec3(out.extentMax);
+    }
     for (const auto& face : soup.faces) {
         for (std::size_t i = 1; i + 1 < face.size(); ++i) {
             const glm::dvec3& a = soup.verts[face[0]];
@@ -627,7 +671,7 @@ StoneMesh generateCutStone(const StoneCutParams& params) {
             const double up = n.y * 0.5 + 0.5;
             const double light = std::min(0.40 + 0.30 * up + 0.55 * diff, 1.25);
             const double tint =
-                planeTint(n, glm::dot(n, a), seedBits, params.tintJitter);
+                planeTint(n, glm::dot(n, a), seedBits, tintJitter);
             const glm::dvec3 rgb = albedo * (light * tint);
             for (const glm::dvec3& v : {a, b, c}) {
                 out.pos.insert(out.pos.end(), {
@@ -638,12 +682,78 @@ StoneMesh generateCutStone(const StoneCutParams& params) {
                     static_cast<float>(rgb.x), static_cast<float>(rgb.y), static_cast<float>(rgb.z), 1.0f});
                 emin = glm::min(emin, v);
                 emax = glm::max(emax, v);
-                ++out.triCount;
             }
+            ++tris;
         }
     }
-    out.triCount /= 3;
+    out.triCount += tris;
     out.extentMin = glm::vec3(emin);
     out.extentMax = glm::vec3(emax);
+}
+
+} // namespace
+
+StoneMesh generateCutStone(const StoneCutParams& params) {
+    StoneMesh out;
+    emitInto(
+        out, buildStoneBody(params, glm::dvec3{0.0}, nullptr),
+        mixSeed(params.seed), params.tintJitter, 1.0f);
+    return out;
+}
+
+StoneMesh generateCutStonePair(const StonePairParams& params) {
+    const StoneCutParams& big = params.big;
+    const StoneCutParams& small = params.small;
+
+    Nef n1 = buildStoneBody(big, glm::dvec3{0.0}, nullptr);
+
+    const double sx1 = std::max(static_cast<double>(big.sizeX), 0.05);
+    const double sz1 = std::max(static_cast<double>(big.sizeZ), 0.05);
+    const double h1 = std::max(static_cast<double>(big.height), 0.05);
+    const double sx2 = std::max(static_cast<double>(small.sizeX), 0.05);
+    const double sz2 = std::max(static_cast<double>(small.sizeZ), 0.05);
+    const double overlap = std::max(static_cast<double>(params.overlap), 0.0);
+    const double gap = std::max(static_cast<double>(params.gap), 0.0);
+
+    // Small box against the chosen side of the big bbox, penetrating `overlap`.
+    glm::dvec3 offset{0.0};
+    double sideExtent = sx1; // centroid-to-wall distance along the side axis
+    switch (params.side) {
+        case 0: offset = { sx1 + sx2 - overlap, 0.0, params.shift}; break;
+        case 1: offset = {-sx1 - sx2 + overlap, 0.0, params.shift}; break;
+        case 2: offset = {params.shift, 0.0,  sz1 + sz2 - overlap}; sideExtent = sz1; break;
+        default: offset = {params.shift, 0.0, -sz1 - sz2 + overlap}; sideExtent = sz1; break;
+    }
+
+    // Inflate a copy of the big stone about its centroid so the carved pocket
+    // ends up ~gap wider than the stone itself: after placement the stones
+    // stay disjoint by a slit of roughly `gap` (uniform only approximately —
+    // the scale is about the centroid, not a true offset).
+    const double s = 1.0 + gap / sideExtent;
+    Nef inflated(n1);
+    const glm::dvec3 c{0.0, 0.5 * h1, 0.0};
+    inflated.transform(
+        AffT(CGAL::TRANSLATION, CK::Vector_3(c.x, c.y, c.z)) *
+        AffT(CGAL::SCALING, s) *
+        AffT(CGAL::TRANSLATION, CK::Vector_3(-c.x, -c.y, -c.z)));
+
+    bool carved = true;
+    Nef n2 = buildStoneBody(small, offset, &inflated, &carved);
+    if (!carved) {
+        // Carve exhausted its retries: fall back to the two boxes standing gap
+        // apart (no imprint) rather than leaving an interpenetrating pair.
+        const double push = overlap + gap;
+        switch (params.side) {
+            case 0: offset.x += push; break;
+            case 1: offset.x -= push; break;
+            case 2: offset.z += push; break;
+            default: offset.z -= push; break;
+        }
+        n2 = buildStoneBody(small, offset, nullptr);
+    }
+
+    StoneMesh out;
+    emitInto(out, n1, mixSeed(big.seed), big.tintJitter, 1.0f);
+    emitInto(out, n2, mixSeed(small.seed), small.tintJitter, 0.88f);
     return out;
 }

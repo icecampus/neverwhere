@@ -215,6 +215,54 @@ bool runStoneGeneratorSmokeTest() {
         check(da.pos == db.pos && da.col == db.col, "cut: same seed, identical mesh");
         det.seed = 22;
         check(generateCutStone(det).pos != da.pos, "cut: different seed, different mesh");
+
+        // Companion pair, zero cuts: the carve is box-minus-inflated-box, and
+        // the intersection of two axis-aligned boxes is itself a box — an
+        // exact analytic volume oracle for the Nef subtraction.
+        {
+            StonePairParams pp;
+            pp.big.cuts = 0;
+            pp.big.grooves = 0;
+            pp.big.pits = 0;
+            pp.small = pp.big;
+            pp.small.seed = 777;
+            pp.small.sizeX = pp.big.sizeX * 0.6f;
+            pp.small.sizeZ = pp.big.sizeZ * 0.6f;
+            pp.small.height = pp.big.height * 0.6f;
+            const StoneMesh pairMesh = generateCutStonePair(pp);
+            const StoneMesh bigSolo = generateCutStone(pp.big);
+
+            const double sx1 = pp.big.sizeX, sz1 = pp.big.sizeZ, h1 = pp.big.height;
+            const double sx2 = pp.small.sizeX, sz2 = pp.small.sizeZ, h2 = pp.small.height;
+            const double s = 1.0 + pp.gap / sx1; // inflation factor about (0, h1/2, 0)
+            const double xSpan = (s * sx1) - (sx1 - pp.overlap);
+            const double yLo = std::max(0.0, 0.5 * h1 * (1.0 - s));
+            const double yHi = std::min(h2, 0.5 * h1 * (1.0 + s));
+            const double zHalf = std::min(s * sz1, sz2);
+            const double vIntersect = xSpan * (yHi - yLo) * 2.0 * zHalf;
+            const double vSmallBox = 2.0 * sx2 * 2.0 * sz2 * h2;
+            const double vExpect = meshVolume(bigSolo) + (vSmallBox - vIntersect);
+            check(
+                std::abs(meshVolume(pairMesh) - vExpect) < 1e-3 * vExpect,
+                "pair: carve volume matches box-intersection oracle");
+            check(meshClosed(pairMesh), "pair: closed mesh (both stones)");
+            check(generateCutStonePair(pp).pos == pairMesh.pos, "pair: deterministic");
+        }
+
+        // Pair with cuts on: the companion adds volume over the big stone
+        // alone and the merged soup stays watertight.
+        {
+            StonePairParams pp;
+            pp.small = pp.big;
+            pp.small.seed = 1234;
+            pp.small.sizeX = pp.big.sizeX * 0.6f;
+            pp.small.sizeZ = pp.big.sizeZ * 0.6f;
+            pp.small.height = pp.big.height * 0.6f;
+            const StoneMesh pairCut = generateCutStonePair(pp);
+            const double vBig = meshVolume(generateCutStone(pp.big));
+            check(meshVolume(pairCut) > vBig * 1.05, "pair: companion adds volume");
+            check(meshClosed(pairCut), "pair: closed with cuts on");
+        }
     }
 
     if (failures == 0) {

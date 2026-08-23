@@ -40,3 +40,22 @@ struct StoneCutParams {
 };
 
 StoneMesh generateCutStone(const StoneCutParams& params);
+
+// Two-stone composition: the big stone stands at the origin; the small one is
+// placed against one of its sides. The small stone starts as a box overlapping
+// the big one, then the big stone (slightly inflated by ~`gap` about its
+// centroid) is subtracted from it — the contact face becomes the exact
+// negative imprint of the big stone's cut surface, with a narrow slit between
+// them. After the carve the small stone gets its own corner-cut pass (seeded
+// separately), so its free sides match the big one's look. Both bodies are
+// emitted into one mesh; they stay disjoint (no union) because of the gap.
+struct StonePairParams {
+    StoneCutParams big;
+    StoneCutParams small; // sizes = box BEFORE the carve; seed drives its cuts
+    int side = 0;         // 0:+x 1:-x 2:+z 3:-z — which side of the big stone
+    float gap = 0.06f;    // contact slit width (approximate: inflation-based)
+    float overlap = 0.30f; // initial box penetration depth (must exceed gap)
+    float shift = 0.0f;   // tangential slide along the side (world units)
+};
+
+StoneMesh generateCutStonePair(const StonePairParams& params);
