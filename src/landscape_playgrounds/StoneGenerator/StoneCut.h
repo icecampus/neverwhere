@@ -18,20 +18,20 @@
 // ray-exit distance so channels never punch through as tunnels.
 
 struct StoneCutParams {
-    int seed = 1;
+    int seed = 5434;
     float sizeX = 1.3f;      // box half-extent in x (world units)
     float sizeZ = 1.1f;      // box half-extent in z
-    float height = 1.5f;     // box height (base sits on y=0)
+    float height = 3.0f;     // box height (base sits on y=0)
     int cuts = 12;           // corner cuts applied
-    float cutDepth = 0.35f;  // fraction of the corner's mean incident edge length
-    float cutTiltDeg = 25.0f; // cone half-angle around the corner direction
+    float cutDepth = 0.093f; // fraction of the corner's mean incident edge length
+    float cutTiltDeg = 23.676f; // cone half-angle around the corner direction
 
-    int grooves = 2;          // V-channels into random faces
+    int grooves = 0;          // V-channels into random faces
     float grooveDepth = 0.22f; // axis depth below the surface (fraction of min extent)
     float grooveAngleDeg = 35.0f; // V half-angle (channel width)
     float grooveLen = 1.0f;   // 1.0 = full chord across the face, less = capped segment
 
-    int pits = 2;             // trihedral dents on random faces
+    int pits = 0;             // trihedral dents on random faces
     float pitDepth = 0.18f;   // apex depth (fraction of min extent)
     float pitAngleDeg = 30.0f; // cone half-angle (pit width)
 

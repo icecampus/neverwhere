@@ -188,7 +188,9 @@ bool runStoneGeneratorSmokeTest() {
         check(vCut < boxVol * 0.995 && vCut > boxVol * 0.2, "cut: corner cuts remove material");
         check(meshClosed(cutMesh), "cut: closed after corner cuts");
 
-        StoneCutParams full; // defaults: cuts + grooves + pits
+        StoneCutParams full; // explicit concavities (defaults ship grooves/pits off)
+        full.grooves = 2;
+        full.pits = 2;
         const StoneMesh fullMesh = generateCutStone(full);
         check(meshVolume(fullMesh) < vCut, "cut: grooves and pits remove more material");
         check(meshClosed(fullMesh), "cut: closed after grooves and pits");
