@@ -41,3 +41,6 @@ tools/blender_mcp/.venv/
 # Shadertoy fetcher venv + persistent Chrome profile (Cloudflare clearance)
 tools/shadertoy/.venv/
 tools/shadertoy/.chrome-profile/
+
+# Scratch space for local experiments (asset downloads, one-off venvs)
+tmp/
