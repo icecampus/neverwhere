@@ -10,10 +10,11 @@
 #include <topology_core/diamond_isometry.h>
 
 #include "NodeField.h"
-#include "StoneCluster.h"
 #include "StoneCut.h"
-#include "StoneGen.h"
-#include "StonePoly.h"
+
+#include <map>
+#include <tuple>
+#include <vector>
 
 namespace {
 
@@ -110,233 +111,108 @@ bool runStoneGeneratorSmokeTest() {
         check(versioned.version == v0 + 1, "node version bumps only on changes");
     }
 
-    // --- Stone generator (polyhedral clipper) -----------------------------------
+    // --- Cut generator (CGAL Nef exact booleans) -------------------------------
     {
-        // Clean params: exact face counts without jitter/noise.
-        const auto cleanParams = [](StoneBaseForm form) {
-            StoneGenParams p;
-            p.form = form;
-            p.chamferWidth = 0.0f;
-            p.planeTiltDeg = 0.0f;
-            p.planeOffset = 0.0f;
-            p.noiseAmp = 0.0f;
-            p.tintJitter = 0.0f;
-            p.shapeVariance = 0.0f;
-            return p;
-        };
-
-        StonePoly poly;
-        std::vector<StonePlane> planes;
-        StoneGenParams p = cleanParams(StoneBaseForm::Box);
-        buildStonePoly(p, poly, planes);
-        check(poly.faces.size() == 6, "stone: box face count");
-
-        p.chamferWidth = 0.12f;
-        p.chamferTopOnly = false;
-        buildStonePoly(p, poly, planes);
-        check(poly.faces.size() == 18, "stone: chamfered box face count (all edges)");
-
-        p.chamferTopOnly = true;
-        buildStonePoly(p, poly, planes);
-        check(poly.faces.size() == 10, "stone: chamfered box face count (top only)");
-
-        p = cleanParams(StoneBaseForm::Prism);
-        p.sides = 6;
-        buildStonePoly(p, poly, planes);
-        check(poly.faces.size() == 8, "stone: hex prism face count");
-
-        // Ball factory directly (no lift/ground clip in the way): with zero
-        // offset jitter every tangent plane is extreme, so faces == planes.
-        std::mt19937_64 rng(42);
-        const std::vector<StonePlane> ballPlanes = makeBallPlanes(24, 1.2, 0.0, rng);
-        poly = buildPolyhedron(ballPlanes);
-        check(poly.faces.size() == 24, "stone: ball face count (jitter 0)");
-
-        // Full-defaults invariants for every form.
-        const std::pair<StoneBaseForm, const char*> forms[] = {
-            {StoneBaseForm::Box, "box"},
-            {StoneBaseForm::Frustum, "frustum"},
-            {StoneBaseForm::Prism, "prism"},
-            {StoneBaseForm::Sphere, "sphere"},
-            {StoneBaseForm::Oval, "oval"},
-        };
-        for (const auto& [form, name] : forms) {
-            StoneGenParams dp;
-            dp.form = form;
-            buildStonePoly(dp, poly, planes);
-            check(isWatertight(poly), (std::string("stone: ") + name + " watertight").c_str());
-
-            // The clip invariant holds before vertex noise (noise moves shared
-            // verts across their planes by design).
-            dp.noiseAmp = 0.0f;
-            buildStonePoly(dp, poly, planes);
-            check(
-                allInside(poly, planes, 1e-6),
-                (std::string("stone: ") + name + " clip invariant").c_str());
-
-            const StoneMesh mesh = generateStone(dp);
-            float minY = 1e30f;
-            bool normalsOk = mesh.triCount > 0;
-            for (int i = 0; i < mesh.triCount * 3; ++i) {
-                minY = std::min(minY, mesh.pos[i * 3 + 1]);
-                const float nx = mesh.nrm[i * 3];
-                const float ny = mesh.nrm[i * 3 + 1];
-                const float nz = mesh.nrm[i * 3 + 2];
-                const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
-                normalsOk = normalsOk && std::abs(len - 1.0f) < 1e-3f && std::isfinite(len);
+        // Signed volume of the emitted triangle soup (divergence theorem).
+        const auto meshVolume = [](const StoneMesh& m) {
+            double v = 0.0;
+            for (int t = 0; t < m.triCount; ++t) {
+                const glm::dvec3 a{m.pos[t * 9 + 0], m.pos[t * 9 + 1], m.pos[t * 9 + 2]};
+                const glm::dvec3 b{m.pos[t * 9 + 3], m.pos[t * 9 + 4], m.pos[t * 9 + 5]};
+                const glm::dvec3 cc{m.pos[t * 9 + 6], m.pos[t * 9 + 7], m.pos[t * 9 + 8]};
+                v += glm::dot(a, glm::cross(b, cc));
             }
-            check(normalsOk, (std::string("stone: ") + name + " mesh normals").c_str());
-            check(
-                minY >= -dp.sink - 1e-3f && minY < 0.05f,
-                (std::string("stone: ") + name + " base sits on ground").c_str());
-        }
-
-        // The ground clip cuts a sphere exactly at -sink.
-        StoneGenParams sp;
-        sp.form = StoneBaseForm::Sphere;
-        const StoneMesh sphereMesh = generateStone(sp);
-        float sphereMinY = 1e30f;
-        for (size_t i = 1; i < sphereMesh.pos.size(); i += 3) {
-            sphereMinY = std::min(sphereMinY, sphereMesh.pos[i]);
-        }
-        check(std::abs(sphereMinY + sp.sink) < 1e-3f, "stone: sphere base clipped at -sink");
-
-        // Seed determinism (bit-identical buffers).
-        StoneGenParams det;
-        det.form = StoneBaseForm::Frustum;
-        det.seed = 7;
-        const StoneMesh a = generateStone(det);
-        const StoneMesh b = generateStone(det);
-        check(a.pos == b.pos && a.col == b.col, "stone: same seed, identical mesh");
-        det.seed = 8;
-        const StoneMesh c = generateStone(det);
-        check(c.pos != a.pos, "stone: different seed, different mesh");
-    }
-
-    // --- Phase 2: multi-block lobes + node-field cluster -----------------------
-    {
-        // Lobe stacking: same seed, growing block count.
-        StoneGenParams lp;
-        lp.form = StoneBaseForm::Frustum;
-        lp.seed = 5;
-        lp.blocks = 1;
-        const StoneMesh lobe1 = generateLobe(lp);
-        lp.blocks = 2;
-        const StoneMesh lobe2 = generateLobe(lp);
-        lp.blocks = 3;
-        const StoneMesh lobe3 = generateLobe(lp);
-        check(lobe2.extentMax.y > lobe1.extentMax.y + 0.2f, "lobe: stacked block raises the top");
-        check(
-            lobe2.triCount > lobe1.triCount && lobe3.triCount > lobe2.triCount,
-            "lobe: tri count grows with blocks");
-        const StoneMesh lobe3b = generateLobe(lp);
-        check(lobe3.pos == lobe3b.pos && lobe3.col == lobe3b.col, "lobe: blocks=3 deterministic");
-
-        // Fixed silhouette: 5x5 patch + two satellites.
-        NodeField field;
-        field.reset(25, 25);
-        for (int y = 8; y <= 12; ++y) {
-            for (int x = 8; x <= 12; ++x) {
-                field.setNode({x, y}, true);
+            return v / 6.0;
+        };
+        // Closedness: every directed edge appears exactly once, matched by its
+        // reverse, over quantized (1e-6) vertex positions.
+        const auto meshClosed = [](const StoneMesh& m) {
+            std::map<std::tuple<long long, long long, long long>, int> ids;
+            std::vector<int> vert;
+            const std::size_t n = m.pos.size() / 3;
+            vert.reserve(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                const auto key = std::make_tuple(
+                    static_cast<long long>(std::llround(static_cast<double>(m.pos[i * 3]) * 1e6)),
+                    static_cast<long long>(std::llround(static_cast<double>(m.pos[i * 3 + 1]) * 1e6)),
+                    static_cast<long long>(std::llround(static_cast<double>(m.pos[i * 3 + 2]) * 1e6)));
+                const auto [it, added] = ids.try_emplace(key, static_cast<int>(ids.size()));
+                vert.push_back(it->second);
             }
-        }
-        field.setNode({18, 18}, true);
-        field.setNode({20, 19}, true);
-
-        const topology_core::DiamondIsometry iso2;
-        StoneGenParams cp;
-        cp.seed = 9;
-        cp.form = StoneBaseForm::Frustum;
-        StoneClusterParams noAo;
-        noAo.aoStrength = 0.0f;
-        const StoneClusterResult cl1 = buildCluster(field, iso2, cp, noAo);
-        const StoneClusterResult cl2 = buildCluster(field, iso2, cp, noAo);
-        check(
-            cl1.mesh.pos == cl2.mesh.pos && cl1.mesh.col == cl2.mesh.col,
-            "cluster: deterministic for same nodes+seed");
-        check(
-            cl1.centers.size() >= 3 && cl1.centers.size() <= static_cast<std::size_t>(noAo.maxLobes),
-            "cluster: lobe count within bounds");
-        bool spacingOk = true;
-        for (std::size_t i = 0; i < cl1.centers.size(); ++i) {
-            for (std::size_t j = i + 1; j < cl1.centers.size(); ++j) {
-                const float dist = glm::distance(cl1.centers[i], cl1.centers[j]);
-                if (dist <= noAo.overlap * (cl1.radii[i] + cl1.radii[j]) - 1e-4f) {
-                    spacingOk = false;
+            std::map<std::pair<int, int>, int> directed;
+            for (int t = 0; t < m.triCount; ++t) {
+                const int a = vert[t * 3];
+                const int b = vert[t * 3 + 1];
+                const int cc = vert[t * 3 + 2];
+                directed[{a, b}]++;
+                directed[{b, cc}]++;
+                directed[{cc, a}]++;
+            }
+            for (const auto& [edge, count] : directed) {
+                if (count != 1) {
+                    return false;
+                }
+                const auto it = directed.find({edge.second, edge.first});
+                if (it == directed.end() || it->second != 1) {
+                    return false;
                 }
             }
-        }
-        check(spacingOk, "cluster: spacing invariant between lobes");
-        check(cl1.mesh.triCount > 0, "cluster: mesh non-empty");
+            return true;
+        };
+        const auto minY = [](const StoneMesh& m) {
+            float y = 1e30f;
+            for (std::size_t i = 1; i < m.pos.size(); i += 3) {
+                y = std::min(y, m.pos[i]);
+            }
+            return y;
+        };
 
-        // Single painted node: exactly one lobe with the clamped minimum radius.
-        NodeField singleNode;
-        singleNode.reset(25, 25);
-        singleNode.setNode({12, 12}, true);
-        const StoneClusterResult sc = buildCluster(singleNode, iso2, cp, noAo);
+        StoneCutParams box;
+        box.cuts = 0;
+        box.grooves = 0;
+        box.pits = 0;
+        const StoneMesh boxMesh = generateCutStone(box);
+        const double boxVol =
+            2.0 * box.sizeX * 2.0 * box.sizeZ * static_cast<double>(box.height);
         check(
-            sc.centers.size() == 1 && std::abs(sc.radii[0] - 0.4f) < 1e-3f,
-            "cluster: single node, one clamped lobe");
+            std::abs(meshVolume(boxMesh) - boxVol) < 1e-3 * boxVol,
+            "cut: box volume (exact booleans)");
+        check(meshClosed(boxMesh), "cut: box mesh closed");
+        check(boxMesh.triCount >= 12, "cut: box triangulated");
 
-        NodeField emptyField;
-        emptyField.reset(25, 25);
+        StoneCutParams cutOnly;
+        cutOnly.grooves = 0;
+        cutOnly.pits = 0;
+        const StoneMesh cutMesh = generateCutStone(cutOnly);
+        const double vCut = meshVolume(cutMesh);
+        check(vCut < boxVol * 0.995 && vCut > boxVol * 0.2, "cut: corner cuts remove material");
+        check(meshClosed(cutMesh), "cut: closed after corner cuts");
+
+        StoneCutParams full; // defaults: cuts + grooves + pits
+        const StoneMesh fullMesh = generateCutStone(full);
+        check(meshVolume(fullMesh) < vCut, "cut: grooves and pits remove more material");
+        check(meshClosed(fullMesh), "cut: closed after grooves and pits");
         check(
-            buildCluster(emptyField, iso2, cp, noAo).mesh.triCount == 0,
-            "cluster: empty field, empty mesh");
+            minY(fullMesh) >= -full.sink - 1e-3f && minY(fullMesh) < 0.05f,
+            "cut: base sits on ground");
 
-        // Contact AO darkens contact zones, never brightens.
-        StoneClusterParams withAo;
-        withAo.aoStrength = 0.5f;
-        const StoneClusterResult ao = buildCluster(field, iso2, cp, withAo);
-        check(ao.mesh.pos == cl1.mesh.pos, "cluster AO: positions untouched");
-        float minL0 = 1e30f, minLA = 1e30f, maxL0 = 0.0f, maxLA = 0.0f;
-        for (std::size_t v = 0; v < cl1.mesh.pos.size() / 3; ++v) {
-            const float l0 = cl1.mesh.col[v * 4] + cl1.mesh.col[v * 4 + 1] + cl1.mesh.col[v * 4 + 2];
-            const float la = ao.mesh.col[v * 4] + ao.mesh.col[v * 4 + 1] + ao.mesh.col[v * 4 + 2];
-            minL0 = std::min(minL0, l0);
-            minLA = std::min(minLA, la);
-            maxL0 = std::max(maxL0, l0);
-            maxLA = std::max(maxLA, la);
-        }
-        check(minLA < minL0 && maxLA <= maxL0 + 1e-6f, "cluster AO: darkens only");
-    }
+        // Capped grooves hit CGAL tangent-contact asserts historically; the
+        // try/perturb retry must ride over them and still produce a closed mesh.
+        StoneCutParams capped;
+        capped.grooves = 4;
+        capped.grooveLen = 0.6f;
+        capped.pits = 4;
+        const StoneMesh cappedMesh = generateCutStone(capped);
+        check(cappedMesh.triCount > 0 && meshClosed(cappedMesh), "cut: capped grooves, closed mesh");
 
-    // --- Cut generator (iterated corner cutting) -------------------------------
-    {
-        StonePoly poly;
-        std::vector<StonePlane> planes;
-
-        StoneCutParams kp;
-        kp.cuts = 0;
-        buildCutPoly(kp, poly, planes);
-        check(poly.faces.size() == 6, "cut: zero cuts keeps the box");
-
-        kp.cuts = 12;
-        buildCutPoly(kp, poly, planes);
-        check(isWatertight(poly), "cut: watertight after corner cuts");
-        check(allInside(poly, planes, 1e-6), "cut: clip invariant");
-        check(
-            poly.faces.size() > 6 && poly.faces.size() <= 6 + 12,
-            "cut: each cut adds at most one face");
-
-        const StoneMesh cm = generateCutStone(kp);
-        check(
-            cm.extentMax.x <= kp.sizeX + 1e-3f && cm.extentMax.y <= kp.height + 1e-3f,
-            "cut: cuts only remove material");
-        float cutMinY = 1e30f;
-        for (size_t i = 1; i < cm.pos.size(); i += 3) {
-            cutMinY = std::min(cutMinY, cm.pos[i]);
-        }
-        check(std::abs(cutMinY) < 1e-3f, "cut: base stays flat on the ground");
-
-        StoneCutParams dp;
-        dp.cuts = 16;
-        dp.seed = 21;
-        const StoneMesh da = generateCutStone(dp);
-        const StoneMesh db = generateCutStone(dp);
+        StoneCutParams det;
+        det.cuts = 16;
+        det.seed = 21;
+        const StoneMesh da = generateCutStone(det);
+        const StoneMesh db = generateCutStone(det);
         check(da.pos == db.pos && da.col == db.col, "cut: same seed, identical mesh");
-        dp.seed = 22;
-        check(generateCutStone(dp).pos != da.pos, "cut: different seed, different mesh");
+        det.seed = 22;
+        check(generateCutStone(det).pos != da.pos, "cut: different seed, different mesh");
     }
 
     if (failures == 0) {

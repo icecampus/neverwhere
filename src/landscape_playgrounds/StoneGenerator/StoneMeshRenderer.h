@@ -21,7 +21,7 @@
 #include <topology_core/camera2d.h>
 #include <topology_core/diamond_isometry.h>
 
-#include "StoneGen.h"
+#include "StoneMesh.h"
 
 // 3D stone pass of the playground, ported from FencePathPlayground's
 // FenceMeshRenderer: the generated StoneMesh (light already baked into the

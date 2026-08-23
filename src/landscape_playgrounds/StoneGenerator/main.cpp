@@ -15,9 +15,7 @@
 #include "NodeField.h"
 #include "PlaygroundScreenshot.h"
 #include "PlaygroundSmokeTest.h"
-#include "StoneCluster.h"
 #include "StoneCut.h"
-#include "StoneGen.h"
 #include "StoneMeshRenderer.h"
 
 #define SOKOL_IMPL
@@ -83,12 +81,9 @@ bool g_ctrlDown = false;
 constexpr int kMapW = 24;
 constexpr int kMapH = 24;
 NodeField g_nodes;
-StoneGenParams g_stoneParams;
-StoneClusterParams g_clusterParams;
 StoneCutParams g_cutParams;
-bool g_clusterMode = false;
-// Panel tabs: 0 = Cut (corner-cut generator), 1 = Legacy (phases 1-2).
-int g_activeTab = 0;
+// Tear-hunt debug render: unlit green rock on a red background, no grid.
+bool g_flat = false;
 StoneMesh g_stoneMesh;
 StoneMeshRenderer g_stoneRenderer;
 bool g_stoneDirty = true;
@@ -266,114 +261,35 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Stone generation", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::BeginTabBar("gen_tabs")) {
-            if (ImGui::BeginTabItem("Cut")) {
-                if (g_activeTab != 0) {
-                    g_activeTab = 0;
-                    g_stoneDirty = true;
-                }
-                bool edited = false;
-                edited |= ImGui::SliderInt("Seed##cut", &g_cutParams.seed, 0, 9999);
-                ImGui::SameLine();
-                if (ImGui::Button("New seed##cut")) {
-                    g_cutParams.seed = std::rand() % 10000;
-                    edited = true;
-                }
-                edited |= ImGui::SliderFloat("Size X", &g_cutParams.sizeX, 0.4f, 3.0f);
-                edited |= ImGui::SliderFloat("Size Z", &g_cutParams.sizeZ, 0.4f, 3.0f);
-                edited |= ImGui::SliderFloat("Height##cut", &g_cutParams.height, 0.4f, 3.0f);
-                ImGui::SeparatorText("Corner cuts");
-                edited |= ImGui::SliderInt("Cuts", &g_cutParams.cuts, 0, 32);
-                edited |= ImGui::SliderFloat("Cut depth", &g_cutParams.cutDepth, 0.05f, 0.8f);
-                edited |= ImGui::SliderFloat("Cut tilt", &g_cutParams.cutTiltDeg, 0.0f, 45.0f);
-                edited |= ImGui::SliderFloat("Sink##cut", &g_cutParams.sink, 0.0f, 0.3f);
-                edited |= ImGui::SliderFloat("Tint jitter##cut", &g_cutParams.tintJitter, 0.0f, 0.3f);
-                edited |= ImGui::SliderFloat("Vertex noise##cut", &g_cutParams.noiseAmp, 0.0f, 0.1f);
-                if (edited) {
-                    g_stoneDirty = true;
-                }
-                ImGui::TextDisabled("Box + iterated corner cuts, watertight");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Legacy (phases 1-2)")) {
-                if (g_activeTab != 1) {
-                    g_activeTab = 1;
-                    g_stoneDirty = true;
-                }
-                bool edited = false;
-        if (ImGui::RadioButton("Single rock", !g_clusterMode)) {
-            g_clusterMode = false;
-            edited = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Cluster", g_clusterMode)) {
-            g_clusterMode = true;
-            edited = true;
-        }
-        const char* forms[] = {"Box", "Frustum", "Prism", "Sphere", "Oval"};
-        int form = static_cast<int>(g_stoneParams.form);
-        if (ImGui::Combo("Base form", &form, forms, 5)) {
-            g_stoneParams.form = static_cast<StoneBaseForm>(form);
-            edited = true;
-        }
-        edited |= ImGui::SliderInt("Seed", &g_stoneParams.seed, 0, 9999);
+        bool edited = false;
+        edited |= ImGui::SliderInt("Seed", &g_cutParams.seed, 0, 9999);
         ImGui::SameLine();
         if (ImGui::Button("New seed")) {
-            g_stoneParams.seed = std::rand() % 10000;
+            g_cutParams.seed = std::rand() % 10000;
             edited = true;
         }
-        edited |= ImGui::SliderFloat("Radius", &g_stoneParams.radius, 0.4f, 3.0f);
-        const bool prismFamily = g_stoneParams.form == StoneBaseForm::Box ||
-            g_stoneParams.form == StoneBaseForm::Frustum ||
-            g_stoneParams.form == StoneBaseForm::Prism;
-        if (prismFamily) {
-            edited |= ImGui::SliderFloat("Height", &g_stoneParams.height, 0.4f, 3.0f);
-            edited |= ImGui::SliderFloat("Yaw", &g_stoneParams.yawDeg, 0.0f, 360.0f);
-        }
-        if (g_stoneParams.form == StoneBaseForm::Frustum ||
-            g_stoneParams.form == StoneBaseForm::Prism) {
-            edited |= ImGui::SliderFloat("Taper", &g_stoneParams.taper, 0.0f, 0.95f);
-        }
-        if (g_stoneParams.form == StoneBaseForm::Prism) {
-            edited |= ImGui::SliderInt("Sides", &g_stoneParams.sides, 3, 12);
-        }
-        if (g_stoneParams.form == StoneBaseForm::Sphere ||
-            g_stoneParams.form == StoneBaseForm::Oval) {
-            edited |= ImGui::SliderInt("Facet planes", &g_stoneParams.ballPlanes, 8, 48);
-        }
-        if (g_stoneParams.form == StoneBaseForm::Oval) {
-            edited |= ImGui::SliderFloat("Oval scale X", &g_stoneParams.ovalScaleX, 0.5f, 2.0f);
-            edited |= ImGui::SliderFloat("Oval scale Z", &g_stoneParams.ovalScaleZ, 0.5f, 2.0f);
-        }
-        ImGui::SeparatorText("Edges");
-        edited |= ImGui::SliderFloat("Chamfer", &g_stoneParams.chamferWidth, 0.0f, 0.3f);
-        edited |= ImGui::Checkbox("Chamfer top only", &g_stoneParams.chamferTopOnly);
-        edited |= ImGui::SliderFloat("Plane tilt", &g_stoneParams.planeTiltDeg, 0.0f, 10.0f);
-        edited |= ImGui::SliderFloat("Plane offset", &g_stoneParams.planeOffset, 0.0f, 0.2f);
-        edited |= ImGui::SliderFloat("Vertex noise", &g_stoneParams.noiseAmp, 0.0f, 0.1f);
-        edited |= ImGui::SliderFloat("Sink", &g_stoneParams.sink, 0.0f, 0.3f);
-        edited |= ImGui::SliderFloat("Tint jitter", &g_stoneParams.tintJitter, 0.0f, 0.3f);
-        edited |= ImGui::SliderFloat("Shape variance", &g_stoneParams.shapeVariance, 0.0f, 1.0f);
-        if (!g_clusterMode) {
-            edited |= ImGui::SliderInt("Blocks", &g_stoneParams.blocks, 1, 3);
-        } else {
-            ImGui::SeparatorText("Cluster");
-            edited |= ImGui::SliderFloat("Overlap", &g_clusterParams.overlap, 0.4f, 1.5f);
-            edited |= ImGui::SliderFloat("Radius mul", &g_clusterParams.radiusMul, 0.5f, 2.0f);
-            edited |= ImGui::SliderInt("Max lobes", &g_clusterParams.maxLobes, 1, 24);
-            edited |= ImGui::Checkbox("Mix forms", &g_clusterParams.mixForms);
-            edited |= ImGui::SliderFloat("AO strength", &g_clusterParams.aoStrength, 0.0f, 1.0f);
-            edited |= ImGui::SliderFloat("AO falloff", &g_clusterParams.aoFalloff, 0.1f, 2.0f);
-        }
+        edited |= ImGui::SliderFloat("Size X", &g_cutParams.sizeX, 0.4f, 3.0f);
+        edited |= ImGui::SliderFloat("Size Z", &g_cutParams.sizeZ, 0.4f, 3.0f);
+        edited |= ImGui::SliderFloat("Height", &g_cutParams.height, 0.4f, 3.0f);
+        ImGui::SeparatorText("Corner cuts");
+        edited |= ImGui::SliderInt("Cuts", &g_cutParams.cuts, 0, 32);
+        edited |= ImGui::SliderFloat("Cut depth", &g_cutParams.cutDepth, 0.05f, 0.8f);
+        edited |= ImGui::SliderFloat("Cut tilt", &g_cutParams.cutTiltDeg, 0.0f, 45.0f);
+        ImGui::SeparatorText("V-grooves");
+        edited |= ImGui::SliderInt("Grooves", &g_cutParams.grooves, 0, 8);
+        edited |= ImGui::SliderFloat("Groove depth", &g_cutParams.grooveDepth, 0.05f, 0.6f);
+        edited |= ImGui::SliderFloat("Groove angle", &g_cutParams.grooveAngleDeg, 15.0f, 60.0f);
+        edited |= ImGui::SliderFloat("Groove length", &g_cutParams.grooveLen, 0.3f, 1.0f);
+        ImGui::SeparatorText("Pits");
+        edited |= ImGui::SliderInt("Pits", &g_cutParams.pits, 0, 8);
+        edited |= ImGui::SliderFloat("Pit depth", &g_cutParams.pitDepth, 0.05f, 0.5f);
+        edited |= ImGui::SliderFloat("Pit angle", &g_cutParams.pitAngleDeg, 15.0f, 50.0f);
+        edited |= ImGui::SliderFloat("Sink", &g_cutParams.sink, 0.0f, 0.3f);
+        edited |= ImGui::SliderFloat("Tint jitter", &g_cutParams.tintJitter, 0.0f, 0.3f);
         if (edited) {
             g_stoneDirty = true;
         }
-        ImGui::TextDisabled(
-            g_clusterMode ? "Painted nodes grow the cluster" : "Painted nodes move the rock");
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
-        }
+        ImGui::TextDisabled("CGAL Nef booleans: box + corner cuts + wedges");
         ImGui::Text("Tris: %d", g_stoneMesh.triCount);
     }
 
@@ -438,19 +354,18 @@ void frame() {
         g_stoneDirty = true; // the rock anchor follows the painted silhouette
     }
     if (g_stoneDirty) {
-        if (g_activeTab == 0) {
-            g_stoneMesh = generateCutStone(g_cutParams);
-            g_stoneWorldPos = stoneAnchorWorld();
-        } else if (g_clusterMode) {
-            // World-space cluster mesh from the painted silhouette.
-            g_stoneMesh = generateCluster(g_nodes, g_iso, g_stoneParams, g_clusterParams);
-            g_stoneWorldPos = glm::vec3{0.0f};
-        } else {
-            g_stoneMesh = generateStone(g_stoneParams);
-            g_stoneWorldPos = stoneAnchorWorld();
-        }
+        g_stoneMesh = generateCutStone(g_cutParams);
+        g_stoneWorldPos = stoneAnchorWorld();
         ++g_stoneContentKey;
         g_stoneDirty = false;
+        if (g_flat) {
+            for (std::size_t i = 0; i + 3 < g_stoneMesh.col.size(); i += 4) {
+                g_stoneMesh.col[i] = 0.05f;
+                g_stoneMesh.col[i + 1] = 1.0f;
+                g_stoneMesh.col[i + 2] = 0.10f;
+                g_stoneMesh.col[i + 3] = 1.0f;
+            }
+        }
     }
 
     if (g_state.imgui_ok) {
@@ -467,7 +382,9 @@ void frame() {
 
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    action.colors[0].clear_value = {0.12f, 0.14f, 0.16f, 1.0f};
+    action.colors[0].clear_value = g_flat
+        ? sg_color{0.90f, 0.08f, 0.08f, 1.0f}
+        : sg_color{0.12f, 0.14f, 0.16f, 1.0f};
     action.depth.load_action = SG_LOADACTION_CLEAR;
     action.depth.clear_value = 1.0f;
 
@@ -499,18 +416,20 @@ void frame() {
         g_stoneWorldPos,
         g_stoneContentKey);
 
-    g_grid.render(
-        g_iso,
-        g_camera,
-        canvasW,
-        h,
-        kMapW,
-        kMapH,
-        g_hoverNode.value_or(glm::ivec2{-1, -1}),
-        g_hoverNode.has_value(),
-        g_nodes.nodes.data(),
-        g_nodes.width,
-        g_nodes.height);
+    if (!g_flat) {
+        g_grid.render(
+            g_iso,
+            g_camera,
+            canvasW,
+            h,
+            kMapW,
+            kMapH,
+            g_hoverNode.value_or(glm::ivec2{-1, -1}),
+            g_hoverNode.has_value(),
+            g_nodes.nodes.data(),
+            g_nodes.width,
+            g_nodes.height);
+    }
 
     if (g_state.imgui_ok) {
         simgui_render();
@@ -658,26 +577,18 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --- Visual debug CLI ----------------------------------------------------------
 // --smoke                 run the CPU smoke test and exit (no window)
 // --no-ui                 hide the ImGui panel (clean captures)
+// --flat                  tear-hunt render: unlit green rock on red, no grid
 // --shot=path.png         capture the framebuffer after 1 s, quit
 // --zoom=Z                camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy          camera center in cell coords
 //                         (default: bbox center of --nodes)
 // --nodes="x,y;x,y;..."   paint these seed nodes on startup (rock anchor)
 // --seed=N                generator seed
-// --form=box|frustum|prism|sphere|oval
-// --radius= / --height=   rock extents (world units, 1 cell = 1)
-// --taper= / --sides=     prism family shaping
-// --ball-planes=          sphere/oval facet count
-// --chamfer=              edge chamfer width (0 = off)
-// --tilt= / --offset=     plane jitter (degrees / fraction of radius)
-// --noise=                vertex micro-noise (fraction of radius)
 // --sink=                 base pushed below y=0
-// --mode=cut|single|cluster  corner-cut generator vs phase 1-2 machinery
-// --blocks=1..3           stacked blocks per lobe (single mode)
-// --overlap= / --radius-mul= / --max-lobes=   cluster packing
-// --ao= / --ao-falloff= / --mix-forms=0|1     cluster contact AO / forms
 // --cuts= / --cut-depth= / --cut-tilt=        corner cuts (count, depth, cone)
 // --cut-sx= / --cut-sz= / --cut-height=       starting box extents
+// --grooves= / --groove-depth= / --groove-angle= / --groove-len=   V-channels
+// --pits= / --pit-depth= / --pit-angle=       trihedral dents
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -687,6 +598,9 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--no-ui") {
             g_noUi = true;
+        }
+        if (arg == "--flat") {
+            g_flat = true;
         }
         if (arg.rfind("--shot=", 0) == 0) {
             g_shotPath = arg.substr(7);
@@ -701,72 +615,7 @@ int main(int argc, char* argv[]) {
             g_cliNodes = parseNodesArg(arg.substr(8));
         }
         if (arg.rfind("--seed=", 0) == 0) {
-            const int seed = std::atoi(arg.substr(7).c_str());
-            g_stoneParams.seed = seed;
-            g_cutParams.seed = seed;
-        }
-        if (arg.rfind("--form=", 0) == 0) {
-            const std::string form = arg.substr(7);
-            if (form == "box") {
-                g_stoneParams.form = StoneBaseForm::Box;
-            } else if (form == "frustum") {
-                g_stoneParams.form = StoneBaseForm::Frustum;
-            } else if (form == "prism") {
-                g_stoneParams.form = StoneBaseForm::Prism;
-            } else if (form == "sphere") {
-                g_stoneParams.form = StoneBaseForm::Sphere;
-            } else if (form == "oval") {
-                g_stoneParams.form = StoneBaseForm::Oval;
-            } else {
-                spdlog::warn("unknown --form={}", form);
-            }
-        }
-        if (arg.rfind("--radius=", 0) == 0) {
-            g_stoneParams.radius = static_cast<float>(std::atof(arg.substr(9).c_str()));
-        }
-        if (arg.rfind("--height=", 0) == 0) {
-            g_stoneParams.height = static_cast<float>(std::atof(arg.substr(9).c_str()));
-        }
-        if (arg.rfind("--taper=", 0) == 0) {
-            g_stoneParams.taper = static_cast<float>(std::atof(arg.substr(8).c_str()));
-        }
-        if (arg.rfind("--sides=", 0) == 0) {
-            g_stoneParams.sides = std::atoi(arg.substr(8).c_str());
-        }
-        if (arg.rfind("--ball-planes=", 0) == 0) {
-            g_stoneParams.ballPlanes = std::atoi(arg.substr(14).c_str());
-        }
-        if (arg.rfind("--chamfer=", 0) == 0) {
-            g_stoneParams.chamferWidth = static_cast<float>(std::atof(arg.substr(10).c_str()));
-        }
-        if (arg.rfind("--tilt=", 0) == 0) {
-            g_stoneParams.planeTiltDeg = static_cast<float>(std::atof(arg.substr(7).c_str()));
-        }
-        if (arg.rfind("--offset=", 0) == 0) {
-            g_stoneParams.planeOffset = static_cast<float>(std::atof(arg.substr(9).c_str()));
-        }
-        if (arg.rfind("--noise=", 0) == 0) {
-            g_stoneParams.noiseAmp = static_cast<float>(std::atof(arg.substr(8).c_str()));
-        }
-        if (arg.rfind("--sink=", 0) == 0) {
-            g_stoneParams.sink = static_cast<float>(std::atof(arg.substr(7).c_str()));
-        }
-        if (arg.rfind("--variance=", 0) == 0) {
-            g_stoneParams.shapeVariance = static_cast<float>(std::atof(arg.substr(11).c_str()));
-        }
-        if (arg.rfind("--mode=", 0) == 0) {
-            const std::string mode = arg.substr(7);
-            if (mode == "cut") {
-                g_activeTab = 0;
-            } else if (mode == "single") {
-                g_activeTab = 1;
-                g_clusterMode = false;
-            } else if (mode == "cluster") {
-                g_activeTab = 1;
-                g_clusterMode = true;
-            } else {
-                spdlog::warn("unknown --mode={}", mode);
-            }
+            g_cutParams.seed = std::atoi(arg.substr(7).c_str());
         }
         if (arg.rfind("--cuts=", 0) == 0) {
             g_cutParams.cuts = std::atoi(arg.substr(7).c_str());
@@ -786,26 +635,29 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--cut-height=", 0) == 0) {
             g_cutParams.height = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
-        if (arg.rfind("--blocks=", 0) == 0) {
-            g_stoneParams.blocks = std::atoi(arg.substr(9).c_str());
+        if (arg.rfind("--grooves=", 0) == 0) {
+            g_cutParams.grooves = std::atoi(arg.substr(10).c_str());
         }
-        if (arg.rfind("--overlap=", 0) == 0) {
-            g_clusterParams.overlap = static_cast<float>(std::atof(arg.substr(10).c_str()));
+        if (arg.rfind("--groove-depth=", 0) == 0) {
+            g_cutParams.grooveDepth = static_cast<float>(std::atof(arg.substr(15).c_str()));
         }
-        if (arg.rfind("--radius-mul=", 0) == 0) {
-            g_clusterParams.radiusMul = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        if (arg.rfind("--groove-angle=", 0) == 0) {
+            g_cutParams.grooveAngleDeg = static_cast<float>(std::atof(arg.substr(15).c_str()));
         }
-        if (arg.rfind("--max-lobes=", 0) == 0) {
-            g_clusterParams.maxLobes = std::atoi(arg.substr(12).c_str());
+        if (arg.rfind("--groove-len=", 0) == 0) {
+            g_cutParams.grooveLen = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
-        if (arg.rfind("--ao=", 0) == 0) {
-            g_clusterParams.aoStrength = static_cast<float>(std::atof(arg.substr(5).c_str()));
+        if (arg.rfind("--pits=", 0) == 0) {
+            g_cutParams.pits = std::atoi(arg.substr(7).c_str());
         }
-        if (arg.rfind("--ao-falloff=", 0) == 0) {
-            g_clusterParams.aoFalloff = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        if (arg.rfind("--pit-depth=", 0) == 0) {
+            g_cutParams.pitDepth = static_cast<float>(std::atof(arg.substr(12).c_str()));
         }
-        if (arg.rfind("--mix-forms=", 0) == 0) {
-            g_clusterParams.mixForms = std::atoi(arg.substr(12).c_str()) != 0;
+        if (arg.rfind("--pit-angle=", 0) == 0) {
+            g_cutParams.pitAngleDeg = static_cast<float>(std::atof(arg.substr(12).c_str()));
+        }
+        if (arg.rfind("--sink=", 0) == 0) {
+            g_cutParams.sink = static_cast<float>(std::atof(arg.substr(7).c_str()));
         }
     }
 

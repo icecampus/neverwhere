@@ -1,20 +1,21 @@
 #pragma once
 
-#include <vector>
+#include "StoneMesh.h"
 
-#include "StoneGen.h"
-#include "StonePoly.h"
-
-// Cut-based rock generator ("how boulders really form — by chipping off"):
-// start from a parallelepiped, then repeatedly pick a corner and slice it with
-// a random plane (clipByPlane, so the result stays watertight by construction).
-// Each cut plane is aimed through the corner: normal within a cone around the
-// outward corner direction, offset at a fraction of the corner's incident edge
-// lengths — small chips, never slicing the body in half. Bottom corners are
-// left alone so the base stays flat on the ground.
+// Cut-based rock generator on CGAL exact booleans: start from a
+// parallelepiped, then repeatedly pick a corner and slice it with a random
+// plane; concave features (V-grooves and pits) subtract convex wedges.
+// All cutting happens on CGAL::Nef_polyhedron_3<CGAL::Epeck> (exact
+// arithmetic) — the output is watertight by construction, no hand-rolled
+// clipping anywhere in this file.
 //
-// Isolated from the phase-1/2 machinery on purpose: only the clipper core
-// (StonePoly) and the shared mesh emission (appendStoneMesh) are reused.
+// Corner cuts aim through a corner: normal within a cone around the outward
+// corner direction, offset at a fraction of the corner's incident edge
+// lengths — small chips, never slicing the body in half. Bottom corners are
+// excluded so the base stays flat. A groove enters a face ~perpendicularly
+// and runs along a face-edge direction (parallel to the adjacent face's
+// plane); a pit is a trihedral cone dent. Wedge depth is clamped by the exact
+// ray-exit distance so channels never punch through as tunnels.
 
 struct StoneCutParams {
     int seed = 1;
@@ -24,14 +25,18 @@ struct StoneCutParams {
     int cuts = 12;           // corner cuts applied
     float cutDepth = 0.35f;  // fraction of the corner's mean incident edge length
     float cutTiltDeg = 25.0f; // cone half-angle around the corner direction
+
+    int grooves = 2;          // V-channels into random faces
+    float grooveDepth = 0.22f; // axis depth below the surface (fraction of min extent)
+    float grooveAngleDeg = 35.0f; // V half-angle (channel width)
+    float grooveLen = 1.0f;   // 1.0 = full chord across the face, less = capped segment
+
+    int pits = 2;             // trihedral dents on random faces
+    float pitDepth = 0.18f;   // apex depth (fraction of min extent)
+    float pitAngleDeg = 30.0f; // cone half-angle (pit width)
+
     float sink = 0.05f;      // base pushed below y=0
-    float tintJitter = 0.10f;
-    float noiseAmp = 0.0f;   // vertex micro-noise; off = clean cuts (fraction of size)
+    float tintJitter = 0.10f; // per-plane-facet albedo variation
 };
 
 StoneMesh generateCutStone(const StoneCutParams& params);
-
-// Debug/test entry: the polyhedron + the full plane set (6 box planes, then
-// one per cut, then the ground plane last).
-void buildCutPoly(
-    const StoneCutParams& params, StonePoly& outPoly, std::vector<StonePlane>& outPlanes);

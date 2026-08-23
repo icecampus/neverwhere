@@ -1,4 +1,5 @@
 find_package(imgui CONFIG REQUIRED)
+find_package(CGAL CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP
@@ -7,6 +8,7 @@ nw_add_console_app(
         spdlog::spdlog_header_only
         imgui::imgui
         topology_core
+        CGAL::CGAL
 )
 
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")
