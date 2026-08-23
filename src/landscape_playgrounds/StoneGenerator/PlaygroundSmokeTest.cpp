@@ -11,6 +11,7 @@
 
 #include "NodeField.h"
 #include "StoneCluster.h"
+#include "StoneCut.h"
 #include "StoneGen.h"
 #include "StonePoly.h"
 
@@ -298,6 +299,44 @@ bool runStoneGeneratorSmokeTest() {
             maxLA = std::max(maxLA, la);
         }
         check(minLA < minL0 && maxLA <= maxL0 + 1e-6f, "cluster AO: darkens only");
+    }
+
+    // --- Cut generator (iterated corner cutting) -------------------------------
+    {
+        StonePoly poly;
+        std::vector<StonePlane> planes;
+
+        StoneCutParams kp;
+        kp.cuts = 0;
+        buildCutPoly(kp, poly, planes);
+        check(poly.faces.size() == 6, "cut: zero cuts keeps the box");
+
+        kp.cuts = 12;
+        buildCutPoly(kp, poly, planes);
+        check(isWatertight(poly), "cut: watertight after corner cuts");
+        check(allInside(poly, planes, 1e-6), "cut: clip invariant");
+        check(
+            poly.faces.size() > 6 && poly.faces.size() <= 6 + 12,
+            "cut: each cut adds at most one face");
+
+        const StoneMesh cm = generateCutStone(kp);
+        check(
+            cm.extentMax.x <= kp.sizeX + 1e-3f && cm.extentMax.y <= kp.height + 1e-3f,
+            "cut: cuts only remove material");
+        float cutMinY = 1e30f;
+        for (size_t i = 1; i < cm.pos.size(); i += 3) {
+            cutMinY = std::min(cutMinY, cm.pos[i]);
+        }
+        check(std::abs(cutMinY) < 1e-3f, "cut: base stays flat on the ground");
+
+        StoneCutParams dp;
+        dp.cuts = 16;
+        dp.seed = 21;
+        const StoneMesh da = generateCutStone(dp);
+        const StoneMesh db = generateCutStone(dp);
+        check(da.pos == db.pos && da.col == db.col, "cut: same seed, identical mesh");
+        dp.seed = 22;
+        check(generateCutStone(dp).pos != da.pos, "cut: different seed, different mesh");
     }
 
     if (failures == 0) {

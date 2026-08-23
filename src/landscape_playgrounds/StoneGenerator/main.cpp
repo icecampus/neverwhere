@@ -16,6 +16,7 @@
 #include "PlaygroundScreenshot.h"
 #include "PlaygroundSmokeTest.h"
 #include "StoneCluster.h"
+#include "StoneCut.h"
 #include "StoneGen.h"
 #include "StoneMeshRenderer.h"
 
@@ -84,7 +85,10 @@ constexpr int kMapH = 24;
 NodeField g_nodes;
 StoneGenParams g_stoneParams;
 StoneClusterParams g_clusterParams;
+StoneCutParams g_cutParams;
 bool g_clusterMode = false;
+// Panel tabs: 0 = Cut (corner-cut generator), 1 = Legacy (phases 1-2).
+int g_activeTab = 0;
 StoneMesh g_stoneMesh;
 StoneMeshRenderer g_stoneRenderer;
 bool g_stoneDirty = true;
@@ -262,7 +266,41 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Stone generation", ImGuiTreeNodeFlags_DefaultOpen)) {
-        bool edited = false;
+        if (ImGui::BeginTabBar("gen_tabs")) {
+            if (ImGui::BeginTabItem("Cut")) {
+                if (g_activeTab != 0) {
+                    g_activeTab = 0;
+                    g_stoneDirty = true;
+                }
+                bool edited = false;
+                edited |= ImGui::SliderInt("Seed##cut", &g_cutParams.seed, 0, 9999);
+                ImGui::SameLine();
+                if (ImGui::Button("New seed##cut")) {
+                    g_cutParams.seed = std::rand() % 10000;
+                    edited = true;
+                }
+                edited |= ImGui::SliderFloat("Size X", &g_cutParams.sizeX, 0.4f, 3.0f);
+                edited |= ImGui::SliderFloat("Size Z", &g_cutParams.sizeZ, 0.4f, 3.0f);
+                edited |= ImGui::SliderFloat("Height##cut", &g_cutParams.height, 0.4f, 3.0f);
+                ImGui::SeparatorText("Corner cuts");
+                edited |= ImGui::SliderInt("Cuts", &g_cutParams.cuts, 0, 32);
+                edited |= ImGui::SliderFloat("Cut depth", &g_cutParams.cutDepth, 0.05f, 0.8f);
+                edited |= ImGui::SliderFloat("Cut tilt", &g_cutParams.cutTiltDeg, 0.0f, 45.0f);
+                edited |= ImGui::SliderFloat("Sink##cut", &g_cutParams.sink, 0.0f, 0.3f);
+                edited |= ImGui::SliderFloat("Tint jitter##cut", &g_cutParams.tintJitter, 0.0f, 0.3f);
+                edited |= ImGui::SliderFloat("Vertex noise##cut", &g_cutParams.noiseAmp, 0.0f, 0.1f);
+                if (edited) {
+                    g_stoneDirty = true;
+                }
+                ImGui::TextDisabled("Box + iterated corner cuts, watertight");
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Legacy (phases 1-2)")) {
+                if (g_activeTab != 1) {
+                    g_activeTab = 1;
+                    g_stoneDirty = true;
+                }
+                bool edited = false;
         if (ImGui::RadioButton("Single rock", !g_clusterMode)) {
             g_clusterMode = false;
             edited = true;
@@ -330,9 +368,13 @@ void drawImGui(int w, int h) {
         if (edited) {
             g_stoneDirty = true;
         }
-        ImGui::Text("Tris: %d", g_stoneMesh.triCount);
         ImGui::TextDisabled(
             g_clusterMode ? "Painted nodes grow the cluster" : "Painted nodes move the rock");
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+        ImGui::Text("Tris: %d", g_stoneMesh.triCount);
     }
 
     ImGui::Separator();
@@ -396,7 +438,10 @@ void frame() {
         g_stoneDirty = true; // the rock anchor follows the painted silhouette
     }
     if (g_stoneDirty) {
-        if (g_clusterMode) {
+        if (g_activeTab == 0) {
+            g_stoneMesh = generateCutStone(g_cutParams);
+            g_stoneWorldPos = stoneAnchorWorld();
+        } else if (g_clusterMode) {
             // World-space cluster mesh from the painted silhouette.
             g_stoneMesh = generateCluster(g_nodes, g_iso, g_stoneParams, g_clusterParams);
             g_stoneWorldPos = glm::vec3{0.0f};
@@ -627,10 +672,12 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --tilt= / --offset=     plane jitter (degrees / fraction of radius)
 // --noise=                vertex micro-noise (fraction of radius)
 // --sink=                 base pushed below y=0
-// --mode=single|cluster   one anchored rock vs node-field cluster
+// --mode=cut|single|cluster  corner-cut generator vs phase 1-2 machinery
 // --blocks=1..3           stacked blocks per lobe (single mode)
 // --overlap= / --radius-mul= / --max-lobes=   cluster packing
 // --ao= / --ao-falloff= / --mix-forms=0|1     cluster contact AO / forms
+// --cuts= / --cut-depth= / --cut-tilt=        corner cuts (count, depth, cone)
+// --cut-sx= / --cut-sz= / --cut-height=       starting box extents
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -654,7 +701,9 @@ int main(int argc, char* argv[]) {
             g_cliNodes = parseNodesArg(arg.substr(8));
         }
         if (arg.rfind("--seed=", 0) == 0) {
-            g_stoneParams.seed = std::atoi(arg.substr(7).c_str());
+            const int seed = std::atoi(arg.substr(7).c_str());
+            g_stoneParams.seed = seed;
+            g_cutParams.seed = seed;
         }
         if (arg.rfind("--form=", 0) == 0) {
             const std::string form = arg.substr(7);
@@ -707,13 +756,35 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--mode=", 0) == 0) {
             const std::string mode = arg.substr(7);
-            if (mode == "single") {
+            if (mode == "cut") {
+                g_activeTab = 0;
+            } else if (mode == "single") {
+                g_activeTab = 1;
                 g_clusterMode = false;
             } else if (mode == "cluster") {
+                g_activeTab = 1;
                 g_clusterMode = true;
             } else {
                 spdlog::warn("unknown --mode={}", mode);
             }
+        }
+        if (arg.rfind("--cuts=", 0) == 0) {
+            g_cutParams.cuts = std::atoi(arg.substr(7).c_str());
+        }
+        if (arg.rfind("--cut-depth=", 0) == 0) {
+            g_cutParams.cutDepth = static_cast<float>(std::atof(arg.substr(12).c_str()));
+        }
+        if (arg.rfind("--cut-tilt=", 0) == 0) {
+            g_cutParams.cutTiltDeg = static_cast<float>(std::atof(arg.substr(11).c_str()));
+        }
+        if (arg.rfind("--cut-sx=", 0) == 0) {
+            g_cutParams.sizeX = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--cut-sz=", 0) == 0) {
+            g_cutParams.sizeZ = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--cut-height=", 0) == 0) {
+            g_cutParams.height = static_cast<float>(std::atof(arg.substr(13).c_str()));
         }
         if (arg.rfind("--blocks=", 0) == 0) {
             g_stoneParams.blocks = std::atoi(arg.substr(9).c_str());

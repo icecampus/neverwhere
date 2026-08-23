@@ -138,19 +138,17 @@ void buildStonePoly(
     outPlanes = std::move(planes);
 }
 
-namespace {
-
-// Emit one polyhedron into the mesh: fan triangulation, flat per-face Newell
-// normals (flipped by the generating plane when the winding faces in), light
-// baked into the vertex color. Extents accumulate across calls.
-void appendMesh(
-    StoneMesh& out, const StonePoly& poly, const std::vector<StonePlane>& planes,
-    const StoneGenParams& params) {
+void appendStoneMesh(
+    StoneMesh& out,
+    const StonePoly& poly,
+    const std::vector<StonePlane>& planes,
+    int seed,
+    float tintJitter) {
 
     // Family light: same fixed sun + hemisphere as fence_core bakes.
     const glm::dvec3 sun = glm::normalize(glm::dvec3{-0.55, 0.80, -0.35});
     const glm::vec3 albedo{0.74f, 0.68f, 0.57f}; // warm beige, tmp/rock_example
-    const std::uint64_t seed = seedFromParams(params.seed);
+    const std::uint64_t seedBits = seedFromParams(seed);
 
     glm::dvec3 emin{1e30}, emax{-1e30};
     if (!out.pos.empty()) {
@@ -172,7 +170,7 @@ void appendMesh(
         const double up = n.y * 0.5 + 0.5;
         const double light = std::min(0.40 + 0.30 * up + 0.55 * diff, 1.25);
         const double tint =
-            1.0 + params.tintJitter * (static_cast<double>(faceTintHash(seed, face.planeId)) - 0.5) * 2.0;
+            1.0 + tintJitter * (static_cast<double>(faceTintHash(seedBits, face.planeId)) - 0.5) * 2.0;
         const glm::dvec3 rgb = glm::dvec3(albedo) * (light * tint);
 
         const int count = static_cast<int>(face.idx.size());
@@ -197,15 +195,13 @@ void appendMesh(
     out.extentMax = glm::vec3(emax);
 }
 
-} // namespace
-
 StoneMesh generateLobe(const StoneGenParams& params) {
     StoneMesh out;
 
     StonePoly poly;
     std::vector<StonePlane> planes;
     buildStonePoly(params, poly, planes);
-    appendMesh(out, poly, planes, params);
+    appendStoneMesh(out, poly, planes, params.seed, params.tintJitter);
 
     const int blocks = std::clamp(params.blocks, 1, 3);
     if (blocks < 2) {
@@ -235,7 +231,7 @@ StoneMesh generateLobe(const StoneGenParams& params) {
         m[3] = glm::dvec4(dx, baseY, dz, 1.0);
         transformPoly(topPoly, m);
         transformPlanes(topPlanes, m);
-        appendMesh(out, topPoly, topPlanes, top);
+        appendStoneMesh(out, topPoly, topPlanes, top.seed, top.tintJitter);
     }
 
     // Block 2: side block leaning against the base rock.
@@ -260,7 +256,7 @@ StoneMesh generateLobe(const StoneGenParams& params) {
         const glm::dmat4 full = m * rot;
         transformPoly(sidePoly, full);
         transformPlanes(sidePlanes, full);
-        appendMesh(out, sidePoly, sidePlanes, side);
+        appendStoneMesh(out, sidePoly, sidePlanes, side.seed, side.tintJitter);
     }
 
     return out;

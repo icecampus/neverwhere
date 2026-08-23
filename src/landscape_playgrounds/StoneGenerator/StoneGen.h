@@ -70,6 +70,17 @@ StoneMesh generateStone(const StoneGenParams& params);
 // generateStone(params) == generateLobe(params) with blocks=1 (bit-identical).
 StoneMesh generateLobe(const StoneGenParams& params);
 
+// Mesh emission, shared by all generators of the playground: fan triangulation,
+// flat per-face Newell normals (flipped by the generating plane when the
+// winding faces in), light baked into the vertex color. Appends to `out`;
+// extents accumulate across calls.
+void appendStoneMesh(
+    StoneMesh& out,
+    const StonePoly& poly,
+    const std::vector<StonePlane>& planes,
+    int seed,
+    float tintJitter);
+
 // Debug/test entry: the polyhedron + the full plane set that built it
 // (base planes, then chamfer planes, then the ground plane last).
 void buildStonePoly(
