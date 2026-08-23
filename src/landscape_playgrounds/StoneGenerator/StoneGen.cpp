@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <random>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -24,6 +26,11 @@ std::uint64_t seedFromParams(int seed) {
 // differently across STL implementations, breaking cross-platform seeds).
 double uniSigned(std::mt19937_64& rng) {
     return static_cast<double>(rng() >> 11) * (1.0 / 4503599627370496.0) - 1.0;
+}
+
+// [0, 1), same mapping.
+double uni01(std::mt19937_64& rng) {
+    return static_cast<double>(rng() >> 11) * (1.0 / 9007199254740992.0);
 }
 
 // [0,1) hash per (seed, planeId) — the per-face tint variation.
@@ -131,12 +138,14 @@ void buildStonePoly(
     outPlanes = std::move(planes);
 }
 
-StoneMesh generateStone(const StoneGenParams& params) {
-    StonePoly poly;
-    std::vector<StonePlane> planes;
-    buildStonePoly(params, poly, planes);
+namespace {
 
-    StoneMesh out;
+// Emit one polyhedron into the mesh: fan triangulation, flat per-face Newell
+// normals (flipped by the generating plane when the winding faces in), light
+// baked into the vertex color. Extents accumulate across calls.
+void appendMesh(
+    StoneMesh& out, const StonePoly& poly, const std::vector<StonePlane>& planes,
+    const StoneGenParams& params) {
 
     // Family light: same fixed sun + hemisphere as fence_core bakes.
     const glm::dvec3 sun = glm::normalize(glm::dvec3{-0.55, 0.80, -0.35});
@@ -144,6 +153,11 @@ StoneMesh generateStone(const StoneGenParams& params) {
     const std::uint64_t seed = seedFromParams(params.seed);
 
     glm::dvec3 emin{1e30}, emax{-1e30};
+    if (!out.pos.empty()) {
+        emin = glm::dvec3(out.extentMin);
+        emax = glm::dvec3(out.extentMax);
+    }
+    int addedVerts = 0;
 
     for (const StonePoly::Face& face : poly.faces) {
         glm::dvec3 n = faceNormal(poly, face);
@@ -174,12 +188,84 @@ StoneMesh generateStone(const StoneGenParams& params) {
                     static_cast<float>(rgb.x), static_cast<float>(rgb.y), static_cast<float>(rgb.z), 1.0f});
                 emin = glm::min(emin, v);
                 emax = glm::max(emax, v);
-                out.triCount++;
+                ++addedVerts;
             }
         }
     }
-    out.triCount /= 3;
+    out.triCount += addedVerts / 3;
     out.extentMin = glm::vec3(emin);
     out.extentMax = glm::vec3(emax);
+}
+
+} // namespace
+
+StoneMesh generateLobe(const StoneGenParams& params) {
+    StoneMesh out;
+
+    StonePoly poly;
+    std::vector<StonePlane> planes;
+    buildStonePoly(params, poly, planes);
+    appendMesh(out, poly, planes, params);
+
+    const int blocks = std::clamp(params.blocks, 1, 3);
+    if (blocks < 2) {
+        return out;
+    }
+
+    // Placement draws for the extra blocks (own stream, fixed order).
+    std::mt19937_64 lobeRng(seedFromParams(params.seed) ^ 0x9E3779B97F4A7C15ull);
+    const glm::dvec3 baseExtentMax(out.extentMax);
+
+    // Block 1: smaller block stacked on top, shifted and rotated.
+    {
+        StoneGenParams top = params;
+        top.seed = params.seed + 101;
+        top.radius = params.radius * (0.55f + 0.15f * static_cast<float>(uni01(lobeRng)));
+        top.height = params.height * (0.65f + 0.20f * static_cast<float>(uni01(lobeRng)));
+        top.yawDeg += 30.0f + 30.0f * static_cast<float>(uni01(lobeRng));
+        top.blocks = 1;
+        const double dx = params.radius * 0.30 * uniSigned(lobeRng);
+        const double dz = params.radius * 0.30 * uniSigned(lobeRng);
+        const double baseY = baseExtentMax.y * (0.55 + 0.15 * uni01(lobeRng));
+
+        StonePoly topPoly;
+        std::vector<StonePlane> topPlanes;
+        buildStonePoly(top, topPoly, topPlanes);
+        glm::dmat4 m(1.0);
+        m[3] = glm::dvec4(dx, baseY, dz, 1.0);
+        transformPoly(topPoly, m);
+        transformPlanes(topPlanes, m);
+        appendMesh(out, topPoly, topPlanes, top);
+    }
+
+    // Block 2: side block leaning against the base rock.
+    if (blocks > 2) {
+        StoneGenParams side = params;
+        side.seed = params.seed + 202;
+        side.radius = params.radius * (0.40f + 0.15f * static_cast<float>(uni01(lobeRng)));
+        side.height = params.height * (0.50f + 0.20f * static_cast<float>(uni01(lobeRng)));
+        side.blocks = 1;
+        const double ang = 2.0 * kPi * uni01(lobeRng);
+        const double lean = degToRad(6.0 + 8.0 * uni01(lobeRng));
+        const double dist = params.radius * (0.75 + 0.15 * uni01(lobeRng));
+
+        StonePoly sidePoly;
+        std::vector<StonePlane> sidePlanes;
+        buildStonePoly(side, sidePoly, sidePlanes);
+        // Lean around the axis tangential to the radial direction, then move out.
+        const glm::dvec3 axis{std::cos(ang + kPi * 0.5), 0.0, std::sin(ang + kPi * 0.5)};
+        const glm::dmat4 rot = glm::rotate(glm::dmat4(1.0), lean, axis);
+        glm::dmat4 m(1.0);
+        m[3] = glm::dvec4(std::cos(ang) * dist, 0.0, std::sin(ang) * dist, 1.0);
+        const glm::dmat4 full = m * rot;
+        transformPoly(sidePoly, full);
+        transformPlanes(sidePlanes, full);
+        appendMesh(out, sidePoly, sidePlanes, side);
+    }
+
     return out;
+}
+
+StoneMesh generateStone(const StoneGenParams& params) {
+    return generateLobe(params);
 }

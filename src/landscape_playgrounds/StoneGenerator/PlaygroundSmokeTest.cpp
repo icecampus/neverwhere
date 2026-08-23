@@ -10,6 +10,7 @@
 #include <topology_core/diamond_isometry.h>
 
 #include "NodeField.h"
+#include "StoneCluster.h"
 #include "StoneGen.h"
 #include "StonePoly.h"
 
@@ -209,6 +210,94 @@ bool runStoneGeneratorSmokeTest() {
         det.seed = 8;
         const StoneMesh c = generateStone(det);
         check(c.pos != a.pos, "stone: different seed, different mesh");
+    }
+
+    // --- Phase 2: multi-block lobes + node-field cluster -----------------------
+    {
+        // Lobe stacking: same seed, growing block count.
+        StoneGenParams lp;
+        lp.form = StoneBaseForm::Frustum;
+        lp.seed = 5;
+        lp.blocks = 1;
+        const StoneMesh lobe1 = generateLobe(lp);
+        lp.blocks = 2;
+        const StoneMesh lobe2 = generateLobe(lp);
+        lp.blocks = 3;
+        const StoneMesh lobe3 = generateLobe(lp);
+        check(lobe2.extentMax.y > lobe1.extentMax.y + 0.2f, "lobe: stacked block raises the top");
+        check(
+            lobe2.triCount > lobe1.triCount && lobe3.triCount > lobe2.triCount,
+            "lobe: tri count grows with blocks");
+        const StoneMesh lobe3b = generateLobe(lp);
+        check(lobe3.pos == lobe3b.pos && lobe3.col == lobe3b.col, "lobe: blocks=3 deterministic");
+
+        // Fixed silhouette: 5x5 patch + two satellites.
+        NodeField field;
+        field.reset(25, 25);
+        for (int y = 8; y <= 12; ++y) {
+            for (int x = 8; x <= 12; ++x) {
+                field.setNode({x, y}, true);
+            }
+        }
+        field.setNode({18, 18}, true);
+        field.setNode({20, 19}, true);
+
+        const topology_core::DiamondIsometry iso2;
+        StoneGenParams cp;
+        cp.seed = 9;
+        cp.form = StoneBaseForm::Frustum;
+        StoneClusterParams noAo;
+        noAo.aoStrength = 0.0f;
+        const StoneClusterResult cl1 = buildCluster(field, iso2, cp, noAo);
+        const StoneClusterResult cl2 = buildCluster(field, iso2, cp, noAo);
+        check(
+            cl1.mesh.pos == cl2.mesh.pos && cl1.mesh.col == cl2.mesh.col,
+            "cluster: deterministic for same nodes+seed");
+        check(
+            cl1.centers.size() >= 3 && cl1.centers.size() <= static_cast<std::size_t>(noAo.maxLobes),
+            "cluster: lobe count within bounds");
+        bool spacingOk = true;
+        for (std::size_t i = 0; i < cl1.centers.size(); ++i) {
+            for (std::size_t j = i + 1; j < cl1.centers.size(); ++j) {
+                const float dist = glm::distance(cl1.centers[i], cl1.centers[j]);
+                if (dist <= noAo.overlap * (cl1.radii[i] + cl1.radii[j]) - 1e-4f) {
+                    spacingOk = false;
+                }
+            }
+        }
+        check(spacingOk, "cluster: spacing invariant between lobes");
+        check(cl1.mesh.triCount > 0, "cluster: mesh non-empty");
+
+        // Single painted node: exactly one lobe with the clamped minimum radius.
+        NodeField singleNode;
+        singleNode.reset(25, 25);
+        singleNode.setNode({12, 12}, true);
+        const StoneClusterResult sc = buildCluster(singleNode, iso2, cp, noAo);
+        check(
+            sc.centers.size() == 1 && std::abs(sc.radii[0] - 0.4f) < 1e-3f,
+            "cluster: single node, one clamped lobe");
+
+        NodeField emptyField;
+        emptyField.reset(25, 25);
+        check(
+            buildCluster(emptyField, iso2, cp, noAo).mesh.triCount == 0,
+            "cluster: empty field, empty mesh");
+
+        // Contact AO darkens contact zones, never brightens.
+        StoneClusterParams withAo;
+        withAo.aoStrength = 0.5f;
+        const StoneClusterResult ao = buildCluster(field, iso2, cp, withAo);
+        check(ao.mesh.pos == cl1.mesh.pos, "cluster AO: positions untouched");
+        float minL0 = 1e30f, minLA = 1e30f, maxL0 = 0.0f, maxLA = 0.0f;
+        for (std::size_t v = 0; v < cl1.mesh.pos.size() / 3; ++v) {
+            const float l0 = cl1.mesh.col[v * 4] + cl1.mesh.col[v * 4 + 1] + cl1.mesh.col[v * 4 + 2];
+            const float la = ao.mesh.col[v * 4] + ao.mesh.col[v * 4 + 1] + ao.mesh.col[v * 4 + 2];
+            minL0 = std::min(minL0, l0);
+            minLA = std::min(minLA, la);
+            maxL0 = std::max(maxL0, l0);
+            maxLA = std::max(maxLA, la);
+        }
+        check(minLA < minL0 && maxLA <= maxL0 + 1e-6f, "cluster AO: darkens only");
     }
 
     if (failures == 0) {

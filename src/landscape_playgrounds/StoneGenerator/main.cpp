@@ -15,6 +15,7 @@
 #include "NodeField.h"
 #include "PlaygroundScreenshot.h"
 #include "PlaygroundSmokeTest.h"
+#include "StoneCluster.h"
 #include "StoneGen.h"
 #include "StoneMeshRenderer.h"
 
@@ -82,6 +83,8 @@ constexpr int kMapW = 24;
 constexpr int kMapH = 24;
 NodeField g_nodes;
 StoneGenParams g_stoneParams;
+StoneClusterParams g_clusterParams;
+bool g_clusterMode = false;
 StoneMesh g_stoneMesh;
 StoneMeshRenderer g_stoneRenderer;
 bool g_stoneDirty = true;
@@ -260,6 +263,15 @@ void drawImGui(int w, int h) {
 
     if (ImGui::CollapsingHeader("Stone generation", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool edited = false;
+        if (ImGui::RadioButton("Single rock", !g_clusterMode)) {
+            g_clusterMode = false;
+            edited = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Cluster", g_clusterMode)) {
+            g_clusterMode = true;
+            edited = true;
+        }
         const char* forms[] = {"Box", "Frustum", "Prism", "Sphere", "Oval"};
         int form = static_cast<int>(g_stoneParams.form);
         if (ImGui::Combo("Base form", &form, forms, 5)) {
@@ -304,11 +316,23 @@ void drawImGui(int w, int h) {
         edited |= ImGui::SliderFloat("Sink", &g_stoneParams.sink, 0.0f, 0.3f);
         edited |= ImGui::SliderFloat("Tint jitter", &g_stoneParams.tintJitter, 0.0f, 0.3f);
         edited |= ImGui::SliderFloat("Shape variance", &g_stoneParams.shapeVariance, 0.0f, 1.0f);
+        if (!g_clusterMode) {
+            edited |= ImGui::SliderInt("Blocks", &g_stoneParams.blocks, 1, 3);
+        } else {
+            ImGui::SeparatorText("Cluster");
+            edited |= ImGui::SliderFloat("Overlap", &g_clusterParams.overlap, 0.4f, 1.5f);
+            edited |= ImGui::SliderFloat("Radius mul", &g_clusterParams.radiusMul, 0.5f, 2.0f);
+            edited |= ImGui::SliderInt("Max lobes", &g_clusterParams.maxLobes, 1, 24);
+            edited |= ImGui::Checkbox("Mix forms", &g_clusterParams.mixForms);
+            edited |= ImGui::SliderFloat("AO strength", &g_clusterParams.aoStrength, 0.0f, 1.0f);
+            edited |= ImGui::SliderFloat("AO falloff", &g_clusterParams.aoFalloff, 0.1f, 2.0f);
+        }
         if (edited) {
             g_stoneDirty = true;
         }
         ImGui::Text("Tris: %d", g_stoneMesh.triCount);
-        ImGui::TextDisabled("Nodes move the rock (cluster layout: phase 2)");
+        ImGui::TextDisabled(
+            g_clusterMode ? "Painted nodes grow the cluster" : "Painted nodes move the rock");
     }
 
     ImGui::Separator();
@@ -372,8 +396,14 @@ void frame() {
         g_stoneDirty = true; // the rock anchor follows the painted silhouette
     }
     if (g_stoneDirty) {
-        g_stoneMesh = generateStone(g_stoneParams);
-        g_stoneWorldPos = stoneAnchorWorld();
+        if (g_clusterMode) {
+            // World-space cluster mesh from the painted silhouette.
+            g_stoneMesh = generateCluster(g_nodes, g_iso, g_stoneParams, g_clusterParams);
+            g_stoneWorldPos = glm::vec3{0.0f};
+        } else {
+            g_stoneMesh = generateStone(g_stoneParams);
+            g_stoneWorldPos = stoneAnchorWorld();
+        }
         ++g_stoneContentKey;
         g_stoneDirty = false;
     }
@@ -597,6 +627,10 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --tilt= / --offset=     plane jitter (degrees / fraction of radius)
 // --noise=                vertex micro-noise (fraction of radius)
 // --sink=                 base pushed below y=0
+// --mode=single|cluster   one anchored rock vs node-field cluster
+// --blocks=1..3           stacked blocks per lobe (single mode)
+// --overlap= / --radius-mul= / --max-lobes=   cluster packing
+// --ao= / --ao-falloff= / --mix-forms=0|1     cluster contact AO / forms
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -670,6 +704,37 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--variance=", 0) == 0) {
             g_stoneParams.shapeVariance = static_cast<float>(std::atof(arg.substr(11).c_str()));
+        }
+        if (arg.rfind("--mode=", 0) == 0) {
+            const std::string mode = arg.substr(7);
+            if (mode == "single") {
+                g_clusterMode = false;
+            } else if (mode == "cluster") {
+                g_clusterMode = true;
+            } else {
+                spdlog::warn("unknown --mode={}", mode);
+            }
+        }
+        if (arg.rfind("--blocks=", 0) == 0) {
+            g_stoneParams.blocks = std::atoi(arg.substr(9).c_str());
+        }
+        if (arg.rfind("--overlap=", 0) == 0) {
+            g_clusterParams.overlap = static_cast<float>(std::atof(arg.substr(10).c_str()));
+        }
+        if (arg.rfind("--radius-mul=", 0) == 0) {
+            g_clusterParams.radiusMul = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
+        if (arg.rfind("--max-lobes=", 0) == 0) {
+            g_clusterParams.maxLobes = std::atoi(arg.substr(12).c_str());
+        }
+        if (arg.rfind("--ao=", 0) == 0) {
+            g_clusterParams.aoStrength = static_cast<float>(std::atof(arg.substr(5).c_str()));
+        }
+        if (arg.rfind("--ao-falloff=", 0) == 0) {
+            g_clusterParams.aoFalloff = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
+        if (arg.rfind("--mix-forms=", 0) == 0) {
+            g_clusterParams.mixForms = std::atoi(arg.substr(12).c_str()) != 0;
         }
     }
 

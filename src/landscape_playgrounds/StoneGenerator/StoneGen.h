@@ -49,6 +49,7 @@ struct StoneGenParams {
     // around the slider values: 0 = sliders are exact, 1 = every seed gets its
     // own proportions. This is what makes "New seed" produce a new rock.
     float shapeVariance = 1.0f;
+    int blocks = 1;              // 1 = single block; 2 = + top block; 3 = + leaning side block
 };
 
 struct StoneMesh {
@@ -61,6 +62,13 @@ struct StoneMesh {
 };
 
 StoneMesh generateStone(const StoneGenParams& params);
+
+// Multi-block lobe: block 0 is the base rock; blocks 2..3 stack a smaller
+// block on top / lean a side block against it (interpenetration, no CSG — the
+// contact line reads as a crease). Each block is a full buildStonePoly with a
+// derived sub-seed, merged into one mesh in lobe-local world coordinates.
+// generateStone(params) == generateLobe(params) with blocks=1 (bit-identical).
+StoneMesh generateLobe(const StoneGenParams& params);
 
 // Debug/test entry: the polyhedron + the full plane set that built it
 // (base planes, then chamfer planes, then the ground plane last).
