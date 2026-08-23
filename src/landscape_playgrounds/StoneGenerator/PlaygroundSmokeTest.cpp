@@ -12,7 +12,9 @@
 #include "NodeField.h"
 #include "StoneCut.h"
 
+#include <algorithm>
 #include <map>
+#include <set>
 #include <tuple>
 #include <vector>
 
@@ -166,6 +168,48 @@ bool runStoneGeneratorSmokeTest() {
             }
             return y;
         };
+        // Footprint area on the ground plane: unique near-ground vertices,
+        // angularly sorted around their centroid (exact for convex, fine for
+        // the star-shaped nicked footprints here), shoelace.
+        const auto footprintArea = [](const StoneMesh& m) {
+            float gy = 1e30f;
+            for (std::size_t i = 1; i < m.pos.size(); i += 3) {
+                gy = std::min(gy, m.pos[i]);
+            }
+            std::set<std::pair<long long, long long>> uniq;
+            for (std::size_t i = 0; i + 2 < m.pos.size(); i += 3) {
+                if (m.pos[i + 1] < gy + 1e-3f) {
+                    uniq.emplace(
+                        std::llround(static_cast<double>(m.pos[i]) * 1e5),
+                        std::llround(static_cast<double>(m.pos[i + 2]) * 1e5));
+                }
+            }
+            std::vector<std::pair<double, double>> pts;
+            for (const auto& k : uniq) {
+                pts.emplace_back(k.first / 1e5, k.second / 1e5);
+            }
+            if (pts.size() < 3) {
+                return 0.0;
+            }
+            double cx = 0.0, cz = 0.0;
+            for (const auto& p : pts) {
+                cx += p.first;
+                cz += p.second;
+            }
+            cx /= static_cast<double>(pts.size());
+            cz /= static_cast<double>(pts.size());
+            std::sort(pts.begin(), pts.end(), [&](const auto& a, const auto& b) {
+                return std::atan2(a.second - cz, a.first - cx) <
+                    std::atan2(b.second - cz, b.first - cx);
+            });
+            double area = 0.0;
+            for (std::size_t i = 0; i < pts.size(); ++i) {
+                const auto& u = pts[i];
+                const auto& w = pts[(i + 1) % pts.size()];
+                area += u.first * w.second - w.first * u.second;
+            }
+            return std::abs(area) * 0.5;
+        };
 
         StoneCutParams box;
         box.cuts = 0;
@@ -262,6 +306,32 @@ bool runStoneGeneratorSmokeTest() {
             const double vBig = meshVolume(generateCutStone(pp.big));
             check(meshVolume(pairCut) > vBig * 1.05, "pair: companion adds volume");
             check(meshClosed(pairCut), "pair: closed with cuts on");
+        }
+
+        // Base nicks: the steepness filter gates how much of the footprint the
+        // cuts may chip; the support floor keeps the stone standing.
+        {
+            StoneCutParams strict;
+            strict.cuts = 24;
+            strict.baseCutQuota = 0.5f;
+            strict.baseCutAngleDeg = 80.0f; // near-vertical planes only
+            StoneCutParams lenient = strict;
+            lenient.baseCutAngleDeg = 25.0f; // grazing planes admitted
+            const double boxFoot =
+                4.0 * static_cast<double>(strict.sizeX) * static_cast<double>(strict.sizeZ);
+            const StoneMesh strictMesh = generateCutStone(strict);
+            const StoneMesh lenientMesh = generateCutStone(lenient);
+            const double fpStrict = footprintArea(strictMesh);
+            const double fpLenient = footprintArea(lenientMesh);
+            check(fpStrict > 0.90 * boxFoot, "base nicks: steep filter keeps the footprint");
+            check(
+                fpLenient < fpStrict - 0.02 * boxFoot,
+                "base nicks: lenient filter chips the base");
+            check(
+                fpLenient > lenient.baseMinArea * boxFoot - 1e-3,
+                "base nicks: support area floor");
+            check(minY(lenientMesh) >= -lenient.sink - 1e-3f, "base nicks: still on the ground");
+            check(meshClosed(lenientMesh), "base nicks: closed mesh");
         }
     }
 

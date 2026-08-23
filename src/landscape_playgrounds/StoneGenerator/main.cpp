@@ -285,6 +285,10 @@ void drawImGui(int w, int h) {
         edited |= ImGui::SliderInt("Cuts", &g_cutParams.cuts, 0, 32);
         edited |= ImGui::SliderFloat("Cut depth", &g_cutParams.cutDepth, 0.05f, 0.8f);
         edited |= ImGui::SliderFloat("Cut tilt", &g_cutParams.cutTiltDeg, 0.0f, 45.0f);
+        ImGui::SeparatorText("Base nicks");
+        edited |= ImGui::SliderFloat("Base angle", &g_cutParams.baseCutAngleDeg, 30.0f, 80.0f);
+        edited |= ImGui::SliderFloat("Base quota", &g_cutParams.baseCutQuota, 0.0f, 0.5f);
+        edited |= ImGui::SliderFloat("Base min area", &g_cutParams.baseMinArea, 0.3f, 0.9f);
         ImGui::SeparatorText("V-grooves");
         edited |= ImGui::SliderInt("Grooves", &g_cutParams.grooves, 0, 8);
         edited |= ImGui::SliderFloat("Groove depth", &g_cutParams.grooveDepth, 0.05f, 0.6f);
@@ -633,6 +637,7 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --seed=N                generator seed
 // --sink=                 base pushed below y=0
 // --cuts= / --cut-depth= / --cut-tilt=        corner cuts (count, depth, cone)
+// --base-angle= / --base-quota= / --base-min-area=   base nick filters
 // --cut-sx= / --cut-sz= / --cut-height=       starting box extents
 // --grooves= / --groove-depth= / --groove-angle= / --groove-len=   V-channels
 // --pits= / --pit-depth= / --pit-angle=       trihedral dents
@@ -676,6 +681,15 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--cut-tilt=", 0) == 0) {
             g_cutParams.cutTiltDeg = static_cast<float>(std::atof(arg.substr(11).c_str()));
+        }
+        if (arg.rfind("--base-angle=", 0) == 0) {
+            g_cutParams.baseCutAngleDeg = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
+        if (arg.rfind("--base-quota=", 0) == 0) {
+            g_cutParams.baseCutQuota = static_cast<float>(std::atof(arg.substr(13).c_str()));
+        }
+        if (arg.rfind("--base-min-area=", 0) == 0) {
+            g_cutParams.baseMinArea = static_cast<float>(std::atof(arg.substr(16).c_str()));
         }
         if (arg.rfind("--cut-sx=", 0) == 0) {
             g_cutParams.sizeX = static_cast<float>(std::atof(arg.substr(9).c_str()));

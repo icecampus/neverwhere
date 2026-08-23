@@ -11,11 +11,17 @@
 //
 // Corner cuts aim through a corner: normal within a cone around the outward
 // corner direction, offset at a fraction of the corner's incident edge
-// lengths — small chips, never slicing the body in half. Bottom corners are
-// excluded so the base stays flat. A groove enters a face ~perpendicularly
-// and runs along a face-edge direction (parallel to the adjacent face's
-// plane); a pit is a trihedral cone dent. Wedge depth is clamped by the exact
-// ray-exit distance so channels never punch through as tunnels.
+// lengths — small chips, never slicing the body in half. Cuts whose removed
+// wedge reaches the base pass extra filters so the stone keeps standing:
+// the plane must be STEEP against the base (dihedral >= baseCutAngleDeg —
+// grazing planes that bevel the rim or shave the whole base are rejected and
+// resampled), the remaining footprint must keep >= baseMinArea of the
+// starting-box area and still contain the body centroid's projection, and at
+// most baseCutQuota of all cuts may touch the base. A groove enters a face
+// ~perpendicularly and runs along a face-edge direction (parallel to the
+// adjacent face's plane); a pit is a trihedral cone dent. Wedge depth is
+// clamped by the exact ray-exit distance so channels never punch through as
+// tunnels.
 
 struct StoneCutParams {
     int seed = 5434;
@@ -25,6 +31,10 @@ struct StoneCutParams {
     int cuts = 12;           // corner cuts applied
     float cutDepth = 0.093f; // fraction of the corner's mean incident edge length
     float cutTiltDeg = 23.676f; // cone half-angle around the corner direction
+
+    float baseCutAngleDeg = 50.0f; // min dihedral with the base for base-touching cuts
+    float baseCutQuota = 0.25f;    // max fraction of cuts allowed to touch the base
+    float baseMinArea = 0.55f;     // footprint floor, fraction of the starting box
 
     int grooves = 0;          // V-channels into random faces
     float grooveDepth = 0.22f; // axis depth below the surface (fraction of min extent)

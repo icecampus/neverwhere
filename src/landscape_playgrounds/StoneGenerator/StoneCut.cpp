@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -281,6 +282,142 @@ double soupFaceArea(const Soup& soup, const std::vector<std::size_t>& face) {
     return 0.5 * glm::length(n);
 }
 
+// --- Base footprint ----------------------------------------------------------
+// 2D (x,z) polygon of the stone's resting face. Booleans may split the base
+// into several coplanar facets, so the footprint is recovered by cancelling
+// interior directed edges of all downward near-ground faces and walking the
+// remaining boundary loop.
+
+using Poly2 = std::vector<glm::dvec2>;
+
+double polyArea(const Poly2& p) {
+    double a = 0.0;
+    for (std::size_t i = 0, n = p.size(); i < n; ++i) {
+        const glm::dvec2& u = p[i];
+        const glm::dvec2& w = p[(i + 1) % n];
+        a += u.x * w.y - w.x * u.y;
+    }
+    return 0.5 * a;
+}
+
+Poly2 baseFootprint(const Soup& soup) {
+    double groundY = 1e30;
+    for (const glm::dvec3& v : soup.verts) {
+        groundY = std::min(groundY, v.y);
+    }
+    if (groundY > 1e29) {
+        return {};
+    }
+    std::map<std::pair<int, int>, int> edges;
+    for (const auto& face : soup.faces) {
+        if (soupFaceNormal(soup, face).y > -0.9) {
+            continue;
+        }
+        double fy = 0.0;
+        for (const std::size_t vi : face) {
+            fy += soup.verts[vi].y;
+        }
+        if (fy / static_cast<double>(face.size()) > groundY + 1e-4) {
+            continue; // a down-facing notch ceiling, not the resting face
+        }
+        const std::size_t n = face.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const int a = static_cast<int>(face[i]);
+            const int b = static_cast<int>(face[(i + 1) % n]);
+            const auto rev = edges.find({b, a});
+            if (rev != edges.end()) {
+                edges.erase(rev); // interior edge shared by two downward facets
+            } else {
+                edges[{a, b}] = 1;
+            }
+        }
+    }
+    Poly2 best;
+    double bestArea = -1.0;
+    while (!edges.empty()) {
+        const int start = edges.begin()->first.first;
+        const int guardMax = static_cast<int>(edges.size()) + 8;
+        int cur = start;
+        Poly2 loop;
+        for (int guard = 0; guard < guardMax; ++guard) {
+            loop.push_back({soup.verts[static_cast<std::size_t>(cur)].x,
+                            soup.verts[static_cast<std::size_t>(cur)].z});
+            int nxt = -1;
+            for (auto it = edges.lower_bound({cur, -1});
+                 it != edges.end() && it->first.first == cur; ++it) {
+                nxt = it->first.second;
+                edges.erase(it);
+                break;
+            }
+            if (nxt < 0 || nxt == start) {
+                break;
+            }
+            cur = nxt;
+        }
+        const double a = std::abs(polyArea(loop));
+        if (a > bestArea) {
+            bestArea = a;
+            best = std::move(loop);
+        }
+    }
+    return best;
+}
+
+// Sutherland–Hodgman clip of the footprint against the cut plane's trace at
+// y=0 (n.x·x + n.z·z <= d). Returns true iff the removed half-space actually
+// bites into the footprint (i.e. the cut touches the base).
+bool clipFootprint(Poly2& poly, const glm::dvec3& n, double d) {
+    if (std::hypot(n.x, n.z) < 1e-12) {
+        // Horizontal plane: everything below/above it — the base is fully
+        // shaved only when the kept half-space excludes the ground plane.
+        if (d >= 0.0) {
+            return false;
+        }
+        poly.clear();
+        return true;
+    }
+    const auto val = [&](const glm::dvec2& p) { return n.x * p.x + n.z * p.y - d; };
+    bool touched = false;
+    for (const glm::dvec2& p : poly) {
+        if (val(p) > 0.0) {
+            touched = true;
+            break;
+        }
+    }
+    if (!touched) {
+        return false;
+    }
+    Poly2 out;
+    const std::size_t m = poly.size();
+    for (std::size_t i = 0; i < m; ++i) {
+        const glm::dvec2 a = poly[i];
+        const glm::dvec2 b = poly[(i + 1) % m];
+        const double va = val(a), vb = val(b);
+        const bool ina = va <= 0.0, inb = vb <= 0.0;
+        if (ina) {
+            out.push_back(a);
+        }
+        if (ina != inb) {
+            out.push_back(a + (va / (va - vb)) * (b - a));
+        }
+    }
+    poly = std::move(out);
+    return true;
+}
+
+bool pointInPoly(const Poly2& p, const glm::dvec2& q) {
+    bool inside = false;
+    for (std::size_t i = 0, j = p.size() - 1; i < p.size(); j = i++) {
+        const glm::dvec2& a = p[i];
+        const glm::dvec2& b = p[j];
+        if ((a.y > q.y) != (b.y > q.y) &&
+            q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
 // First triangle hit of the ray o + t*dir, t > 0 (Möller–Trumbore). 1e30 miss.
 double rayExit(const Soup& tris, const glm::dvec3& o, const glm::dvec3& dir) {
     double best = 1e30;
@@ -349,8 +486,14 @@ glm::dvec3 tilted(const glm::dvec3& n, int attempt) {
     return glm::normalize(n * std::cos(ang) + u * std::sin(ang));
 }
 
-void applyCornerCut(Nef& body, const StoneCutParams& params, double height, double extent,
-    std::mt19937_64& rng) {
+// One corner cut. All vertices are candidates — bottom corners included — but
+// a cut whose removed wedge reaches the base must pass the base filters
+// (steep dihedral, footprint support floor, centroid inside) and the per-stone
+// quota of base-touching cuts; rejected picks are resampled a few times, then
+// the cut is skipped. Grazing cuts at the base would either bevel the rim all
+// around ("rounded" look) or shave the whole footprint (floating stone).
+void applyCornerCut(Nef& body, const StoneCutParams& params, double extent,
+    std::mt19937_64& rng, int& baseCutsUsed, int baseCutsMax) {
     const Soup soup = snapshot(body, /*triangulate=*/false);
     if (soup.verts.empty()) {
         return;
@@ -374,47 +517,73 @@ void applyCornerCut(Nef& body, const StoneCutParams& params, double height, doub
         }
     }
 
-    std::vector<int> candidates;
-    for (int i = 0; i < static_cast<int>(soup.verts.size()); ++i) {
-        if (soup.verts[i].y > 0.1 * height) {
-            candidates.push_back(i);
+    const Poly2 footprint = baseFootprint(soup);
+    const double baseArea0 =
+        4.0 * static_cast<double>(params.sizeX) * static_cast<double>(params.sizeZ);
+    const double steepLimit = std::cos(params.baseCutAngleDeg * kPi / 180.0);
+
+    for (int pick = 0; pick < 8; ++pick) {
+        const int corner = static_cast<int>(uni01(rng) * soup.verts.size()) %
+            static_cast<int>(soup.verts.size());
+        const glm::dvec3 cv = soup.verts[corner];
+
+        double meanLen = 0.0;
+        for (const int nb : adj[corner]) {
+            meanLen += glm::length(soup.verts[nb] - cv);
         }
-    }
-    if (candidates.empty()) {
-        return;
-    }
-    const int corner = candidates[static_cast<std::size_t>(uni01(rng) * candidates.size()) %
-                                  candidates.size()];
-    const glm::dvec3 cv = soup.verts[corner];
+        meanLen /= std::max(adj[corner].size(), std::size_t{1});
+        if (meanLen < 1e-9) {
+            return;
+        }
 
-    double meanLen = 0.0;
-    for (const int nb : adj[corner]) {
-        meanLen += glm::length(soup.verts[nb] - cv);
-    }
-    meanLen /= std::max(adj[corner].size(), std::size_t{1});
-    if (meanLen < 1e-9) {
-        return;
-    }
+        glm::dvec3 dir = cv - center;
+        if (glm::length(dir) < 1e-9) {
+            return;
+        }
+        dir = glm::normalize(dir);
+        glm::dvec3 u, v;
+        planeBasis(dir, u, v);
+        const double tiltCone = std::tan(params.cutTiltDeg * kPi / 180.0);
+        glm::dvec3 n = dir + tiltCone * (uniSigned(rng) * u + uniSigned(rng) * v);
+        if (glm::length(n) < 1e-9) {
+            return;
+        }
+        n = glm::normalize(n);
 
-    glm::dvec3 dir = cv - center;
-    if (glm::length(dir) < 1e-9) {
-        return;
-    }
-    dir = glm::normalize(dir);
-    glm::dvec3 u, v;
-    planeBasis(dir, u, v);
-    const double tiltCone = std::tan(params.cutTiltDeg * kPi / 180.0);
-    glm::dvec3 n = dir + tiltCone * (uniSigned(rng) * u + uniSigned(rng) * v);
-    if (glm::length(n) < 1e-9) {
-        return;
-    }
-    n = glm::normalize(n);
+        const double depth = params.cutDepth * meanLen * (0.6 + 0.8 * uni01(rng));
+        const double d0 = glm::dot(n, cv) - depth;
 
-    const double depth = params.cutDepth * meanLen * (0.6 + 0.8 * uni01(rng));
-    tryBoolean(body, [&](int attempt) {
-        const glm::dvec3 nn = tilted(n, attempt);
-        return body * nefPlaneClip(nn, glm::dot(nn, cv) - depth, extent);
-    });
+        if (!footprint.empty()) {
+            Poly2 clipped = footprint;
+            if (clipFootprint(clipped, n, d0)) {
+                // The wedge bites into the footprint: base-touching cut.
+                if (baseCutsUsed >= baseCutsMax) {
+                    continue;
+                }
+                if (std::abs(n.y) > steepLimit) {
+                    continue; // grazing plane: rim bevel or base shave
+                }
+                if (polyArea(clipped) < params.baseMinArea * baseArea0) {
+                    continue; // would eat too much of the support
+                }
+                if (!pointInPoly(clipped, {center.x, center.z})) {
+                    continue; // would saw the support out from under the body
+                }
+                if (tryBoolean(body, [&](int attempt) {
+                        const glm::dvec3 nn = tilted(n, attempt);
+                        return body * nefPlaneClip(nn, glm::dot(nn, cv) - depth, extent);
+                    })) {
+                    ++baseCutsUsed;
+                }
+                return;
+            }
+        }
+        tryBoolean(body, [&](int attempt) {
+            const glm::dvec3 nn = tilted(n, attempt);
+            return body * nefPlaneClip(nn, glm::dot(nn, cv) - depth, extent);
+        });
+        return;
+    }
 }
 
 // --- Grooves / pits ------------------------------------------------------------
@@ -616,8 +785,11 @@ Nef buildStoneBody(
         }
     }
 
+    int baseCutsUsed = 0;
+    const int baseCutsMax = static_cast<int>(
+        std::clamp(params.cuts, 0, 64) * std::clamp(params.baseCutQuota, 0.0f, 1.0f));
     for (int cut = 0, cuts = std::clamp(params.cuts, 0, 64); cut < cuts; ++cut) {
-        applyCornerCut(body, params, h, clipExtent, rng);
+        applyCornerCut(body, params, clipExtent, rng, baseCutsUsed, baseCutsMax);
     }
     for (int g = 0, grooves = std::clamp(params.grooves, 0, 8); g < grooves; ++g) {
         applyGroove(body, params, minExtent, rng);
