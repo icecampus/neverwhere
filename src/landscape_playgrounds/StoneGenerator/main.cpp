@@ -92,6 +92,16 @@ float g_pairShift = 0.0f;
 float g_pairSizeFactor = 0.60f;
 float g_pairHeightFactor = 0.60f;
 int g_pairSeed = 1234;
+// Recursive cluster composition (generateCutStoneCluster): companions hug the
+// camera-facing sides with a randomized slide, sizes decay per level.
+bool g_clusterEnabled = false;
+int g_clusterSeed = 777;
+int g_clusterLevels = 2;
+int g_clusterChildren = 2;
+float g_clusterDecay = 0.60f;
+float g_clusterGap = 0.06f;
+float g_clusterOverlap = 0.30f;
+float g_clusterOvershoot = 0.50f;
 // Tear-hunt debug render: unlit green rock on a red background, no grid.
 bool g_flat = false;
 StoneMesh g_stoneMesh;
@@ -307,21 +317,25 @@ void drawImGui(int w, int h) {
         ImGui::Text("Tris: %d", g_stoneMesh.triCount);
     }
 
-    if (ImGui::CollapsingHeader("Companion stone")) {
+    if (ImGui::CollapsingHeader("Cluster")) {
         bool edited = false;
-        edited |= ImGui::Checkbox("Enabled", &g_pairEnabled);
-        const char* kSides[] = {"+X", "-X", "+Z", "-Z"};
-        edited |= ImGui::Combo("Side", &g_pairSide, kSides, 4);
-        edited |= ImGui::SliderInt("Seed 2", &g_pairSeed, 0, 9999);
-        edited |= ImGui::SliderFloat("Size factor", &g_pairSizeFactor, 0.3f, 1.0f);
-        edited |= ImGui::SliderFloat("Height factor", &g_pairHeightFactor, 0.3f, 1.0f);
-        edited |= ImGui::SliderFloat("Gap", &g_pairGap, 0.0f, 0.3f);
-        edited |= ImGui::SliderFloat("Overlap", &g_pairOverlap, 0.05f, 0.8f);
-        edited |= ImGui::SliderFloat("Shift", &g_pairShift, -1.5f, 1.5f);
+        edited |= ImGui::Checkbox("Enabled", &g_clusterEnabled);
+        edited |= ImGui::SliderInt("Layout seed", &g_clusterSeed, 0, 9999);
+        ImGui::SameLine();
+        if (ImGui::Button("New layout")) {
+            g_clusterSeed = std::rand() % 10000;
+            edited = true;
+        }
+        edited |= ImGui::SliderInt("Levels", &g_clusterLevels, 1, 3);
+        edited |= ImGui::SliderInt("Max children", &g_clusterChildren, 1, 3);
+        edited |= ImGui::SliderFloat("Decay", &g_clusterDecay, 0.4f, 0.8f);
+        edited |= ImGui::SliderFloat("Overshoot", &g_clusterOvershoot, 0.0f, 1.0f);
+        edited |= ImGui::SliderFloat("Gap", &g_clusterGap, 0.0f, 0.3f);
+        edited |= ImGui::SliderFloat("Overlap", &g_clusterOverlap, 0.05f, 0.8f);
         if (edited) {
             g_stoneDirty = true;
         }
-        ImGui::TextDisabled("Carved with the big stone's side imprint");
+        ImGui::TextDisabled("Companions hug camera-facing sides (+X/+Z)");
     }
 
     ImGui::Separator();
@@ -364,9 +378,20 @@ bool capturePlaygroundPng(const char* path) {
 #endif
 }
 
-// Mesh rebuild entry point: single stone, or a big+companion pair carved with
-// each other's contact imprint when the pair mode is on.
+// Mesh rebuild entry point: cluster, pair, or a single stone.
 StoneMesh buildStoneMesh() {
+    if (g_clusterEnabled) {
+        StoneClusterParams cp;
+        cp.base = g_cutParams;
+        cp.seed = g_clusterSeed;
+        cp.levels = g_clusterLevels;
+        cp.maxChildren = g_clusterChildren;
+        cp.decay = g_clusterDecay;
+        cp.gap = g_clusterGap;
+        cp.overlap = g_clusterOverlap;
+        cp.overshoot = g_clusterOvershoot;
+        return generateCutStoneCluster(cp);
+    }
     if (!g_pairEnabled) {
         return generateCutStone(g_cutParams);
     }
@@ -645,6 +670,10 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --pair-side=0..3            contact side (+x, -x, +z, -z)
 // --pair-gap= / --pair-overlap= / --pair-shift=   slit, carve depth, slide
 // --pair-size= / --pair-height= / --pair-seed=    companion scale factors, seed
+// --cluster                   recursive companions on camera-facing sides
+// --cluster-seed= / --cluster-levels= / --cluster-children=   layout rng, depth, count
+// --cluster-decay= / --cluster-overshoot=           size ratio, slide-out
+// --cluster-gap= / --cluster-overlap=               slit, carve depth
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -747,6 +776,30 @@ int main(int argc, char* argv[]) {
         }
         if (arg.rfind("--pair-seed=", 0) == 0) {
             g_pairSeed = std::atoi(arg.substr(12).c_str());
+        }
+        if (arg == "--cluster") {
+            g_clusterEnabled = true;
+        }
+        if (arg.rfind("--cluster-seed=", 0) == 0) {
+            g_clusterSeed = std::atoi(arg.substr(15).c_str());
+        }
+        if (arg.rfind("--cluster-levels=", 0) == 0) {
+            g_clusterLevels = std::atoi(arg.substr(17).c_str());
+        }
+        if (arg.rfind("--cluster-children=", 0) == 0) {
+            g_clusterChildren = std::atoi(arg.substr(19).c_str());
+        }
+        if (arg.rfind("--cluster-decay=", 0) == 0) {
+            g_clusterDecay = static_cast<float>(std::atof(arg.substr(16).c_str()));
+        }
+        if (arg.rfind("--cluster-gap=", 0) == 0) {
+            g_clusterGap = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--cluster-overlap=", 0) == 0) {
+            g_clusterOverlap = static_cast<float>(std::atof(arg.substr(18).c_str()));
+        }
+        if (arg.rfind("--cluster-overshoot=", 0) == 0) {
+            g_clusterOvershoot = static_cast<float>(std::atof(arg.substr(20).c_str()));
         }
     }
 

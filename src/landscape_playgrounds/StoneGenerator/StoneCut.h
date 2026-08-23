@@ -69,3 +69,26 @@ struct StonePairParams {
 };
 
 StoneMesh generateCutStonePair(const StonePairParams& params);
+
+// Stone cluster: a root stone plus recursively spawned companions hugging its
+// CAMERA-FACING sides only (+X and +Z — those face the viewer in the diamond
+// projection; -X/-Z would be occluded behind the parent's silhouette, so
+// stones there are never spawned). Each child starts as a box overlapping its
+// parent at a random tangential slide (overshoot allows sticking out past the
+// parent's edge), the inflated parent is subtracted (tight imprint with a
+// ~gap slit, same as the pair), then the child gets its own cut pass.
+// Candidates that miss the parent's body (carve removed ~nothing) or
+// interpenetrate an already-placed stone are resampled. Sizes decay per level.
+struct StoneClusterParams {
+    StoneCutParams base;    // root recipe; children inherit it with own seeds
+    int seed = 777;         // layout rng: sides, shifts, child seeds
+    int levels = 2;         // recursion depth (0 = root only)
+    int maxChildren = 2;    // per stone; actual count is 1..maxChildren
+    float decay = 0.60f;    // child/parent linear size ratio
+    float gap = 0.06f;      // contact slit width (inflation-based, as the pair)
+    float overlap = 0.30f;  // initial box penetration into the parent
+    float overshoot = 0.5f; // 0 = slide within the parent's face, 1 = max out
+    float minContact = 0.3f; // fraction of the child half-width facing the parent
+};
+
+StoneMesh generateCutStoneCluster(const StoneClusterParams& params);

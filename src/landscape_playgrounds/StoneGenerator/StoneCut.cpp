@@ -740,25 +740,39 @@ float planeTint(const glm::dvec3& n, double offset, std::uint64_t seed, float ji
     return 1.0f + jitter * (h - 0.5f) * 2.0f;
 }
 
+// Body volume from the triangle soup (outward-oriented -> positive).
+double bodyVolume(const Nef& body) {
+    const Soup soup = snapshot(body, /*triangulate=*/true);
+    double v = 0.0;
+    for (const auto& face : soup.faces) {
+        for (std::size_t i = 1; i + 1 < face.size(); ++i) {
+            const glm::dvec3& a = soup.verts[face[0]];
+            const glm::dvec3& b = soup.verts[face[i]];
+            const glm::dvec3& c = soup.verts[face[i + 1]];
+            v += glm::dot(a, glm::cross(b, c));
+        }
+    }
+    return std::abs(v) / 6.0;
+}
+
 // --- Body assembly -----------------------------------------------------------
 
-// One stone body: box -> optional carve of another body -> corner cuts ->
-// grooves -> pits -> ground clip. `offset` is the XZ center (and base height)
-// of the starting box. `subtract` (nullable) is boolean-carved out of the box
-// before any cutting; carvedOk reports whether that carve survived the retries.
-Nef buildStoneBody(
+// Stage 1 — the starting box at `offset` (XZ center, base at offset.y),
+// optionally carved by `subtract`. carvedOk reports whether the subtraction
+// survived the retries; carvedVol is how much material it actually removed
+// (zero also when the tool misses the box entirely).
+Nef carveStoneBox(
     const StoneCutParams& params, const glm::dvec3& offset, const Nef* subtract,
-    bool* carvedOk = nullptr) {
+    bool* carvedOk = nullptr, double* carvedVol = nullptr) {
     if (carvedOk) {
         *carvedOk = true;
     }
-    std::mt19937_64 rng(mixSeed(params.seed));
-
+    if (carvedVol) {
+        *carvedVol = 0.0;
+    }
     const double sx = std::max(static_cast<double>(params.sizeX), 0.05);
     const double sz = std::max(static_cast<double>(params.sizeZ), 0.05);
     const double h = std::max(static_cast<double>(params.height), 0.05);
-    const double minExtent = std::min({sx, sz, h});
-    const double clipExtent = 64.0 * std::max({sx, sz, h});
 
     Nef body = nefBox(
         {offset.x - sx, offset.y, offset.z - sz},
@@ -778,12 +792,27 @@ Nef buildStoneBody(
             return body - shifted;
         });
         if (!ok) {
-            spdlog::warn("buildStoneBody: carve subtraction failed, body left uncarved");
+            spdlog::warn("carveStoneBox: subtraction failed, body left uncarved");
         }
         if (carvedOk) {
             *carvedOk = ok;
         }
+        if (ok && carvedVol) {
+            *carvedVol = 8.0 * sx * sz * h - bodyVolume(body);
+        }
     }
+    return body;
+}
+
+// Stage 2 — corner cuts (with the base filters), grooves, pits, ground clip.
+void applyStoneDetail(Nef& body, const StoneCutParams& params) {
+    std::mt19937_64 rng(mixSeed(params.seed));
+
+    const double sx = std::max(static_cast<double>(params.sizeX), 0.05);
+    const double sz = std::max(static_cast<double>(params.sizeZ), 0.05);
+    const double h = std::max(static_cast<double>(params.height), 0.05);
+    const double minExtent = std::min({sx, sz, h});
+    const double clipExtent = 64.0 * std::max({sx, sz, h});
 
     int baseCutsUsed = 0;
     const int baseCutsMax = static_cast<int>(
@@ -804,6 +833,17 @@ Nef buildStoneBody(
             tilted(glm::dvec3{0.0, -1.0, 0.0}, attempt),
             static_cast<double>(params.sink), clipExtent);
     });
+}
+
+// One stone body: box -> optional carve of another body -> corner cuts ->
+// grooves -> pits -> ground clip. `offset` is the XZ center (and base height)
+// of the starting box. `subtract` (nullable) is boolean-carved out of the box
+// before any cutting; carvedOk reports whether that carve survived the retries.
+Nef buildStoneBody(
+    const StoneCutParams& params, const glm::dvec3& offset, const Nef* subtract,
+    bool* carvedOk = nullptr) {
+    Nef body = carveStoneBox(params, offset, subtract, carvedOk);
+    applyStoneDetail(body, params);
     return body;
 }
 
@@ -927,5 +967,126 @@ StoneMesh generateCutStonePair(const StonePairParams& params) {
     StoneMesh out;
     emitInto(out, n1, mixSeed(big.seed), big.tintJitter, 1.0f);
     emitInto(out, n2, mixSeed(small.seed), small.tintJitter, 0.88f);
+    return out;
+}
+
+StoneMesh generateCutStoneCluster(const StoneClusterParams& params) {
+    std::mt19937_64 rng(mixSeed(params.seed));
+
+    struct Node {
+        Nef body;
+        glm::dvec2 center; // box XZ center the stone was placed at
+        double sx, sz, h;  // starting-box extents
+        int level;
+    };
+
+    StoneMesh out;
+    std::vector<Node> nodes;
+    std::vector<std::size_t> frontier;
+    const auto spawn = [&](Nef body, const glm::dvec2& center, double sx, double sz,
+                           double h, int level, float albedoMul, int seed) {
+        emitInto(out, body, mixSeed(seed), params.base.tintJitter, albedoMul);
+        nodes.push_back({std::move(body), center, sx, sz, h, level});
+        frontier.push_back(nodes.size() - 1);
+    };
+
+    {
+        const double sx = std::max(static_cast<double>(params.base.sizeX), 0.05);
+        const double sz = std::max(static_cast<double>(params.base.sizeZ), 0.05);
+        const double h = std::max(static_cast<double>(params.base.height), 0.05);
+        spawn(
+            buildStoneBody(params.base, glm::dvec3{0.0}, nullptr), {0.0, 0.0}, sx, sz, h,
+            0, 1.0f, params.base.seed);
+    }
+
+    // BFS: every expanded node tries to grow 1..maxChildren companions on its
+    // camera-facing sides (+X / +Z — the ones the diamond projection shows).
+    for (std::size_t head = 0; head < frontier.size(); ++head) {
+        const Node parent = nodes[frontier[head]]; // copy: `nodes` reallocates
+        if (parent.level >= params.levels) {
+            continue;
+        }
+        const int want =
+            1 + static_cast<int>(uni01(rng) * std::max(params.maxChildren, 1));
+        const double decay = std::clamp(static_cast<double>(params.decay), 0.2, 0.95);
+        const double gap = std::max(static_cast<double>(params.gap), 0.0);
+        const double overlap = std::max(static_cast<double>(params.overlap), 0.0);
+        const double over = std::clamp(static_cast<double>(params.overshoot), 0.0, 1.0);
+        const double minContact =
+            std::clamp(static_cast<double>(params.minContact), 0.05, 1.0);
+
+        int spawned = 0;
+        for (int tries = 0; tries < 8 && spawned < want; ++tries) {
+            const bool sideX = uni01(rng) < 0.5; // +X or +Z, never the far sides
+            const double csx = std::max(parent.sx * decay, 0.15);
+            const double csz = std::max(parent.sz * decay, 0.15);
+            const double ch = std::max(parent.h * decay * (0.8 + 0.4 * uni01(rng)), 0.2);
+            const double parentHalf = sideX ? parent.sx : parent.sz; // side axis
+            const double parentHalfT = sideX ? parent.sz : parent.sx; // tangent axis
+            const double childHalfT = sideX ? csz : csx; // along the tangent
+            // Slide window: from fully within the parent's face to sticking out
+            // past its edge, but always facing the parent by >= minContact.
+            const double fullIn = std::max(0.0, parentHalfT - childHalfT);
+            const double wide = parentHalfT + childHalfT - minContact * childHalfT;
+            const double maxShift = fullIn + over * (wide - fullIn);
+            const double shift = uniSigned(rng) * maxShift;
+
+            glm::dvec2 c = parent.center;
+            if (sideX) {
+                c.x += parent.sx + csx - overlap;
+                c.y += shift;
+            } else {
+                c.y += parent.sz + csz - overlap;
+                c.x += shift;
+            }
+
+            StoneCutParams cp = params.base;
+            cp.seed = static_cast<int>(rng() % 100000);
+            cp.sizeX = static_cast<float>(csx);
+            cp.sizeZ = static_cast<float>(csz);
+            cp.height = static_cast<float>(ch);
+
+            // Inflated parent -> gap-preserving imprint (same trick as the pair).
+            Nef inflated(parent.body);
+            const double s = 1.0 + gap / parentHalf;
+            const glm::dvec3 pc{parent.center.x, 0.5 * parent.h, parent.center.y};
+            inflated.transform(
+                AffT(CGAL::TRANSLATION, CK::Vector_3(pc.x, pc.y, pc.z)) *
+                AffT(CGAL::SCALING, s) *
+                AffT(CGAL::TRANSLATION, CK::Vector_3(-pc.x, -pc.y, -pc.z)));
+
+            bool carvedOk = false;
+            double carvedVol = 0.0;
+            Nef childBody =
+                carveStoneBox(cp, {c.x, 0.0, c.y}, &inflated, &carvedOk, &carvedVol);
+            const double boxVol = 8.0 * csx * csz * ch;
+            if (!carvedOk || carvedVol < 1e-3 * boxVol) {
+                continue; // slid past the parent's body — no real contact
+            }
+            bool collides = false;
+            for (std::size_t oi = 0; oi < nodes.size(); ++oi) {
+                if (oi == frontier[head]) {
+                    continue;
+                }
+                try {
+                    if (bodyVolume(childBody * nodes[oi].body) > 1e-4 * boxVol) {
+                        collides = true;
+                        break;
+                    }
+                } catch (const std::exception&) {
+                    collides = true; // CGAL tangent-contact hiccup: resample
+                    break;
+                }
+            }
+            if (collides) {
+                continue;
+            }
+
+            applyStoneDetail(childBody, cp);
+            const float shade = static_cast<float>(std::pow(0.88, parent.level + 1));
+            spawn(std::move(childBody), c, csx, csz, ch, parent.level + 1, shade, cp.seed);
+            ++spawned;
+        }
+    }
     return out;
 }

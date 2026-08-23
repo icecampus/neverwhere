@@ -333,6 +333,41 @@ bool runStoneGeneratorSmokeTest() {
             check(minY(lenientMesh) >= -lenient.sink - 1e-3f, "base nicks: still on the ground");
             check(meshClosed(lenientMesh), "base nicks: closed mesh");
         }
+
+        // Cluster: camera-facing companions with tight imprints.
+        {
+            StoneClusterParams cp;
+            cp.base.cuts = 8;
+            cp.levels = 1;
+            cp.maxChildren = 1;
+            cp.overshoot = 0.0f; // the child stays fully within the parent's span
+            const StoneMesh cluster1 = generateCutStoneCluster(cp);
+            check(cluster1.triCount > 0 && meshClosed(cluster1), "cluster: closed mesh");
+            check(generateCutStoneCluster(cp).pos == cluster1.pos, "cluster: deterministic");
+
+            // Front rule with overshoot=0: verts beyond the root's +X/+Z bbox
+            // walls belong to a companion and must stay within the parent's
+            // span on the tangent axis.
+            const double sx1 = cp.base.sizeX, sz1 = cp.base.sizeZ;
+            bool frontOk = true;
+            for (std::size_t i = 0; i + 2 < cluster1.pos.size(); i += 3) {
+                const double x = cluster1.pos[i], z = cluster1.pos[i + 2];
+                if (x > sx1 + 1e-3 && std::abs(z) > sz1 + 0.05) {
+                    frontOk = false;
+                }
+                if (z > sz1 + 1e-3 && std::abs(x) > sx1 + 0.05) {
+                    frontOk = false;
+                }
+            }
+            check(frontOk, "cluster: companion within the parent span (overshoot 0)");
+
+            StoneClusterParams deep = cp;
+            deep.levels = 2;
+            deep.maxChildren = 2;
+            const StoneMesh cluster2 = generateCutStoneCluster(deep);
+            check(cluster2.triCount > cluster1.triCount, "cluster: recursion adds stones");
+            check(meshClosed(cluster2), "cluster: closed at depth 2");
+        }
     }
 
     if (failures == 0) {
