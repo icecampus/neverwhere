@@ -16,6 +16,7 @@
 #include "PlaygroundScreenshot.h"
 #include "PlaygroundSmokeTest.h"
 #include "StoneGen.h"
+#include "StoneMeshRenderer.h"
 
 #define SOKOL_IMPL
 #define SOKOL_NO_ENTRY
@@ -80,13 +81,18 @@ bool g_ctrlDown = false;
 constexpr int kMapW = 24;
 constexpr int kMapH = 24;
 NodeField g_nodes;
-StoneGenParams g_params;
+StoneGenParams g_stoneParams;
+StoneMesh g_stoneMesh;
+StoneMeshRenderer g_stoneRenderer;
+bool g_stoneDirty = true;
+glm::vec3 g_stoneWorldPos{0.0f};
+std::uint64_t g_stoneContentKey = 0;
+std::uint64_t g_stoneNodesVersion = ~0ull;
 
 std::string g_shotPath;
 std::optional<float> g_cliZoom;
 std::optional<glm::ivec2> g_cliCenter;
 std::vector<glm::ivec2> g_cliNodes;
-std::optional<int> g_cliSeed;
 bool g_noUi = false;
 
 // --- Units -----------------------------------------------------------------
@@ -156,6 +162,29 @@ void paintAtMouse() {
     g_lastPaintNode = g_hoverNode;
 }
 
+// World anchor for the single rock: centroid of the painted nodes (fallback:
+// map center), inverted from field coords back to world (the renderer applies
+// the forward mapping, so the rock lands exactly there).
+glm::vec3 stoneAnchorWorld() {
+    glm::vec2 acc(0.0f);
+    int count = 0;
+    for (int y = 0; y < g_nodes.height; ++y) {
+        for (int x = 0; x < g_nodes.width; ++x) {
+            if (g_nodes.isOn({x, y})) {
+                acc += g_iso.nodeToField({x, y});
+                ++count;
+            }
+        }
+    }
+    const glm::vec2 field =
+        count > 0 ? acc / static_cast<float>(count) : g_iso.mapToField({kMapW / 2, kMapH / 2});
+    const float halfW = g_iso.dims.cellSize().x * 0.5f;
+    const float halfH = g_iso.dims.cellSize().y * 0.5f;
+    const float a = (field.x - halfW) / halfW; // x - z
+    const float b = (field.y - halfH) / halfH; // x + z
+    return {(a + b) * 0.5f, 0.0f, (b - a) * 0.5f};
+}
+
 void init() {
     spdlog::set_level(spdlog::level::info);
     spdlog::info("StoneGenerator: init()");
@@ -180,11 +209,9 @@ void init() {
     }
 
     g_grid.init();
+    g_stoneRenderer.init();
     g_nodes.reset(kMapW + 1, kMapH + 1);
 
-    if (g_cliSeed) {
-        g_params.seed = *g_cliSeed;
-    }
     for (const glm::ivec2& node : g_cliNodes) {
         g_nodes.setNode(node, true);
     }
@@ -232,11 +259,56 @@ void drawImGui(int w, int h) {
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Stone generation", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::TextDisabled("Scaffold: generator not wired yet.");
-        ImGui::TextWrapped(
-            "Painted nodes are the seed silhouette. Generation experiments "
-            "go in StoneGen.h — do not fork B-rep or stone_gen from here.");
-        ImGui::SliderInt("Seed", &g_params.seed, 0, 9999);
+        bool edited = false;
+        const char* forms[] = {"Box", "Frustum", "Prism", "Sphere", "Oval"};
+        int form = static_cast<int>(g_stoneParams.form);
+        if (ImGui::Combo("Base form", &form, forms, 5)) {
+            g_stoneParams.form = static_cast<StoneBaseForm>(form);
+            edited = true;
+        }
+        edited |= ImGui::SliderInt("Seed", &g_stoneParams.seed, 0, 9999);
+        ImGui::SameLine();
+        if (ImGui::Button("New seed")) {
+            g_stoneParams.seed = std::rand() % 10000;
+            edited = true;
+        }
+        edited |= ImGui::SliderFloat("Radius", &g_stoneParams.radius, 0.4f, 3.0f);
+        const bool prismFamily = g_stoneParams.form == StoneBaseForm::Box ||
+            g_stoneParams.form == StoneBaseForm::Frustum ||
+            g_stoneParams.form == StoneBaseForm::Prism;
+        if (prismFamily) {
+            edited |= ImGui::SliderFloat("Height", &g_stoneParams.height, 0.4f, 3.0f);
+            edited |= ImGui::SliderFloat("Yaw", &g_stoneParams.yawDeg, 0.0f, 360.0f);
+        }
+        if (g_stoneParams.form == StoneBaseForm::Frustum ||
+            g_stoneParams.form == StoneBaseForm::Prism) {
+            edited |= ImGui::SliderFloat("Taper", &g_stoneParams.taper, 0.0f, 0.95f);
+        }
+        if (g_stoneParams.form == StoneBaseForm::Prism) {
+            edited |= ImGui::SliderInt("Sides", &g_stoneParams.sides, 3, 12);
+        }
+        if (g_stoneParams.form == StoneBaseForm::Sphere ||
+            g_stoneParams.form == StoneBaseForm::Oval) {
+            edited |= ImGui::SliderInt("Facet planes", &g_stoneParams.ballPlanes, 8, 48);
+        }
+        if (g_stoneParams.form == StoneBaseForm::Oval) {
+            edited |= ImGui::SliderFloat("Oval scale X", &g_stoneParams.ovalScaleX, 0.5f, 2.0f);
+            edited |= ImGui::SliderFloat("Oval scale Z", &g_stoneParams.ovalScaleZ, 0.5f, 2.0f);
+        }
+        ImGui::SeparatorText("Edges");
+        edited |= ImGui::SliderFloat("Chamfer", &g_stoneParams.chamferWidth, 0.0f, 0.3f);
+        edited |= ImGui::Checkbox("Chamfer top only", &g_stoneParams.chamferTopOnly);
+        edited |= ImGui::SliderFloat("Plane tilt", &g_stoneParams.planeTiltDeg, 0.0f, 10.0f);
+        edited |= ImGui::SliderFloat("Plane offset", &g_stoneParams.planeOffset, 0.0f, 0.2f);
+        edited |= ImGui::SliderFloat("Vertex noise", &g_stoneParams.noiseAmp, 0.0f, 0.1f);
+        edited |= ImGui::SliderFloat("Sink", &g_stoneParams.sink, 0.0f, 0.3f);
+        edited |= ImGui::SliderFloat("Tint jitter", &g_stoneParams.tintJitter, 0.0f, 0.3f);
+        edited |= ImGui::SliderFloat("Shape variance", &g_stoneParams.shapeVariance, 0.0f, 1.0f);
+        if (edited) {
+            g_stoneDirty = true;
+        }
+        ImGui::Text("Tris: %d", g_stoneMesh.triCount);
+        ImGui::TextDisabled("Nodes move the rock (cluster layout: phase 2)");
     }
 
     ImGui::Separator();
@@ -295,6 +367,17 @@ void frame() {
     const int h = static_cast<int>(std::lround(window.y));
     updateHover();
 
+    if (g_nodes.version != g_stoneNodesVersion) {
+        g_stoneNodesVersion = g_nodes.version;
+        g_stoneDirty = true; // the rock anchor follows the painted silhouette
+    }
+    if (g_stoneDirty) {
+        g_stoneMesh = generateStone(g_stoneParams);
+        g_stoneWorldPos = stoneAnchorWorld();
+        ++g_stoneContentKey;
+        g_stoneDirty = false;
+    }
+
     if (g_state.imgui_ok) {
         // simgui_new_frame() wants the framebuffer size and does the division
         // by dpi_scale itself; everything downstream of it is in points.
@@ -328,6 +411,18 @@ void frame() {
     const int vpH = static_cast<int>(std::lround(h * dpi));
     sg_apply_viewport(vpX, 0, vpW, vpH, true);
     sg_apply_scissor_rect(vpX, 0, vpW, vpH, true);
+
+    // The depth-writing stone pass goes first; the grid only depth-tests
+    // against it (LESS_EQUAL, no write), so grid lines on nearer rows stay
+    // visible and lines under the rock are occluded.
+    g_stoneRenderer.render(
+        g_iso,
+        g_camera,
+        canvasW,
+        h,
+        g_stoneMesh,
+        g_stoneWorldPos,
+        g_stoneContentKey);
 
     g_grid.render(
         g_iso,
@@ -364,6 +459,7 @@ void frame() {
 
 void cleanup() {
     spdlog::info("StoneGenerator: cleanup()");
+    g_stoneRenderer.shutdown();
     g_grid.shutdown();
     if (g_state.imgui_ok) {
         simgui_shutdown();
@@ -491,8 +587,16 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --zoom=Z                camera zoom (default: centerCamera's 1.0)
 // --center=cx,cy          camera center in cell coords
 //                         (default: bbox center of --nodes)
-// --nodes="x,y;x,y;..."   paint these seed nodes on startup
-// --seed=N                generator seed (placeholder, default 1)
+// --nodes="x,y;x,y;..."   paint these seed nodes on startup (rock anchor)
+// --seed=N                generator seed
+// --form=box|frustum|prism|sphere|oval
+// --radius= / --height=   rock extents (world units, 1 cell = 1)
+// --taper= / --sides=     prism family shaping
+// --ball-planes=          sphere/oval facet count
+// --chamfer=              edge chamfer width (0 = off)
+// --tilt= / --offset=     plane jitter (degrees / fraction of radius)
+// --noise=                vertex micro-noise (fraction of radius)
+// --sink=                 base pushed below y=0
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -516,7 +620,56 @@ int main(int argc, char* argv[]) {
             g_cliNodes = parseNodesArg(arg.substr(8));
         }
         if (arg.rfind("--seed=", 0) == 0) {
-            g_cliSeed = std::atoi(arg.substr(7).c_str());
+            g_stoneParams.seed = std::atoi(arg.substr(7).c_str());
+        }
+        if (arg.rfind("--form=", 0) == 0) {
+            const std::string form = arg.substr(7);
+            if (form == "box") {
+                g_stoneParams.form = StoneBaseForm::Box;
+            } else if (form == "frustum") {
+                g_stoneParams.form = StoneBaseForm::Frustum;
+            } else if (form == "prism") {
+                g_stoneParams.form = StoneBaseForm::Prism;
+            } else if (form == "sphere") {
+                g_stoneParams.form = StoneBaseForm::Sphere;
+            } else if (form == "oval") {
+                g_stoneParams.form = StoneBaseForm::Oval;
+            } else {
+                spdlog::warn("unknown --form={}", form);
+            }
+        }
+        if (arg.rfind("--radius=", 0) == 0) {
+            g_stoneParams.radius = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--height=", 0) == 0) {
+            g_stoneParams.height = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--taper=", 0) == 0) {
+            g_stoneParams.taper = static_cast<float>(std::atof(arg.substr(8).c_str()));
+        }
+        if (arg.rfind("--sides=", 0) == 0) {
+            g_stoneParams.sides = std::atoi(arg.substr(8).c_str());
+        }
+        if (arg.rfind("--ball-planes=", 0) == 0) {
+            g_stoneParams.ballPlanes = std::atoi(arg.substr(14).c_str());
+        }
+        if (arg.rfind("--chamfer=", 0) == 0) {
+            g_stoneParams.chamferWidth = static_cast<float>(std::atof(arg.substr(10).c_str()));
+        }
+        if (arg.rfind("--tilt=", 0) == 0) {
+            g_stoneParams.planeTiltDeg = static_cast<float>(std::atof(arg.substr(7).c_str()));
+        }
+        if (arg.rfind("--offset=", 0) == 0) {
+            g_stoneParams.planeOffset = static_cast<float>(std::atof(arg.substr(9).c_str()));
+        }
+        if (arg.rfind("--noise=", 0) == 0) {
+            g_stoneParams.noiseAmp = static_cast<float>(std::atof(arg.substr(8).c_str()));
+        }
+        if (arg.rfind("--sink=", 0) == 0) {
+            g_stoneParams.sink = static_cast<float>(std::atof(arg.substr(7).c_str()));
+        }
+        if (arg.rfind("--variance=", 0) == 0) {
+            g_stoneParams.shapeVariance = static_cast<float>(std::atof(arg.substr(11).c_str()));
         }
     }
 

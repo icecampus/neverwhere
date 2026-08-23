@@ -10,6 +10,8 @@
 #include <topology_core/diamond_isometry.h>
 
 #include "NodeField.h"
+#include "StoneGen.h"
+#include "StonePoly.h"
 
 namespace {
 
@@ -104,6 +106,109 @@ bool runStoneGeneratorSmokeTest() {
         versioned.setNode({5, 5}, true);
         versioned.setNode({5, 5}, true);
         check(versioned.version == v0 + 1, "node version bumps only on changes");
+    }
+
+    // --- Stone generator (polyhedral clipper) -----------------------------------
+    {
+        // Clean params: exact face counts without jitter/noise.
+        const auto cleanParams = [](StoneBaseForm form) {
+            StoneGenParams p;
+            p.form = form;
+            p.chamferWidth = 0.0f;
+            p.planeTiltDeg = 0.0f;
+            p.planeOffset = 0.0f;
+            p.noiseAmp = 0.0f;
+            p.tintJitter = 0.0f;
+            p.shapeVariance = 0.0f;
+            return p;
+        };
+
+        StonePoly poly;
+        std::vector<StonePlane> planes;
+        StoneGenParams p = cleanParams(StoneBaseForm::Box);
+        buildStonePoly(p, poly, planes);
+        check(poly.faces.size() == 6, "stone: box face count");
+
+        p.chamferWidth = 0.12f;
+        p.chamferTopOnly = false;
+        buildStonePoly(p, poly, planes);
+        check(poly.faces.size() == 18, "stone: chamfered box face count (all edges)");
+
+        p.chamferTopOnly = true;
+        buildStonePoly(p, poly, planes);
+        check(poly.faces.size() == 10, "stone: chamfered box face count (top only)");
+
+        p = cleanParams(StoneBaseForm::Prism);
+        p.sides = 6;
+        buildStonePoly(p, poly, planes);
+        check(poly.faces.size() == 8, "stone: hex prism face count");
+
+        // Ball factory directly (no lift/ground clip in the way): with zero
+        // offset jitter every tangent plane is extreme, so faces == planes.
+        std::mt19937_64 rng(42);
+        const std::vector<StonePlane> ballPlanes = makeBallPlanes(24, 1.2, 0.0, rng);
+        poly = buildPolyhedron(ballPlanes);
+        check(poly.faces.size() == 24, "stone: ball face count (jitter 0)");
+
+        // Full-defaults invariants for every form.
+        const std::pair<StoneBaseForm, const char*> forms[] = {
+            {StoneBaseForm::Box, "box"},
+            {StoneBaseForm::Frustum, "frustum"},
+            {StoneBaseForm::Prism, "prism"},
+            {StoneBaseForm::Sphere, "sphere"},
+            {StoneBaseForm::Oval, "oval"},
+        };
+        for (const auto& [form, name] : forms) {
+            StoneGenParams dp;
+            dp.form = form;
+            buildStonePoly(dp, poly, planes);
+            check(isWatertight(poly), (std::string("stone: ") + name + " watertight").c_str());
+
+            // The clip invariant holds before vertex noise (noise moves shared
+            // verts across their planes by design).
+            dp.noiseAmp = 0.0f;
+            buildStonePoly(dp, poly, planes);
+            check(
+                allInside(poly, planes, 1e-6),
+                (std::string("stone: ") + name + " clip invariant").c_str());
+
+            const StoneMesh mesh = generateStone(dp);
+            float minY = 1e30f;
+            bool normalsOk = mesh.triCount > 0;
+            for (int i = 0; i < mesh.triCount * 3; ++i) {
+                minY = std::min(minY, mesh.pos[i * 3 + 1]);
+                const float nx = mesh.nrm[i * 3];
+                const float ny = mesh.nrm[i * 3 + 1];
+                const float nz = mesh.nrm[i * 3 + 2];
+                const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+                normalsOk = normalsOk && std::abs(len - 1.0f) < 1e-3f && std::isfinite(len);
+            }
+            check(normalsOk, (std::string("stone: ") + name + " mesh normals").c_str());
+            check(
+                minY >= -dp.sink - 1e-3f && minY < 0.05f,
+                (std::string("stone: ") + name + " base sits on ground").c_str());
+        }
+
+        // The ground clip cuts a sphere exactly at -sink.
+        StoneGenParams sp;
+        sp.form = StoneBaseForm::Sphere;
+        const StoneMesh sphereMesh = generateStone(sp);
+        float sphereMinY = 1e30f;
+        for (size_t i = 1; i < sphereMesh.pos.size(); i += 3) {
+            sphereMinY = std::min(sphereMinY, sphereMesh.pos[i]);
+        }
+        check(std::abs(sphereMinY + sp.sink) < 1e-3f, "stone: sphere base clipped at -sink");
+
+        // Seed determinism (bit-identical buffers).
+        StoneGenParams det;
+        det.form = StoneBaseForm::Frustum;
+        det.seed = 7;
+        const StoneMesh a = generateStone(det);
+        const StoneMesh b = generateStone(det);
+        check(a.pos == b.pos && a.col == b.col, "stone: same seed, identical mesh");
+        det.seed = 8;
+        const StoneMesh c = generateStone(det);
+        check(c.pos != a.pos, "stone: different seed, different mesh");
     }
 
     if (failures == 0) {
