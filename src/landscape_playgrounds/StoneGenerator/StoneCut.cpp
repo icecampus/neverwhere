@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <random>
 #include <vector>
 
@@ -108,6 +109,44 @@ Nef nefFromFaces(std::vector<glm::dvec3> verts, std::vector<std::vector<int>> fa
         }
     }
     return Nef(mesh);
+}
+
+// Box rotated by `yaw` about the Y axis through its own XZ centre, standing on
+// `baseY`. Corners are computed in double and every face is fan-triangulated by
+// nefFromFaces, so an off-axis box needs no exact trigonometry: Nef only ever
+// sees triangles, and those are coplanar by definition.
+Nef nefYawBox(
+    const glm::dvec2& center, double halfX, double halfZ, double baseY, double height,
+    double yaw) {
+    const double cs = std::cos(yaw);
+    const double sn = std::sin(yaw);
+    const glm::dvec2 ax{cs * halfX, sn * halfX};
+    const glm::dvec2 az{-sn * halfZ, cs * halfZ};
+    const double y1 = baseY + height;
+    // 0..3 bottom ring, 4..7 top ring, same angular order.
+    std::vector<glm::dvec3> v;
+    v.reserve(8);
+    for (const double y : {baseY, y1}) {
+        for (const glm::dvec2 s : {glm::dvec2{-1.0, -1.0}, glm::dvec2{1.0, -1.0},
+                                   glm::dvec2{1.0, 1.0}, glm::dvec2{-1.0, 1.0}}) {
+            const glm::dvec2 p = center + ax * s.x + az * s.y;
+            v.push_back({p.x, y, p.y});
+        }
+    }
+    // Every edge must be walked once in each direction or Surface_mesh rejects
+    // the second face as non-manifold and the operand silently loses a wall.
+    // The ring above is clockwise seen from +Y (x cross z = -y), so the bottom
+    // ring reads forward, the top ring reversed, and each side wall walks its
+    // bottom edge backwards.
+    std::vector<std::vector<int>> f = {
+        {0, 1, 2, 3}, // bottom (-Y)
+        {7, 6, 5, 4}, // top (+Y)
+    };
+    for (int i = 0; i < 4; ++i) {
+        const int j = (i + 1) % 4;
+        f.push_back({j, i, i + 4, j + 4});
+    }
+    return nefFromFaces(v, f);
 }
 
 // Box with min/max corners.
@@ -282,6 +321,49 @@ double soupFaceArea(const Soup& soup, const std::vector<std::size_t>& face) {
     return 0.5 * glm::length(n);
 }
 
+// --- Plateau ------------------------------------------------------------------
+
+// Area-weighted centroid of the plateau: the up-facing faces in the top third of
+// the body. Rim chamfers (45 degrees) and flank facets are excluded by the
+// normal test, so what is left is the flat-ish crown — a point that is known to
+// lie ON the stone's top surface, unlike (centre.xz, yTop), which floats in the
+// air above the low side of a slanted plateau. Empty when the body has no crown
+// left to protect.
+std::optional<glm::dvec3> plateauCentre(const Soup& soup) {
+    if (soup.verts.empty()) {
+        return std::nullopt;
+    }
+    double yLo = 1e30;
+    double yHi = -1e30;
+    for (const glm::dvec3& v : soup.verts) {
+        yLo = std::min(yLo, v.y);
+        yHi = std::max(yHi, v.y);
+    }
+    const double crownY = yLo + 0.6 * (yHi - yLo);
+    glm::dvec3 acc{0.0};
+    double total = 0.0;
+    for (const auto& face : soup.faces) {
+        if (soupFaceNormal(soup, face).y < 0.9) {
+            continue;
+        }
+        glm::dvec3 c{0.0};
+        for (const std::size_t vi : face) {
+            c += soup.verts[vi];
+        }
+        c /= static_cast<double>(face.size());
+        if (c.y < crownY) {
+            continue;
+        }
+        const double a = soupFaceArea(soup, face);
+        acc += c * a;
+        total += a;
+    }
+    if (total < 1e-12) {
+        return std::nullopt;
+    }
+    return acc / total;
+}
+
 // --- Base footprint ----------------------------------------------------------
 // 2D (x,z) polygon of the stone's resting face. Booleans may split the base
 // into several coplanar facets, so the footprint is recovered by cancelling
@@ -453,7 +535,7 @@ double rayExit(const Soup& tris, const glm::dvec3& o, const glm::dvec3& dir) {
     return best;
 }
 
-// --- Corner cuts ---------------------------------------------------------------
+// --- Boolean retries -----------------------------------------------------------
 
 // CGAL Nef booleans can hit internal assertions on exact tangent/coplanar
 // contacts (e_below assertion in SNC_FM_decorator). Retry the operation with a
@@ -486,13 +568,249 @@ glm::dvec3 tilted(const glm::dvec3& n, int attempt) {
     return glm::normalize(n * std::cos(ang) + u * std::sin(ang));
 }
 
+// --- Macro form: massif, taper, top --------------------------------------------
+
+// A body's XZ silhouette and vertical span — everything the macro stages and
+// the cluster placement need to aim at the real geometry instead of the
+// starting box (a yawed massif reaches further on the diagonal than its
+// half-extents suggest, and each taper cut shrinks it again).
+struct BodyForm {
+    std::vector<glm::dvec2> xz;
+    glm::dvec2 center{0.0};
+    double yBase = 0.0;
+    double yTop = 0.0;
+
+    double height() const { return yTop - yBase; }
+
+    // Support radius: how far the silhouette reaches from `center` along `dir`.
+    double radius(const glm::dvec2& dir) const {
+        double best = 0.0;
+        for (const glm::dvec2& p : xz) {
+            best = std::max(best, glm::dot(p - center, dir));
+        }
+        return best;
+    }
+
+    double maxRadius() const {
+        double best = 0.0;
+        for (const glm::dvec2& p : xz) {
+            best = std::max(best, glm::length(p - center));
+        }
+        return best;
+    }
+};
+
+BodyForm bodyForm(const Soup& soup) {
+    BodyForm form;
+    if (soup.verts.empty()) {
+        return form;
+    }
+    glm::dvec2 lo{1e30, 1e30};
+    glm::dvec2 hi{-1e30, -1e30};
+    form.yBase = 1e30;
+    form.yTop = -1e30;
+    form.xz.reserve(soup.verts.size());
+    for (const glm::dvec3& v : soup.verts) {
+        const glm::dvec2 p{v.x, v.z};
+        form.xz.push_back(p);
+        lo = glm::min(lo, p);
+        hi = glm::max(hi, p);
+        form.yBase = std::min(form.yBase, v.y);
+        form.yTop = std::max(form.yTop, v.y);
+    }
+    form.center = (lo + hi) * 0.5;
+    return form;
+}
+
+BodyForm bodyForm(const Nef& body) {
+    return bodyForm(snapshot(body, /*triangulate=*/false));
+}
+
+// Support radius of a yawed box along `dir` (both unit vectors in XZ).
+double yawBoxSupport(const glm::dvec2& dir, double halfX, double halfZ, double yaw) {
+    const glm::dvec2 ax{std::cos(yaw), std::sin(yaw)};
+    const glm::dvec2 az{-ax.y, ax.x};
+    return std::abs(glm::dot(dir, ax)) * halfX + std::abs(glm::dot(dir, az)) * halfZ;
+}
+
+// Stage 1 — the massif. Lobe 0 is the main box; the rest are smaller, yawed
+// shoulders unioned onto its flanks, all flush with its top, so `height` stays
+// the true stone height for every downstream consumer (placement, imprint
+// centre, cluster).
+//
+// The geometry of "two boxes overlapping" is the whole difficulty here, and it
+// bites in two ways.
+//
+// Sideways: wherever two walls cross at a shallow angle they leave a razor-thin
+// fin instead of a step. So neither the protrusion nor the tangential width is
+// sampled and hoped for — both are solved for. The shoulder clears the main box
+// along its azimuth by a visible margin, its yaw is kept away from zero so the
+// crossings are never near-parallel, and its tangential reach is scaled down
+// until its side walls sit well inside the main box.
+//
+// Vertically: shoulders are flush by construction. A shorter shoulder shows its
+// own top as a horizontal shelf whose width is exactly the protrusion, hanging
+// off the wall with a sharp overhang under it — on screen that is a bright slit,
+// or at larger protrusions a pulled-out drawer, and neither reads as stone.
+// Flush shoulders only widen the silhouette and break the four-wall symmetry,
+// which is all that is wanted from a single mass; stepping down in height is
+// what the cluster's companion stones are for.
+Nef buildMassif(
+    const StoneCutParams& params, const glm::dvec3& offset, double sx, double sz, double h,
+    std::mt19937_64& rng) {
+    Nef body = nefBox(
+        {offset.x - sx, offset.y, offset.z - sz},
+        {offset.x + sx, offset.y + h, offset.z + sz});
+
+    const int lobes = std::clamp(params.lobes, 1, 4);
+    const double sizeF = std::clamp(static_cast<double>(params.lobeSize), 0.35, 1.0);
+    const double protrudeF = std::clamp(static_cast<double>(params.lobeSpread), 0.0, 0.8);
+    const double yawMax = static_cast<double>(params.lobeYawDeg) * kPi / 180.0;
+
+    constexpr double kMinYaw = 8.0 * kPi / 180.0; // never near-parallel walls
+    constexpr double kMinProtrude = 0.12;         // step must be visible, in main-radius units
+    constexpr double kMaxTangential = 0.8;        // side walls stay inside the main box
+    constexpr double kMinTangential = 0.35;       // narrower than this reads as a fin
+
+    for (int i = 1; i < lobes; ++i) {
+        double lsx = sx * sizeF * (0.8 + 0.4 * uni01(rng));
+        double lsz = sz * sizeF * (0.8 + 0.4 * uni01(rng));
+        const double az = 2.0 * kPi * uni01(rng);
+        const double yawSpan = std::max(yawMax - kMinYaw, 0.0);
+        const double yaw = (uni01(rng) < 0.5 ? -1.0 : 1.0) * (kMinYaw + uni01(rng) * yawSpan);
+
+        const glm::dvec2 dir{std::cos(az), std::sin(az)};
+        const glm::dvec2 tan{-dir.y, dir.x};
+        const double mainR = std::abs(dir.x) * sx + std::abs(dir.y) * sz;
+        const double mainT = std::abs(tan.x) * sx + std::abs(tan.y) * sz;
+
+        // Pull the tangential reach inside the main box's own.
+        double lobeT = yawBoxSupport(tan, lsx, lsz, yaw);
+        if (lobeT > kMaxTangential * mainT) {
+            const double k = kMaxTangential * mainT / lobeT;
+            lsx *= k;
+            lsz *= k;
+            lobeT = kMaxTangential * mainT;
+        }
+        if (lobeT < kMinTangential * mainT) {
+            continue; // a fin is worse than no shoulder at all
+        }
+
+        // Protrusion: as far out as asked, but never so far that the shoulder
+        // stops overlapping the main box (it would become a separate solid).
+        const double lobeR = yawBoxSupport(dir, lsx, lsz, yaw);
+        const double protrude = std::min(protrudeF * mainR, 1.2 * lobeR);
+        if (protrude < kMinProtrude * mainR) {
+            continue; // too small to read as a step; a fin is worse than nothing
+        }
+        const glm::dvec2 c =
+            glm::dvec2{offset.x, offset.z} + dir * (mainR + protrude - lobeR);
+
+        if (!tryBoolean(body, [&](int attempt) {
+                return body +
+                    nefYawBox(c, lsx, lsz, offset.y, h, yaw + 1e-5 * static_cast<double>(attempt));
+            })) {
+            spdlog::warn("buildMassif: lobe union failed, lobe skipped");
+        }
+    }
+    return body;
+}
+
+// Stage 2 — one taper (batter) plane, tilted `theta` off vertical around
+// azimuth `az`. Its trace sits at radius `R - inset + (yTop - y)*tan(theta)`, so
+// it bites `inset` at the top and slides outward going down; at the base that is
+// `R - inset + h*tan(theta) >= R` for any `inset <= h*tan(theta)` — which is
+// exactly how `inset` is defined below. Hence the base is untouched by
+// construction and the footprint filters never have to look at these cuts.
+void applyTaperCut(
+    Nef& body, double az, double thetaRad, double reach, double topKeep, double extent) {
+    const BodyForm form = bodyForm(body);
+    if (form.xz.empty() || form.height() < 1e-6) {
+        return;
+    }
+    const glm::dvec2 dir{std::cos(az), std::sin(az)};
+    const double R = form.radius(dir);
+    if (R < 1e-6) {
+        return;
+    }
+    const double tanT = std::tan(thetaRad);
+    // Clamped so a single flank can never slice the body in half, and so the
+    // plateau keeps at least `topKeep` of radius along this azimuth: flanks are
+    // applied one after another, and without a floor a few of them stacking on
+    // neighbouring azimuths meet in the middle and pinch the top into a cone.
+    const double inset =
+        std::min({reach * form.height() * tanT, 0.45 * R, std::max(R - topKeep, 0.0)});
+    if (inset < 1e-6) {
+        return;
+    }
+    const double cs = std::cos(thetaRad);
+    const double sn = std::sin(thetaRad);
+    const glm::dvec3 n{dir.x * cs, sn, dir.y * cs};
+    const glm::dvec2 a = form.center + dir * (R - inset);
+    const glm::dvec3 anchor{a.x, form.yTop, a.y};
+    tryBoolean(body, [&](int attempt) {
+        const glm::dvec3 nn = tilted(n, attempt);
+        return body * nefPlaneClip(nn, glm::dot(nn, anchor), extent);
+    });
+}
+
+// Stage 3a — tilt the plateau. The plane runs through the top-centre point and
+// leans by `slant` toward `az`, shaving up to R*tan(slant) on that side and
+// nothing on the far one: a slanted top face rather than a chamfer. The slant is
+// clamped so the plane's lowest trace stays well above the base.
+void applyTopSlant(Nef& body, double az, double slantRad, double extent) {
+    const BodyForm form = bodyForm(body);
+    const double R = form.maxRadius();
+    if (form.xz.empty() || R < 1e-6 || form.height() < 1e-6 || slantRad < 1e-6) {
+        return;
+    }
+    const double tanS = std::min(std::tan(slantRad), 0.6 * form.height() / R);
+    if (tanS < 1e-6) {
+        return;
+    }
+    const glm::dvec2 dir{std::cos(az), std::sin(az)};
+    const glm::dvec3 n = glm::normalize(glm::dvec3{dir.x * tanS, 1.0, dir.y * tanS});
+    const glm::dvec3 anchor{form.center.x, form.yTop, form.center.y};
+    tryBoolean(body, [&](int attempt) {
+        const glm::dvec3 nn = tilted(n, attempt);
+        return body * nefPlaneClip(nn, glm::dot(nn, anchor), extent);
+    });
+}
+
+// Stage 3b — chamfer the top rim: a 45-degree plane anchored `bevel` inside the
+// rim corner along the (outward, up) diagonal. Removed iff `rho + y > R + yTop -
+// bevel*sqrt(2)`, so at the base that threshold is >= R while
+// `bevel <= h/sqrt(2)`: the chamfer cannot creep down onto the footprint.
+void applyRimBevel(Nef& body, double az, double bevel, double extent) {
+    const BodyForm form = bodyForm(body);
+    if (form.xz.empty() || form.height() < 1e-6) {
+        return;
+    }
+    const glm::dvec2 dir{std::cos(az), std::sin(az)};
+    const double R = form.radius(dir);
+    const double b = std::min({bevel, 0.5 * form.height(), 0.5 * R});
+    if (R < 1e-6 || b < 1e-6) {
+        return;
+    }
+    const double s = 1.0 / std::sqrt(2.0);
+    const glm::dvec3 n{dir.x * s, s, dir.y * s};
+    const glm::dvec2 rimXz = form.center + dir * R;
+    const glm::dvec3 rim{rimXz.x, form.yTop, rimXz.y};
+    tryBoolean(body, [&](int attempt) {
+        const glm::dvec3 nn = tilted(n, attempt);
+        return body * nefPlaneClip(nn, glm::dot(nn, rim) - b, extent);
+    });
+}
+
+// --- Corner cuts ---------------------------------------------------------------
+
 // One corner cut. All vertices are candidates — bottom corners included — but
 // a cut whose removed wedge reaches the base must pass the base filters
 // (steep dihedral, footprint support floor, centroid inside) and the per-stone
 // quota of base-touching cuts; rejected picks are resampled a few times, then
 // the cut is skipped. Grazing cuts at the base would either bevel the rim all
 // around ("rounded" look) or shave the whole footprint (floating stone).
-void applyCornerCut(Nef& body, const StoneCutParams& params, double extent,
+void applyCornerCut(Nef& body, const StoneCutParams& params, double extent, double baseArea0,
     std::mt19937_64& rng, int& baseCutsUsed, int baseCutsMax) {
     const Soup soup = snapshot(body, /*triangulate=*/false);
     if (soup.verts.empty()) {
@@ -518,8 +836,7 @@ void applyCornerCut(Nef& body, const StoneCutParams& params, double extent,
     }
 
     const Poly2 footprint = baseFootprint(soup);
-    const double baseArea0 =
-        4.0 * static_cast<double>(params.sizeX) * static_cast<double>(params.sizeZ);
+    const std::optional<glm::dvec3> crown = plateauCentre(soup);
     const double steepLimit = std::cos(params.baseCutAngleDeg * kPi / 180.0);
 
     for (int pick = 0; pick < 8; ++pick) {
@@ -552,6 +869,14 @@ void applyCornerCut(Nef& body, const StoneCutParams& params, double extent,
 
         const double depth = params.cutDepth * meanLen * (0.6 + 0.8 * uni01(rng));
         const double d0 = glm::dot(n, cv) - depth;
+
+        // The plateau is protected the same way the footprint is: a chip may bite
+        // the rim, but a plane that sweeps across the crown itself turns the stone
+        // into a shard with a roof, and that is the single most damaging thing the
+        // cut pass can do to the silhouette the macro stages just built.
+        if (crown && glm::dot(n, *crown) > d0) {
+            continue;
+        }
 
         if (!footprint.empty()) {
             Poly2 clipped = footprint;
@@ -757,10 +1082,46 @@ double bodyVolume(const Nef& body) {
 
 // --- Body assembly -----------------------------------------------------------
 
-// Stage 1 — the starting box at `offset` (XZ center, base at offset.y),
+// Subtract `tool` from `body`, retrying with a nudged tool on CGAL degeneracies.
+// `removed` (optional) reports the volume actually taken off — which is zero when
+// the tool simply missed the body, so callers can tell "carved" from "no contact".
+bool carveWith(Nef& body, const Nef& tool, double* removed = nullptr) {
+    const double before = removed ? bodyVolume(body) : 0.0;
+    const bool ok = tryBoolean(body, [&](int attempt) {
+        if (attempt == 0) {
+            return body - tool;
+        }
+        // Retry: nudge the tool by a micron — same geometry class, but the
+        // exact-arithmetic degeneracy that tripped CGAL is sidestepped.
+        Nef shifted(tool);
+        const double e = 1e-6 * static_cast<double>(attempt);
+        shifted.transform(AffT(CGAL::TRANSLATION, CK::Vector_3(e, 2.0 * e, -e)));
+        return body - shifted;
+    });
+    if (removed) {
+        *removed = ok ? std::max(before - bodyVolume(body), 0.0) : 0.0;
+    }
+    return ok;
+}
+
+// A copy of `body` scaled about (centreXz, h/2) — the imprint tool of the pair
+// and cluster carves. Scaling up by `1 + gap/radius` makes the subtracted shape
+// slightly larger than the stone itself, so the contact face comes out as its
+// negative with a ~`gap` slit instead of a coincident surface (which is both
+// ugly and the worst case for exact booleans).
+Nef inflatedCopy(const Nef& body, const glm::dvec2& centreXz, double h, double scale) {
+    Nef out(body);
+    const CK::Vector_3 c(centreXz.x, 0.5 * h, centreXz.y);
+    out.transform(
+        AffT(CGAL::TRANSLATION, c) * AffT(CGAL::SCALING, scale) *
+        AffT(CGAL::TRANSLATION, -c));
+    return out;
+}
+
+// Stage 1 — the starting massif at `offset` (XZ centre, base at offset.y),
 // optionally carved by `subtract`. carvedOk reports whether the subtraction
 // survived the retries; carvedVol is how much material it actually removed
-// (zero also when the tool misses the box entirely).
+// (zero also when the tool misses the body entirely).
 Nef carveStoneBox(
     const StoneCutParams& params, const glm::dvec3& offset, const Nef* subtract,
     bool* carvedOk = nullptr, double* carvedVol = nullptr) {
@@ -774,37 +1135,28 @@ Nef carveStoneBox(
     const double sz = std::max(static_cast<double>(params.sizeZ), 0.05);
     const double h = std::max(static_cast<double>(params.height), 0.05);
 
-    Nef body = nefBox(
-        {offset.x - sx, offset.y, offset.z - sz},
-        {offset.x + sx, offset.y + h, offset.z + sz});
+    // The massif rng runs off a differently mixed seed so the lobe layout and
+    // the cut pass (which seeds from `seed` directly) stay independent streams:
+    // nudging one stage does not reshuffle the other.
+    std::mt19937_64 massifRng(mix64(mixSeed(params.seed) ^ 0xA5A5A5A55A5A5A5Aull));
+    Nef body = buildMassif(params, offset, sx, sz, h, massifRng);
 
     if (subtract) {
-        const Nef& operand = *subtract;
-        const bool ok = tryBoolean(body, [&](int attempt) {
-            if (attempt == 0) {
-                return body - operand;
-            }
-            // Retry: nudge the tool by a micron — same geometry class, but the
-            // exact-arithmetic degeneracy that tripped CGAL is sidestepped.
-            Nef shifted(operand);
-            const double e = 1e-6 * static_cast<double>(attempt);
-            shifted.transform(AffT(CGAL::TRANSLATION, CK::Vector_3(e, 2.0 * e, -e)));
-            return body - shifted;
-        });
+        const bool ok = carveWith(body, *subtract, carvedVol);
         if (!ok) {
             spdlog::warn("carveStoneBox: subtraction failed, body left uncarved");
         }
         if (carvedOk) {
             *carvedOk = ok;
         }
-        if (ok && carvedVol) {
-            *carvedVol = 8.0 * sx * sz * h - bodyVolume(body);
-        }
     }
     return body;
 }
 
-// Stage 2 — corner cuts (with the base filters), grooves, pits, ground clip.
+// Stage 2 — the macro form (taper, plateau slant, rim chamfer), then the small
+// features: corner cuts (with the base filters), grooves, pits, ground clip.
+// Order matters: the flanks decide the silhouette first and the chips land on
+// the finished form, not on a box that later gets sliced away.
 void applyStoneDetail(Nef& body, const StoneCutParams& params) {
     std::mt19937_64 rng(mixSeed(params.seed));
 
@@ -814,11 +1166,69 @@ void applyStoneDetail(Nef& body, const StoneCutParams& params) {
     const double minExtent = std::min({sx, sz, h});
     const double clipExtent = 64.0 * std::max({sx, sz, h});
 
+    // Radius the plateau may never shrink below, in units of the smallest box
+    // extent: the stones of the references are topped by a real flat face, and a
+    // rock that comes to a point reads as a shard.
+    constexpr double kPlateauKeep = 0.45;
+
+    // Taper flanks: azimuths spread evenly around the circle with jitter, so a
+    // handful of planes covers every side instead of clustering on one.
+    const int taperCuts = std::clamp(params.taperCuts, 0, 12);
+    const double taperBase = std::max(static_cast<double>(params.taperDeg), 0.0) * kPi / 180.0;
+    const double taperReach = std::clamp(static_cast<double>(params.taperReach), 0.0, 1.0);
+    const double taperWalls = std::clamp(static_cast<double>(params.taperWalls), 0.0, 0.75);
+    const double taperAz0 = 2.0 * kPi * uni01(rng);
+    for (int i = 0; i < taperCuts; ++i) {
+        const double slot = 2.0 * kPi * static_cast<double>(i) / static_cast<double>(taperCuts);
+        // Jitter stays inside a quarter slot: neighbouring flanks must not be
+        // able to land on the same azimuth, or the pair degenerates into a
+        // sliver that CGAL has to resolve and the eye reads as a crease.
+        const double az =
+            taperAz0 + slot + uniSigned(rng) * 0.5 * kPi / static_cast<double>(taperCuts);
+        // Both rolls are drawn either way so the wall/lean decision does not
+        // reshuffle the angles of the flanks after it.
+        const double wallRoll = uni01(rng);
+        const double angRoll = uni01(rng);
+        if (wallRoll < taperWalls) {
+            continue; // left vertical on purpose — see the header on frustums
+        }
+        // The leaning flanks carry the whole batter, so they lean harder than the
+        // nominal angle would give if it were spread over every side.
+        applyTaperCut(
+            body, az, taperBase * (0.85 + 0.75 * angRoll), taperReach, kPlateauKeep * minExtent,
+            clipExtent);
+    }
+
+    applyTopSlant(
+        body, 2.0 * kPi * uni01(rng),
+        std::max(static_cast<double>(params.topSlantDeg), 0.0) * kPi / 180.0, clipExtent);
+
+    const int rimCuts = std::clamp(params.rimBevelCuts, 0, 12);
+    const double rimAz0 = 2.0 * kPi * uni01(rng);
+    for (int i = 0; i < rimCuts; ++i) {
+        const double slot = 2.0 * kPi * static_cast<double>(i) / static_cast<double>(rimCuts);
+        const double az =
+            rimAz0 + slot + uniSigned(rng) * 0.5 * kPi / static_cast<double>(rimCuts);
+        applyRimBevel(
+            body, az,
+            std::max(static_cast<double>(params.rimBevel), 0.0) * minExtent *
+                (0.7 + 0.6 * uni01(rng)),
+            clipExtent);
+    }
+
+    // The support floor is measured against the footprint the macro stages left
+    // behind (a massif rests on more ground than its main box), not against the
+    // nominal box area — otherwise lobes would silently license deeper nicks.
+    const Poly2 startFootprint = baseFootprint(snapshot(body, /*triangulate=*/false));
+    const double baseArea0 = startFootprint.empty()
+        ? 4.0 * sx * sz
+        : std::abs(polyArea(startFootprint));
+
     int baseCutsUsed = 0;
     const int baseCutsMax = static_cast<int>(
         std::clamp(params.cuts, 0, 64) * std::clamp(params.baseCutQuota, 0.0f, 1.0f));
     for (int cut = 0, cuts = std::clamp(params.cuts, 0, 64); cut < cuts; ++cut) {
-        applyCornerCut(body, params, clipExtent, rng, baseCutsUsed, baseCutsMax);
+        applyCornerCut(body, params, clipExtent, baseArea0, rng, baseCutsUsed, baseCutsMax);
     }
     for (int g = 0, grooves = std::clamp(params.grooves, 0, 8); g < grooves; ++g) {
         applyGroove(body, params, minExtent, rng);
@@ -879,6 +1289,24 @@ void emitInto(
                 continue;
             }
             n /= len;
+
+            // Exact arithmetic can place two corners closer together than a
+            // float can tell apart: two flanks crossing the same edge at almost
+            // the same height leave a sliver whose ends collapse on the cast
+            // below. The solid stays watertight, but the emitted triangle would
+            // become a degenerate zero-area fan entry — an unmatched edge for
+            // any closedness check and a garbage normal for flat shading. The
+            // collapse is a plain edge collapse, so dropping the slivers welds
+            // the surface back together.
+            const glm::vec3 fa{
+                static_cast<float>(a.x), static_cast<float>(a.y), static_cast<float>(a.z)};
+            const glm::vec3 fb{
+                static_cast<float>(b.x), static_cast<float>(b.y), static_cast<float>(b.z)};
+            const glm::vec3 fc{
+                static_cast<float>(c.x), static_cast<float>(c.y), static_cast<float>(c.z)};
+            if (fa == fb || fb == fc || fc == fa) {
+                continue;
+            }
             const double diff = std::max(glm::dot(n, sun), 0.0);
             const double up = n.y * 0.5 + 0.5;
             const double light = std::min(0.40 + 0.30 * up + 0.55 * diff, 1.25);
@@ -975,10 +1403,27 @@ StoneMesh generateCutStoneCluster(const StoneClusterParams& params) {
 
     struct Node {
         Nef body;
-        glm::dvec2 center; // box XZ center the stone was placed at
+        BodyForm form;     // real silhouette: support radius for the next ring
+        glm::dvec2 center; // XZ centre the starting box was placed at
         double sx, sz, h;  // starting-box extents
         int level;
     };
+
+    // The diamond projection puts +X+Z nearer the viewer and lower on screen, so
+    // that quadrant is the cluster's front; its bisector is the reference
+    // azimuth for every placement decision.
+    constexpr double kFrontAz = 0.25 * kPi;
+
+    const double decay = std::clamp(static_cast<double>(params.decay), 0.2, 0.95);
+    const double gap = std::max(static_cast<double>(params.gap), 0.0);
+    const double overlap = std::max(static_cast<double>(params.overlap), 0.0);
+    const double spread = std::clamp(static_cast<double>(params.spread), 0.0, 1.0);
+    const double heightVar = std::clamp(static_cast<double>(params.heightVar), 0.0, 0.8);
+    const double spireChance = std::clamp(static_cast<double>(params.spireChance), 0.0, 1.0);
+
+    const double rootSx = std::max(static_cast<double>(params.base.sizeX), 0.05);
+    const double rootSz = std::max(static_cast<double>(params.base.sizeZ), 0.05);
+    const double rootH = std::max(static_cast<double>(params.base.height), 0.05);
 
     StoneMesh out;
     std::vector<Node> nodes;
@@ -986,59 +1431,63 @@ StoneMesh generateCutStoneCluster(const StoneClusterParams& params) {
     const auto spawn = [&](Nef body, const glm::dvec2& center, double sx, double sz,
                            double h, int level, float albedoMul, int seed) {
         emitInto(out, body, mixSeed(seed), params.base.tintJitter, albedoMul);
-        nodes.push_back({std::move(body), center, sx, sz, h, level});
+        BodyForm form = bodyForm(body);
+        form.center = center; // measure support from the placement anchor
+        nodes.push_back({std::move(body), std::move(form), center, sx, sz, h, level});
         frontier.push_back(nodes.size() - 1);
     };
 
-    {
-        const double sx = std::max(static_cast<double>(params.base.sizeX), 0.05);
-        const double sz = std::max(static_cast<double>(params.base.sizeZ), 0.05);
-        const double h = std::max(static_cast<double>(params.base.height), 0.05);
-        spawn(
-            buildStoneBody(params.base, glm::dvec3{0.0}, nullptr), {0.0, 0.0}, sx, sz, h,
-            0, 1.0f, params.base.seed);
-    }
+    spawn(
+        buildStoneBody(params.base, glm::dvec3{0.0}, nullptr), {0.0, 0.0}, rootSx, rootSz,
+        rootH, 0, 1.0f, params.base.seed);
 
-    // BFS: every expanded node tries to grow 1..maxChildren companions on its
-    // camera-facing sides (+X / +Z — the ones the diamond projection shows).
+    // BFS: every expanded node grows 1..maxChildren companions on a fan of
+    // azimuths around it.
     for (std::size_t head = 0; head < frontier.size(); ++head) {
         const Node parent = nodes[frontier[head]]; // copy: `nodes` reallocates
         if (parent.level >= params.levels) {
             continue;
         }
-        const int want =
-            1 + static_cast<int>(uni01(rng) * std::max(params.maxChildren, 1));
-        const double decay = std::clamp(static_cast<double>(params.decay), 0.2, 0.95);
-        const double gap = std::max(static_cast<double>(params.gap), 0.0);
-        const double overlap = std::max(static_cast<double>(params.overlap), 0.0);
-        const double over = std::clamp(static_cast<double>(params.overshoot), 0.0, 1.0);
-        const double minContact =
-            std::clamp(static_cast<double>(params.minContact), 0.05, 1.0);
+        const int want = 1 + static_cast<int>(uni01(rng) * std::max(params.maxChildren, 1));
 
         int spawned = 0;
-        for (int tries = 0; tries < 8 && spawned < want; ++tries) {
-            const bool sideX = uni01(rng) < 0.5; // +X or +Z, never the far sides
-            const double csx = std::max(parent.sx * decay, 0.15);
-            const double csz = std::max(parent.sz * decay, 0.15);
-            const double ch = std::max(parent.h * decay * (0.8 + 0.4 * uni01(rng)), 0.2);
-            const double parentHalf = sideX ? parent.sx : parent.sz; // side axis
-            const double parentHalfT = sideX ? parent.sz : parent.sx; // tangent axis
-            const double childHalfT = sideX ? csz : csx; // along the tangent
-            // Slide window: from fully within the parent's face to sticking out
-            // past its edge, but always facing the parent by >= minContact.
-            const double fullIn = std::max(0.0, parentHalfT - childHalfT);
-            const double wide = parentHalfT + childHalfT - minContact * childHalfT;
-            const double maxShift = fullIn + over * (wide - fullIn);
-            const double shift = uniSigned(rng) * maxShift;
+        for (int tries = 0; tries < 10 && spawned < want; ++tries) {
+            // A spire is the one companion allowed to out-top its parent, and it
+            // always goes BEHIND it. Both halves of that rule matter: a taller
+            // stone in front would swallow the parent's silhouette, and a
+            // shorter stone behind it would disappear — so the back half of the
+            // circle is reserved for spires and nothing else. Height is capped
+            // against the root so recursion cannot grow an ever-taller tower.
+            const bool spire = uni01(rng) < spireChance;
+            double ch = spire
+                ? parent.h * (1.05 + 0.25 * uni01(rng))
+                : parent.h * decay * (1.0 + heightVar * uniSigned(rng));
+            ch = std::clamp(ch, 0.2, rootH * 1.3);
 
-            glm::dvec2 c = parent.center;
-            if (sideX) {
-                c.x += parent.sx + csx - overlap;
-                c.y += shift;
-            } else {
-                c.y += parent.sz + csz - overlap;
-                c.x += shift;
-            }
+            const double arc = kPi * 0.5 * spread;
+            const double az = kFrontAz + (spire ? kPi : 0.0) + uniSigned(rng) * arc;
+
+            // The role decides the PROPORTIONS, not merely the size. Height is
+            // picked first and the footprint follows from a target aspect,
+            // because scaling x, z and height by one decay factor preserves the
+            // parent's aspect forever: under a tall root every descendant is a
+            // thinner copy of a tall block, which reads as a fang. Companions
+            // are squat boulders piling at the foot; a spire is taller than its
+            // parent but still has to be chunky enough to read as a mass.
+            const double aspect = spire ? 1.25 + 0.35 * uni01(rng) : 0.80 + 0.35 * uni01(rng);
+            // A companion stays subordinate in plan even when the aspect asks
+            // for more, so the group keeps one clear hero.
+            const double m = std::min(0.5 * ch / aspect, 0.95 * std::min(parent.sx, parent.sz));
+            const double csx = std::max(m * (1.0 + 0.35 * uni01(rng)), 0.15);
+            const double csz = std::max(m * (1.0 + 0.35 * uni01(rng)), 0.15);
+
+            // Push the child out to the parent's real support radius along the
+            // chosen direction, then back in by `overlap` so the imprint carve
+            // has material to bite into.
+            const glm::dvec2 dir{std::cos(az), std::sin(az)};
+            const double childR = std::abs(dir.x) * csx + std::abs(dir.y) * csz;
+            const double parentR = parent.form.radius(dir);
+            const glm::dvec2 c = parent.center + dir * (parentR + childR - overlap);
 
             StoneCutParams cp = params.base;
             cp.seed = static_cast<int>(rng() % 100000);
@@ -1047,13 +1496,8 @@ StoneMesh generateCutStoneCluster(const StoneClusterParams& params) {
             cp.height = static_cast<float>(ch);
 
             // Inflated parent -> gap-preserving imprint (same trick as the pair).
-            Nef inflated(parent.body);
-            const double s = 1.0 + gap / parentHalf;
-            const glm::dvec3 pc{parent.center.x, 0.5 * parent.h, parent.center.y};
-            inflated.transform(
-                AffT(CGAL::TRANSLATION, CK::Vector_3(pc.x, pc.y, pc.z)) *
-                AffT(CGAL::SCALING, s) *
-                AffT(CGAL::TRANSLATION, CK::Vector_3(-pc.x, -pc.y, -pc.z)));
+            const Nef inflated = inflatedCopy(
+                parent.body, parent.center, parent.h, 1.0 + gap / std::max(parentR, 0.05));
 
             bool carvedOk = false;
             double carvedVol = 0.0;
@@ -1063,22 +1507,50 @@ StoneMesh generateCutStoneCluster(const StoneClusterParams& params) {
             if (!carvedOk || carvedVol < 1e-3 * boxVol) {
                 continue; // slid past the parent's body — no real contact
             }
-            bool collides = false;
+
+            // Siblings that reach into each other get the same imprint treatment
+            // as the parent rather than being resampled away. Rejecting them
+            // instead is what used to keep groups thin: every companion crowds the
+            // same front arc, so the second and third one almost always touch the
+            // first, and the fan collapsed back into a pair of stones.
             for (std::size_t oi = 0; oi < nodes.size(); ++oi) {
+                const Node& other = nodes[oi];
+                if (oi == frontier[head]) {
+                    continue;
+                }
+                const glm::dvec2 delta = other.center - c;
+                const double reach = std::hypot(csx, csz) + std::hypot(other.sx, other.sz);
+                if (glm::length(delta) > reach) {
+                    continue; // support circles cannot meet: nothing to carve
+                }
+                const glm::dvec2 toChild =
+                    glm::length(delta) > 1e-9 ? -delta / glm::length(delta) : glm::dvec2{1.0, 0.0};
+                const double otherR = std::max(other.form.radius(toChild), 0.05);
+                carveWith(
+                    childBody,
+                    inflatedCopy(other.body, other.center, other.h, 1.0 + gap / otherR));
+            }
+
+            // The carves above cannot fail silently into an interpenetration, so
+            // this is a last guard: if anything is still overlapping, drop the
+            // candidate rather than emit two stones sharing a volume.
+            bool collides = false;
+            for (std::size_t oi = 0; oi < nodes.size() && !collides; ++oi) {
                 if (oi == frontier[head]) {
                     continue;
                 }
                 try {
-                    if (bodyVolume(childBody * nodes[oi].body) > 1e-4 * boxVol) {
-                        collides = true;
-                        break;
-                    }
+                    collides = bodyVolume(childBody * nodes[oi].body) > 1e-4 * boxVol;
                 } catch (const std::exception&) {
                     collides = true; // CGAL tangent-contact hiccup: resample
-                    break;
                 }
             }
             if (collides) {
+                continue;
+            }
+            // A companion whittled down by its neighbours' imprints is a splinter,
+            // not a stone.
+            if (bodyVolume(childBody) < 0.25 * boxVol) {
                 continue;
             }
 
@@ -1086,6 +1558,72 @@ StoneMesh generateCutStoneCluster(const StoneClusterParams& params) {
             const float shade = static_cast<float>(std::pow(0.88, parent.level + 1));
             spawn(std::move(childBody), c, csx, csz, ch, parent.level + 1, shade, cp.seed);
             ++spawned;
+        }
+    }
+
+    // --- Debris ----------------------------------------------------------------
+    // Small blocks on the ground around the group. They are pushed past the
+    // cluster's own support radius along their azimuth, so they cannot intersect
+    // any stone and need no boolean collision test — only a cheap 2D spacing
+    // check against each other.
+    const int pebbles = std::clamp(params.pebbles, 0, 24);
+    if (pebbles > 0) {
+        BodyForm hull;
+        hull.center = {0.0, 0.0};
+        for (const Node& node : nodes) {
+            hull.xz.insert(hull.xz.end(), node.form.xz.begin(), node.form.xz.end());
+        }
+        const double pebbleF = std::clamp(static_cast<double>(params.pebbleSize), 0.05, 0.6);
+        std::vector<glm::dvec3> placed; // xz + radius
+        for (int i = 0; i < pebbles; ++i) {
+            // Debris reads only where it is not hidden by the massif, so the
+            // scatter stays in the front half, walking the arc slot by slot.
+            const double slot = static_cast<double>(i) / static_cast<double>(pebbles);
+            const double az = kFrontAz + (slot - 0.5) * 1.5 * kPi + uniSigned(rng) * 0.3;
+            const glm::dvec2 dir{std::cos(az), std::sin(az)};
+            const double psx = rootSx * pebbleF * (0.5 + 0.5 * uni01(rng));
+            const double psz = rootSz * pebbleF * (0.5 + 0.5 * uni01(rng));
+            // Squat, and hugging the foot: debris standing as tall as it is wide
+            // and set well back from the group reads as scattered crates, not as
+            // rubble that fell off this rock.
+            const double ph = 0.85 * std::min(psx, psz) * (0.8 + 0.5 * uni01(rng));
+            const double pr = std::max(psx, psz);
+            const double margin = rootSx * (0.02 + 0.22 * uni01(rng));
+            const glm::dvec2 c = dir * (hull.radius(dir) + pr + margin);
+
+            bool tooClose = false;
+            for (const glm::dvec3& p : placed) {
+                if (glm::length(glm::dvec2{p.x, p.y} - c) < pr + p.z + 0.15 * rootSx) {
+                    tooClose = true;
+                    break;
+                }
+            }
+            if (tooClose) {
+                continue;
+            }
+
+            // Debris keeps the family recipe but at a reduced feature count: at
+            // this size the extra planes cost booleans and buy no silhouette.
+            // The rim chamfer is the exception — it is a fraction of the min
+            // extent, so at pebble scale the inherited value rounds to nothing
+            // and leaves a bare box; widening it is what makes the debris read as
+            // the same kind of rock as the massif above it.
+            StoneCutParams pp = params.base;
+            pp.seed = static_cast<int>(rng() % 100000);
+            pp.sizeX = static_cast<float>(psx);
+            pp.sizeZ = static_cast<float>(psz);
+            pp.height = static_cast<float>(ph);
+            pp.lobes = 1;
+            pp.taperCuts = std::min(params.base.taperCuts, 3);
+            pp.rimBevelCuts = std::max(std::min(params.base.rimBevelCuts, 3), 2);
+            pp.rimBevel = std::max(params.base.rimBevel, 0.3f);
+            pp.cuts = std::min(params.base.cuts, 3);
+            pp.grooves = 0;
+            pp.pits = 0;
+
+            Nef body = buildStoneBody(pp, {c.x, 0.0, c.y}, nullptr);
+            emitInto(out, body, mixSeed(pp.seed), pp.tintJitter, 0.88f);
+            placed.push_back({c.x, c.y, pr});
         }
     }
     return out;

@@ -2,35 +2,83 @@
 
 #include "StoneMesh.h"
 
-// Cut-based rock generator on CGAL exact booleans: start from a
-// parallelepiped, then repeatedly pick a corner and slice it with a random
-// plane; concave features (V-grooves and pits) subtract convex wedges.
+// Cut-based rock generator on CGAL exact booleans. The macro form is built in
+// three stages, largest feature first, so the silhouette is decided before any
+// detail touches it:
+//
+//   1. MASSIF — the starting body is a union of `lobes` yaw-rotated boxes, all
+//      resting on the ground, all overlapping the main one and all flush with
+//      its top. That reads as a rock mass with shoulders instead of a single
+//      prism, and the off-axis yaw gives facets that do not line up with the
+//      isometric grid, while `height` stays the stone's true height for every
+//      downstream consumer. Shoulders deliberately do not vary in height: a
+//      lower shoulder shows its own top as a horizontal shelf jutting out of the
+//      wall, which reads as a pulled-out drawer, not as rock. Differences in
+//      height are the cluster's job — that is what separate stones are for.
+//      Each shoulder's protrusion and width are solved for rather than sampled,
+//      so two walls never cross at a shallow angle — see buildMassif() for why a
+//      grazing lobe leaves a razor fin instead of a step.
+//   2. TAPER — `taperCuts` large planes around the azimuth circle, each tilted
+//      so it bites `inset` at the top and nothing at the base: wide bottom,
+//      narrower top, a few big flat flanks. This is the batter that makes a
+//      block read as a boulder. Base-safe by construction (see below), so it
+//      never fights the footprint filters. The tilt is deliberately not uniform:
+//      a `taperWalls` share of the flanks is skipped and keeps the massif's own
+//      vertical wall, because tapering every side equally yields a symmetric
+//      frustum — a tent, not a rock.
+//   3. TOP — the plateau is tilted by `topSlantDeg` and its rim is chamfered by
+//      `rimBevelCuts` 45-degree facets, the wide bevel band that separates a
+//      rock's top face from its walls.
+//
+// Only then come the small features: corner cuts (chips), and the optional
+// concavities (V-grooves, pits) which ship off.
+//
 // All cutting happens on CGAL::Nef_polyhedron_3<CGAL::Epeck> (exact
 // arithmetic) — the output is watertight by construction, no hand-rolled
 // clipping anywhere in this file.
 //
-// Corner cuts aim through a corner: normal within a cone around the outward
-// corner direction, offset at a fraction of the corner's incident edge
-// lengths — small chips, never slicing the body in half. Cuts whose removed
-// wedge reaches the base pass extra filters so the stone keeps standing:
-// the plane must be STEEP against the base (dihedral >= baseCutAngleDeg —
-// grazing planes that bevel the rim or shave the whole base are rejected and
-// resampled), the remaining footprint must keep >= baseMinArea of the
-// starting-box area and still contain the body centroid's projection, and at
-// most baseCutQuota of all cuts may touch the base. A groove enters a face
-// ~perpendicularly and runs along a face-edge direction (parallel to the
-// adjacent face's plane); a pit is a trihedral cone dent. Wedge depth is
-// clamped by the exact ray-exit distance so channels never punch through as
-// tunnels.
+// The three macro stages cannot undercut the stone: a taper plane reaches the
+// base only if `inset > height*tan(taperDeg)`, and `inset` is defined as
+// `taperReach` (<= 1) times exactly that product; the top slant and rim bevels
+// are anchored at the plateau and clamped so their traces stay above y=0.
+// Corner cuts, which aim through an arbitrary vertex, do need the guards:
+// a cut whose removed wedge reaches the base must be STEEP against it
+// (dihedral >= baseCutAngleDeg — grazing planes that bevel the rim or shave
+// the whole base are rejected and resampled), must leave >= baseMinArea of the
+// starting footprint, must keep the body centroid's projection inside it, and
+// at most baseCutQuota of all cuts may touch the base at all.
+//
+// A groove enters a face ~perpendicularly and runs along a face-edge direction
+// (parallel to the adjacent face's plane); a pit is a trihedral cone dent.
+// Wedge depth is clamped by the exact ray-exit distance so channels never
+// punch through as tunnels.
 
 struct StoneCutParams {
     int seed = 5434;
-    float sizeX = 1.3f;      // box half-extent in x (world units)
-    float sizeZ = 1.1f;      // box half-extent in z
-    float height = 3.0f;     // box height (base sits on y=0)
-    int cuts = 12;           // corner cuts applied
-    float cutDepth = 0.093f; // fraction of the corner's mean incident edge length
-    float cutTiltDeg = 23.676f; // cone half-angle around the corner direction
+    float sizeX = 1.3f;      // main box half-extent in x (world units)
+    float sizeZ = 1.1f;      // main box half-extent in z
+    float height = 3.0f;     // stone height (base sits on y=0; lobes never exceed it)
+
+    // --- Massif: the starting body is a union of yawed boxes ----------------
+    int lobes = 3;             // 1 = plain box; 2..4 add shoulders
+    float lobeSize = 0.70f;    // lobe half-extents, fraction of the main box
+    float lobeSpread = 0.30f;  // how far a shoulder sticks out, in main-radius units
+    float lobeYawDeg = 32.0f;  // per-lobe yaw about Y (kept away from zero)
+
+    // --- Taper: large flank planes, wide base -> narrow top -----------------
+    int taperCuts = 5;        // planes spread around the azimuth circle
+    float taperDeg = 15.0f;   // plane tilt off vertical (the batter angle)
+    float taperReach = 0.80f; // 1.0 = the plane grazes the base corner
+    float taperWalls = 0.40f; // share of flanks left vertical (0 = even frustum)
+
+    // --- Top: slanted plateau with a chamfered rim --------------------------
+    float topSlantDeg = 9.0f; // plateau tilt (0 = dead flat)
+    int rimBevelCuts = 4;     // 45-degree facets around the top edge
+    float rimBevel = 0.28f;   // chamfer depth, fraction of the min extent
+
+    int cuts = 4;            // corner cuts applied (chips on the macro form)
+    float cutDepth = 0.32f;  // fraction of the corner's mean incident edge length
+    float cutTiltDeg = 24.0f; // cone half-angle around the corner direction
 
     float baseCutAngleDeg = 50.0f; // min dihedral with the base for base-touching cuts
     float baseCutQuota = 0.25f;    // max fraction of cuts allowed to touch the base
@@ -70,25 +118,44 @@ struct StonePairParams {
 
 StoneMesh generateCutStonePair(const StonePairParams& params);
 
-// Stone cluster: a root stone plus recursively spawned companions hugging its
-// CAMERA-FACING sides only (+X and +Z — those face the viewer in the diamond
-// projection; -X/-Z would be occluded behind the parent's silhouette, so
-// stones there are never spawned). Each child starts as a box overlapping its
-// parent at a random tangential slide (overshoot allows sticking out past the
-// parent's edge), the inflated parent is subtracted (tight imprint with a
-// ~gap slit, same as the pair), then the child gets its own cut pass.
-// Candidates that miss the parent's body (carve removed ~nothing) or
-// interpenetrate an already-placed stone are resampled. Sizes decay per level.
+// Stone cluster: a root stone plus recursively spawned companions arranged as a
+// FAN of azimuths around it, not a stair along the axes. Each child picks a
+// direction on the circle, is pushed out to the parent's exact support radius
+// along it (minus `overlap`), then has the inflated parent subtracted — the
+// contact face becomes a tight imprint with a ~gap slit, same trick as the
+// pair. Candidates that miss the parent's body (carve removed ~nothing) or
+// interpenetrate an already-placed stone are resampled.
+//
+// Composition rules, all in service of the silhouette:
+//   * Ordinary companions go in the CAMERA-FACING half (+X/+Z read as "front"
+//     and "nearer" in the diamond projection) and are always shorter than their
+//     parent, so they pile against its foot without hiding it.
+//   * With `spireChance` a companion is a SPIRE instead: taller than its parent
+//     and placed BEHIND it. That is what turns a decaying stair into a massif
+//     with a second peak, and it is the only case where the back half of the
+//     circle is used — a shorter stone back there would just disappear.
+//   * Ordinary heights scatter by `heightVar` around `decay`, so tops do not
+//     line up into a staircase. Each child's footprint is then derived from its
+//     height and a per-role target aspect — companions squat, spires chunky —
+//     rather than decayed alongside it, which is what keeps a tall root from
+//     breeding thin fangs.
+//   * `pebbles` small blocks are scattered on the ground outside the cluster
+//     silhouette, the debris that plants the group in the terrain. They are
+//     placed beyond the cluster's own support radius, so they need no boolean
+//     collision test at all.
 struct StoneClusterParams {
     StoneCutParams base;    // root recipe; children inherit it with own seeds
-    int seed = 777;         // layout rng: sides, shifts, child seeds
+    int seed = 777;         // layout rng: azimuths, heights, child seeds
     int levels = 2;         // recursion depth (0 = root only)
-    int maxChildren = 2;    // per stone; actual count is 1..maxChildren
-    float decay = 0.60f;    // child/parent linear size ratio
+    int maxChildren = 3;    // per stone; actual count is 1..maxChildren
+    float decay = 0.62f;    // child/parent HEIGHT ratio (footprint follows the aspect)
     float gap = 0.06f;      // contact slit width (inflation-based, as the pair)
     float overlap = 0.30f;  // initial box penetration into the parent
-    float overshoot = 0.5f; // 0 = slide within the parent's face, 1 = max out
-    float minContact = 0.3f; // fraction of the child half-width facing the parent
+    float spread = 0.85f;   // azimuth scatter within the chosen half (0 = axis)
+    float heightVar = 0.35f; // child height jitter around decay*parent
+    float spireChance = 0.28f; // chance a child is a taller stone placed behind
+    int pebbles = 6;        // ground debris scattered around the cluster
+    float pebbleSize = 0.26f; // pebble half-extent, fraction of the root box
 };
 
 StoneMesh generateCutStoneCluster(const StoneClusterParams& params);

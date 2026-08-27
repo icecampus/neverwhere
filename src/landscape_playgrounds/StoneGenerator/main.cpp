@@ -92,16 +92,21 @@ float g_pairShift = 0.0f;
 float g_pairSizeFactor = 0.60f;
 float g_pairHeightFactor = 0.60f;
 int g_pairSeed = 1234;
-// Recursive cluster composition (generateCutStoneCluster): companions hug the
-// camera-facing sides with a randomized slide, sizes decay per level.
+// Recursive cluster composition (generateCutStoneCluster): companions fan out
+// around the camera-facing half, heights scatter, spires out-top their parent,
+// and debris settles around the group's foot.
 bool g_clusterEnabled = false;
 int g_clusterSeed = 777;
 int g_clusterLevels = 2;
-int g_clusterChildren = 2;
-float g_clusterDecay = 0.60f;
+int g_clusterChildren = 3;
+float g_clusterDecay = 0.62f;
 float g_clusterGap = 0.06f;
 float g_clusterOverlap = 0.30f;
-float g_clusterOvershoot = 0.50f;
+float g_clusterSpread = 0.85f;
+float g_clusterHeightVar = 0.35f;
+float g_clusterSpireChance = 0.28f;
+int g_clusterPebbles = 6;
+float g_clusterPebbleSize = 0.26f;
 // Tear-hunt debug render: unlit green rock on a red background, no grid.
 bool g_flat = false;
 StoneMesh g_stoneMesh;
@@ -291,6 +296,20 @@ void drawImGui(int w, int h) {
         edited |= ImGui::SliderFloat("Size X", &g_cutParams.sizeX, 0.4f, 3.0f);
         edited |= ImGui::SliderFloat("Size Z", &g_cutParams.sizeZ, 0.4f, 3.0f);
         edited |= ImGui::SliderFloat("Height", &g_cutParams.height, 0.4f, 3.0f);
+        ImGui::SeparatorText("Massif (unioned lobes)");
+        edited |= ImGui::SliderInt("Lobes", &g_cutParams.lobes, 1, 4);
+        edited |= ImGui::SliderFloat("Lobe size", &g_cutParams.lobeSize, 0.35f, 1.0f);
+        edited |= ImGui::SliderFloat("Lobe spread", &g_cutParams.lobeSpread, 0.0f, 0.8f);
+        edited |= ImGui::SliderFloat("Lobe yaw", &g_cutParams.lobeYawDeg, 0.0f, 45.0f);
+        ImGui::SeparatorText("Taper (flanks)");
+        edited |= ImGui::SliderInt("Taper cuts", &g_cutParams.taperCuts, 0, 12);
+        edited |= ImGui::SliderFloat("Taper angle", &g_cutParams.taperDeg, 0.0f, 35.0f);
+        edited |= ImGui::SliderFloat("Taper reach", &g_cutParams.taperReach, 0.0f, 1.0f);
+        edited |= ImGui::SliderFloat("Taper walls", &g_cutParams.taperWalls, 0.0f, 0.75f);
+        ImGui::SeparatorText("Top (plateau)");
+        edited |= ImGui::SliderFloat("Top slant", &g_cutParams.topSlantDeg, 0.0f, 25.0f);
+        edited |= ImGui::SliderInt("Rim bevels", &g_cutParams.rimBevelCuts, 0, 12);
+        edited |= ImGui::SliderFloat("Rim bevel", &g_cutParams.rimBevel, 0.0f, 0.5f);
         ImGui::SeparatorText("Corner cuts");
         edited |= ImGui::SliderInt("Cuts", &g_cutParams.cuts, 0, 32);
         edited |= ImGui::SliderFloat("Cut depth", &g_cutParams.cutDepth, 0.05f, 0.8f);
@@ -327,15 +346,20 @@ void drawImGui(int w, int h) {
             edited = true;
         }
         edited |= ImGui::SliderInt("Levels", &g_clusterLevels, 1, 3);
-        edited |= ImGui::SliderInt("Max children", &g_clusterChildren, 1, 3);
+        edited |= ImGui::SliderInt("Max children", &g_clusterChildren, 1, 4);
         edited |= ImGui::SliderFloat("Decay", &g_clusterDecay, 0.4f, 0.8f);
-        edited |= ImGui::SliderFloat("Overshoot", &g_clusterOvershoot, 0.0f, 1.0f);
+        edited |= ImGui::SliderFloat("Azimuth spread", &g_clusterSpread, 0.0f, 1.0f);
+        edited |= ImGui::SliderFloat("Height var", &g_clusterHeightVar, 0.0f, 0.8f);
+        edited |= ImGui::SliderFloat("Spire chance", &g_clusterSpireChance, 0.0f, 1.0f);
         edited |= ImGui::SliderFloat("Gap", &g_clusterGap, 0.0f, 0.3f);
         edited |= ImGui::SliderFloat("Overlap", &g_clusterOverlap, 0.05f, 0.8f);
+        ImGui::SeparatorText("Debris");
+        edited |= ImGui::SliderInt("Pebbles", &g_clusterPebbles, 0, 16);
+        edited |= ImGui::SliderFloat("Pebble size", &g_clusterPebbleSize, 0.05f, 0.6f);
         if (edited) {
             g_stoneDirty = true;
         }
-        ImGui::TextDisabled("Companions hug camera-facing sides (+X/+Z)");
+        ImGui::TextDisabled("Fan of azimuths, front half; spires may go behind");
     }
 
     ImGui::Separator();
@@ -389,7 +413,11 @@ StoneMesh buildStoneMesh() {
         cp.decay = g_clusterDecay;
         cp.gap = g_clusterGap;
         cp.overlap = g_clusterOverlap;
-        cp.overshoot = g_clusterOvershoot;
+        cp.spread = g_clusterSpread;
+        cp.heightVar = g_clusterHeightVar;
+        cp.spireChance = g_clusterSpireChance;
+        cp.pebbles = g_clusterPebbles;
+        cp.pebbleSize = g_clusterPebbleSize;
         return generateCutStoneCluster(cp);
     }
     if (!g_pairEnabled) {
@@ -661,6 +689,11 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --nodes="x,y;x,y;..."   paint these seed nodes on startup (rock anchor)
 // --seed=N                generator seed
 // --sink=                 base pushed below y=0
+// --lobes= / --lobe-size= / --lobe-spread= / --lobe-yaw=
+//                         massif: union of yawed boxes (shoulders)
+// --taper= / --taper-angle= / --taper-reach= / --taper-walls=
+//                         flank batter (wide base, narrow top; walls = share left vertical)
+// --top-slant= / --rim-bevels= / --rim-bevel= plateau tilt and rim chamfer
 // --cuts= / --cut-depth= / --cut-tilt=        corner cuts (count, depth, cone)
 // --base-angle= / --base-quota= / --base-min-area=   base nick filters
 // --cut-sx= / --cut-sz= / --cut-height=       starting box extents
@@ -670,10 +703,12 @@ std::optional<glm::ivec2> parseVec2Arg(const std::string& text) {
 // --pair-side=0..3            contact side (+x, -x, +z, -z)
 // --pair-gap= / --pair-overlap= / --pair-shift=   slit, carve depth, slide
 // --pair-size= / --pair-height= / --pair-seed=    companion scale factors, seed
-// --cluster                   recursive companions on camera-facing sides
+// --cluster                   recursive companions fanned around the front half
 // --cluster-seed= / --cluster-levels= / --cluster-children=   layout rng, depth, count
-// --cluster-decay= / --cluster-overshoot=           size ratio, slide-out
+// --cluster-decay= / --cluster-spread=              height ratio, azimuth scatter
+// --cluster-height-var= / --cluster-spire=          height mix, taller stones behind
 // --cluster-gap= / --cluster-overlap=               slit, carve depth
+// --pebbles= / --pebble-size=                       ground debris around the group
 int main(int argc, char* argv[]) {
     bool smoke = false;
     for (int i = 1; i < argc; ++i) {
@@ -798,8 +833,53 @@ int main(int argc, char* argv[]) {
         if (arg.rfind("--cluster-overlap=", 0) == 0) {
             g_clusterOverlap = static_cast<float>(std::atof(arg.substr(18).c_str()));
         }
-        if (arg.rfind("--cluster-overshoot=", 0) == 0) {
-            g_clusterOvershoot = static_cast<float>(std::atof(arg.substr(20).c_str()));
+        if (arg.rfind("--cluster-spread=", 0) == 0) {
+            g_clusterSpread = static_cast<float>(std::atof(arg.substr(17).c_str()));
+        }
+        if (arg.rfind("--cluster-height-var=", 0) == 0) {
+            g_clusterHeightVar = static_cast<float>(std::atof(arg.substr(21).c_str()));
+        }
+        if (arg.rfind("--cluster-spire=", 0) == 0) {
+            g_clusterSpireChance = static_cast<float>(std::atof(arg.substr(16).c_str()));
+        }
+        if (arg.rfind("--pebbles=", 0) == 0) {
+            g_clusterPebbles = std::atoi(arg.substr(10).c_str());
+        }
+        if (arg.rfind("--pebble-size=", 0) == 0) {
+            g_clusterPebbleSize = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--lobes=", 0) == 0) {
+            g_cutParams.lobes = std::atoi(arg.substr(8).c_str());
+        }
+        if (arg.rfind("--lobe-size=", 0) == 0) {
+            g_cutParams.lobeSize = static_cast<float>(std::atof(arg.substr(12).c_str()));
+        }
+        if (arg.rfind("--lobe-spread=", 0) == 0) {
+            g_cutParams.lobeSpread = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--lobe-yaw=", 0) == 0) {
+            g_cutParams.lobeYawDeg = static_cast<float>(std::atof(arg.substr(11).c_str()));
+        }
+        if (arg.rfind("--taper=", 0) == 0) {
+            g_cutParams.taperCuts = std::atoi(arg.substr(8).c_str());
+        }
+        if (arg.rfind("--taper-angle=", 0) == 0) {
+            g_cutParams.taperDeg = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--taper-reach=", 0) == 0) {
+            g_cutParams.taperReach = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--taper-walls=", 0) == 0) {
+            g_cutParams.taperWalls = static_cast<float>(std::atof(arg.substr(14).c_str()));
+        }
+        if (arg.rfind("--top-slant=", 0) == 0) {
+            g_cutParams.topSlantDeg = static_cast<float>(std::atof(arg.substr(12).c_str()));
+        }
+        if (arg.rfind("--rim-bevels=", 0) == 0) {
+            g_cutParams.rimBevelCuts = std::atoi(arg.substr(13).c_str());
+        }
+        if (arg.rfind("--rim-bevel=", 0) == 0) {
+            g_cutParams.rimBevel = static_cast<float>(std::atof(arg.substr(12).c_str()));
         }
     }
 
