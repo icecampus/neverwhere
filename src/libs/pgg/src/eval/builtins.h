@@ -1,0 +1,124 @@
+#pragma once
+
+// Built-in node catalog (spec §8): signature registry and dispatch for the
+// execution core.
+//
+// Every supported operation has a BuiltinSig: parameter names, types
+// (value vs field vs either), defaults, result type. The same registry drives
+// the static type checker (E2xx), the expression compiler and the runtime
+// dispatch — one source of truth for signatures.
+//
+// Operations deferred past E1 (import_mesh, §8.3 topology, SDF, groups,
+// distribute, aggregators, ...) are registered with a deferredStage note so
+// calling them produces a precise "not supported at this stage" diagnostic
+// instead of E201.
+
+#include "field.h"
+#include "value.h"
+
+namespace pgg {
+
+enum class BuiltinId {
+    None,
+    // §8.1 sources
+    IcoSphere, Box, Grid, MeshLine, PointCloud,
+    // §8.2 transforms
+    Transform, SetPosition, Smooth, ComputeNormals,
+    // §8.5 rng
+    RngFromSeed, SplitRng, AliasRng,
+    // §8.5 field generators
+    Fbm, Vnoise, Random, RandomVec, RandomInt, DistanceTo, Position, Normal, Index,
+    // §6.3 expression functions (field-polymorphic)
+    Dot, Cross, Length, Normalize, Clamp, Smoothstep, Mix, Abs, Min, Max, Floor, Pow,
+    Vec2, Vec3, Vec4, CastInt, CastF32, CastBool, OrientFromEuler, Ramp,
+    // Known but not supported at this stage.
+    Deferred,
+};
+
+enum class ParamKind {
+    Value,   // concrete value argument (field argument -> E205)
+    Field,   // declared field<T>: a value argument becomes a constant field
+    Either,  // expression-function argument: value or field (result follows)
+};
+
+struct ParamSig {
+    std::string name;
+    ScalarType base = ScalarType::None;  // Any = any numeric scalar or vector
+    ParamKind kind = ParamKind::Value;
+    bool optional = false;      // T? (accepts none)
+    bool required = false;
+    bool allowString = false;   // base Any also accepts a string (split_rng key)
+    GeoKind geoKind = GeoKind::Any;
+    Value defValue;
+    bool hasDefValue = false;
+    bool defPosition = false;   // default = position()
+    bool defIndex = false;      // default = index()
+    std::vector<std::string> enumValues;  // non-empty -> enum parameter
+};
+
+struct BuiltinSig {
+    BuiltinId id = BuiltinId::None;
+    const char* name = "";
+    std::vector<ParamSig> params;
+    Type result;
+    bool variadic = false;                 // ramp: trailing values after declared params
+    bool resultGeoKindOfFirstArg = false;  // geo<K> of the first geo argument is kept
+    bool exprFunc = false;                 // §6.3 expression function (field-polymorphic)
+    const char* deferredStage = nullptr;   // non-null -> known, but not supported at E1
+};
+
+const BuiltinSig* findBuiltin(const std::string& name);
+
+// §8.1 geometry sources as plain functions (testable without the engine;
+// the Value-level dispatch wraps them). All write @P; surface sources
+// (ico_sphere, box, grid) also write @N.
+GeoPtr genIcoSphere(int subdiv, float radius);
+GeoPtr genBox(glm::vec3 size, int res);
+GeoPtr genGrid(glm::vec2 size, int res);
+GeoPtr genMeshLine(int count, float length, glm::vec3 dir);
+GeoPtr genPointCloud(int count, glm::vec3 bounds, Rng rng);
+
+// One call with arguments bound to the signature (produced by the compiler
+// after bindCallArgs; diagnostics come from the static typecheck pass).
+struct BoundCall {
+    const BuiltinSig* sig = nullptr;
+    std::vector<Value> values;             // per param (value args / defaults)
+    std::vector<const FieldNode*> fields;  // per param (nullptr when not a field arg)
+    std::vector<bool> present;             // per param: argument explicitly supplied
+    Span span;
+};
+
+// Positional-then-keyword argument binding with defaults; emits E202/E203.
+// Returns per-param source args (nullptr = use the declared default) and, for
+// variadic signatures (ramp), the trailing positional args.
+bool bindCallArgs(const BuiltinSig& sig, const Call& call,
+                  std::vector<const CallArg*>& outByParam,
+                  std::vector<const CallArg*>& outVariadic,
+                  std::vector<Diagnostic>& diags);
+
+// Value-level dispatch (sources, transforms, rng ops, const-folded expr funcs).
+Value evalBuiltinCall(const BoundCall& bound, RunContext& run);
+
+// Field-level dispatch used by the evaluator for Call nodes: §6.3 expression
+// functions and §8.5 field generators.
+ConstBufferPtr evalFieldCall(int callId, const FieldNode& node,
+                             const std::vector<ConstBufferPtr>& args, EvalContext& ctx);
+
+// §6.3 expression functions on evaluated argument buffers (geo-free, so the
+// same code constant-folds value calls); params are the variadic values.
+ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& args,
+                               const std::vector<Value>& params, size_t count);
+
+// §8.5 field generators (need the evaluation context: positions, geo, domain).
+ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
+                               const std::vector<ConstBufferPtr>& args, EvalContext& ctx);
+
+// Result type of an expression function given its argument types (§6.3);
+// isField follows the arguments (field-polymorphic). Emits E204.
+Type inferExprFuncType(BuiltinId id, const std::vector<Type>& argTypes, Span span,
+                       std::vector<Diagnostic>& diags);
+
+// §8.2 transform nodes, value level (builtins_transform.cpp).
+Value evalTransformBuiltin(const BoundCall& bound, RunContext& run);
+
+}  // namespace pgg

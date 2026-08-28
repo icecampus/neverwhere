@@ -3,6 +3,7 @@
 // corpus (src/tests/pgg/corpus, PGG_CORPUS_DIR is set by CMake).
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>

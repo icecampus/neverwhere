@@ -1,0 +1,11 @@
+param seed: int = 42
+
+root_rng = rng_from_seed(seed)
+noise_rng = split_rng(root_rng, key = "surface")
+
+base = ico_sphere(subdiv = 3, radius = 1.0)
+n = fbm(scale = 2.5, octaves = 5, rng = noise_rng)
+disp = set_position(base, offset = @N * (n + n) * 0.35, where = n > 0.1)
+rock = compute_normals(disp)
+
+output rock

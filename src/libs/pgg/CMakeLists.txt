@@ -5,6 +5,7 @@ if(EMSCRIPTEN)
 endif()
 
 find_package(antlr4-runtime CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 # Generated ANTLR artifacts are committed (regen: tools/pgg/regen_parser.sh).
 file(GLOB PARSER_GEN CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/parser_gen/*.cpp")
@@ -25,9 +26,26 @@ nw_add_lib_sources(
         src/validate.h
         src/validate.cpp
         src/pgg.cpp
+        src/eval/rng.h
+        src/eval/rng.cpp
+        src/eval/geometry.h
+        src/eval/geometry.cpp
+        src/eval/value.h
+        src/eval/field.h
+        src/eval/field.cpp
+        src/eval/builtins.h
+        src/eval/builtins.cpp
+        src/eval/builtins_sources.cpp
+        src/eval/builtins_transform.cpp
+        src/eval/builtins_fields.cpp
+        src/eval/typecheck.h
+        src/eval/typecheck.cpp
+        src/eval/engine.h
+        src/eval/engine.cpp
         ${PARSER_GEN}
     LIBS
         antlr4_static
+        glm::glm-header-only
 )
 
 target_include_directories(pgg PUBLIC include)
