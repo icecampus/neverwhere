@@ -31,6 +31,19 @@ target_link_libraries(neverwhere_tests PRIVATE
     Qt6::Quick
 )
 
+# pgg is desktop-only; its suites live under src/tests/pgg/.
+if(TARGET pgg)
+    target_link_libraries(neverwhere_tests PRIVATE pgg)
+    target_compile_definitions(neverwhere_tests PRIVATE
+        PGG_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pgg/corpus"
+    )
+else()
+    file(GLOB PGG_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/pgg/*_test.cpp")
+    if(PGG_TEST_SOURCES)
+        message(FATAL_ERROR "src/tests/pgg requires the pgg target (desktop builds only)")
+    endif()
+endif()
+
 if(MSVC)
     target_compile_options(neverwhere_tests PRIVATE "/MP")
 endif()

@@ -1,0 +1,17 @@
+# leading comment
+import rock_builders as rb @ 1.2
+param world_seed: int
+
+def make_rock(seed: rng, size: f32 = 1.0) -> (rock: geo<mesh>) {
+    """Builds one rock."""
+    expect seed has @rng
+    shape = sdf_sphere(radius = size)
+    rock = mesh_from_sdf(shape)  # trailing comment
+}
+rock = make_rock(seed = rng_from_seed(world_seed))
+
+# comment before zone
+result = repeat (rock, iterations = 2) |cur| {
+    cur = relax(cur, radius = 0.5)
+}
+output result

@@ -44,3 +44,7 @@ tools/shadertoy/.chrome-profile/
 
 # Scratch space for local experiments (asset downloads, one-off venvs)
 tmp/
+
+# PGG tooling: pinned ANTLR jar + bootstrapped JRE (tools/pgg/regen_parser.sh)
+tools/pgg/*.jar
+toolchain/jre/

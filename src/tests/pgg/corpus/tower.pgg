@@ -1,0 +1,70 @@
+param world_seed: int
+
+# --- уровень 1: примитивная обёртка ---
+def fbm_displace(geo: geo, scale: f32 = 2.5, amp: f32 = 0.35, rng: rng) -> (out: geo) {
+    """Дисплейс слоистым шумом вдоль нормалей.
+    Требует: @N на точках. Пишет: @disp (f32, точки).
+    """
+    n         = fbm(scale = scale, octaves = 5, rng = rng)
+    displaced = set_position(geo, offset = @N * n * amp)
+    out       = set(displaced, "disp", n * amp)
+}
+
+# --- уровень 2a: SDF-ядро валуна (для плавного сливания) ---
+def make_rock_sdf(size: f32 = 2.0, roughness: f32 = 1.0, rng: rng) -> (out: sdf) {
+    """SDF-ядро валуна — вход для sdf_instance_on_points и mesh_from_sdf."""
+    expect size > 0: "размер в метрах, положительный"
+    ball = sdf_sphere(r = size)
+    out  = sdf_displace(ball, fbm(@P * 1.5, octaves = 5, rng = rng) * 0.3 * roughness)
+}
+
+# --- уровень 2b: одиночный валун-меш ---
+def make_rock(size: f32 = 2.0, roughness: f32 = 1.0, rng: rng) -> (out: geo<mesh>) {
+    """Один валун: SDF-ядро + шумовой дисплейс + атрибуты крутизны.
+    Пишет: @slope (f32, точки), группы cliff_faces / flat_tops.
+    """
+    expect size > 0: "размер в метрах, положительный"
+    shape_rng  = split_rng(rng, key = "shape")
+    tops_rng   = split_rng(rng, key = "tops")
+    detail_rng = split_rng(rng, key = "detail")
+    src     = make_rock_sdf(size = size, roughness = roughness, rng = shape_rng)
+    raw     = mesh_from_sdf(src, voxel = size * 0.02)
+    shaped  = compute_normals(raw)
+    sloped  = set(shaped, "slope", 1 - dot(@N, (0, 0, 1)))
+    cliffed = mark(sloped, "cliff_faces", where = @slope > 0.6)
+    topped  = mark(cliffed, "flat_tops", where = (@slope < 0.15) & (fbm(scale = 6, rng = tops_rng) > 0.5))
+    out     = fbm_displace(topped, scale = 3.0, amp = 0.1 * roughness, rng = detail_rng)
+}
+
+# --- уровень 3: составная структура ---
+def cliff_wall(length: f32 = 120, rng: rng) -> (wall: geo<mesh>, anchors: geo<points>) {
+    """Стена из валунов вдоль линии: SDF-инстансы одной формы сливаются в одно поле,
+    повторяемость маскируют @scale и @orient на точках. anchors — точки посадки деталей."""
+    scale_rng   = split_rng(rng, key = "scale")
+    orient_rng  = split_rng(rng, key = "orient")
+    source_rng  = split_rng(rng, key = "source")
+    tops_rng    = split_rng(rng, key = "tops")
+    scatter_rng = split_rng(rng, key = "scatter")
+    line0    = mesh_line(count = int(length / 7.5), length = length)
+    line1    = set(line0, "scale", random(lo = 0.7, hi = 1.4, rng = scale_rng))
+    line     = set(line1, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = orient_rng)))
+    rock_src = make_rock_sdf(size = 3.0, rng = source_rng)
+    wall_sdf = sdf_instance_on_points(line, source = rock_src, k = 0.8)
+    raw      = mesh_from_sdf(wall_sdf, voxel = 0.1)
+    shaped   = compute_normals(raw)
+    sloped   = set(shaped, "slope", 1 - dot(@N, (0, 0, 1)))
+    wall     = mark(sloped, "flat_tops", where = (@slope < 0.15) & (fbm(scale = 6, rng = tops_rng) > 0.5))
+    anchors  = distribute_points(wall, density = ingroup("flat_tops") * 3, mode = poisson, min_dist = 0.4, rng = scatter_rng)
+}
+
+# --- уровень 4: мир ---
+world_rng = rng_from_seed(world_seed)
+wall_rng  = split_rng(world_rng, key = "main_wall")
+hero_rng  = split_rng(world_rng, key = "hero_rock")
+wall, anchors = cliff_wall(length = 120, rng = wall_rng)
+hero0  = make_rock(size = 6.0, roughness = 1.2, rng = hero_rng)
+hero   = transform(hero0, translate = (12, 0, 8))
+scene  = merge(wall, hero)
+output scene
+output anchors
+tap stats: scene
