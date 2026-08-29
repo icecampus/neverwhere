@@ -38,6 +38,9 @@ nw_add_lib_sources(
         src/eval/builtins_sources.cpp
         src/eval/builtins_transform.cpp
         src/eval/builtins_fields.cpp
+        src/eval/builtins_attrs.cpp
+        src/eval/builtins_scatter.cpp
+        src/eval/builtins_aggregate.cpp
         src/eval/typecheck.h
         src/eval/typecheck.cpp
         src/eval/engine.h

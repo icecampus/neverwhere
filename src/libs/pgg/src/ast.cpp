@@ -58,6 +58,15 @@ std::string exprText(const Expr* e) {
             }
             return out + ")";
         }
+        case NodeKind::ListLit: {
+            const auto* v = static_cast<const ListLit*>(e);
+            std::string out = "[";
+            for (size_t i = 0; i < v->elems.size(); ++i) {
+                if (i) out += ", ";
+                out += exprText(v->elems[i]);
+            }
+            return out + "]";
+        }
         case NodeKind::Paren:
             return "(" + exprText(static_cast<const Paren*>(e)->inner) + ")";
         case NodeKind::Unary: {
@@ -352,6 +361,14 @@ bool astEqual(const Node* a, const Node* b) {
         case NodeKind::VecLit: {
             const auto* va = static_cast<const VecLit*>(a);
             const auto* vb = static_cast<const VecLit*>(b);
+            if (va->elems.size() != vb->elems.size()) return false;
+            for (size_t i = 0; i < va->elems.size(); ++i)
+                if (!astEqual(va->elems[i], vb->elems[i])) return false;
+            return true;
+        }
+        case NodeKind::ListLit: {
+            const auto* va = static_cast<const ListLit*>(a);
+            const auto* vb = static_cast<const ListLit*>(b);
             if (va->elems.size() != vb->elems.size()) return false;
             for (size_t i = 0; i < va->elems.size(); ++i)
                 if (!astEqual(va->elems[i], vb->elems[i])) return false;

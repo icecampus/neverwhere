@@ -1,6 +1,6 @@
 #pragma once
 
-// Runtime values and types for the E1 execution core (spec §4).
+// Runtime values and types for the execution core (spec §4).
 //
 // Type = scalar/vector base x isField x geoKind (§4.1: geo kinds and domains
 // are separate type axes). Value = the runtime payload: numbers, vectors,
@@ -46,6 +46,7 @@ struct Type {
     ScalarType base = ScalarType::None;
     bool isField = false;
     GeoKind geoKind = GeoKind::Any;  // for base == Geo
+    bool isList = false;             // T[] — value-level lists (never fields)
 
     bool operator==(const Type&) const = default;
 };
@@ -92,6 +93,7 @@ inline std::string typeName(const Type& t) {
     } else {
         out = scalarName(t.base);
     }
+    if (t.isList) out += "[]";
     if (t.isField) out = "field<" + out + ">";
     return out;
 }
@@ -131,6 +133,16 @@ inline ScalarType promoteBase(ScalarType a, ScalarType b) {
 // Full conversion test including field flags and geo kinds (§4.5).
 inline bool canConvert(const Type& from, const Type& to) {
     if (from.isField && !to.isField) return false;  // field -> value needs an aggregator
+    if (from.isList || to.isList) {
+        if (!from.isList || !to.isList) return false;
+        if (from.base == ScalarType::None) return true;  // empty list literal
+        if (to.base == ScalarType::Geo || from.base == ScalarType::Geo) {
+            if (from.base != ScalarType::Geo || to.base != ScalarType::Geo) return false;
+            return to.geoKind == GeoKind::Any || from.geoKind == GeoKind::Any ||
+                   from.geoKind == to.geoKind;
+        }
+        return canConvertBase(from.base, to.base);
+    }
     if (to.base == ScalarType::Geo || from.base == ScalarType::Geo) {
         if (from.base != ScalarType::Geo || to.base != ScalarType::Geo) return false;
         return to.geoKind == GeoKind::Any || from.geoKind == GeoKind::Any ||
@@ -156,19 +168,25 @@ inline Type typeFromRef(const TypeRef& ref) {
         t.base = ScalarType::Geo;
         if (ref.geoKind == "mesh") t.geoKind = GeoKind::Mesh;
         else if (ref.geoKind == "points") t.geoKind = GeoKind::Points;
+        else if (ref.geoKind == "instances") t.geoKind = GeoKind::Instances;
     } else if (b == "field" && ref.arg) {
         t = typeFromRef(*ref.arg);
         t.isField = true;
+        return t;  // field<...> keeps the inner flags; field<T>[] is not legal
     }
+    t.isList = ref.list;
     return t;
 }
 
 // --- Value ------------------------------------------------------------------
 
+struct Value;
+using ListValuePtr = std::shared_ptr<const std::vector<Value>>;
+
 struct Value {
     using Data = std::variant<std::monostate,  // none
                               bool, int64_t, float, glm::vec2, glm::vec3, glm::vec4,
-                              std::string, Rng, GeoPtr, FieldPtr>;
+                              std::string, Rng, GeoPtr, FieldPtr, ListValuePtr>;
     Data data;
 
     Value() = default;
@@ -183,6 +201,7 @@ struct Value {
     Value(Rng v) : data(v) {}
     Value(GeoPtr v) : data(std::move(v)) {}
     Value(FieldPtr v) : data(std::move(v)) {}
+    Value(ListValuePtr v) : data(std::move(v)) {}
 };
 
 inline bool isNone(const Value& v) { return std::holds_alternative<std::monostate>(v.data); }
@@ -199,6 +218,7 @@ inline ScalarType valueBase(const Value& v) {
         case 8: return ScalarType::Rng;
         case 9: return ScalarType::Geo;
         case 10: return ScalarType::Any;  // field: element type lives in the node
+        case 11: return ScalarType::Any;  // list: element type is not in the payload
         default: return ScalarType::None;
     }
 }
@@ -214,6 +234,8 @@ inline Rng asRng(const Value& v) { return std::get<Rng>(v.data); }
 inline GeoPtr asGeo(const Value& v) { return std::get<GeoPtr>(v.data); }
 inline FieldPtr asField(const Value& v) { return std::get<FieldPtr>(v.data); }
 inline bool isFieldValue(const Value& v) { return std::holds_alternative<FieldPtr>(v.data); }
+inline bool isListValue(const Value& v) { return std::holds_alternative<ListValuePtr>(v.data); }
+inline const std::vector<Value>& asList(const Value& v) { return *std::get<ListValuePtr>(v.data); }
 
 // Widening conversion of a value to a target base (broadcast included).
 // Returns none when the conversion is not in the §4.5 chain.
@@ -384,6 +406,15 @@ inline std::string valueToString(const Value& v) {
         case 8: return "<rng>";
         case 9: return std::string("geo<") + geoKindName(asGeo(v)->kind) + ">";
         case 10: return "<field>";
+        case 11: {
+            std::string out = "[";
+            const auto& elems = asList(v);
+            for (size_t i = 0; i < elems.size(); ++i) {
+                if (i) out += ", ";
+                out += valueToString(elems[i]);
+            }
+            return out + "]";
+        }
         default: return "?";
     }
 }

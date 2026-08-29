@@ -19,7 +19,7 @@ public:
         for (const Node* item : f->items) {
             switch (item->kind) {
                 case NodeKind::Import:
-                    error("E201", item->span, "import is not supported at stage E1", "modules are stage E5");
+                    error("E201", item->span, "import is not supported at stage E2", "modules are stage E5");
                     break;
                 case NodeKind::ParamDecl: {
                     const auto* p = static_cast<const ParamDecl*>(item);
@@ -32,7 +32,7 @@ public:
                     break;
                 }
                 case NodeKind::Def:
-                    error("E201", item->span, "def is not supported at stage E1", "composition is stage E5");
+                    error("E201", item->span, "def is not supported at stage E2", "composition is stage E5");
                     break;
                 case NodeKind::OutputDecl:
                     output(static_cast<const OutputDecl*>(item));
@@ -55,6 +55,8 @@ private:
     std::vector<Diagnostic>& diags_;
     std::unordered_map<std::string, Type> env_;
     std::vector<std::pair<std::string, Span>> outputs_;
+    const BuiltinSig* lastSig_ = nullptr;  // sig of the last inferred call (multi-output check)
+    bool allowMulti_ = false;              // destructuring position accepts multi-output calls
 
     bool isBound(const std::string& name) const {
         return std::find(boundParams_.begin(), boundParams_.end(), name) != boundParams_.end();
@@ -93,22 +95,38 @@ private:
         switch (s->kind) {
             case NodeKind::Binding: {
                 const auto* b = static_cast<const Binding*>(s);
-                if (b->targets.names.size() > 1) {
-                    error("E201", s->span, "multi-output destructuring is not supported at stage E1",
-                          "multi-output nodes (split/def) are stages E2/E5");
-                }
+                const size_t nTargets = b->targets.names.size();
+                lastSig_ = nullptr;
+                allowMulti_ = nTargets > 1;
                 Type t = infer(b->value);
-                if (!b->targets.names.empty()) define(b->targets.names[0], t);
+                allowMulti_ = false;
+                if (nTargets > 1) {
+                    // Multi-output destructuring (E2): arity and per-target
+                    // types come from the registry entry of the call.
+                    if (!lastSig_ || lastSig_->results.empty()) {
+                        error("E202", s->span, "destructuring needs a multi-output operation",
+                              "single-result operations bind exactly one target");
+                    } else if (lastSig_->results.size() != nTargets) {
+                        error("E202", s->span,
+                              "'" + std::string(lastSig_->name) + "' returns " +
+                                  std::to_string(lastSig_->results.size()) + " value(s), got " +
+                                  std::to_string(nTargets) + " targets");
+                    } else {
+                        for (size_t i = 0; i < nTargets; ++i) define(b->targets.names[i], lastSig_->results[i]);
+                    }
+                    break;
+                }
+                if (nTargets == 1) define(b->targets.names[0], t);
                 break;
             }
             case NodeKind::RepeatZone:
-                error("E201", s->span, "repeat zones are not supported at stage E1", "zones are stage E7");
+                error("E201", s->span, "repeat zones are not supported at stage E2", "zones are stage E7");
                 break;
             case NodeKind::ForeachZone:
-                error("E201", s->span, "foreach zones are not supported at stage E1", "zones are stage E7");
+                error("E201", s->span, "foreach zones are not supported at stage E2", "zones are stage E7");
                 break;
             default:
-                break;  // tap: diagnostics layer, a no-op at E1
+                break;  // tap: diagnostics layer, a no-op at E2
         }
     }
 
@@ -144,6 +162,26 @@ private:
                 error("E100", e->span, "vector literals are vec2..vec4");
                 return {};
             }
+            case NodeKind::ListLit: {
+                const auto* l = static_cast<const ListLit*>(e);
+                ScalarType elemBase = ScalarType::None;
+                GeoKind elemKind = GeoKind::Any;
+                for (const Expr* el : l->elems) {
+                    Type t = infer(el);
+                    if (t.base == ScalarType::None) continue;
+                    if (t.isField) {
+                        error("E205", el->span, "list elements must be values, got " + typeName(t));
+                        continue;
+                    }
+                    if (elemBase == ScalarType::None) {
+                        elemBase = t.base;
+                        elemKind = t.geoKind;
+                    } else if (t.base != elemBase) {
+                        error("E204", el->span, "list elements must share one type");
+                    }
+                }
+                return Type{elemBase, false, elemKind, true};
+            }
             case NodeKind::Paren:
                 return infer(static_cast<const Paren*>(e)->inner);
             case NodeKind::Unary:
@@ -167,8 +205,9 @@ private:
                   "zones are stage E7");
             return field(ScalarType::Int);
         }
-        error("E302", ref->span, "attribute '@" + ref->name + "' is not known at stage E1",
-              "only @P/@N/@index exist before stage E2 (user attributes)");
+        // Named user attributes (E2): the schema is runtime data, so a read
+        // gets a provisional f32 type statically; runtime buffers are
+        // duck-typed and a missing attribute is a runtime E302.
         return field(ScalarType::F32);
     }
 
@@ -258,7 +297,7 @@ private:
         if (c->path.size() != 1) {
             std::string q;
             for (const std::string& p : c->path) q += (q.empty() ? "" : ".") + p;
-            error("E201", c->span, "qualified operation '" + q + "' is not supported at stage E1",
+            error("E201", c->span, "qualified operation '" + q + "' is not supported at stage E2",
                   "def/imports are stage E5");
             return {};
         }
@@ -269,7 +308,12 @@ private:
             return {};
         }
         if (sig->deferredStage) {
-            error("E201", c->span, "operation '" + name + "' is not supported at stage E1 (" + sig->deferredStage + ")");
+            error("E201", c->span, "operation '" + name + "' is not supported at stage E2 (" + sig->deferredStage + ")");
+            return {};
+        }
+        if (!sig->results.empty() && !allowMulti_) {
+            error("E204", c->span, "'" + name + "' returns a tuple and must be destructured",
+                  "min, max = bbox(g)");
             return {};
         }
 
@@ -292,7 +336,7 @@ private:
             argTypes[i] = t;
             if (t.base == ScalarType::None) continue;
             if (p.optional && arg->value->kind == NodeKind::NoneLit) continue;
-            const Type target{p.base, p.kind != ParamKind::Value, p.geoKind};
+            const Type target{p.base, p.kind != ParamKind::Value, p.geoKind, p.isList};
             if (p.kind == ParamKind::Value) {
                 if (t.isField) {
                     error("E205", arg->value->span,
@@ -329,11 +373,13 @@ private:
         if (sig->exprFunc) {
             Type rt = inferExprFuncType(sig->id, argTypes, c->span, diags_);
             rt.isField = anyField;
+            lastSig_ = sig;  // after arg inference: the root call's sig wins
             return rt;
         }
         Type rt = sig->result;
         if (sig->resultGeoKindOfFirstArg && np > 0 && argTypes[0].base == ScalarType::Geo)
             rt.geoKind = argTypes[0].geoKind;
+        lastSig_ = sig;
         return rt;
     }
 

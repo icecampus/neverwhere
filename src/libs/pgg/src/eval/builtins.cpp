@@ -29,11 +29,18 @@ ParamSig geoArg(const char* name, bool required = true) {
     return p;
 }
 
-ParamSig fld(const char* name, ScalarType base) {
+ParamSig geoArg(const char* name, GeoKind kind) {
+    ParamSig p = val(name, ScalarType::Geo, true);
+    p.geoKind = kind;
+    return p;
+}
+
+ParamSig fld(const char* name, ScalarType base, bool required = false) {
     ParamSig p;
     p.name = name;
     p.base = base;
     p.kind = ParamKind::Field;
+    p.required = required;
     return p;
 }
 
@@ -250,29 +257,135 @@ const std::vector<BuiltinSig>& registry() {
             r.push_back(s);
         }
 
-        // --- known but deferred past E1 -----------------------------------------
+        // --- §8.6 groups -----------------------------------------------------
+        {
+            ParamSig domain = valDef("domain", ScalarType::String, Value(std::string("points")));
+            domain.enumValues = {"points", "corners", "faces", "detail"};
+            BuiltinSig s = sig(BuiltinId::Mark, "mark",
+                               {geoArg("geo"), val("name", ScalarType::String, true),
+                                fld("where", ScalarType::Bool, true), domain},
+                               geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        {
+            BuiltinSig s = sig(BuiltinId::Unmark, "unmark",
+                               {geoArg("geo"), val("name", ScalarType::String, true)}, geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        r.push_back(sig(BuiltinId::Ingroup, "ingroup", {val("name", ScalarType::String, true)},
+                        fieldResult(ScalarType::Bool)));
+
+        // --- §8.7 attributes --------------------------------------------------
+        {
+            BuiltinSig s = sig(BuiltinId::SetAttr, "set",
+                               {geoArg("geo"), val("name", ScalarType::String, true),
+                                fld("value", ScalarType::Any, true)},
+                               geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        {
+            BuiltinSig s = sig(BuiltinId::RemoveAttr, "remove_attr",
+                               {geoArg("geo"), val("name", ScalarType::String, true)}, geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        {
+            BuiltinSig s = sig(BuiltinId::RenameAttr, "rename_attr",
+                               {geoArg("geo"), val("old", ScalarType::String, true),
+                                val("new", ScalarType::String, true)},
+                               geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        {
+            ParamSig from = val("from", ScalarType::String, true);
+            from.enumValues = {"points", "corners", "faces", "detail"};
+            ParamSig to = val("to", ScalarType::String, true);
+            to.enumValues = {"points", "corners", "faces", "detail"};
+            ParamSig mode = valDef("mode", ScalarType::String, Value(std::string("average")));
+            mode.enumValues = {"sum", "average", "first"};
+            BuiltinSig s = sig(BuiltinId::Promote, "promote",
+                               {geoArg("geo"), val("name", ScalarType::String, true), from, to, mode},
+                               geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+
+        // --- §8.3 merge (E2 subset of topology) ---------------------------------
+        {
+            BuiltinSig s = sig(BuiltinId::Merge, "merge", {geoArg("a"), geoArg("b")}, geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+
+        // --- §8.8 scatter and instancing ----------------------------------------
+        {
+            ParamSig mode = valDef("mode", ScalarType::String, Value(std::string("poisson")));
+            mode.enumValues = {"poisson", "uniform"};
+            r.push_back(sig(BuiltinId::DistributePoints, "distribute_points",
+                            {geoArg("geo", GeoKind::Mesh), fld("density", ScalarType::F32, true), mode,
+                             valDef("min_dist", ScalarType::F32, Value(0.0f)),
+                             val("rng", ScalarType::Rng, true)},
+                            Type{ScalarType::Geo, false, GeoKind::Points}));
+        }
+        {
+            ParamSig variants = valDef("variants", ScalarType::Geo,
+                                       Value(std::make_shared<const std::vector<Value>>()));
+            variants.isList = true;
+            variants.geoKind = GeoKind::Mesh;
+            r.push_back(sig(BuiltinId::InstanceOnPoints, "instance_on_points",
+                            {geoArg("pts", GeoKind::Points), geoArg("source", GeoKind::Mesh), variants},
+                            Type{ScalarType::Geo, false, GeoKind::Instances}));
+        }
+        r.push_back(sig(BuiltinId::Realize, "realize", {geoArg("inst", GeoKind::Instances)},
+                        Type{ScalarType::Geo, false, GeoKind::Mesh}));
+
+        // --- §8.10 aggregators ---------------------------------------------------
+        {
+            BuiltinSig s = sig(BuiltinId::Bbox, "bbox", {geoArg("geo")}, Type{});
+            s.results = {Type{ScalarType::Vec3, false, GeoKind::Any},
+                         Type{ScalarType::Vec3, false, GeoKind::Any}};
+            r.push_back(s);
+        }
+        r.push_back(sig(BuiltinId::Extent, "extent", {geoArg("geo")},
+                        Type{ScalarType::Vec3, false, GeoKind::Any}));
+        r.push_back(sig(BuiltinId::Centroid, "centroid", {geoArg("geo")},
+                        Type{ScalarType::Vec3, false, GeoKind::Any}));
+        {
+            ParamSig domain = valDef("domain", ScalarType::String, Value(std::string("points")));
+            domain.enumValues = {"points", "corners", "faces", "detail"};
+            r.push_back(sig(BuiltinId::Count, "count",
+                            {geoArg("geo"), domain, fldDef("where", ScalarType::Bool, Value(true))},
+                            Type{ScalarType::Int, false, GeoKind::Any}));
+        }
+        for (BuiltinId id : {BuiltinId::MinOf, BuiltinId::MaxOf, BuiltinId::AvgOf, BuiltinId::SumOf}) {
+            const char* n = id == BuiltinId::MinOf ? "min_of"
+                          : id == BuiltinId::MaxOf ? "max_of"
+                          : id == BuiltinId::AvgOf ? "avg_of"
+                                                   : "sum_of";
+            r.push_back(sig(id, n,
+                            {fld("field", ScalarType::F32, true), geoArg("on"),
+                             fldDef("where", ScalarType::Bool, Value(true))},
+                            Type{ScalarType::F32, false, GeoKind::Any}));
+        }
+
+        // --- known but deferred past E2 -----------------------------------------
         r.push_back(deferredSig("import_mesh", "deferred: no host asset contract yet, Q4"));
-        r.push_back(deferredSig("merge", "topology ops are stage E2"));
-        r.push_back(deferredSig("subdivide", "topology ops are stage E2+"));
-        r.push_back(deferredSig("triangulate", "topology ops are stage E2+"));
-        r.push_back(deferredSig("merge_by_distance", "topology ops are stage E2+"));
-        r.push_back(deferredSig("delete", "topology ops are stage E2+"));
-        r.push_back(deferredSig("separate", "topology ops are stage E2+"));
-        r.push_back(deferredSig("islands", "topology ops are stage E2+"));
+        r.push_back(deferredSig("subdivide", "topology ops are a later stage (post-E2)"));
+        r.push_back(deferredSig("triangulate", "topology ops are a later stage (post-E2)"));
+        r.push_back(deferredSig("merge_by_distance", "topology ops are a later stage (post-E2)"));
+        r.push_back(deferredSig("delete", "topology ops are a later stage (post-E2)"));
+        r.push_back(deferredSig("separate", "topology ops are a later stage (post-E2)"));
+        r.push_back(deferredSig("islands", "topology ops are a later stage (post-E2)"));
         for (const char* n : {"sdf_sphere", "sdf_box", "sdf_union", "sdf_union_smooth", "sdf_subtract",
                               "sdf_subtract_smooth", "sdf_intersect", "sdf_displace", "sdf_instance_on_points",
                               "sdf_from_mesh", "mesh_from_sdf"})
             r.push_back(deferredSig(n, "SDF is stage E4"));
-        for (const char* n : {"mark", "unmark", "ingroup"})
-            r.push_back(deferredSig(n, "groups are stage E2"));
-        for (const char* n : {"set", "remove_attr", "rename_attr", "promote"})
-            r.push_back(deferredSig(n, "attributes are stage E2"));
-        for (const char* n : {"distribute_points", "instance_on_points", "realize"})
-            r.push_back(deferredSig(n, "scatter/instances are stage E2"));
         for (const char* n : {"raycast", "transfer"})
-            r.push_back(deferredSig(n, "sampling is stage E2+"));
-        for (const char* n : {"bbox", "extent", "centroid", "count", "min_of", "max_of", "avg_of", "sum_of"})
-            r.push_back(deferredSig(n, "aggregators are stage E2"));
+            r.push_back(deferredSig(n, "sampling ops are a later stage (post-E2)"));
         r.push_back(deferredSig("fracture", "fracture is stage E7"));
         return r;
     }();
@@ -379,6 +492,27 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Smooth:
         case BuiltinId::ComputeNormals:
             return evalTransformBuiltin(bound, run);
+        case BuiltinId::Mark:
+        case BuiltinId::Unmark:
+        case BuiltinId::SetAttr:
+        case BuiltinId::RemoveAttr:
+        case BuiltinId::RenameAttr:
+        case BuiltinId::Promote:
+            return evalAttrBuiltin(bound, run);
+        case BuiltinId::Merge:
+        case BuiltinId::DistributePoints:
+        case BuiltinId::InstanceOnPoints:
+        case BuiltinId::Realize:
+            return evalScatterBuiltin(bound, run);
+        case BuiltinId::Bbox:
+        case BuiltinId::Extent:
+        case BuiltinId::Centroid:
+        case BuiltinId::Count:
+        case BuiltinId::MinOf:
+        case BuiltinId::MaxOf:
+        case BuiltinId::AvgOf:
+        case BuiltinId::SumOf:
+            return evalAggregateBuiltin(bound, run);
         default:
             break;
     }

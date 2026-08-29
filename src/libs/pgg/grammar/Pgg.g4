@@ -250,6 +250,7 @@ primary returns [pgg::Expr* result]
     | s=STRING { $result = gc->newString($s.text, spanTok($s)); }
     | b=(TRUE|FALSE) { $result = gc->newBool($b.text, spanTok($b)); }
     | v=vec_literal { $result = $v.result; }
+    | l=list_literal { $result = $l.result; }
     | NONE { $result = gc->newNone(spanOf(_localctx)); }
     | i=IDENT { $result = gc->newIdent($i.text, spanTok($i)); }
     | a=attr_ref { $result = $a.result; }
@@ -263,6 +264,14 @@ attr_ref returns [pgg::Expr* result]
 vec_literal returns [pgg::Expr* result]
     : LPAREN n+=NUMBER (COMMA n+=NUMBER)* RPAREN
       { $result = gc->newNumberVec($n, spanOf(_localctx)); }
+    ;
+
+// list literal (spec §13: T[] values, e.g. variants = [a, b]). Any expressions
+// as elements; an optional trailing comma is accepted (multiline canonical
+// form, §6.4 — the E2 formatter still emits single-line statements).
+list_literal returns [pgg::Expr* result]
+    : LBRACKET (e+=aexpr (COMMA e+=aexpr)* COMMA?)? RBRACKET
+      { $result = gc->newList(gc->resultsOf($e), spanOf(_localctx)); }
     ;
 
 // literal: defaults in param positions (spec §6.6). A bare ident here is an

@@ -151,6 +151,12 @@ Expr* GrammarCompositor::newNumberVec(const std::vector<antlr4::Token*>& numbers
     return newVec(std::move(elems), span);
 }
 
+Expr* GrammarCompositor::newList(std::vector<Expr*> elems, Span span) {
+    auto* n = make<ListLit>(span);
+    n->elems = std::move(elems);
+    return n;
+}
+
 Expr* GrammarCompositor::newParen(Expr* inner, Span span) {
     auto* n = make<Paren>(span);
     n->inner = inner ? inner : newError(span);

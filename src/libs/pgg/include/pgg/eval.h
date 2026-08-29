@@ -1,6 +1,6 @@
 #pragma once
 
-// PGG public execution API (stage E1): run a .pgg graph to its declared
+// PGG public execution API (stages E1+E2): run a .pgg graph to its declared
 // outputs. Parsing (pgg/pgg.h) and E0 checks happen inside; the result
 // carries outputs, diagnostics (E0 + static + runtime) and evaluation stats.
 

@@ -100,4 +100,96 @@ TEST(Eval, DeterminismAcrossRuns) {
     EXPECT_EQ(*pgg::asGeo(c.outputs[0].value)->positions, *pgg::asGeo(c2.outputs[0].value)->positions);
 }
 
+// --- E2 acceptance corpus (spec §15 E2): rock + mask scatter + instances -----
+
+const std::string kCorpusE2 = std::string(PGG_CORPUS_DIR) + "/e2_rock_scatter.pgg";
+
+const pgg::Value* outputOf(const pgg::RunResult& r, const std::string& name) {
+    for (const auto& o : r.outputs)
+        if (o.name == name) return &o.value;
+    return nullptr;
+}
+
+TEST(EvalE2, CorpusScatterMatchesGoldens) {
+    pgg::RunResult r = pgg::runFile(kCorpusE2);
+    expectNoErrors(r);
+    ASSERT_EQ(r.outputs.size(), 4u);
+
+    // rock: ico subdiv 3 displaced (counts unchanged by the displace).
+    pgg::GeoPtr rock = pgg::asGeo(*outputOf(r, "rock"));
+    ASSERT_TRUE(rock);
+    EXPECT_EQ(rock->kind, pgg::GeoKind::Mesh);
+    EXPECT_EQ(rock->pointCount(), 642u);
+    EXPECT_EQ(rock->faceCount(), 1280u);
+
+    // Golden rock bbox (seed 42), also destructured in the corpus itself.
+    const glm::vec3 mn = pgg::asVec3(*outputOf(r, "mn"));
+    const glm::vec3 mx = pgg::asVec3(*outputOf(r, "mx"));
+    EXPECT_NEAR(mn.x, -2.14426f, 1e-5f);
+    EXPECT_NEAR(mn.y, -2.11947f, 1e-5f);
+    EXPECT_NEAR(mn.z, -2.07377f, 1e-5f);
+    EXPECT_NEAR(mx.x, 2.07115f, 1e-5f);
+    EXPECT_NEAR(mx.y, 2.0f, 1e-5f);
+    EXPECT_NEAR(mx.z, 2.20019f, 1e-5f);
+    glm::vec3 gmn, gmx;
+    pgg::geoBBox(*rock, gmn, gmx);
+    EXPECT_EQ(gmn, mn);
+    EXPECT_EQ(gmx, mx);
+
+    // instances: 25 anchors on the flat mask, split 10/15 across 2 variants.
+    pgg::GeoPtr inst = pgg::asGeo(*outputOf(r, "inst"));
+    ASSERT_TRUE(inst);
+    EXPECT_EQ(inst->kind, pgg::GeoKind::Instances);
+    ASSERT_EQ(inst->pointCount(), 25u);
+    ASSERT_TRUE(inst->instanceSources);
+    ASSERT_EQ(inst->instanceSources->size(), 2u);
+    const pgg::AttrColumn* variantCol = inst->pointAttrs ? inst->pointAttrs->find("variant") : nullptr;
+    ASSERT_TRUE(variantCol);
+    const auto& variants = std::get<std::shared_ptr<const std::vector<int64_t>>>(variantCol->data);
+    int v0 = 0, v1 = 0;
+    for (int64_t v : *variants) (v == 0 ? v0 : v1) += 1;
+    EXPECT_EQ(v0, 10);
+    EXPECT_EQ(v1, 15);
+
+    // Mask-driven density: every anchor sits on the flat top of the rock.
+    for (const glm::vec3& p : *inst->positions) EXPECT_GT(p.y, 1.0f);
+    // Golden anchor bbox (seed 42).
+    glm::vec3 amn, amx;
+    pgg::geoBBox(*inst, amn, amx);
+    EXPECT_NEAR(amn.x, -1.31312f, 1e-5f);
+    EXPECT_NEAR(amn.y, 1.52644f, 1e-5f);
+    EXPECT_NEAR(amn.z, -0.999541f, 1e-4f);
+    EXPECT_NEAR(amx.x, 0.832977f, 1e-5f);
+    EXPECT_NEAR(amx.y, 1.98334f, 1e-5f);
+    EXPECT_NEAR(amx.z, 1.18762f, 1e-5f);
+}
+
+TEST(EvalE2, CorpusDeterminismAcrossRuns) {
+    pgg::RunResult a = pgg::runFile(kCorpusE2);
+    pgg::RunResult b = pgg::runFile(kCorpusE2);
+    expectNoErrors(a);
+    expectNoErrors(b);
+    EXPECT_EQ(*pgg::asGeo(*outputOf(a, "inst"))->positions, *pgg::asGeo(*outputOf(b, "inst"))->positions);
+    EXPECT_EQ(*pgg::asGeo(*outputOf(a, "rock"))->positions, *pgg::asGeo(*outputOf(b, "rock"))->positions);
+    // A different seed produces a different (deterministic) scatter.
+    pgg::RunParams p;
+    p.values.push_back({"seed", pgg::Value(int64_t(7))});
+    pgg::RunResult c = pgg::runFile(kCorpusE2, p);
+    expectNoErrors(c);
+    pgg::RunResult c2 = pgg::runFile(kCorpusE2, p);
+    EXPECT_EQ(*pgg::asGeo(*outputOf(c, "inst"))->positions, *pgg::asGeo(*outputOf(c2, "inst"))->positions);
+}
+
+TEST(EvalE2, CorpusMinDistHolds) {
+    // The corpus scatters with min_dist = 0.35.
+    pgg::RunResult r = pgg::runFile(kCorpusE2);
+    expectNoErrors(r);
+    pgg::GeoPtr inst = pgg::asGeo(*outputOf(r, "inst"));
+    ASSERT_TRUE(inst);
+    for (size_t i = 0; i < inst->pointCount(); ++i)
+        for (size_t j = i + 1; j < inst->pointCount(); ++j)
+            EXPECT_GE(glm::length((*inst->positions)[i] - (*inst->positions)[j]), 0.35f - 1e-4f)
+                << i << " " << j;
+}
+
 }  // namespace

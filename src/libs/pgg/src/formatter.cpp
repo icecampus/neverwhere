@@ -271,6 +271,15 @@ private:
                 }
                 return s + ")";
             }
+            case NodeKind::ListLit: {
+                const auto* v = static_cast<const ListLit*>(e);
+                std::string s = "[";
+                for (size_t i = 0; i < v->elems.size(); ++i) {
+                    if (i) s += ", ";
+                    s += expr(v->elems[i]);
+                }
+                return s + "]";
+            }
             case NodeKind::Paren:
                 return "(" + expr(static_cast<const Paren*>(e)->inner) + ")";
             case NodeKind::Unary: {

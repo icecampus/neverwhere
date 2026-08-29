@@ -43,6 +43,11 @@ void normalizeCalls(pgg::Node* n) {
             case pgg::NodeKind::Paren:
                 self(static_cast<pgg::Paren*>(e)->inner, self);
                 break;
+            case pgg::NodeKind::ListLit: {
+                auto* l = static_cast<pgg::ListLit*>(e);
+                for (pgg::Expr* el : l->elems) self(el, self);
+                break;
+            }
             case pgg::NodeKind::Unary:
                 self(static_cast<pgg::Unary*>(e)->operand, self);
                 break;
@@ -142,6 +147,32 @@ TEST(Formatter, NoReorderWhenAnyArgPositional) {
     ASSERT_FALSE(doc.hasErrors());
     EXPECT_NE(pgg::format(doc.file, doc.comments).find("f(1, b = 2, a = 3)"),
               std::string::npos);
+}
+
+TEST(Formatter, ListLiteralCanonical) {
+    // Canonical form is single-line `[a, b]`; the trailing comma of the
+    // multiline style (§6.4) is accepted but dropped.
+    const std::string src =
+        "a = 1\n"
+        "b = 2\n"
+        "xs = [a,    b,]\n"
+        "empty = []\n"
+        "output xs\n"
+        "output empty\n";
+    pgg::Document doc = pgg::parse(src);
+    ASSERT_FALSE(doc.hasErrors());
+    EXPECT_EQ(pgg::format(doc.file, doc.comments),
+              "a = 1\n"
+              "b = 2\n"
+              "xs = [a, b]\n"
+              "empty = []\n"
+              "output xs\n"
+              "output empty\n");
+    // round-trip: parse(format(x)) == parse(x)
+    const std::string formatted = pgg::format(doc.file, doc.comments);
+    pgg::Document doc2 = pgg::parse(formatted);
+    ASSERT_FALSE(doc2.hasErrors());
+    EXPECT_TRUE(pgg::astEqual(doc.file, doc2.file));
 }
 
 TEST(Formatter, RoundTripCorpus) {

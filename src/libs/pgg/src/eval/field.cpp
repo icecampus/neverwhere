@@ -247,23 +247,18 @@ ConstBufferPtr computeField(const FieldNode& node, EvalContext& ctx) {
         case FKind::Const:
             return makeConstBuffer(node.constValue, count);
         case FKind::AttrP: {
-            if (ctx.domain != Domain::Points) {
-                run.report("E301", node.span, "@P is only readable on the points domain at stage E1");
-                return makeZeroBuffer(ScalarType::Vec3, count);
-            }
-            return std::make_shared<const Buffer>(Vec3Buf(*ctx.geo.positions));
+            std::shared_ptr<const std::vector<glm::vec3>> p = samplePositions(ctx.geo, ctx.domain);
+            if (!p) return makeZeroBuffer(ScalarType::Vec3, count);
+            return std::make_shared<const Buffer>(Vec3Buf(*p));
         }
         case FKind::AttrN: {
-            if (ctx.domain != Domain::Points) {
-                run.report("E301", node.span, "@N is only readable on the points domain at stage E1");
-                return makeZeroBuffer(ScalarType::Vec3, count);
-            }
-            if (!ctx.geo.normals) {
+            std::shared_ptr<const std::vector<glm::vec3>> n = sampleNormals(ctx.geo, ctx.domain);
+            if (!n) {
                 run.report("E302", node.span, "attribute @N is not present on this geometry",
                            "run compute_normals (or use a surface source that writes @N) first");
                 return makeZeroBuffer(ScalarType::Vec3, count);
             }
-            return std::make_shared<const Buffer>(Vec3Buf(*ctx.geo.normals));
+            return std::make_shared<const Buffer>(Vec3Buf(*n));
         }
         case FKind::AttrIndex: {
             IntBuf out(count);
@@ -271,23 +266,31 @@ ConstBufferPtr computeField(const FieldNode& node, EvalContext& ctx) {
             return std::make_shared<const Buffer>(std::move(out));
         }
         case FKind::AttrNamed: {
-            const AttrSet* attrs = ctx.geo.attrs(ctx.domain);
-            const AttrColumn* col = attrs ? attrs->find(node.name) : nullptr;
+            std::optional<ColumnData> col = sampleAttrColumn(ctx.geo, node.name, ctx.domain);
             if (!col) {
-                run.report("E302", node.span, "attribute '@" + node.name + "' is not present on this geometry");
+                if (attrExistsOnAnyDomain(ctx.geo, node.name)) {
+                    run.report("E301", node.span,
+                               "attribute '@" + node.name + "' cannot be read on the " +
+                                   std::string(domainName(ctx.domain)) + " domain",
+                               "string attributes do not interpolate across domains");
+                } else {
+                    run.report("E302", node.span,
+                               "attribute '@" + node.name + "' is not present on this geometry",
+                               "write it with set(geo, \"" + node.name + "\", ...) first");
+                }
                 return makeZeroBuffer(node.type, count);
             }
             return std::visit(
                 [&](const auto& ptr) -> ConstBufferPtr {
                     using VecT = std::decay_t<decltype(*ptr)>;
                     if constexpr (std::is_same_v<VecT, std::vector<std::string>>) {
-                        run.report("E301", node.span, "string attributes are not readable as fields at stage E1");
+                        run.report("E301", node.span, "string attributes are not readable as fields");
                         return makeZeroBuffer(node.type, count);
                     } else {
                         return std::make_shared<const Buffer>(VecT(*ptr));
                     }
                 },
-                col->data);
+                *col);
         }
         case FKind::Unary: {
             ConstBufferPtr a = evalField(node.args[0], ctx.geo, ctx.domain, run);
@@ -459,6 +462,31 @@ TypedValue compileExprImpl(const Expr* e, RunContext& run, const IdentResolver& 
             run.report("E100", e->span, "vector literals are vec2..vec4");
             return {};
         }
+        case NodeKind::ListLit: {
+            const auto* l = static_cast<const ListLit*>(e);
+            auto elems = std::make_shared<std::vector<Value>>();
+            ScalarType elemBase = ScalarType::None;
+            GeoKind elemKind = GeoKind::Any;
+            for (const Expr* el : l->elems) {
+                TypedValue tv = compileExprImpl(el, run, resolve);
+                if (!tv) continue;
+                if (tv.field) {
+                    run.report("E205", el->span, "list elements must be values, got " + typeName(tv.type));
+                    continue;
+                }
+                const ScalarType eb = valueBase(tv.value);
+                if (elemBase == ScalarType::None) {
+                    elemBase = eb;
+                    elemKind = tv.type.geoKind;
+                } else if (eb != elemBase) {
+                    run.report("E204", el->span, "list elements must share one type");
+                }
+                elems->push_back(tv.value);
+            }
+            TypedValue tv = makeValueResult(Value(ListValuePtr(elems)));
+            tv.type = Type{elemBase, false, elemKind, true};
+            return tv;
+        }
         case NodeKind::Paren:
             return compileExprImpl(static_cast<const Paren*>(e)->inner, run, resolve);
         case NodeKind::Unary: {
@@ -535,7 +563,7 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
     if (c->path.size() != 1) {
         std::string q;
         for (const std::string& p : c->path) q += (q.empty() ? "" : ".") + p;
-        run.report("E201", c->span, "qualified operation '" + q + "' is not supported at stage E1",
+        run.report("E201", c->span, "qualified operation '" + q + "' is not supported at stage E2",
                    "def/imports are stage E5");
         return {};
     }
@@ -548,7 +576,7 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
     }
     if (sig->deferredStage) {
         run.report("E201", c->span,
-                   "operation '" + name + "' is not supported at stage E1 (" + sig->deferredStage + ")");
+                   "operation '" + name + "' is not supported at stage E2 (" + sig->deferredStage + ")");
         return {};
     }
 
@@ -745,10 +773,14 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
 
     Value v = evalBuiltinCall(bound, run);
     TypedValue tv = makeValueResult(v);
-    tv.type = sig->result;
-    tv.type.isField = false;
-    if (sig->resultGeoKindOfFirstArg && !sig->params.empty() && argTV[0])
-        tv.type.geoKind = argTV[0].type.geoKind;
+    if (sig->results.empty()) {
+        // Multi-output nodes keep the tuple type from the payload; their
+        // declared `result` is empty by construction.
+        tv.type = sig->result;
+        tv.type.isField = false;
+        if (sig->resultGeoKindOfFirstArg && !sig->params.empty() && argTV[0])
+            tv.type.geoKind = argTV[0].type.geoKind;
+    }
     return tv;
 }
 

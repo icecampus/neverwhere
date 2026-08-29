@@ -3,7 +3,7 @@
 #include "src/compositor.h"
 
 
-// Generated from /Users/neuro/sources/neverwhere/src/libs/pgg/grammar/Pgg.g4 by ANTLR 4.13.2
+// Generated from /home/neuro/sources/neverwhere/src/libs/pgg/grammar/Pgg.g4 by ANTLR 4.13.2
 
 #pragma once
 
@@ -35,7 +35,7 @@ public:
     RuleAnd_expr = 21, RuleCmp_expr = 22, RuleAdd_expr = 23, RuleMul_expr = 24, 
     RuleUnary = 25, RulePostfix = 26, RuleCall = 27, RuleQualified_name = 28, 
     RuleArg = 29, RulePrimary = 30, RuleAttr_ref = 31, RuleVec_literal = 32, 
-    RuleLiteral = 33, RuleType = 34
+    RuleList_literal = 33, RuleLiteral = 34, RuleType = 35
   };
 
   explicit PggParser(antlr4::TokenStream *input);
@@ -112,6 +112,7 @@ public:
   class PrimaryContext;
   class Attr_refContext;
   class Vec_literalContext;
+  class List_literalContext;
   class LiteralContext;
   class TypeContext; 
 
@@ -762,6 +763,7 @@ public:
     antlr4::Token *s = nullptr;
     antlr4::Token *b = nullptr;
     PggParser::Vec_literalContext *v = nullptr;
+    PggParser::List_literalContext *l = nullptr;
     antlr4::Token *i = nullptr;
     PggParser::Attr_refContext *a = nullptr;
     PggParser::AexprContext *e = nullptr;
@@ -772,6 +774,7 @@ public:
     antlr4::tree::TerminalNode *TRUE();
     antlr4::tree::TerminalNode *FALSE();
     Vec_literalContext *vec_literal();
+    List_literalContext *list_literal();
     antlr4::tree::TerminalNode *NONE();
     antlr4::tree::TerminalNode *IDENT();
     Attr_refContext *attr_ref();
@@ -816,6 +819,25 @@ public:
   };
 
   Vec_literalContext* vec_literal();
+
+  class  List_literalContext : public antlr4::ParserRuleContext {
+  public:
+    pgg::Expr* result;
+    PggParser::AexprContext *aexprContext = nullptr;
+    std::vector<AexprContext *> e;
+    List_literalContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *LBRACKET();
+    antlr4::tree::TerminalNode *RBRACKET();
+    std::vector<AexprContext *> aexpr();
+    AexprContext* aexpr(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> COMMA();
+    antlr4::tree::TerminalNode* COMMA(size_t i);
+
+   
+  };
+
+  List_literalContext* list_literal();
 
   class  LiteralContext : public antlr4::ParserRuleContext {
   public:

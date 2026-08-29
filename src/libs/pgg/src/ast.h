@@ -41,6 +41,7 @@ enum class NodeKind {
     Ident,
     AttrRef,  // @name
     VecLit,
+    ListLit,  // [expr, ...]
     Paren,
     Unary,
     Binary,
@@ -110,6 +111,11 @@ struct AttrRef final : Expr {
 struct VecLit final : Expr {
     std::vector<Expr*> elems;  // NumberLit only (spec: vec_literal is numeric)
     explicit VecLit(Span s) : Expr(NodeKind::VecLit, s) {}
+};
+
+struct ListLit final : Expr {
+    std::vector<Expr*> elems;  // any expressions (spec §13: T[] list literal)
+    explicit ListLit(Span s) : Expr(NodeKind::ListLit, s) {}
 };
 
 struct Paren final : Expr {

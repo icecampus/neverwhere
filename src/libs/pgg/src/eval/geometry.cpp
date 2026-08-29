@@ -12,6 +12,7 @@ const char* geoKindName(GeoKind kind) {
     switch (kind) {
         case GeoKind::Mesh: return "mesh";
         case GeoKind::Points: return "points";
+        case GeoKind::Instances: return "instances";
         default: return "geo";
     }
 }
@@ -26,6 +27,13 @@ const char* domainName(Domain domain) {
     return "?";
 }
 
+Domain domainFromName(const std::string& name) {
+    if (name == "points") return Domain::Points;
+    if (name == "corners") return Domain::Corners;
+    if (name == "faces") return Domain::Faces;
+    return Domain::Detail;
+}
+
 size_t AttrColumn::size() const {
     return std::visit([](const auto& ptr) { return ptr ? ptr->size() : size_t(0); }, data);
 }
@@ -33,6 +41,11 @@ size_t AttrColumn::size() const {
 const AttrColumn* AttrSet::find(const std::string& name) const {
     auto it = columns.find(name);
     return it == columns.end() ? nullptr : &it->second;
+}
+
+ConstBoolColumnPtr GroupSet::find(const std::string& name) const {
+    auto it = columns.find(name);
+    return it == columns.end() ? nullptr : it->second;
 }
 
 size_t Geo::elementCount(Domain domain) const {
@@ -51,6 +64,16 @@ const AttrSet* Geo::attrs(Domain domain) const {
         case Domain::Corners: return cornerAttrs.get();
         case Domain::Faces: return faceAttrs.get();
         case Domain::Detail: return detailAttrs.get();
+    }
+    return nullptr;
+}
+
+const GroupSet* Geo::groups(Domain domain) const {
+    switch (domain) {
+        case Domain::Points: return pointGroups.get();
+        case Domain::Corners: return cornerGroups.get();
+        case Domain::Faces: return faceGroups.get();
+        case Domain::Detail: return detailGroups.get();
     }
     return nullptr;
 }
@@ -83,6 +106,375 @@ GeoPtr withNormals(const Geo& geo, std::vector<glm::vec3> normals) {
     Geo out = geo;
     out.normals = std::make_shared<const std::vector<glm::vec3>>(std::move(normals));
     return std::make_shared<const Geo>(std::move(out));
+}
+
+GeoPtr withAttrs(const Geo& geo, Domain domain, std::shared_ptr<const AttrSet> attrs) {
+    Geo out = geo;
+    switch (domain) {
+        case Domain::Points: out.pointAttrs = std::move(attrs); break;
+        case Domain::Corners: out.cornerAttrs = std::move(attrs); break;
+        case Domain::Faces: out.faceAttrs = std::move(attrs); break;
+        case Domain::Detail: out.detailAttrs = std::move(attrs); break;
+    }
+    return std::make_shared<const Geo>(std::move(out));
+}
+
+GeoPtr withGroups(const Geo& geo, Domain domain, std::shared_ptr<const GroupSet> groups) {
+    Geo out = geo;
+    switch (domain) {
+        case Domain::Points: out.pointGroups = std::move(groups); break;
+        case Domain::Corners: out.cornerGroups = std::move(groups); break;
+        case Domain::Faces: out.faceGroups = std::move(groups); break;
+        case Domain::Detail: out.detailGroups = std::move(groups); break;
+    }
+    return std::make_shared<const Geo>(std::move(out));
+}
+
+bool attrExistsOnAnyDomain(const Geo& geo, const std::string& name) {
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const AttrSet* attrs = geo.attrs(d);
+        if (attrs && attrs->find(name)) return true;
+    }
+    return false;
+}
+
+bool groupExistsOnAnyDomain(const Geo& geo, const std::string& name) {
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const GroupSet* groups = geo.groups(d);
+        if (groups && groups->find(name)) return true;
+    }
+    return false;
+}
+
+// --- domain interpolation matrix (spec §4.3) ----------------------------------
+
+namespace {
+
+// Untyped double-wide working column: interpolation runs once for all element
+// types; the typed load/store at the edges keeps the source type (bool
+// thresholds at > 0.5, int rounds to nearest).
+struct DColumn {
+    int width = 1;
+    std::vector<glm::dvec4> vals;
+};
+
+DColumn loadDColumn(const ColumnData& data) {
+    return std::visit(
+        [](const auto& ptr) -> DColumn {
+            using VecT = std::decay_t<decltype(*ptr)>;
+            using ElemT = typename VecT::value_type;
+            DColumn out;
+            const size_t n = ptr ? ptr->size() : 0;
+            out.vals.resize(n, glm::dvec4(0.0));
+            if constexpr (std::is_same_v<ElemT, float>) {
+                out.width = 1;
+                for (size_t i = 0; i < n; ++i) out.vals[i].x = (*ptr)[i];
+            } else if constexpr (std::is_same_v<ElemT, int64_t>) {
+                out.width = 1;
+                for (size_t i = 0; i < n; ++i) out.vals[i].x = static_cast<double>((*ptr)[i]);
+            } else if constexpr (std::is_same_v<ElemT, uint8_t>) {
+                out.width = 1;
+                for (size_t i = 0; i < n; ++i) out.vals[i].x = (*ptr)[i] ? 1.0 : 0.0;
+            } else if constexpr (std::is_same_v<ElemT, glm::vec2>) {
+                out.width = 2;
+                for (size_t i = 0; i < n; ++i)
+                    for (int k = 0; k < 2; ++k) out.vals[i][k] = (*ptr)[i][k];
+            } else if constexpr (std::is_same_v<ElemT, glm::vec3>) {
+                out.width = 3;
+                for (size_t i = 0; i < n; ++i)
+                    for (int k = 0; k < 3; ++k) out.vals[i][k] = (*ptr)[i][k];
+            } else if constexpr (std::is_same_v<ElemT, glm::vec4>) {
+                out.width = 4;
+                for (size_t i = 0; i < n; ++i)
+                    for (int k = 0; k < 4; ++k) out.vals[i][k] = (*ptr)[i][k];
+            } else {  // string: never interpolated
+                out.width = 0;
+            }
+            return out;
+        },
+        data);
+}
+
+ColumnData storeDColumn(const DColumn& col, const ColumnData& typeOf) {
+    return std::visit(
+        [&](const auto& ptr) -> ColumnData {
+            using VecT = std::decay_t<decltype(*ptr)>;
+            using ElemT = typename VecT::value_type;
+            const size_t n = col.vals.size();
+            if constexpr (std::is_same_v<ElemT, float>) {
+                std::vector<float> out(n);
+                for (size_t i = 0; i < n; ++i) out[i] = static_cast<float>(col.vals[i].x);
+                return std::make_shared<const std::vector<float>>(std::move(out));
+            } else if constexpr (std::is_same_v<ElemT, int64_t>) {
+                std::vector<int64_t> out(n);
+                for (size_t i = 0; i < n; ++i) out[i] = static_cast<int64_t>(std::llround(col.vals[i].x));
+                return std::make_shared<const std::vector<int64_t>>(std::move(out));
+            } else if constexpr (std::is_same_v<ElemT, uint8_t>) {
+                std::vector<uint8_t> out(n);
+                for (size_t i = 0; i < n; ++i) out[i] = col.vals[i].x > 0.5 ? 1 : 0;
+                return std::make_shared<const std::vector<uint8_t>>(std::move(out));
+            } else if constexpr (std::is_same_v<ElemT, glm::vec2>) {
+                std::vector<glm::vec2> out(n);
+                for (size_t i = 0; i < n; ++i)
+                    out[i] = glm::vec2(static_cast<float>(col.vals[i].x), static_cast<float>(col.vals[i].y));
+                return std::make_shared<const std::vector<glm::vec2>>(std::move(out));
+            } else if constexpr (std::is_same_v<ElemT, glm::vec3>) {
+                std::vector<glm::vec3> out(n);
+                for (size_t i = 0; i < n; ++i)
+                    out[i] = glm::vec3(static_cast<float>(col.vals[i].x), static_cast<float>(col.vals[i].y),
+                                       static_cast<float>(col.vals[i].z));
+                return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
+            } else if constexpr (std::is_same_v<ElemT, glm::vec4>) {
+                std::vector<glm::vec4> out(n);
+                for (size_t i = 0; i < n; ++i)
+                    out[i] = glm::vec4(static_cast<float>(col.vals[i].x), static_cast<float>(col.vals[i].y),
+                                       static_cast<float>(col.vals[i].z), static_cast<float>(col.vals[i].w));
+                return std::make_shared<const std::vector<glm::vec4>>(std::move(out));
+            } else {
+                return typeOf;  // string: unreachable (callers short-circuit)
+            }
+        },
+        typeOf);
+}
+
+// corner -> owning face lookup, built on demand.
+std::vector<int32_t> cornerFaceMap(const Geo& geo) {
+    std::vector<int32_t> map(geo.cornerCount(), 0);
+    for (size_t f = 0; f < geo.faceCount(); ++f)
+        for (int32_t c = (*geo.faceOffsets)[f]; c < (*geo.faceOffsets)[f + 1]; ++c)
+            map[static_cast<size_t>(c)] = static_cast<int32_t>(f);
+    return map;
+}
+
+// Reduce `vals` (indexed by selector, e.g. corners of a face) with the mode.
+glm::dvec4 reduceVals(const std::vector<glm::dvec4>& vals, const std::vector<int32_t>& sel,
+                      PromoteMode mode) {
+    glm::dvec4 acc(0.0);
+    if (sel.empty()) return acc;
+    if (mode == PromoteMode::First) return vals[static_cast<size_t>(sel.front())];
+    for (int32_t s : sel) acc += vals[static_cast<size_t>(s)];
+    if (mode == PromoteMode::Average) acc /= static_cast<double>(sel.size());
+    return acc;
+}
+
+// The conversion matrix. from == to is a copy; expanding conversions
+// (detail -> *, points -> corners, faces -> corners) copy/broadcast for every
+// mode; reducing conversions apply the mode.
+std::vector<glm::dvec4> interpolateDColumn(const Geo& geo, Domain from,
+                                           const std::vector<glm::dvec4>& src, Domain to,
+                                           PromoteMode mode) {
+    if (from == to) return src;
+    const size_t nTo = geo.elementCount(to);
+    if (from == Domain::Detail) {
+        const glm::dvec4 v = src.empty() ? glm::dvec4(0.0) : src[0];
+        return std::vector<glm::dvec4>(nTo, v);
+    }
+    if (to == Domain::Detail) {
+        glm::dvec4 acc(0.0);
+        if (!src.empty()) {
+            if (mode == PromoteMode::First) {
+                acc = src[0];
+            } else {
+                for (const glm::dvec4& v : src) acc += v;
+                if (mode == PromoteMode::Average) acc /= static_cast<double>(src.size());
+            }
+        }
+        return {acc};
+    }
+
+    const bool hasTopo = geo.cornerVerts && geo.faceOffsets;
+    auto incidentCorners = [&](int32_t point) {
+        std::vector<int32_t> sel;
+        if (hasTopo)
+            for (size_t c = 0; c < geo.cornerVerts->size(); ++c)
+                if ((*geo.cornerVerts)[c] == point) sel.push_back(static_cast<int32_t>(c));
+        return sel;
+    };
+
+    std::vector<glm::dvec4> out(nTo, glm::dvec4(0.0));
+    if (from == Domain::Points && to == Domain::Corners) {
+        for (size_t c = 0; c < nTo; ++c)
+            out[c] = src[static_cast<size_t>((*geo.cornerVerts)[c])];
+        return out;
+    }
+    if (from == Domain::Corners && to == Domain::Faces) {
+        for (size_t f = 0; f < geo.faceCount(); ++f) {
+            std::vector<int32_t> sel;
+            for (int32_t c = (*geo.faceOffsets)[f]; c < (*geo.faceOffsets)[f + 1]; ++c) sel.push_back(c);
+            out[f] = reduceVals(src, sel, mode);
+        }
+        return out;
+    }
+    if (from == Domain::Faces && to == Domain::Corners) {
+        const std::vector<int32_t> faceOf = cornerFaceMap(geo);
+        for (size_t c = 0; c < nTo; ++c) out[c] = src[static_cast<size_t>(faceOf[c])];
+        return out;
+    }
+    if (from == Domain::Corners && to == Domain::Points) {
+        for (size_t p = 0; p < nTo; ++p) out[p] = reduceVals(src, incidentCorners(static_cast<int32_t>(p)), mode);
+        return out;
+    }
+    if (from == Domain::Points && to == Domain::Faces) {
+        for (size_t f = 0; f < geo.faceCount(); ++f) {
+            std::vector<int32_t> sel;
+            for (int32_t c = (*geo.faceOffsets)[f]; c < (*geo.faceOffsets)[f + 1]; ++c)
+                sel.push_back((*geo.cornerVerts)[c]);
+            out[f] = reduceVals(src, sel, mode);
+        }
+        return out;
+    }
+    // Faces -> Points: corner-wise copy, then the corners -> points reduction.
+    const std::vector<int32_t> faceOf = cornerFaceMap(geo);
+    std::vector<glm::dvec4> viaCorners(geo.cornerCount());
+    for (size_t c = 0; c < viaCorners.size(); ++c) viaCorners[c] = src[static_cast<size_t>(faceOf[c])];
+    for (size_t p = 0; p < nTo; ++p)
+        out[p] = reduceVals(viaCorners, incidentCorners(static_cast<int32_t>(p)), mode);
+    return out;
+}
+
+// Finds the attribute on any domain (the first in points/corners/faces/detail
+// order wins) and resamples it. String columns are same-domain only.
+std::optional<ColumnData> resampleAttr(const Geo& geo, const std::string& name, Domain domain,
+                                       Domain* foundDomain, PromoteMode mode) {
+    for (Domain from : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const AttrSet* attrs = geo.attrs(from);
+        const AttrColumn* col = attrs ? attrs->find(name) : nullptr;
+        if (!col) continue;
+        if (foundDomain) *foundDomain = from;
+        if (std::holds_alternative<std::shared_ptr<const std::vector<std::string>>>(col->data)) {
+            if (from == domain) return col->data;
+            return std::nullopt;  // strings do not interpolate
+        }
+        if (from == domain) return col->data;
+        DColumn dc = loadDColumn(col->data);
+        dc.vals = interpolateDColumn(geo, from, dc.vals, domain, mode);
+        return storeDColumn(dc, col->data);
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+std::optional<ColumnData> sampleAttrColumn(const Geo& geo, const std::string& name, Domain domain) {
+    return resampleAttr(geo, name, domain, nullptr, PromoteMode::Average);
+}
+
+std::optional<ColumnData> promoteAttrColumn(const Geo& geo, const std::string& name, Domain from,
+                                            Domain to, PromoteMode mode) {
+    const AttrSet* attrs = geo.attrs(from);
+    const AttrColumn* col = attrs ? attrs->find(name) : nullptr;
+    if (!col) return std::nullopt;
+    if (std::holds_alternative<std::shared_ptr<const std::vector<std::string>>>(col->data)) {
+        if (from == to) return col->data;
+        return std::nullopt;  // strings do not interpolate
+    }
+    if (from == to) return col->data;
+    DColumn dc = loadDColumn(col->data);
+    dc.vals = interpolateDColumn(geo, from, dc.vals, to, mode);
+    return storeDColumn(dc, col->data);
+}
+
+ConstBoolColumnPtr sampleGroupColumn(const Geo& geo, const std::string& name, Domain domain) {
+    for (Domain from : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const GroupSet* groups = geo.groups(from);
+        ConstBoolColumnPtr col = groups ? groups->find(name) : nullptr;
+        if (!col) continue;
+        if (from == domain) return col;
+        DColumn dc;
+        dc.width = 1;
+        dc.vals.resize(col->size(), glm::dvec4(0.0));
+        for (size_t i = 0; i < col->size(); ++i) dc.vals[i].x = (*col)[i] ? 1.0 : 0.0;
+        dc.vals = interpolateDColumn(geo, from, dc.vals, domain, PromoteMode::Average);
+        BoolColumn out(dc.vals.size());
+        for (size_t i = 0; i < dc.vals.size(); ++i) out[i] = dc.vals[i].x > 0.5 ? 1 : 0;
+        return std::make_shared<const BoolColumn>(std::move(out));
+    }
+    return nullptr;
+}
+
+std::shared_ptr<const std::vector<glm::vec3>> samplePositions(const Geo& geo, Domain domain) {
+    if (!geo.positions) return nullptr;
+    if (domain == Domain::Points) return geo.positions;
+    DColumn dc;
+    dc.width = 3;
+    dc.vals.resize(geo.positions->size(), glm::dvec4(0.0));
+    for (size_t i = 0; i < geo.positions->size(); ++i) {
+        const glm::vec3& p = (*geo.positions)[i];
+        dc.vals[i] = glm::dvec4(p.x, p.y, p.z, 0.0);
+    }
+    dc.vals = interpolateDColumn(geo, Domain::Points, dc.vals, domain, PromoteMode::Average);
+    std::vector<glm::vec3> out(dc.vals.size());
+    for (size_t i = 0; i < dc.vals.size(); ++i)
+        out[i] = glm::vec3(static_cast<float>(dc.vals[i].x), static_cast<float>(dc.vals[i].y),
+                           static_cast<float>(dc.vals[i].z));
+    return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
+}
+
+std::shared_ptr<const std::vector<glm::vec3>> sampleNormals(const Geo& geo, Domain domain) {
+    if (!geo.normals) return nullptr;
+    if (domain == Domain::Points) return geo.normals;
+    DColumn dc;
+    dc.width = 3;
+    dc.vals.resize(geo.normals->size(), glm::dvec4(0.0));
+    for (size_t i = 0; i < geo.normals->size(); ++i) {
+        const glm::vec3& n = (*geo.normals)[i];
+        dc.vals[i] = glm::dvec4(n.x, n.y, n.z, 0.0);
+    }
+    dc.vals = interpolateDColumn(geo, Domain::Points, dc.vals, domain, PromoteMode::Average);
+    std::vector<glm::vec3> out(dc.vals.size());
+    for (size_t i = 0; i < dc.vals.size(); ++i)
+        out[i] = glm::vec3(static_cast<float>(dc.vals[i].x), static_cast<float>(dc.vals[i].y),
+                           static_cast<float>(dc.vals[i].z));
+    return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
+}
+
+// --- column utilities (merge/realize union semantics) -------------------------
+
+ColumnData zeroColumnLike(const ColumnData& typeOf, size_t count) {
+    return std::visit(
+        [count](const auto& ptr) -> ColumnData {
+            using VecT = std::decay_t<decltype(*ptr)>;
+            using ElemT = typename VecT::value_type;
+            return std::make_shared<const VecT>(count, ElemT{});
+        },
+        typeOf);
+}
+
+ColumnData convertColumn(const ColumnData& src, const ColumnData& typeOf) {
+    if (src.index() == typeOf.index()) return src;
+    const bool srcStr = std::holds_alternative<std::shared_ptr<const std::vector<std::string>>>(src);
+    const bool dstStr =
+        std::holds_alternative<std::shared_ptr<const std::vector<std::string>>>(typeOf);
+    if (srcStr || dstStr) return zeroColumnLike(typeOf, AttrColumn{src}.size());
+    DColumn dc = loadDColumn(src);
+    return storeDColumn(dc, typeOf);
+}
+
+ColumnData concatColumns(const ColumnData& a, const ColumnData& b) {
+    const ColumnData cb = b.index() == a.index() ? b : convertColumn(b, a);
+    return std::visit(
+        [&](const auto& pa) -> ColumnData {
+            using VecT = std::decay_t<decltype(*pa)>;
+            const auto& pb = std::get<std::shared_ptr<const VecT>>(cb);
+            VecT out;
+            out.reserve((pa ? pa->size() : 0) + (pb ? pb->size() : 0));
+            if (pa) out.insert(out.end(), pa->begin(), pa->end());
+            if (pb) out.insert(out.end(), pb->begin(), pb->end());
+            return std::make_shared<const VecT>(std::move(out));
+        },
+        a);
+}
+
+ColumnData gatherColumn(const ColumnData& col, const std::vector<int32_t>& indices) {
+    return std::visit(
+        [&](const auto& ptr) -> ColumnData {
+            using VecT = std::decay_t<decltype(*ptr)>;
+            VecT out;
+            out.reserve(indices.size());
+            for (int32_t i : indices) out.push_back((*ptr)[static_cast<size_t>(i)]);
+            return std::make_shared<const VecT>(std::move(out));
+        },
+        col);
 }
 
 void geoBBox(const Geo& geo, glm::vec3& outMin, glm::vec3& outMax) {

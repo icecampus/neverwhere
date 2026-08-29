@@ -49,11 +49,11 @@ public:
                 }
                 case NodeKind::Binding: {
                     const auto* b = static_cast<const Binding*>(item);
-                    if (!b->targets.names.empty()) topLevel_[b->targets.names[0]] = item;
+                    for (const std::string& n : b->targets.names) topLevel_[n] = item;
                     break;
                 }
                 default:
-                    break;  // zones (rejected statically), tap (no-op at E1)
+                    break;  // zones (rejected statically), tap (no-op at E2)
             }
         }
     }
@@ -110,8 +110,22 @@ private:
         } else if (node->kind == NodeKind::Binding) {
             const auto* b = static_cast<const Binding*>(node);
             tv = compileExpr(b->value, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
+            if (b->targets.names.size() > 1) {
+                // Multi-output destructure: the tuple (a list Value) fans out
+                // to the targets by position; arity was checked statically.
+                if (tv && isListValue(tv.value)) {
+                    const std::vector<Value>& elems = asList(tv.value);
+                    for (size_t i = 0; i < b->targets.names.size(); ++i) {
+                        const Value elem = i < elems.size() ? elems[i] : Value();
+                        TypedValue et{Type{valueBase(elem), false, GeoKind::Any}, nullptr, elem};
+                        env_.emplace(b->targets.names[i], et);
+                    }
+                }
+                auto eit = env_.find(name);
+                return eit != env_.end() ? eit->second : TypedValue{};
+            }
         } else {
-            run_.report("E201", span, "'" + name + "' is not evaluable at stage E1");
+            run_.report("E201", span, "'" + name + "' is not evaluable at stage E2");
             return {};
         }
         env_.emplace(name, tv);

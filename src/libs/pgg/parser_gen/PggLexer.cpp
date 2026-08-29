@@ -1,5 +1,5 @@
 
-// Generated from /Users/neuro/sources/neverwhere/src/libs/pgg/grammar/Pgg.g4 by ANTLR 4.13.2
+// Generated from /home/neuro/sources/neverwhere/src/libs/pgg/grammar/Pgg.g4 by ANTLR 4.13.2
 
 
 #include "PggLexer.h"

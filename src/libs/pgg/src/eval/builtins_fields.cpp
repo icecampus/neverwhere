@@ -527,6 +527,19 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
     const BuiltinId id = static_cast<BuiltinId>(callId);
     const size_t count = ctx.elementCount;
     switch (id) {
+        case BuiltinId::Ingroup: {
+            // ingroup("name"): read the named mask on the evaluation domain;
+            // cross-domain falls back to the §4.3 interpolation with a > 0.5
+            // threshold; fully missing is a runtime E305 (§8.6).
+            const std::string& name = asString(node.params[0]);
+            ConstBoolColumnPtr col = sampleGroupColumn(ctx.geo, name, ctx.domain);
+            if (!col) {
+                ctx.run.report("E305", node.span, "group \"" + name + "\" does not exist on this geometry",
+                               "create it with mark(geo, \"" + name + "\", where = ...) first");
+                return std::make_shared<const Buffer>(BoolBuf(count, 0));
+            }
+            return std::make_shared<const Buffer>(BoolBuf(*col));
+        }
         case BuiltinId::Fbm: {
             ConstBufferPtr at = convertBuffer(args[0], ScalarType::Vec3);
             const auto& p = std::get<Vec3Buf>(*at);
@@ -598,7 +611,7 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             // Brute-force point-to-surface distance (perf: later stages).
             const GeoPtr target = asGeo(node.params[0]);
             if (ctx.domain != Domain::Points) {
-                ctx.run.report("E301", node.span, "distance_to is only evaluable on the points domain at stage E1");
+                ctx.run.report("E301", node.span, "distance_to is only evaluable on the points domain at stage E2");
                 return std::make_shared<const Buffer>(F32Buf(count, 0.0f));
             }
             const auto& pos = *ctx.geo.positions;

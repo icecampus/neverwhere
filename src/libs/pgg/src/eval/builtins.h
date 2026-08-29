@@ -8,8 +8,8 @@
 // the static type checker (E2xx), the expression compiler and the runtime
 // dispatch — one source of truth for signatures.
 //
-// Operations deferred past E1 (import_mesh, §8.3 topology, SDF, groups,
-// distribute, aggregators, ...) are registered with a deferredStage note so
+// Operations deferred past E2 (import_mesh, §8.3 topology beyond merge,
+// SDF, raycast/transfer, zones, ...) are registered with a deferredStage note so
 // calling them produces a precise "not supported at this stage" diagnostic
 // instead of E201.
 
@@ -31,6 +31,16 @@ enum class BuiltinId {
     // §6.3 expression functions (field-polymorphic)
     Dot, Cross, Length, Normalize, Clamp, Smoothstep, Mix, Abs, Min, Max, Floor, Pow,
     Vec2, Vec3, Vec4, CastInt, CastF32, CastBool, OrientFromEuler, Ramp,
+    // §8.6 groups
+    Mark, Unmark, Ingroup,
+    // §8.7 attributes
+    SetAttr, RemoveAttr, RenameAttr, Promote,
+    // §8.3 topology (E2 subset)
+    Merge,
+    // §8.8 scatter and instancing
+    DistributePoints, InstanceOnPoints, Realize,
+    // §8.10 aggregators
+    Bbox, Extent, Centroid, Count, MinOf, MaxOf, AvgOf, SumOf,
     // Known but not supported at this stage.
     Deferred,
 };
@@ -49,6 +59,7 @@ struct ParamSig {
     bool required = false;
     bool allowString = false;   // base Any also accepts a string (split_rng key)
     GeoKind geoKind = GeoKind::Any;
+    bool isList = false;        // T[] parameter (value-level list)
     Value defValue;
     bool hasDefValue = false;
     bool defPosition = false;   // default = position()
@@ -61,10 +72,11 @@ struct BuiltinSig {
     const char* name = "";
     std::vector<ParamSig> params;
     Type result;
-    bool variadic = false;                 // ramp: trailing values after declared params
-    bool resultGeoKindOfFirstArg = false;  // geo<K> of the first geo argument is kept
-    bool exprFunc = false;                 // §6.3 expression function (field-polymorphic)
-    const char* deferredStage = nullptr;   // non-null -> known, but not supported at E1
+    std::vector<Type> results;               // non-empty -> multi-output node (destructured)
+    bool variadic = false;                   // ramp: trailing values after declared params
+    bool resultGeoKindOfFirstArg = false;    // geo<K> of the first geo argument is kept
+    bool exprFunc = false;                   // §6.3 expression function (field-polymorphic)
+    const char* deferredStage = nullptr;     // non-null -> known, but not supported at E2
 };
 
 const BuiltinSig* findBuiltin(const std::string& name);
@@ -120,5 +132,19 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& argTypes, Span spa
 
 // §8.2 transform nodes, value level (builtins_transform.cpp).
 Value evalTransformBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.6 group and §8.7 attribute nodes, value level (builtins_attrs.cpp).
+Value evalAttrBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.3 merge and §8.8 scatter/instance nodes, value level (builtins_scatter.cpp).
+Value evalScatterBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.10 aggregators, value level (builtins_aggregate.cpp).
+Value evalAggregateBuiltin(const BoundCall& bound, RunContext& run);
+
+// Materializes geo<instances> into geo<mesh> (spec §8.8); host entry point
+// for tools that export instances without running the graph. nullptr when the
+// input is not an instances geometry.
+GeoPtr realizeInstances(const Geo& inst);
 
 }  // namespace pgg

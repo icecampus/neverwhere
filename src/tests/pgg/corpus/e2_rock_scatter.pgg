@@ -1,0 +1,39 @@
+param seed: int = 42
+
+root_rng = rng_from_seed(seed)
+noise_rng = split_rng(root_rng, key = "surface")
+scatter_rng = split_rng(root_rng, key = "scatter")
+scale_rng = split_rng(root_rng, key = "scale")
+orient_rng = split_rng(root_rng, key = "orient")
+tint_rng = split_rng(root_rng, key = "tint")
+variant_rng = split_rng(root_rng, key = "variant")
+
+# rock: icosphere + fbm displace along the normals
+base = ico_sphere(subdiv = 3, radius = 2.0)
+n = fbm(scale = 2.5, octaves = 5, rng = noise_rng)
+disp = set_position(base, offset = @N * (n + n) * 0.15, where = n > 0.1)
+rock = compute_normals(disp)
+
+# mask of flat spots on top of the rock
+flat = mark(rock, "flat", where = dot(@N, (0, 1, 0)) > 0.8)
+
+# scatter anchors inside the mask and stamp the instance variation
+pts0 = distribute_points(flat, density = ingroup("flat") * 6.0, min_dist = 0.35, rng = scatter_rng)
+pts1 = set(pts0, "scale", random(lo = 0.5, hi = 1.2, rng = scale_rng))
+pts2 = set(pts1, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = orient_rng)))
+pts3 = set(pts2, "tint", mix((0.4, 0.4, 0.45), (0.9, 0.85, 0.7), random(lo = 0.0, hi = 1.0, rng = tint_rng)))
+pts = set(pts3, "variant", random_int(n = 2, rng = variant_rng))
+
+# two pebble variants; instances stay lightweight (no realize)
+va = ico_sphere(subdiv = 1, radius = 0.12)
+vb0 = ico_sphere(subdiv = 1, radius = 0.09)
+vb = transform(vb0, scale = (1.0, 0.6, 1.0))
+
+inst = instance_on_points(pts, va, variants = [va, vb])
+
+mn, mx = bbox(rock)
+
+output rock
+output inst
+output mn
+output mx

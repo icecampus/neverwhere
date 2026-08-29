@@ -7,7 +7,7 @@
 // the consumer against a (geometry, domain) context. The evaluator memoizes
 // by (FieldNode*, Geo*, domain) -> shared element buffer, so one field with
 // many consumers on the same geometry computes once (§4.4 identity rule).
-// Evaluation counters live in RunContext for the E1 acceptance tests.
+// Evaluation counters live in RunContext for the acceptance tests.
 
 #include <functional>
 #include <unordered_map>

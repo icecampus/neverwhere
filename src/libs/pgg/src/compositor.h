@@ -68,6 +68,7 @@ public:
     Expr* newAttr(const std::string& name, Span);
     Expr* newVec(std::vector<Expr*> elems, Span);
     Expr* newNumberVec(const std::vector<antlr4::Token*>& numbers, Span);
+    Expr* newList(std::vector<Expr*> elems, Span);
     Expr* newParen(Expr* inner, Span);
     Expr* newUnary(std::string op, Expr* operand, Span);
     Expr* newBinary(std::string op, Expr* lhs, Expr* rhs, Span);

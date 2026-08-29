@@ -285,6 +285,11 @@ private:
                 for (const Expr* el : v->elems) expr(el, scope);
                 break;
             }
+            case NodeKind::ListLit: {
+                const auto* v = static_cast<const ListLit*>(e);
+                for (const Expr* el : v->elems) expr(el, scope);
+                break;
+            }
             default:
                 break;  // literals, attr refs, error sentinels: no name resolution
         }

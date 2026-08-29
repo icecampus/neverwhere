@@ -6,6 +6,7 @@
 //                                       run the graph, print output summaries
 // Exit codes: 0 ok, 1 diagnostics with errors, 2 usage/io failure.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +16,7 @@
 
 #include <pgg/eval.h>
 #include <pgg/pgg.h>
+#include <pgg/src/eval/builtins.h>  // realizeInstances for the --obj export
 
 namespace {
 
@@ -149,6 +151,27 @@ void printGeoSummary(const std::string& name, const pgg::Geo& geo) {
     std::printf("%s: geo<%s> points=%zu", name.c_str(), pgg::geoKindName(geo.kind), geo.pointCount());
     if (geo.kind == pgg::GeoKind::Mesh)
         std::printf(" corners=%zu faces=%zu", geo.cornerCount(), geo.faceCount());
+    if (geo.kind == pgg::GeoKind::Instances && geo.instanceSources) {
+        // Per-variant instance counts from the @variant stamp (default 0) and
+        // the total realized potential (sum of source sizes per instance).
+        std::vector<size_t> perVariant(geo.instanceSources->size(), 0);
+        std::optional<pgg::ColumnData> variantCol =
+            pgg::sampleAttrColumn(geo, "variant", pgg::Domain::Points);
+        size_t realizedPoints = 0;
+        for (size_t i = 0; i < geo.pointCount(); ++i) {
+            int64_t v = 0;
+            if (variantCol && variantCol->index() == 1)
+                v = (*std::get<std::shared_ptr<const std::vector<int64_t>>>(*variantCol))[i];
+            const size_t idx = static_cast<size_t>(
+                std::clamp<int64_t>(v, 0, static_cast<int64_t>(geo.instanceSources->size()) - 1));
+            perVariant[idx] += 1;
+            realizedPoints += (*geo.instanceSources)[idx]->pointCount();
+        }
+        std::printf(" variants=%zu instances=[", geo.instanceSources->size());
+        for (size_t i = 0; i < perVariant.size(); ++i)
+            std::printf("%s%zu", i ? ", " : "", perVariant[i]);
+        std::printf("] realized_points=%zu", realizedPoints);
+    }
     if (geo.pointCount() > 0) {
         glm::vec3 mn, mx;
         pgg::geoBBox(geo, mn, mx);
@@ -202,8 +225,20 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
         std::filesystem::create_directories(objDir, ec);
         for (const pgg::RunOutput& o : result.outputs) {
             if (pgg::valueBase(o.value) != pgg::ScalarType::Geo) continue;
+            const pgg::Geo& geo = *pgg::asGeo(o.value);
             const std::string objPath = objDir + "/" + o.name + ".obj";
-            if (!writeObj(objPath, *pgg::asGeo(o.value))) {
+            // Instances have no polygons of their own: the export realizes
+            // them first (the only place instances get expensive, §8.8).
+            if (geo.kind == pgg::GeoKind::Instances) {
+                pgg::GeoPtr realized = pgg::realizeInstances(geo);
+                if (!realized || !writeObj(objPath, *realized)) {
+                    std::fprintf(stderr, "cannot write %s\n", objPath.c_str());
+                    return 2;
+                }
+                std::printf("wrote %s (realized from geo<instances>)\n", objPath.c_str());
+                continue;
+            }
+            if (!writeObj(objPath, geo)) {
                 std::fprintf(stderr, "cannot write %s\n", objPath.c_str());
                 return 2;
             }

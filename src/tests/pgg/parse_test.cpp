@@ -118,6 +118,42 @@ TEST(Parse, TypeForms) {
     EXPECT_EQ(f->def->kind, pgg::NodeKind::EnumLit);  // bare ident in default position
 }
 
+TEST(Parse, ListLiteral) {
+    const std::string src =
+        "a = 1\n"
+        "b = 2\n"
+        "xs = [a, b]\n"
+        "nested = [f(a), [a, b], 3,]\n"
+        "empty = []\n"
+        "output xs\n"
+        "output nested\n"
+        "output empty\n";
+    pgg::Document doc = pgg::parse(src);
+    ASSERT_FALSE(doc.hasErrors());
+    for (const pgg::Diagnostic& d : doc.diagnostics) ADD_FAILURE() << d.code << " " << d.message;
+    ASSERT_EQ(doc.file->items.size(), 8u);
+
+    const auto* xs = static_cast<const pgg::Binding*>(itemAt(doc, 2));
+    ASSERT_EQ(xs->value->kind, pgg::NodeKind::ListLit);
+    const auto* list = static_cast<const pgg::ListLit*>(xs->value);
+    ASSERT_EQ(list->elems.size(), 2u);
+    EXPECT_EQ(list->elems[0]->kind, pgg::NodeKind::Ident);
+    EXPECT_EQ(list->elems[1]->kind, pgg::NodeKind::Ident);
+
+    // nested lists, arbitrary expressions and a trailing comma
+    const auto* nested = static_cast<const pgg::Binding*>(itemAt(doc, 3));
+    ASSERT_EQ(nested->value->kind, pgg::NodeKind::ListLit);
+    const auto* nl = static_cast<const pgg::ListLit*>(nested->value);
+    ASSERT_EQ(nl->elems.size(), 3u);
+    EXPECT_EQ(nl->elems[0]->kind, pgg::NodeKind::Call);
+    EXPECT_EQ(nl->elems[1]->kind, pgg::NodeKind::ListLit);
+    EXPECT_EQ(nl->elems[2]->kind, pgg::NodeKind::NumberLit);
+
+    const auto* empty = static_cast<const pgg::Binding*>(itemAt(doc, 4));
+    ASSERT_EQ(empty->value->kind, pgg::NodeKind::ListLit);
+    EXPECT_TRUE(static_cast<const pgg::ListLit*>(empty->value)->elems.empty());
+}
+
 TEST(Parse, UnclosedBraceYieldsE101AndPartialAst) {
     const std::string src =
         "a = 1\n"
