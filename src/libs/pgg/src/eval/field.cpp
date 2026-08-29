@@ -6,6 +6,7 @@
 #include <numeric>
 
 #include "builtins.h"
+#include "parallel.h"
 
 namespace pgg {
 
@@ -131,6 +132,10 @@ Value bufferValueAt(const Buffer& buf, size_t i) {
 namespace {
 
 // --- elementwise kernels ----------------------------------------------------
+//
+// Every kernel loop visits disjoint elements with no shared writes, so the
+// loops run chunked over the thread pool when the buffer is large enough
+// (bit-identical to the sequential pass, N7).
 
 template <typename T>
 T arithElem(const std::string& op, const T& a, const T& b) {
@@ -150,56 +155,62 @@ T arithElem(const std::string& op, const T& a, const T& b) {
     return T(0);
 }
 
-ConstBufferPtr bufferArith(const std::string& op, ConstBufferPtr a, ConstBufferPtr b) {
+ConstBufferPtr bufferArith(const std::string& op, ConstBufferPtr a, ConstBufferPtr b, unsigned threads) {
     return std::make_shared<const Buffer>(std::visit(
         [&](const auto& va) -> Buffer {
             using VecT = std::decay_t<decltype(va)>;
             using ElemT = typename VecT::value_type;
             const auto& vb = std::get<VecT>(*b);
             VecT out(va.size());
-            for (size_t i = 0; i < va.size(); ++i) out[i] = arithElem(op, va[i], vb[i]);
+            parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) out[i] = arithElem(op, va[i], vb[i]);
+            });
             return out;
         },
         *a));
 }
 
-ConstBufferPtr bufferCompare(const std::string& op, ConstBufferPtr a, ConstBufferPtr b) {
+ConstBufferPtr bufferCompare(const std::string& op, ConstBufferPtr a, ConstBufferPtr b, unsigned threads) {
     return std::make_shared<const Buffer>(std::visit(
         [&](const auto& va) -> Buffer {
             using VecT = std::decay_t<decltype(va)>;
             using ElemT = typename VecT::value_type;
             const auto& vb = std::get<VecT>(*b);
             BoolBuf out(va.size());
-            for (size_t i = 0; i < va.size(); ++i) {
-                uint8_t r = 0;
-                if constexpr (std::is_same_v<ElemT, uint8_t> || std::is_same_v<ElemT, int64_t> ||
-                              std::is_same_v<ElemT, float>) {
-                    if (op == "<") r = va[i] < vb[i];
-                    else if (op == "<=") r = va[i] <= vb[i];
-                    else if (op == ">") r = va[i] > vb[i];
-                    else if (op == ">=") r = va[i] >= vb[i];
-                    else if (op == "==") r = va[i] == vb[i];
-                    else if (op == "!=") r = va[i] != vb[i];
-                } else {  // glm vectors: equality only (all components)
-                    if (op == "==") r = va[i] == vb[i];
-                    else if (op == "!=") r = va[i] != vb[i];
+            parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) {
+                    uint8_t r = 0;
+                    if constexpr (std::is_same_v<ElemT, uint8_t> || std::is_same_v<ElemT, int64_t> ||
+                                  std::is_same_v<ElemT, float>) {
+                        if (op == "<") r = va[i] < vb[i];
+                        else if (op == "<=") r = va[i] <= vb[i];
+                        else if (op == ">") r = va[i] > vb[i];
+                        else if (op == ">=") r = va[i] >= vb[i];
+                        else if (op == "==") r = va[i] == vb[i];
+                        else if (op == "!=") r = va[i] != vb[i];
+                    } else {  // glm vectors: equality only (all components)
+                        if (op == "==") r = va[i] == vb[i];
+                        else if (op == "!=") r = va[i] != vb[i];
+                    }
+                    out[i] = r;
                 }
-                out[i] = r;
-            }
+            });
             return out;
         },
         *a));
 }
 
-ConstBufferPtr bufferLogic(const std::string& op, ConstBufferPtr a, ConstBufferPtr b) {
+ConstBufferPtr bufferLogic(const std::string& op, ConstBufferPtr a, ConstBufferPtr b, unsigned threads) {
     const auto& va = std::get<BoolBuf>(*a);
     const auto& vb = std::get<BoolBuf>(*b);
     BoolBuf out(va.size());
-    for (size_t i = 0; i < va.size(); ++i) out[i] = op == "&" ? va[i] && vb[i] : va[i] || vb[i];
+    parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) out[i] = op == "&" ? va[i] && vb[i] : va[i] || vb[i];
+    });
     return std::make_shared<const Buffer>(std::move(out));
 }
 
-ConstBufferPtr bufferUnary(const std::string& op, ConstBufferPtr a) {
+ConstBufferPtr bufferUnary(const std::string& op, ConstBufferPtr a, unsigned threads) {
     return std::make_shared<const Buffer>(std::visit(
         [&](const auto& va) -> Buffer {
             using VecT = std::decay_t<decltype(va)>;
@@ -209,32 +220,40 @@ ConstBufferPtr bufferUnary(const std::string& op, ConstBufferPtr a) {
             if (op == "-") {
                 if constexpr (std::is_same_v<ElemT, uint8_t>) {
                     IntBuf r(va.size());
-                    for (size_t i = 0; i < va.size(); ++i) r[i] = -static_cast<int64_t>(va[i]);
+                    parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+                        for (size_t i = begin; i < end; ++i) r[i] = -static_cast<int64_t>(va[i]);
+                    });
                     return r;
                 } else {
                     VecT out(va.size());
-                    for (size_t i = 0; i < va.size(); ++i) out[i] = -va[i];
+                    parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+                        for (size_t i = begin; i < end; ++i) out[i] = -va[i];
+                    });
                     return out;
                 }
             }
             // "!" — scalar operands only (vectors are a static E204).
             BoolBuf r(va.size());
             if constexpr (!isVec) {
-                for (size_t i = 0; i < va.size(); ++i) r[i] = !va[i];
+                parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+                    for (size_t i = begin; i < end; ++i) r[i] = !va[i];
+                });
             }
             return r;
         },
         *a));
 }
 
-ConstBufferPtr bufferTernary(ConstBufferPtr cond, ConstBufferPtr a, ConstBufferPtr b) {
+ConstBufferPtr bufferTernary(ConstBufferPtr cond, ConstBufferPtr a, ConstBufferPtr b, unsigned threads) {
     const auto& vc = std::get<BoolBuf>(*cond);
     return std::make_shared<const Buffer>(std::visit(
         [&](const auto& va) -> Buffer {
             using VecT = std::decay_t<decltype(va)>;
             const auto& vb = std::get<VecT>(*b);
             VecT out(va.size());
-            for (size_t i = 0; i < va.size(); ++i) out[i] = vc[i] ? va[i] : vb[i];
+            parallelFor(va.size(), threads, [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; ++i) out[i] = vc[i] ? va[i] : vb[i];
+            });
             return out;
         },
         *a));
@@ -294,7 +313,7 @@ ConstBufferPtr computeField(const FieldNode& node, EvalContext& ctx) {
         }
         case FKind::Unary: {
             ConstBufferPtr a = evalField(node.args[0], ctx.geo, ctx.domain, run);
-            return bufferUnary(node.op, std::move(a));
+            return bufferUnary(node.op, std::move(a), run.threads);
         }
         case FKind::Binary: {
             ConstBufferPtr a = evalField(node.args[0], ctx.geo, ctx.domain, run);
@@ -305,13 +324,15 @@ ConstBufferPtr computeField(const FieldNode& node, EvalContext& ctx) {
                 return makeZeroBuffer(node.type, count);
             }
             const std::string& op = node.op;
-            if (op == "&" || op == "|") return bufferLogic(op, convertBuffer(pa, ScalarType::Bool), convertBuffer(pb, ScalarType::Bool));
+            if (op == "&" || op == "|")
+                return bufferLogic(op, convertBuffer(pa, ScalarType::Bool), convertBuffer(pb, ScalarType::Bool),
+                                   run.threads);
             if (op == "<" || op == "<=" || op == ">" || op == ">=" || op == "==" || op == "!=") {
                 if (isVectorBase(bufferType(*pa)) && op != "==" && op != "!=") {
                     run.report("E204", node.span, "ordered comparison '" + op + "' is not defined for vectors");
                     return makeZeroBuffer(ScalarType::Bool, count);
                 }
-                return bufferCompare(op, std::move(pa), std::move(pb));
+                return bufferCompare(op, std::move(pa), std::move(pb), run.threads);
             }
             // Arithmetic on booleans happens as int (bool is rank 0 of the chain).
             if (bufferType(*pa) == ScalarType::Bool) {
@@ -322,7 +343,7 @@ ConstBufferPtr computeField(const FieldNode& node, EvalContext& ctx) {
                 run.report("E204", node.span, "'%' is only defined for integers");
                 return makeZeroBuffer(node.type, count);
             }
-            return bufferArith(op, std::move(pa), std::move(pb));
+            return bufferArith(op, std::move(pa), std::move(pb), run.threads);
         }
         case FKind::Ternary: {
             ConstBufferPtr cond = evalField(node.args[0], ctx.geo, ctx.domain, run);
@@ -333,7 +354,8 @@ ConstBufferPtr computeField(const FieldNode& node, EvalContext& ctx) {
                 run.report("E204", node.span, "ternary branches have incompatible types");
                 return makeZeroBuffer(node.type, count);
             }
-            return bufferTernary(convertBuffer(std::move(cond), ScalarType::Bool), std::move(pa), std::move(pb));
+            return bufferTernary(convertBuffer(std::move(cond), ScalarType::Bool), std::move(pa), std::move(pb),
+                                 run.threads);
         }
         case FKind::Call: {
             std::vector<ConstBufferPtr> args;

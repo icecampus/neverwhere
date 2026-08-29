@@ -118,8 +118,9 @@ ConstBufferPtr evalFieldCall(int callId, const FieldNode& node,
 
 // §6.3 expression functions on evaluated argument buffers (geo-free, so the
 // same code constant-folds value calls); params are the variadic values.
+// Element loops are chunked over the pool (disjoint writes, N7).
 ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& args,
-                               const std::vector<Value>& params, size_t count);
+                               const std::vector<Value>& params, size_t count, unsigned threads);
 
 // §8.5 field generators (need the evaluation context: positions, geo, domain).
 ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
@@ -144,7 +145,8 @@ Value evalAggregateBuiltin(const BoundCall& bound, RunContext& run);
 
 // Materializes geo<instances> into geo<mesh> (spec §8.8); host entry point
 // for tools that export instances without running the graph. nullptr when the
-// input is not an instances geometry.
-GeoPtr realizeInstances(const Geo& inst);
+// input is not an instances geometry. Per-anchor slices are precomputed, so
+// the fill parallelizes over `threads` lanes bit-identically (N7).
+GeoPtr realizeInstances(const Geo& inst, unsigned threads = 1);
 
 }  // namespace pgg

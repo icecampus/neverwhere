@@ -73,6 +73,9 @@ struct RunContext {
     std::unordered_map<int, int> nodeEvals;  // FieldNode id -> evaluation count (cache misses)
     uint64_t fieldsEvaluated = 0;
     std::vector<Diagnostic>* diagnostics = nullptr;
+    // Resolved lane count for per-element loops (RunParams::threads, 0 ->
+    // hardware). 1 = fully sequential; results are bit-identical either way.
+    unsigned threads = 1;
 
     FieldNode* newNode();
     void report(const std::string& code, Span span, std::string message, std::string hint = {});

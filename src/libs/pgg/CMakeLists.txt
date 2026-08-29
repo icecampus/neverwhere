@@ -28,6 +28,14 @@ nw_add_lib_sources(
         src/pgg.cpp
         src/eval/rng.h
         src/eval/rng.cpp
+        src/eval/profile.h
+        src/eval/profile.cpp
+        src/eval/fingerprint.h
+        src/eval/fingerprint.cpp
+        src/eval/parallel.h
+        src/eval/parallel.cpp
+        src/eval/cache.h
+        src/eval/cache.cpp
         src/eval/geometry.h
         src/eval/geometry.cpp
         src/eval/value.h

@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "builtins.h"
+#include "parallel.h"
 
 namespace pgg {
 namespace {
@@ -47,7 +48,7 @@ ScalarType promoteN(std::initializer_list<ScalarType> ts) {
 // (pos, value) pairs; ElemT is the value type (float or glm vector).
 template <typename ElemT>
 void rampFill(const Buffer& xbuf, const std::vector<Value>& params, size_t pairs, size_t count,
-              std::vector<ElemT>& out) {
+              std::vector<ElemT>& out, unsigned threads) {
     auto posAt = [&](size_t k) { return numericValueF32(params[2 * k]); };
     auto valAt = [&](size_t k) -> ElemT {
         const Value& v = params[2 * k + 1];
@@ -56,27 +57,29 @@ void rampFill(const Buffer& xbuf, const std::vector<Value>& params, size_t pairs
         else if constexpr (std::is_same_v<ElemT, glm::vec3>) return asVec3(v);
         else return asVec4(v);
     };
-    for (size_t i = 0; i < count; ++i) {
-        const float x = f32At(xbuf, i);
-        if (pairs == 0) {
-            out[i] = ElemT(0);
-            continue;
+    parallelFor(count, threads, [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            const float x = f32At(xbuf, i);
+            if (pairs == 0) {
+                out[i] = ElemT(0);
+                continue;
+            }
+            if (x <= posAt(0)) {
+                out[i] = valAt(0);
+                continue;
+            }
+            if (x >= posAt(pairs - 1)) {
+                out[i] = valAt(pairs - 1);
+                continue;
+            }
+            size_t k = 0;
+            while (k + 2 < pairs && x >= posAt(k + 1)) ++k;
+            const float p0 = posAt(k);
+            const float p1 = posAt(k + 1);
+            const float u = p1 > p0 ? (x - p0) / (p1 - p0) : 0.0f;
+            out[i] = valAt(k) + (valAt(k + 1) - valAt(k)) * u;
         }
-        if (x <= posAt(0)) {
-            out[i] = valAt(0);
-            continue;
-        }
-        if (x >= posAt(pairs - 1)) {
-            out[i] = valAt(pairs - 1);
-            continue;
-        }
-        size_t k = 0;
-        while (k + 2 < pairs && x >= posAt(k + 1)) ++k;
-        const float p0 = posAt(k);
-        const float p1 = posAt(k + 1);
-        const float u = p1 > p0 ? (x - p0) / (p1 - p0) : 0.0f;
-        out[i] = valAt(k) + (valAt(k + 1) - valAt(k)) * u;
-    }
+    });
 }
 
 }  // namespace
@@ -197,7 +200,7 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
 }
 
 ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& args,
-                               const std::vector<Value>& params, size_t count) {
+                               const std::vector<Value>& params, size_t count, unsigned threads) {
     const BuiltinId id = static_cast<BuiltinId>(callId);
     auto out1 = [](Buffer b) { return std::make_shared<const Buffer>(std::move(b)); };
     switch (id) {
@@ -209,20 +212,28 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                 if (t == ScalarType::Vec2) {
                     const auto& a = std::get<Vec2Buf>(*pa);
                     const auto& b = std::get<Vec2Buf>(*pb);
-                    for (size_t i = 0; i < count; ++i) out[i] = glm::dot(a[i], b[i]);
+                    parallelFor(count, threads, [&](size_t s, size_t e) {
+                        for (size_t i = s; i < e; ++i) out[i] = glm::dot(a[i], b[i]);
+                    });
                 } else if (t == ScalarType::Vec3) {
                     const auto& a = std::get<Vec3Buf>(*pa);
                     const auto& b = std::get<Vec3Buf>(*pb);
-                    for (size_t i = 0; i < count; ++i) out[i] = glm::dot(a[i], b[i]);
+                    parallelFor(count, threads, [&](size_t s, size_t e) {
+                        for (size_t i = s; i < e; ++i) out[i] = glm::dot(a[i], b[i]);
+                    });
                 } else {
                     const auto& a = std::get<Vec4Buf>(*pa);
                     const auto& b = std::get<Vec4Buf>(*pb);
-                    for (size_t i = 0; i < count; ++i) out[i] = glm::dot(a[i], b[i]);
+                    parallelFor(count, threads, [&](size_t s, size_t e) {
+                        for (size_t i = s; i < e; ++i) out[i] = glm::dot(a[i], b[i]);
+                    });
                 }
             } else {
                 ConstBufferPtr pa = asF32Buf(args[0]);
                 ConstBufferPtr pb = asF32Buf(args[1]);
-                for (size_t i = 0; i < count; ++i) out[i] = f32At(*pa, i) * f32At(*pb, i);
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = f32At(*pa, i) * f32At(*pb, i);
+                });
             }
             return out1(std::move(out));
         }
@@ -232,21 +243,31 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
             const auto& a = std::get<Vec3Buf>(*pa);
             const auto& b = std::get<Vec3Buf>(*pb);
             Vec3Buf out(count);
-            for (size_t i = 0; i < count; ++i) out[i] = glm::cross(a[i], b[i]);
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) out[i] = glm::cross(a[i], b[i]);
+            });
             return out1(std::move(out));
         }
         case BuiltinId::Length: {
             F32Buf out(count);
             const ScalarType t = bufferType(*args[0]);
             if (t == ScalarType::Vec2) {
-                for (size_t i = 0; i < count; ++i) out[i] = glm::length(std::get<Vec2Buf>(*args[0])[i]);
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = glm::length(std::get<Vec2Buf>(*args[0])[i]);
+                });
             } else if (t == ScalarType::Vec3) {
-                for (size_t i = 0; i < count; ++i) out[i] = glm::length(std::get<Vec3Buf>(*args[0])[i]);
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = glm::length(std::get<Vec3Buf>(*args[0])[i]);
+                });
             } else if (t == ScalarType::Vec4) {
-                for (size_t i = 0; i < count; ++i) out[i] = glm::length(std::get<Vec4Buf>(*args[0])[i]);
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = glm::length(std::get<Vec4Buf>(*args[0])[i]);
+                });
             } else {
                 ConstBufferPtr p = asF32Buf(args[0]);
-                for (size_t i = 0; i < count; ++i) out[i] = std::fabs(f32At(*p, i));
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = std::fabs(f32At(*p, i));
+                });
             }
             return out1(std::move(out));
         }
@@ -259,10 +280,12 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                         return va;  // unreachable post-typecheck (E204 static)
                     } else {
                         VecT out(va.size());
-                        for (size_t i = 0; i < va.size(); ++i) {
-                            const float len = glm::length(va[i]);
-                            out[i] = len > 0.0f ? va[i] / len : va[i] * 0.0f;
-                        }
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) {
+                                const float len = glm::length(va[i]);
+                                out[i] = len > 0.0f ? va[i] / len : va[i] * 0.0f;
+                            }
+                        });
                         return out;
                     }
                 },
@@ -282,12 +305,18 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                     VecT out(vx.size());
                     if constexpr (std::is_same_v<ElemT, uint8_t>) {
                         IntBuf r(vx.size());
-                        for (size_t i = 0; i < vx.size(); ++i) r[i] = std::clamp<int64_t>(vx[i], vl[i], vh[i]);
+                        parallelFor(vx.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) r[i] = std::clamp<int64_t>(vx[i], vl[i], vh[i]);
+                        });
                         return r;
                     } else if constexpr (std::is_same_v<ElemT, int64_t> || std::is_same_v<ElemT, float>) {
-                        for (size_t i = 0; i < vx.size(); ++i) out[i] = std::clamp(vx[i], vl[i], vh[i]);
+                        parallelFor(vx.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) out[i] = std::clamp(vx[i], vl[i], vh[i]);
+                        });
                     } else {
-                        for (size_t i = 0; i < vx.size(); ++i) out[i] = glm::clamp(vx[i], vl[i], vh[i]);
+                        parallelFor(vx.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) out[i] = glm::clamp(vx[i], vl[i], vh[i]);
+                        });
                     }
                     return out;
                 },
@@ -309,10 +338,12 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                         const auto& v1 = std::get<VecT>(*p1);
                         const auto& vx = std::get<VecT>(*px);
                         VecT out(v0.size());
-                        for (size_t i = 0; i < v0.size(); ++i) {
-                            const ElemT u = glm::clamp((vx[i] - v0[i]) / (v1[i] - v0[i]), ElemT(0), ElemT(1));
-                            out[i] = u * u * (ElemT(3) - ElemT(2) * u);
-                        }
+                        parallelFor(v0.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) {
+                                const ElemT u = glm::clamp((vx[i] - v0[i]) / (v1[i] - v0[i]), ElemT(0), ElemT(1));
+                                out[i] = u * u * (ElemT(3) - ElemT(2) * u);
+                            }
+                        });
                         return out;
                     }
                 },
@@ -334,23 +365,31 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                     } else if constexpr (std::is_same_v<ElemT, int64_t>) {
                         const auto& vu = std::get<F32Buf>(*pt);
                         VecT out(va.size());
-                        for (size_t i = 0; i < va.size(); ++i)
-                            out[i] = va[i] + (vb[i] - va[i]) * static_cast<int64_t>(vu[i]);
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i)
+                                out[i] = va[i] + (vb[i] - va[i]) * static_cast<int64_t>(vu[i]);
+                        });
                         return out;
                     } else if constexpr (std::is_same_v<ElemT, float>) {
                         const auto& vu = std::get<F32Buf>(*pt);
                         VecT out(va.size());
-                        for (size_t i = 0; i < va.size(); ++i) out[i] = va[i] + (vb[i] - va[i]) * vu[i];
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) out[i] = va[i] + (vb[i] - va[i]) * vu[i];
+                        });
                         return out;
                     } else if (vecFactor) {
                         const auto& vt = std::get<VecT>(*pt);
                         VecT out(va.size());
-                        for (size_t i = 0; i < va.size(); ++i) out[i] = glm::mix(va[i], vb[i], vt[i]);
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) out[i] = glm::mix(va[i], vb[i], vt[i]);
+                        });
                         return out;
                     } else {
                         const auto& vu = std::get<F32Buf>(*pt);
                         VecT out(va.size());
-                        for (size_t i = 0; i < va.size(); ++i) out[i] = glm::mix(va[i], vb[i], vu[i]);
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) out[i] = glm::mix(va[i], vb[i], vu[i]);
+                        });
                         return out;
                     }
                 },
@@ -363,17 +402,19 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                     using VecT = std::decay_t<decltype(va)>;
                     using ElemT = typename VecT::value_type;
                     VecT out(va.size());
-                    for (size_t i = 0; i < va.size(); ++i) {
-                        if constexpr (std::is_same_v<ElemT, uint8_t>) {
-                            out[i] = va[i];
-                        } else if constexpr (std::is_same_v<ElemT, int64_t>) {
-                            out[i] = id == BuiltinId::Abs ? std::abs(va[i]) : va[i];
-                        } else if constexpr (std::is_same_v<ElemT, float>) {
-                            out[i] = id == BuiltinId::Abs ? std::fabs(va[i]) : std::floor(va[i]);
-                        } else {
-                            out[i] = id == BuiltinId::Abs ? glm::abs(va[i]) : glm::floor(va[i]);
+                    parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                        for (size_t i = s; i < e; ++i) {
+                            if constexpr (std::is_same_v<ElemT, uint8_t>) {
+                                out[i] = va[i];
+                            } else if constexpr (std::is_same_v<ElemT, int64_t>) {
+                                out[i] = id == BuiltinId::Abs ? std::abs(va[i]) : va[i];
+                            } else if constexpr (std::is_same_v<ElemT, float>) {
+                                out[i] = id == BuiltinId::Abs ? std::fabs(va[i]) : std::floor(va[i]);
+                            } else {
+                                out[i] = id == BuiltinId::Abs ? glm::abs(va[i]) : glm::floor(va[i]);
+                            }
                         }
-                    }
+                    });
                     return out;
                 },
                 *args[0]));
@@ -387,14 +428,16 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                     using ElemT = typename VecT::value_type;
                     const auto& vb = std::get<VecT>(*pb);
                     VecT out(va.size());
-                    for (size_t i = 0; i < va.size(); ++i) {
-                        if constexpr (std::is_same_v<ElemT, glm::vec2> || std::is_same_v<ElemT, glm::vec3> ||
-                                      std::is_same_v<ElemT, glm::vec4>) {
-                            out[i] = id == BuiltinId::Min ? glm::min(va[i], vb[i]) : glm::max(va[i], vb[i]);
-                        } else {
-                            out[i] = id == BuiltinId::Min ? std::min(va[i], vb[i]) : std::max(va[i], vb[i]);
+                    parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                        for (size_t i = s; i < e; ++i) {
+                            if constexpr (std::is_same_v<ElemT, glm::vec2> || std::is_same_v<ElemT, glm::vec3> ||
+                                          std::is_same_v<ElemT, glm::vec4>) {
+                                out[i] = id == BuiltinId::Min ? glm::min(va[i], vb[i]) : glm::max(va[i], vb[i]);
+                            } else {
+                                out[i] = id == BuiltinId::Min ? std::min(va[i], vb[i]) : std::max(va[i], vb[i]);
+                            }
                         }
-                    }
+                    });
                     return out;
                 },
                 *pa));
@@ -413,13 +456,15 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                     } else {
                         const auto& vb = std::get<VecT>(*pb);
                         VecT out(va.size());
-                        for (size_t i = 0; i < va.size(); ++i) {
-                            if constexpr (std::is_same_v<ElemT, float>) {
-                                out[i] = std::pow(va[i], vb[i]);
-                            } else {
-                                out[i] = glm::pow(va[i], vb[i]);
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) {
+                                if constexpr (std::is_same_v<ElemT, float>) {
+                                    out[i] = std::pow(va[i], vb[i]);
+                                } else {
+                                    out[i] = glm::pow(va[i], vb[i]);
+                                }
                             }
-                        }
+                        });
                         return out;
                     }
                 },
@@ -439,18 +484,24 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
             }
             if (n == 2) {
                 Vec2Buf out(count);
-                for (size_t i = 0; i < count; ++i) out[i] = glm::vec2(f32At(*comps[0], i), f32At(*comps[1], i));
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = glm::vec2(f32At(*comps[0], i), f32At(*comps[1], i));
+                });
                 return out1(std::move(out));
             }
             if (n == 3) {
                 Vec3Buf out(count);
-                for (size_t i = 0; i < count; ++i)
-                    out[i] = glm::vec3(f32At(*comps[0], i), f32At(*comps[1], i), f32At(*comps[2], i));
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i)
+                        out[i] = glm::vec3(f32At(*comps[0], i), f32At(*comps[1], i), f32At(*comps[2], i));
+                });
                 return out1(std::move(out));
             }
             Vec4Buf out(count);
-            for (size_t i = 0; i < count; ++i)
-                out[i] = glm::vec4(f32At(*comps[0], i), f32At(*comps[1], i), f32At(*comps[2], i), f32At(*comps[3], i));
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i)
+                    out[i] = glm::vec4(f32At(*comps[0], i), f32At(*comps[1], i), f32At(*comps[2], i), f32At(*comps[3], i));
+            });
             return out1(std::move(out));
         }
         case BuiltinId::CastInt: {
@@ -458,10 +509,14 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
             const ScalarType t = bufferType(*args[0]);
             if (t == ScalarType::Int) return args[0];
             if (t == ScalarType::Bool) {
-                for (size_t i = 0; i < count; ++i) out[i] = std::get<BoolBuf>(*args[0])[i] ? 1 : 0;
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = std::get<BoolBuf>(*args[0])[i] ? 1 : 0;
+                });
             } else {
                 ConstBufferPtr p = asF32Buf(args[0]);
-                for (size_t i = 0; i < count; ++i) out[i] = static_cast<int64_t>(f32At(*p, i));
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = static_cast<int64_t>(f32At(*p, i));
+                });
             }
             return out1(std::move(out));
         }
@@ -472,10 +527,14 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
             const ScalarType t = bufferType(*args[0]);
             if (t == ScalarType::Bool) return args[0];
             if (t == ScalarType::Int) {
-                for (size_t i = 0; i < count; ++i) out[i] = std::get<IntBuf>(*args[0])[i] != 0;
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = std::get<IntBuf>(*args[0])[i] != 0;
+                });
             } else {
                 ConstBufferPtr p = asF32Buf(args[0]);
-                for (size_t i = 0; i < count; ++i) out[i] = f32At(*p, i) != 0.0f;
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) out[i] = f32At(*p, i) != 0.0f;
+                });
             }
             return out1(std::move(out));
         }
@@ -483,10 +542,12 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
             ConstBufferPtr p = convertBuffer(args[0], ScalarType::Vec3);
             const auto& v = std::get<Vec3Buf>(*p);
             Vec4Buf out(count);
-            for (size_t i = 0; i < count; ++i) {
-                const glm::quat q(glm::radians(v[i]));
-                out[i] = glm::vec4(q.x, q.y, q.z, q.w);
-            }
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) {
+                    const glm::quat q(glm::radians(v[i]));
+                    out[i] = glm::vec4(q.x, q.y, q.z, q.w);
+                }
+            });
             return out1(std::move(out));
         }
         case BuiltinId::Ramp: {
@@ -497,22 +558,22 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
             switch (vt) {
                 case ScalarType::Vec2: {
                     Vec2Buf out(count);
-                    rampFill(*px, params, pairs, count, out);
+                    rampFill(*px, params, pairs, count, out, threads);
                     return out1(std::move(out));
                 }
                 case ScalarType::Vec3: {
                     Vec3Buf out(count);
-                    rampFill(*px, params, pairs, count, out);
+                    rampFill(*px, params, pairs, count, out, threads);
                     return out1(std::move(out));
                 }
                 case ScalarType::Vec4: {
                     Vec4Buf out(count);
-                    rampFill(*px, params, pairs, count, out);
+                    rampFill(*px, params, pairs, count, out, threads);
                     return out1(std::move(out));
                 }
                 default: {
                     F32Buf out(count);
-                    rampFill(*px, params, pairs, count, out);
+                    rampFill(*px, params, pairs, count, out, threads);
                     return out1(std::move(out));
                 }
             }
@@ -526,6 +587,7 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
                                const std::vector<ConstBufferPtr>& args, EvalContext& ctx) {
     const BuiltinId id = static_cast<BuiltinId>(callId);
     const size_t count = ctx.elementCount;
+    const unsigned threads = ctx.run.threads;
     switch (id) {
         case BuiltinId::Ingroup: {
             // ingroup("name"): read the named mask on the evaluation domain;
@@ -549,10 +611,12 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             const float lacunarity = asF32(node.params[3]);
             const float gain = asF32(node.params[4]);
             F32Buf out(count);
-            for (size_t i = 0; i < count; ++i) {
-                const glm::vec3 q = p[i] * scale;
-                out[i] = fbmNoise(rng, q.x, q.y, q.z, octaves, lacunarity, gain);
-            }
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) {
+                    const glm::vec3 q = p[i] * scale;
+                    out[i] = fbmNoise(rng, q.x, q.y, q.z, octaves, lacunarity, gain);
+                }
+            });
             return std::make_shared<const Buffer>(std::move(out));
         }
         case BuiltinId::Vnoise: {
@@ -561,12 +625,14 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             const float scale = asF32(node.params[0]);
             const Rng rng = asRng(node.params[1]);
             Vec3Buf out(count);
-            for (size_t i = 0; i < count; ++i) {
-                const glm::vec3 q = p[i] * scale;
-                out[i] = glm::vec3(2.0f * valueNoise(rng, q.x, q.y, q.z, 0) - 1.0f,
-                                   2.0f * valueNoise(rng, q.x, q.y, q.z, 1) - 1.0f,
-                                   2.0f * valueNoise(rng, q.x, q.y, q.z, 2) - 1.0f);
-            }
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) {
+                    const glm::vec3 q = p[i] * scale;
+                    out[i] = glm::vec3(2.0f * valueNoise(rng, q.x, q.y, q.z, 0) - 1.0f,
+                                       2.0f * valueNoise(rng, q.x, q.y, q.z, 1) - 1.0f,
+                                       2.0f * valueNoise(rng, q.x, q.y, q.z, 2) - 1.0f);
+                }
+            });
             return std::make_shared<const Buffer>(std::move(out));
         }
         case BuiltinId::Random: {
@@ -576,8 +642,10 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             const float hi = asF32(node.params[1]);
             const Rng rng = asRng(node.params[2]);
             F32Buf out(count);
-            for (size_t i = 0; i < count; ++i)
-                out[i] = lo + (hi - lo) * rngF32(rng, static_cast<uint64_t>(c[i]), 0);
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i)
+                    out[i] = lo + (hi - lo) * rngF32(rng, static_cast<uint64_t>(c[i]), 0);
+            });
             return std::make_shared<const Buffer>(std::move(out));
         }
         case BuiltinId::RandomVec: {
@@ -587,12 +655,14 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             const glm::vec3 hi = asVec3(node.params[1]);
             const Rng rng = asRng(node.params[2]);
             Vec3Buf out(count);
-            for (size_t i = 0; i < count; ++i) {
-                const uint64_t ctr = static_cast<uint64_t>(c[i]);
-                out[i] = glm::vec3(lo.x + (hi.x - lo.x) * rngF32(rng, ctr, 0),
-                                   lo.y + (hi.y - lo.y) * rngF32(rng, ctr, 1),
-                                   lo.z + (hi.z - lo.z) * rngF32(rng, ctr, 2));
-            }
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) {
+                    const uint64_t ctr = static_cast<uint64_t>(c[i]);
+                    out[i] = glm::vec3(lo.x + (hi.x - lo.x) * rngF32(rng, ctr, 0),
+                                       lo.y + (hi.y - lo.y) * rngF32(rng, ctr, 1),
+                                       lo.z + (hi.z - lo.z) * rngF32(rng, ctr, 2));
+                }
+            });
             return std::make_shared<const Buffer>(std::move(out));
         }
         case BuiltinId::RandomInt: {
@@ -601,10 +671,12 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             const uint64_t n = static_cast<uint64_t>(std::max<int64_t>(1, asInt(node.params[0])));
             const Rng rng = asRng(node.params[1]);
             IntBuf out(count);
-            for (size_t i = 0; i < count; ++i) {
-                const uint32_t w = rngWord(rng, static_cast<uint64_t>(c[i]), 0);
-                out[i] = static_cast<int64_t>((static_cast<uint64_t>(w) * n) >> 32);
-            }
+            parallelFor(count, threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) {
+                    const uint32_t w = rngWord(rng, static_cast<uint64_t>(c[i]), 0);
+                    out[i] = static_cast<int64_t>((static_cast<uint64_t>(w) * n) >> 32);
+                }
+            });
             return std::make_shared<const Buffer>(std::move(out));
         }
         case BuiltinId::DistanceTo: {
@@ -618,27 +690,31 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             F32Buf out(count, std::numeric_limits<float>::infinity());
             const bool targetFaces = target->kind == GeoKind::Mesh && target->faceCount() > 0;
             if (targetFaces) {
-                for (size_t i = 0; i < count; ++i) {
-                    float best = std::numeric_limits<float>::infinity();
-                    for (size_t f = 0; f < target->faceCount(); ++f) {
-                        const int32_t begin = (*target->faceOffsets)[f];
-                        const int32_t end = (*target->faceOffsets)[f + 1];
-                        const glm::vec3& a = (*target->positions)[(*target->cornerVerts)[begin]];
-                        for (int32_t ci = begin + 1; ci + 1 < end; ++ci) {
-                            const glm::vec3& b = (*target->positions)[(*target->cornerVerts)[ci]];
-                            const glm::vec3& cc = (*target->positions)[(*target->cornerVerts)[ci + 1]];
-                            best = std::min(best, pointTriangleDistance(pos[i], a, b, cc));
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) {
+                        float best = std::numeric_limits<float>::infinity();
+                        for (size_t f = 0; f < target->faceCount(); ++f) {
+                            const int32_t begin = (*target->faceOffsets)[f];
+                            const int32_t end = (*target->faceOffsets)[f + 1];
+                            const glm::vec3& a = (*target->positions)[(*target->cornerVerts)[begin]];
+                            for (int32_t ci = begin + 1; ci + 1 < end; ++ci) {
+                                const glm::vec3& b = (*target->positions)[(*target->cornerVerts)[ci]];
+                                const glm::vec3& cc = (*target->positions)[(*target->cornerVerts)[ci + 1]];
+                                best = std::min(best, pointTriangleDistance(pos[i], a, b, cc));
+                            }
                         }
+                        out[i] = best;
                     }
-                    out[i] = best;
-                }
+                });
             } else if (target->pointCount() > 0) {
-                for (size_t i = 0; i < count; ++i) {
-                    float best = std::numeric_limits<float>::infinity();
-                    for (const glm::vec3& q : *target->positions)
-                        best = std::min(best, glm::length(pos[i] - q));
-                    out[i] = best;
-                }
+                parallelFor(count, threads, [&](size_t s, size_t e) {
+                    for (size_t i = s; i < e; ++i) {
+                        float best = std::numeric_limits<float>::infinity();
+                        for (const glm::vec3& q : *target->positions)
+                            best = std::min(best, glm::length(pos[i] - q));
+                        out[i] = best;
+                    }
+                });
             }
             return std::make_shared<const Buffer>(std::move(out));
         }
@@ -671,7 +747,7 @@ ConstBufferPtr evalFieldCall(int callId, const FieldNode& node,
         case BuiltinId::CastBool:
         case BuiltinId::OrientFromEuler:
         case BuiltinId::Ramp:
-            return evalExprFuncBuf(callId, args, node.params, ctx.elementCount);
+            return evalExprFuncBuf(callId, args, node.params, ctx.elementCount, ctx.run.threads);
         default:
             return evalFieldGenBuf(callId, node, args, ctx);
     }

@@ -7,20 +7,28 @@
 // (detail: single element, a wins). Instances-merge is a clean stage error;
 // a kind mismatch is E204.
 //
-// distribute_points: deterministic priority scheme (v0, spec §19):
+// distribute_points: deterministic priority scheme (spec §19):
 //   1. per-face candidates K_f = ceil(area_f * dMax_f * kOversample),
 //      dMax_f = max density over the face's vertices and centroid;
 //   2. density thinning with d(candidate)/dMax_f — the density field is
 //      evaluated once on a probe geometry of all candidates, so it sees
 //      barycentrically interpolated surface attributes (and groups at > 0.5);
-//   3. poisson min_dist: a candidate is kept iff no kept candidate with a
-//      strictly higher priority word lies within min_dist (spatial hash) —
-//      the kept set is unique, so the result is order-independent by
-//      construction; uniform mode skips this stage.
+//   3. poisson min_dist: a thinning-accepted candidate is kept iff no
+//      thinning-accepted candidate with a strictly higher priority (ties by
+//      candidate index) lies within min_dist — checked against a read-only
+//      spatial hash of all accepted candidates, so the kept set is unique
+//      and the result is order-independent by construction (N1); uniform
+//      mode skips this stage.
 //   Poisson rate is not guaranteed: the contract is determinism by rng,
 //   min_dist compliance, density response and zero density -> zero points.
 //   Candidate address: (rng, face_id, attempt*5 + lane) with lanes
 //   {triangle pick, u, v, priority, thinning}.
+//
+// Parallel structure (N7): candidate generation per face (precomputed slice
+// offsets), probe/thinning per candidate, the poisson check per candidate
+// (read-only hash); only the hash build and the final kept-set compaction
+// stay sequential (compaction keeps ascending candidate order = face,
+// attempt).
 //
 // instance_on_points: lightweight geo<instances> — anchor points share the
 // stamp attributes (@scale/@orient/@variant/@tint with defaults), sources
@@ -32,6 +40,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "builtins.h"
+#include "parallel.h"
 
 namespace pgg {
 namespace {
@@ -189,38 +198,41 @@ enum class TriIdx { Points, Corners };
 
 // Barycentric gather over the triangle indices of every candidate: int rounds
 // to nearest, bool thresholds at > 0.5, strings take the max-weight value.
-ColumnData barySample(const ColumnData& col, const std::vector<Candidate>& cands, TriIdx which) {
+ColumnData barySample(const ColumnData& col, const std::vector<Candidate>& cands, TriIdx which,
+                      unsigned threads) {
     return std::visit(
         [&](const auto& ptr) -> ColumnData {
             using VecT = std::decay_t<decltype(*ptr)>;
             using ElemT = typename VecT::value_type;
             VecT out(cands.size());
-            for (size_t i = 0; i < cands.size(); ++i) {
-                const Candidate& c = cands[i];
-                const int32_t ia = which == TriIdx::Points ? c.v0 : c.c0;
-                const int32_t ib = which == TriIdx::Points ? c.v1 : c.c1;
-                const int32_t ic = which == TriIdx::Points ? c.v2 : c.c2;
-                const ElemT& va = (*ptr)[static_cast<size_t>(ia)];
-                const ElemT& vb = (*ptr)[static_cast<size_t>(ib)];
-                const ElemT& vc = (*ptr)[static_cast<size_t>(ic)];
-                if constexpr (std::is_same_v<ElemT, float>) {
-                    out[i] = c.bary.x * va + c.bary.y * vb + c.bary.z * vc;
-                } else if constexpr (std::is_same_v<ElemT, int64_t>) {
-                    const double w = c.bary.x * static_cast<double>(va) + c.bary.y * static_cast<double>(vb) +
-                                     c.bary.z * static_cast<double>(vc);
-                    out[i] = static_cast<int64_t>(std::llround(w));
-                } else if constexpr (std::is_same_v<ElemT, uint8_t>) {
-                    const float w = c.bary.x * (va ? 1.0f : 0.0f) + c.bary.y * (vb ? 1.0f : 0.0f) +
-                                    c.bary.z * (vc ? 1.0f : 0.0f);
-                    out[i] = w > 0.5f ? 1 : 0;
-                } else if constexpr (std::is_same_v<ElemT, std::string>) {
-                    out[i] = c.bary.x >= c.bary.y && c.bary.x >= c.bary.z ? va
-                             : c.bary.y >= c.bary.z                      ? vb
-                                                                          : vc;
-                } else {  // glm vectors
-                    out[i] = c.bary.x * va + c.bary.y * vb + c.bary.z * vc;
+            parallelFor(cands.size(), threads, [&](size_t s, size_t e) {
+                for (size_t i = s; i < e; ++i) {
+                    const Candidate& c = cands[i];
+                    const int32_t ia = which == TriIdx::Points ? c.v0 : c.c0;
+                    const int32_t ib = which == TriIdx::Points ? c.v1 : c.c1;
+                    const int32_t ic = which == TriIdx::Points ? c.v2 : c.c2;
+                    const ElemT& va = (*ptr)[static_cast<size_t>(ia)];
+                    const ElemT& vb = (*ptr)[static_cast<size_t>(ib)];
+                    const ElemT& vc = (*ptr)[static_cast<size_t>(ic)];
+                    if constexpr (std::is_same_v<ElemT, float>) {
+                        out[i] = c.bary.x * va + c.bary.y * vb + c.bary.z * vc;
+                    } else if constexpr (std::is_same_v<ElemT, int64_t>) {
+                        const double w = c.bary.x * static_cast<double>(va) + c.bary.y * static_cast<double>(vb) +
+                                         c.bary.z * static_cast<double>(vc);
+                        out[i] = static_cast<int64_t>(std::llround(w));
+                    } else if constexpr (std::is_same_v<ElemT, uint8_t>) {
+                        const float w = c.bary.x * (va ? 1.0f : 0.0f) + c.bary.y * (vb ? 1.0f : 0.0f) +
+                                        c.bary.z * (vc ? 1.0f : 0.0f);
+                        out[i] = w > 0.5f ? 1 : 0;
+                    } else if constexpr (std::is_same_v<ElemT, std::string>) {
+                        out[i] = c.bary.x >= c.bary.y && c.bary.x >= c.bary.z ? va
+                                 : c.bary.y >= c.bary.z                      ? vb
+                                                                              : vc;
+                    } else {  // glm vectors
+                        out[i] = c.bary.x * va + c.bary.y * vb + c.bary.z * vc;
+                    }
                 }
-            }
+            });
             return std::make_shared<const VecT>(std::move(out));
         },
         col);
@@ -242,8 +254,13 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
     const auto& dPts = std::get<F32Buf>(*dPtsB);
     const auto& dFace = std::get<F32Buf>(*dFaceB);
 
-    // 2. per-face candidates addressed by (rng, face_id, attempt).
-    std::vector<Candidate> cands;
+    // 2. per-face candidates addressed by (rng, face_id, attempt). Counts and
+    //    slice offsets are a cheap sequential pass; the fill runs per face on
+    //    the pool (each face writes only its own slice, ascending candidate
+    //    order = (face, attempt), identical to the old append order).
+    std::vector<int32_t> faceK(in.faceCount(), 0);
+    std::vector<float> faceDmax(in.faceCount(), 0.0f);
+    std::vector<int32_t> candBegin(in.faceCount() + 1, 0);
     for (size_t f = 0; f < in.faceCount(); ++f) {
         const float area = 0.5f * glm::length(faceNormal(in, f));
         float dMax = dFace[f];
@@ -252,51 +269,64 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
         for (int32_t c = begin; c < end; ++c) dMax = std::max(dMax, dPts[static_cast<size_t>((*in.cornerVerts)[c])]);
         dMax = std::max(dMax, 0.0f);
         if (area <= 0.0f || dMax <= 0.0f) continue;
-        const int k = static_cast<int>(std::ceil(area * dMax * kScatterOversample));
-
-        // Fan triangles and their areas (for the area-weighted pick).
-        std::vector<float> triAreas;
-        float totalArea = 0.0f;
-        const glm::vec3& p0 = (*in.positions)[static_cast<size_t>((*in.cornerVerts)[begin])];
-        for (int32_t c = begin + 1; c + 1 < end; ++c) {
-            const glm::vec3& pa = (*in.positions)[static_cast<size_t>((*in.cornerVerts)[c])];
-            const glm::vec3& pb = (*in.positions)[static_cast<size_t>((*in.cornerVerts)[c + 1])];
-            const float ta = 0.5f * glm::length(glm::cross(pa - p0, pb - p0));
-            triAreas.push_back(ta);
-            totalArea += ta;
-        }
-
-        for (int j = 0; j < k; ++j) {
-            const uint32_t lane = static_cast<uint32_t>(j) * 5u;
-            const float wTri = rngF32(rng, static_cast<uint64_t>(f), lane + 0);
-            const float u = rngF32(rng, static_cast<uint64_t>(f), lane + 1);
-            const float v = rngF32(rng, static_cast<uint64_t>(f), lane + 2);
-            Candidate cand;
-            cand.priority = rngWord(rng, static_cast<uint64_t>(f), lane + 3);
-            cand.thin = rngF32(rng, static_cast<uint64_t>(f), lane + 4);
-            cand.face = static_cast<int32_t>(f);
-            cand.dMax = dMax;
-            // area-weighted triangle pick inside the fan
-            float x = wTri * totalArea;
-            size_t tri = 0;
-            while (tri + 1 < triAreas.size() && x > triAreas[tri]) {
-                x -= triAreas[tri];
-                ++tri;
-            }
-            cand.c0 = begin;
-            cand.c1 = begin + 1 + static_cast<int32_t>(tri);
-            cand.c2 = begin + 2 + static_cast<int32_t>(tri);
-            cand.v0 = (*in.cornerVerts)[cand.c0];
-            cand.v1 = (*in.cornerVerts)[cand.c1];
-            cand.v2 = (*in.cornerVerts)[cand.c2];
-            const float su = std::sqrt(u);
-            cand.bary = glm::vec3(1.0f - su, su * (1.0f - v), su * v);
-            cand.pos = cand.bary.x * (*in.positions)[static_cast<size_t>(cand.v0)] +
-                       cand.bary.y * (*in.positions)[static_cast<size_t>(cand.v1)] +
-                       cand.bary.z * (*in.positions)[static_cast<size_t>(cand.v2)];
-            cands.push_back(cand);
-        }
+        faceDmax[f] = dMax;
+        faceK[f] = static_cast<int32_t>(std::ceil(area * dMax * kScatterOversample));
     }
+    for (size_t f = 0; f < in.faceCount(); ++f) candBegin[f + 1] = candBegin[f] + faceK[f];
+    std::vector<Candidate> cands(static_cast<size_t>(candBegin.back()));
+    parallelFor(in.faceCount(), run.threads, [&](size_t s, size_t e) {
+        for (size_t f = s; f < e; ++f) {
+            const int32_t k = faceK[f];
+            if (k <= 0) continue;
+            const float dMax = faceDmax[f];
+            const int32_t begin = (*in.faceOffsets)[f];
+            const int32_t end = (*in.faceOffsets)[f + 1];
+
+            // Fan triangles and their areas (for the area-weighted pick).
+            std::vector<float> triAreas;
+            float totalArea = 0.0f;
+            const glm::vec3& p0 = (*in.positions)[static_cast<size_t>((*in.cornerVerts)[begin])];
+            for (int32_t c = begin + 1; c + 1 < end; ++c) {
+                const glm::vec3& pa = (*in.positions)[static_cast<size_t>((*in.cornerVerts)[c])];
+                const glm::vec3& pb = (*in.positions)[static_cast<size_t>((*in.cornerVerts)[c + 1])];
+                const float ta = 0.5f * glm::length(glm::cross(pa - p0, pb - p0));
+                triAreas.push_back(ta);
+                totalArea += ta;
+            }
+
+            Candidate* out = cands.data() + candBegin[f];
+            for (int32_t j = 0; j < k; ++j) {
+                const uint32_t lane = static_cast<uint32_t>(j) * 5u;
+                const float wTri = rngF32(rng, static_cast<uint64_t>(f), lane + 0);
+                const float u = rngF32(rng, static_cast<uint64_t>(f), lane + 1);
+                const float v = rngF32(rng, static_cast<uint64_t>(f), lane + 2);
+                Candidate cand;
+                cand.priority = rngWord(rng, static_cast<uint64_t>(f), lane + 3);
+                cand.thin = rngF32(rng, static_cast<uint64_t>(f), lane + 4);
+                cand.face = static_cast<int32_t>(f);
+                cand.dMax = dMax;
+                // area-weighted triangle pick inside the fan
+                float x = wTri * totalArea;
+                size_t tri = 0;
+                while (tri + 1 < triAreas.size() && x > triAreas[tri]) {
+                    x -= triAreas[tri];
+                    ++tri;
+                }
+                cand.c0 = begin;
+                cand.c1 = begin + 1 + static_cast<int32_t>(tri);
+                cand.c2 = begin + 2 + static_cast<int32_t>(tri);
+                cand.v0 = (*in.cornerVerts)[cand.c0];
+                cand.v1 = (*in.cornerVerts)[cand.c1];
+                cand.v2 = (*in.cornerVerts)[cand.c2];
+                const float su = std::sqrt(u);
+                cand.bary = glm::vec3(1.0f - su, su * (1.0f - v), su * v);
+                cand.pos = cand.bary.x * (*in.positions)[static_cast<size_t>(cand.v0)] +
+                           cand.bary.y * (*in.positions)[static_cast<size_t>(cand.v1)] +
+                           cand.bary.z * (*in.positions)[static_cast<size_t>(cand.v2)];
+                out[j] = cand;
+            }
+        }
+    });
     if (cands.empty()) return Value(empty);
 
     // 3. probe geometry: candidates with barycentrically inherited surface
@@ -306,31 +336,37 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
     probe.kind = GeoKind::Points;
     {
         std::vector<glm::vec3> pos(cands.size());
-        for (size_t i = 0; i < cands.size(); ++i) pos[i] = cands[i].pos;
+        parallelFor(cands.size(), run.threads, [&](size_t s, size_t e) {
+            for (size_t i = s; i < e; ++i) pos[i] = cands[i].pos;
+        });
         probe.positions = std::make_shared<const std::vector<glm::vec3>>(std::move(pos));
     }
     if (in.normals) {
         std::vector<glm::vec3> nrm(cands.size());
-        for (size_t i = 0; i < cands.size(); ++i) {
-            const Candidate& c = cands[i];
-            glm::vec3 n = c.bary.x * (*in.normals)[static_cast<size_t>(c.v0)] +
-                          c.bary.y * (*in.normals)[static_cast<size_t>(c.v1)] +
-                          c.bary.z * (*in.normals)[static_cast<size_t>(c.v2)];
-            const float len = glm::length(n);
-            nrm[i] = len > 0.0f ? n / len : glm::vec3(0, 1, 0);
-        }
+        parallelFor(cands.size(), run.threads, [&](size_t s, size_t e) {
+            for (size_t i = s; i < e; ++i) {
+                const Candidate& c = cands[i];
+                glm::vec3 n = c.bary.x * (*in.normals)[static_cast<size_t>(c.v0)] +
+                              c.bary.y * (*in.normals)[static_cast<size_t>(c.v1)] +
+                              c.bary.z * (*in.normals)[static_cast<size_t>(c.v2)];
+                const float len = glm::length(n);
+                nrm[i] = len > 0.0f ? n / len : glm::vec3(0, 1, 0);
+            }
+        });
         probe.normals = std::make_shared<const std::vector<glm::vec3>>(std::move(nrm));
     }
     std::vector<int32_t> faceIdx(cands.size());
-    for (size_t i = 0; i < cands.size(); ++i) faceIdx[i] = cands[i].face;
+    parallelFor(cands.size(), run.threads, [&](size_t s, size_t e) {
+        for (size_t i = s; i < e; ++i) faceIdx[i] = cands[i].face;
+    });
     {
         AttrSet attrs;
         if (in.pointAttrs)
             for (const auto& [n, c] : in.pointAttrs->columns)
-                attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Points)};
+                attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Points, run.threads)};
         if (in.cornerAttrs)
             for (const auto& [n, c] : in.cornerAttrs->columns)
-                if (!attrs.find(n)) attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Corners)};
+                if (!attrs.find(n)) attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Corners, run.threads)};
         if (in.faceAttrs)
             for (const auto& [n, c] : in.faceAttrs->columns)
                 if (!attrs.find(n)) attrs.columns[n] = AttrColumn{gatherColumn(c.data, faceIdx)};
@@ -338,11 +374,13 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
         GroupSet groups;
         if (in.pointGroups)
             for (const auto& [n, c] : in.pointGroups->columns)
-                groups.columns[n] = std::get<ConstBoolColumnPtr>(barySample(ColumnData(c), cands, TriIdx::Points));
+                groups.columns[n] =
+                    std::get<ConstBoolColumnPtr>(barySample(ColumnData(c), cands, TriIdx::Points, run.threads));
         if (in.cornerGroups)
             for (const auto& [n, c] : in.cornerGroups->columns)
                 if (!groups.find(n))
-                    groups.columns[n] = std::get<ConstBoolColumnPtr>(barySample(ColumnData(c), cands, TriIdx::Corners));
+                    groups.columns[n] =
+                        std::get<ConstBoolColumnPtr>(barySample(ColumnData(c), cands, TriIdx::Corners, run.threads));
         if (in.faceGroups)
             for (const auto& [n, c] : in.faceGroups->columns)
                 if (!groups.find(n))
@@ -358,21 +396,19 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
         convertBuffer(evalField(densityField, *probeGeo, Domain::Points, run), ScalarType::F32);
     const auto& dCand = std::get<F32Buf>(*dCandB);
     std::vector<uint8_t> accept(cands.size(), 0);
-    for (size_t i = 0; i < cands.size(); ++i) {
-        const float ratio = std::clamp(dCand[i] / cands[i].dMax, 0.0f, 1.0f);
-        accept[i] = cands[i].thin < ratio ? 1 : 0;
-    }
+    parallelFor(cands.size(), run.threads, [&](size_t s, size_t e) {
+        for (size_t i = s; i < e; ++i) {
+            const float ratio = std::clamp(dCand[i] / cands[i].dMax, 0.0f, 1.0f);
+            accept[i] = cands[i].thin < ratio ? 1 : 0;
+        }
+    });
 
-    // 5. poisson: keep a candidate iff no kept candidate with a strictly
-    //    higher priority lies within min_dist. The kept set is unique, so the
-    //    result does not depend on the processing order (N1 by construction).
+    // 5. poisson: keep a thinning-accepted candidate iff no thinning-accepted
+    //    candidate with a strictly higher priority (ties by candidate index)
+    //    lies within min_dist. The spatial hash holds every accepted
+    //    candidate and is read-only during the check, so the kept set is
+    //    unique and the loop parallelizes (N1 by construction).
     if (mode == "poisson" && minDist > 0.0f) {
-        std::vector<int32_t> order;
-        for (size_t i = 0; i < cands.size(); ++i)
-            if (accept[i]) order.push_back(static_cast<int32_t>(i));
-        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            return cands[static_cast<size_t>(a)].priority > cands[static_cast<size_t>(b)].priority;
-        });
         struct CellKey {
             int64_t x, y, z;
             bool operator==(const CellKey&) const = default;
@@ -387,32 +423,42 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
         };
         std::unordered_map<CellKey, std::vector<int32_t>, CellHash> grid;
         const float md2 = minDist * minDist;
-        std::vector<uint8_t> kept(cands.size(), 0);
-        for (int32_t idx : order) {
-            const Candidate& c = cands[static_cast<size_t>(idx)];
+        for (size_t i = 0; i < cands.size(); ++i) {
+            if (!accept[i]) continue;
+            const Candidate& c = cands[i];
             const int64_t cx = static_cast<int64_t>(std::floor(c.pos.x / minDist));
             const int64_t cy = static_cast<int64_t>(std::floor(c.pos.y / minDist));
             const int64_t cz = static_cast<int64_t>(std::floor(c.pos.z / minDist));
-            bool blocked = false;
-            for (int64_t dx = -1; dx <= 1 && !blocked; ++dx)
-                for (int64_t dy = -1; dy <= 1 && !blocked; ++dy)
-                    for (int64_t dz = -1; dz <= 1 && !blocked; ++dz) {
-                        auto it = grid.find(CellKey{cx + dx, cy + dy, cz + dz});
-                        if (it == grid.end()) continue;
-                        for (int32_t other : it->second) {
-                            const Candidate& o = cands[static_cast<size_t>(other)];
-                            if (o.priority > c.priority &&
-                                glm::dot(o.pos - c.pos, o.pos - c.pos) < md2) {
-                                blocked = true;
-                                break;
+            grid[CellKey{cx, cy, cz}].push_back(static_cast<int32_t>(i));
+        }
+        std::vector<uint8_t> kept(cands.size(), 0);
+        parallelFor(cands.size(), run.threads, [&](size_t s, size_t e) {
+            for (size_t i = s; i < e; ++i) {
+                if (!accept[i]) continue;
+                const Candidate& c = cands[i];
+                const int64_t cx = static_cast<int64_t>(std::floor(c.pos.x / minDist));
+                const int64_t cy = static_cast<int64_t>(std::floor(c.pos.y / minDist));
+                const int64_t cz = static_cast<int64_t>(std::floor(c.pos.z / minDist));
+                bool blocked = false;
+                for (int64_t dx = -1; dx <= 1 && !blocked; ++dx)
+                    for (int64_t dy = -1; dy <= 1 && !blocked; ++dy)
+                        for (int64_t dz = -1; dz <= 1 && !blocked; ++dz) {
+                            auto it = grid.find(CellKey{cx + dx, cy + dy, cz + dz});
+                            if (it == grid.end()) continue;
+                            for (int32_t other : it->second) {
+                                if (static_cast<size_t>(other) == i) continue;
+                                const Candidate& o = cands[static_cast<size_t>(other)];
+                                const bool higher = o.priority > c.priority ||
+                                                    (o.priority == c.priority && static_cast<size_t>(other) < i);
+                                if (higher && glm::dot(o.pos - c.pos, o.pos - c.pos) < md2) {
+                                    blocked = true;
+                                    break;
+                                }
                             }
                         }
-                    }
-            if (!blocked) {
-                kept[static_cast<size_t>(idx)] = 1;
-                grid[CellKey{cx, cy, cz}].push_back(idx);
+                kept[i] = blocked ? 0 : 1;
             }
-        }
+        });
         accept = std::move(kept);
     }
 
@@ -528,31 +574,31 @@ std::optional<ColumnData> stampColumn(const Geo& inst, const std::string& name) 
 }
 
 // Mutable accumulator matching the ColumnData alternative order (union schema
-// across variants: first variant's type wins, others convert).
+// across variants: first variant's type wins, others convert). Columns are
+// pre-sized to the total point count; each anchor writes only its own slice,
+// so the realize fill parallelizes over anchors bit-identically (N7).
 using MutColumn = std::variant<std::vector<float>, std::vector<int64_t>, std::vector<uint8_t>,
                                std::vector<glm::vec2>, std::vector<glm::vec3>, std::vector<glm::vec4>,
                                std::vector<std::string>>;
 
-MutColumn allocLike(const ColumnData& exemplar) {
+MutColumn allocLike(const ColumnData& exemplar, size_t count) {
     return std::visit(
-        [](const auto& ptr) -> MutColumn {
+        [count](const auto& ptr) -> MutColumn {
             using VecT = std::decay_t<decltype(*ptr)>;
-            return VecT{};
+            return VecT(count);  // zero value = the union zero-fill
         },
         exemplar);
 }
 
-void appendConverted(MutColumn& acc, const ColumnData* src, const ColumnData& exemplar, size_t zeroCount) {
-    if (!src) {
-        std::visit([zeroCount](auto& v) { v.resize(v.size() + zeroCount); }, acc);
-        return;
-    }
+void writeConverted(MutColumn& acc, size_t dstBegin, const ColumnData* src, const ColumnData& exemplar,
+                    size_t count) {
+    if (!src) return;  // variant lacks the column: the pre-sized zeros stand
     ColumnData converted = src->index() == exemplar.index() ? *src : convertColumn(*src, exemplar);
     std::visit(
         [&](auto& v) {
             using VecT = std::decay_t<decltype(v)>;
             const auto& srcVec = std::get<std::shared_ptr<const VecT>>(converted);
-            v.insert(v.end(), srcVec->begin(), srcVec->end());
+            std::copy_n(srcVec->begin(), static_cast<ptrdiff_t>(count), v.begin() + static_cast<ptrdiff_t>(dstBegin));
         },
         acc);
 }
@@ -568,7 +614,7 @@ ColumnData freezeColumn(MutColumn&& acc) {
 
 }  // namespace
 
-GeoPtr realizeInstances(const Geo& inst) {
+GeoPtr realizeInstances(const Geo& inst, unsigned threads) {
     if (inst.kind != GeoKind::Instances || !inst.instanceSources || inst.instanceSources->empty())
         return nullptr;
     const auto& sources = *inst.instanceSources;
@@ -579,7 +625,9 @@ GeoPtr realizeInstances(const Geo& inst) {
     std::optional<ColumnData> variantCol = stampColumn(inst, "variant");
     std::optional<ColumnData> tintCol = stampColumn(inst, "tint");
 
+    // Per-anchor source pick and slice offsets (sequential prefix pass).
     std::vector<int32_t> srcIdx(n, 0);
+    std::vector<size_t> ptBase(n, 0), cornerBase(n, 0), faceBase(n, 0);
     size_t totalPts = 0, totalCorners = 0, totalFaces = 0;
     bool anyNormals = false;
     for (const GeoPtr& s : sources) anyNormals = anyNormals || s->normals != nullptr;
@@ -588,20 +636,13 @@ GeoPtr realizeInstances(const Geo& inst) {
         srcIdx[i] = static_cast<int32_t>(
             std::clamp<int64_t>(v, 0, static_cast<int64_t>(sources.size()) - 1));
         const Geo& src = *sources[static_cast<size_t>(srcIdx[i])];
+        ptBase[i] = totalPts;
+        cornerBase[i] = totalCorners;
+        faceBase[i] = totalFaces;
         totalPts += src.pointCount();
         totalCorners += src.cornerCount();
         totalFaces += src.faceCount();
     }
-
-    std::vector<glm::vec3> positions;
-    positions.reserve(totalPts);
-    std::vector<glm::vec3> normals;
-    if (anyNormals) normals.reserve(totalPts);
-    std::vector<int32_t> corners;
-    corners.reserve(totalCorners);
-    std::vector<int32_t> offsets;
-    offsets.reserve(totalFaces + 1);
-    offsets.push_back(0);
 
     // Union schema of the source point attributes/groups (first variant wins).
     std::vector<std::pair<std::string, ColumnData>> attrSchema;
@@ -620,49 +661,63 @@ GeoPtr realizeInstances(const Geo& inst) {
                 if (!seen) groupSchema.push_back({name, ColumnData(c)});
             }
     }
+
+    std::vector<glm::vec3> positions(totalPts);
+    std::vector<glm::vec3> normals(anyNormals ? totalPts : 0);
+    std::vector<int32_t> corners(totalCorners);
+    std::vector<int32_t> offsets(totalFaces + 1);
+    offsets[0] = 0;
+    std::vector<glm::vec3> tint(totalPts);
     std::vector<MutColumn> attrOut;
-    for (const auto& [name, ex] : attrSchema) attrOut.push_back(allocLike(ex));
+    for (const auto& [name, ex] : attrSchema) attrOut.push_back(allocLike(ex, totalPts));
     std::vector<MutColumn> groupOut;
-    for (const auto& [name, ex] : groupSchema) groupOut.push_back(allocLike(ex));
-    std::vector<glm::vec3> tint;
-    tint.reserve(totalPts);
+    for (const auto& [name, ex] : groupSchema) groupOut.push_back(allocLike(ex, totalPts));
 
-    for (size_t i = 0; i < n; ++i) {
-        const Geo& src = *sources[static_cast<size_t>(srcIdx[i])];
-        const float s = stampF32(scaleCol ? &*scaleCol : nullptr, i, 1.0f);
-        const glm::vec4 o = stampVec4(orientCol ? &*orientCol : nullptr, i, glm::vec4(0, 0, 0, 1));
-        glm::quat q(o.w, o.x, o.y, o.z);
-        const float qlen = glm::length(q);
-        q = qlen > 0.0f ? q / qlen : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        const glm::vec3 anchor = (*inst.positions)[i];
+    // Per-anchor fill: transform T(P)*R(orient)*S(scale) per anchor in @index
+    // order, every anchor writing only its precomputed slices (N7).
+    parallelFor(n, threads, [&](size_t s, size_t e) {
+        for (size_t i = s; i < e; ++i) {
+            const Geo& src = *sources[static_cast<size_t>(srcIdx[i])];
+            const float sc = stampF32(scaleCol ? &*scaleCol : nullptr, i, 1.0f);
+            const glm::vec4 o = stampVec4(orientCol ? &*orientCol : nullptr, i, glm::vec4(0, 0, 0, 1));
+            glm::quat q(o.w, o.x, o.y, o.z);
+            const float qlen = glm::length(q);
+            q = qlen > 0.0f ? q / qlen : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            const glm::vec3 anchor = (*inst.positions)[i];
 
-        const size_t ptBase = positions.size();
-        for (const glm::vec3& p : *src.positions) positions.push_back(anchor + q * (p * s));
-        if (anyNormals) {
-            for (size_t k = 0; k < src.pointCount(); ++k)
-                normals.push_back(src.normals ? q * (*src.normals)[k] : glm::vec3(0.0f));
-        }
-        if (src.cornerVerts) {
-            for (int32_t cv : *src.cornerVerts) corners.push_back(cv + static_cast<int32_t>(ptBase));
-        }
-        if (src.faceOffsets) {
-            const int32_t cornerBase = static_cast<int32_t>(offsets.back());
-            for (size_t k = 1; k < src.faceOffsets->size(); ++k)
-                offsets.push_back((*src.faceOffsets)[k] + cornerBase);
-        }
+            const size_t pb = ptBase[i];
+            const size_t sp = src.pointCount();
+            for (size_t k = 0; k < sp; ++k) positions[pb + k] = anchor + q * ((*src.positions)[k] * sc);
+            if (anyNormals) {
+                for (size_t k = 0; k < sp; ++k)
+                    normals[pb + k] = src.normals ? q * (*src.normals)[k] : glm::vec3(0.0f);
+            }
+            if (src.cornerVerts) {
+                const size_t cb = cornerBase[i];
+                for (size_t k = 0; k < src.cornerVerts->size(); ++k)
+                    corners[cb + k] = (*src.cornerVerts)[k] + static_cast<int32_t>(pb);
+            }
+            if (src.faceOffsets) {
+                const size_t fb = faceBase[i];
+                const int32_t cornerShift = static_cast<int32_t>(cornerBase[i]);
+                for (size_t k = 1; k < src.faceOffsets->size(); ++k)
+                    offsets[fb + k] = (*src.faceOffsets)[k] + cornerShift;
+            }
 
-        const glm::vec3 t = stampVec3(tintCol ? &*tintCol : nullptr, i, glm::vec3(1.0f));
-        tint.resize(tint.size() + src.pointCount(), t);
-        for (size_t a = 0; a < attrSchema.size(); ++a) {
-            const AttrColumn* col = src.pointAttrs ? src.pointAttrs->find(attrSchema[a].first) : nullptr;
-            appendConverted(attrOut[a], col ? &col->data : nullptr, attrSchema[a].second, src.pointCount());
+            const glm::vec3 t = stampVec3(tintCol ? &*tintCol : nullptr, i, glm::vec3(1.0f));
+            std::fill(tint.begin() + static_cast<ptrdiff_t>(pb),
+                      tint.begin() + static_cast<ptrdiff_t>(pb + sp), t);
+            for (size_t a = 0; a < attrSchema.size(); ++a) {
+                const AttrColumn* col = src.pointAttrs ? src.pointAttrs->find(attrSchema[a].first) : nullptr;
+                writeConverted(attrOut[a], pb, col ? &col->data : nullptr, attrSchema[a].second, sp);
+            }
+            for (size_t g = 0; g < groupSchema.size(); ++g) {
+                ConstBoolColumnPtr col = src.pointGroups ? src.pointGroups->find(groupSchema[g].first) : nullptr;
+                ColumnData asCol = ColumnData(col ? col : ConstBoolColumnPtr());
+                writeConverted(groupOut[g], pb, col ? &asCol : nullptr, groupSchema[g].second, sp);
+            }
         }
-        for (size_t g = 0; g < groupSchema.size(); ++g) {
-            ConstBoolColumnPtr col = src.pointGroups ? src.pointGroups->find(groupSchema[g].first) : nullptr;
-            ColumnData asCol = ColumnData(col ? col : ConstBoolColumnPtr());
-            appendConverted(groupOut[g], col ? &asCol : nullptr, groupSchema[g].second, src.pointCount());
-        }
-    }
+    });
 
     Geo out;
     out.kind = GeoKind::Mesh;
@@ -690,7 +745,7 @@ namespace {
 
 Value opRealize(const BoundCall& bound, RunContext& run) {
     const Geo& inst = *asGeo(bound.values[0]);
-    GeoPtr realized = realizeInstances(inst);
+    GeoPtr realized = realizeInstances(inst, run.threads);
     if (!realized) {
         run.report("E204", bound.span, "realize expects geo<instances>, got geo<" +
                                            std::string(geoKindName(inst.kind)) + ">");

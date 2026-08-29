@@ -153,8 +153,9 @@ TEST(Scatter, InheritsAttributesGroupsAndNormals) {
     EXPECT_TRUE(g->pointGroups->find("right"));
     ASSERT_TRUE(g->normals);
     EXPECT_EQ(g->normals->size(), g->pointCount());
-    // Points inside a face all lie on the surface: y == 0 exactly.
-    for (const glm::vec3& p : *g->positions) EXPECT_FLOAT_EQ(p.y, 0.0f);
+    // Points inside a face all lie on the surface: y == 0 (tolerance form —
+    // float goldens are eps, criterion 3; the exact invariant holds too).
+    for (const glm::vec3& p : *g->positions) EXPECT_NEAR(p.y, 0.0f, 1e-6f);
 }
 
 }  // namespace

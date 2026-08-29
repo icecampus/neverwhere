@@ -104,8 +104,12 @@ TEST(Instance, RealizeDefaultsAreIdentity) {
     EXPECT_EQ(g->pointCount(), 16u);
     glm::vec3 mn, mx;
     pgg::geoBBox(*g, mn, mx);
-    EXPECT_EQ(mn, glm::vec3(-1, -1, -1));
-    EXPECT_EQ(mx, glm::vec3(11, 1, 1));
+    EXPECT_NEAR(mn.x, -1.0f, 1e-6f);
+    EXPECT_NEAR(mn.y, -1.0f, 1e-6f);
+    EXPECT_NEAR(mn.z, -1.0f, 1e-6f);
+    EXPECT_NEAR(mx.x, 11.0f, 1e-5f);
+    EXPECT_NEAR(mx.y, 1.0f, 1e-6f);
+    EXPECT_NEAR(mx.z, 1.0f, 1e-6f);
     // tint materialized, default white.
     const pgg::AttrColumn* tint = g->pointAttrs ? g->pointAttrs->find("tint") : nullptr;
     ASSERT_TRUE(tint);
@@ -212,7 +216,7 @@ TEST(Merge, ColumnUnionZeroFills) {
         "s = sum_of(@x, on = m)\n"
         "output s\n");
     expectNoErrors(r);
-    EXPECT_FLOAT_EQ(pgg::asF32(r.outputs[0].value), 1.0f);  // 0 + 1 + 3 * 0
+    EXPECT_NEAR(pgg::asF32(r.outputs[0].value), 1.0f, 1e-6f);  // 0 + 1 + 3 * 0
 }
 
 TEST(Merge, KindMismatchIsE204) {

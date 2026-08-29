@@ -136,11 +136,13 @@ TEST(EvalE2, CorpusScatterMatchesGoldens) {
     EXPECT_EQ(gmn, mn);
     EXPECT_EQ(gmx, mx);
 
-    // instances: 25 anchors on the flat mask, split 10/15 across 2 variants.
+    // instances: 15 anchors on the flat mask, split 4/11 across 2 variants.
+    // (E3: the poisson kept-set is the unique conflict-free set — re-pinned
+    // from the E2 greedy values 25 / 10/15, spec §19 v1.0.)
     pgg::GeoPtr inst = pgg::asGeo(*outputOf(r, "inst"));
     ASSERT_TRUE(inst);
     EXPECT_EQ(inst->kind, pgg::GeoKind::Instances);
-    ASSERT_EQ(inst->pointCount(), 25u);
+    ASSERT_EQ(inst->pointCount(), 15u);
     ASSERT_TRUE(inst->instanceSources);
     ASSERT_EQ(inst->instanceSources->size(), 2u);
     const pgg::AttrColumn* variantCol = inst->pointAttrs ? inst->pointAttrs->find("variant") : nullptr;
@@ -148,8 +150,8 @@ TEST(EvalE2, CorpusScatterMatchesGoldens) {
     const auto& variants = std::get<std::shared_ptr<const std::vector<int64_t>>>(variantCol->data);
     int v0 = 0, v1 = 0;
     for (int64_t v : *variants) (v == 0 ? v0 : v1) += 1;
-    EXPECT_EQ(v0, 10);
-    EXPECT_EQ(v1, 15);
+    EXPECT_EQ(v0, 4);
+    EXPECT_EQ(v1, 11);
 
     // Mask-driven density: every anchor sits on the flat top of the rock.
     for (const glm::vec3& p : *inst->positions) EXPECT_GT(p.y, 1.0f);
@@ -160,7 +162,7 @@ TEST(EvalE2, CorpusScatterMatchesGoldens) {
     EXPECT_NEAR(amn.y, 1.52644f, 1e-5f);
     EXPECT_NEAR(amn.z, -0.999541f, 1e-4f);
     EXPECT_NEAR(amx.x, 0.832977f, 1e-5f);
-    EXPECT_NEAR(amx.y, 1.98334f, 1e-5f);
+    EXPECT_NEAR(amx.y, 1.98056f, 1e-5f);
     EXPECT_NEAR(amx.z, 1.18762f, 1e-5f);
 }
 

@@ -525,7 +525,7 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         const size_t np = std::min(sig.params.size(), v.size());
         for (size_t i = 0; i < np; ++i) args.push_back(makeConstBuffer(v[i], 1));
         std::vector<Value> params(v.begin() + static_cast<ptrdiff_t>(np), v.end());
-        ConstBufferPtr out = evalExprFuncBuf(static_cast<int>(sig.id), args, params, 1);
+        ConstBufferPtr out = evalExprFuncBuf(static_cast<int>(sig.id), args, params, 1, run.threads);
         return bufferValueAt(*out, 0);
     }
     (void)run;

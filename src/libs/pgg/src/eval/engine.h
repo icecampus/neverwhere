@@ -3,6 +3,9 @@
 // Pull-based lazy driver (spec §5.1, §6.6-6.7): binds launch params, then
 // evaluates only the bindings on the path to the requested outputs (N2).
 // Static checks (typecheck) run first; the graph executes only when clean.
+// E3: RunParams selects the lane count for per-element loops (N7) and carries
+// the caller-owned cross-run cache (N3/N4); RunStats reports cache counters,
+// the resolved thread count and the numeric profile id (§5.2).
 
 #include <unordered_map>
 
@@ -13,9 +16,16 @@
 namespace pgg {
 
 struct Document;  // pgg/pgg.h
+class MemoryCache;  // eval/cache.h
 
 struct RunParams {
     std::vector<std::pair<std::string, Value>> values;  // param name -> bound value
+    // Per-element loop parallelism: 0 = hardware concurrency, 1 = sequential.
+    // Results are bit-identical at any lane count within one numeric profile.
+    unsigned threads = 0;
+    // Caller-owned cross-run cache (nullptr = disabled). Value bindings only;
+    // inspector/debug sessions use their own instance by design (spec §5.3).
+    MemoryCache* cache = nullptr;
 };
 
 struct RunOutput {
@@ -29,6 +39,11 @@ struct RunStats {
     // The memoization rule (§4.4) pins this at 1 no matter the consumer count;
     // an unused binding is absent (== 0 via map default).
     std::unordered_map<std::string, uint64_t> bindingFieldEvals;
+    // Cross-run cache (MemoryCache); both stay 0 when no cache is attached.
+    uint64_t cacheHits = 0;
+    uint64_t cacheMisses = 0;
+    unsigned threadsUsed = 1;    // resolved lane count (RunParams::threads 0 -> hardware)
+    uint64_t profileId = 0;      // numeric profile of this run (spec §5.2)
 };
 
 struct RunResult {

@@ -1,6 +1,7 @@
 // RNG tests (spec §5.2): determinism, split independence, alias identity,
-// counter/lane addressing, golden word values (regression pin for the v0
-// draft algorithm; cross-platform vectors are stage E3).
+// counter/lane addressing, golden word values. Words, keys and the word->f32
+// mapping are the platform-independent integer contract pinned bit-exact in
+// repro_test.cpp (E3); noise goldens here are tolerances (criterion 3).
 #include <gtest/gtest.h>
 
 #include "pgg/src/eval/rng.h"
@@ -84,9 +85,11 @@ TEST(Rng, WordToF32Conversion) {
 }
 
 TEST(Rng, NoiseIsDeterministicAndRanged) {
+    // Noise goldens are float interpolation — outside the integer bit
+    // contract (spec §5.2), so they pin with a tolerance (E3 criterion 3).
     const pgg::Rng r = pgg::splitRng(pgg::rngFromSeed(42), "surface");
-    EXPECT_FLOAT_EQ(pgg::valueNoise(r, 1.5f, 2.5f, 3.5f, 0), 0.65052164f);
-    EXPECT_FLOAT_EQ(pgg::fbmNoise(r, 1.5f, 2.5f, 3.5f, 5, 2.0f, 0.5f), -0.054200567f);
+    EXPECT_NEAR(pgg::valueNoise(r, 1.5f, 2.5f, 3.5f, 0), 0.65052164f, 1e-6f);
+    EXPECT_NEAR(pgg::fbmNoise(r, 1.5f, 2.5f, 3.5f, 5, 2.0f, 0.5f), -0.054200567f, 1e-6f);
     float mn = 1e9f, mx = -1e9f;
     for (int i = 0; i < 50000; ++i) {
         const float v = pgg::fbmNoise(r, i * 0.137f, i * 0.031f, i * 0.213f, 5, 2.0f, 0.5f);

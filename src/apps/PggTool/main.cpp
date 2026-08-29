@@ -3,7 +3,7 @@
 //   PggTool fmt <file.pgg> [--check]    canonical format
 //   PggTool ast <file.pgg>              dump the AST
 //   PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]
-//                                       run the graph, print output summaries
+//                      [--threads N]    run the graph, print output summaries
 // Exit codes: 0 ok, 1 diagnostics with errors, 2 usage/io failure.
 
 #include <algorithm>
@@ -27,6 +27,7 @@ void usage() {
                  "  PggTool fmt <file.pgg> [-i|--check] canonical format (stdout, write-back, or diff-check)\n"
                  "  PggTool ast <file.pgg>              dump the AST\n"
                  "  PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]\n"
+                 "                        [--threads N]\n"
                  "                                      run the graph, print output summaries\n"
                  "                                      (--obj writes one Wavefront OBJ per geo output)\n");
 }
@@ -201,9 +202,10 @@ bool writeObj(const std::string& path, const pgg::Geo& geo) {
 }
 
 int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std::string>>& params,
-           const std::vector<std::string>& outputs, const std::string& objDir) {
+           const std::vector<std::string>& outputs, const std::string& objDir, unsigned threads) {
     pgg::RunParams rp;
     for (const auto& [k, v] : params) rp.values.push_back({k, parseCliValue(v)});
+    rp.threads = threads;
     pgg::RunResult result = pgg::runFile(path, rp, outputs);
     for (const pgg::Diagnostic& d : result.diagnostics) {
         std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
@@ -220,6 +222,9 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
     }
     std::printf("run: %zu output(s), %llu field evaluation(s)\n", result.outputs.size(),
                 (unsigned long long)result.stats.fieldsEvaluated);
+    std::printf("profile: %016llx threads: %u cache: %llu hit(s) %llu miss(es)\n",
+                (unsigned long long)result.stats.profileId, result.stats.threadsUsed,
+                (unsigned long long)result.stats.cacheHits, (unsigned long long)result.stats.cacheMisses);
     if (!objDir.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(objDir, ec);
@@ -262,6 +267,7 @@ int main(int argc, char** argv) {
         std::vector<std::pair<std::string, std::string>> params;
         std::vector<std::string> outputs;
         std::string objDir;
+        unsigned threads = 0;  // 0 = hardware concurrency (RunParams default)
         for (int i = 3; i < argc; ++i) {
             const std::string a = argv[i];
             auto takeValue = [&](const std::string& flag, std::string& out) -> bool {
@@ -287,12 +293,14 @@ int main(int argc, char** argv) {
                 outputs.push_back(v);
             } else if (takeValue("--obj", v)) {
                 objDir = v;
+            } else if (takeValue("--threads", v)) {
+                threads = static_cast<unsigned>(std::strtoul(v.c_str(), nullptr, 10));
             } else {
                 usage();
                 return 2;
             }
         }
-        return cmdRun(path, params, outputs, objDir);
+        return cmdRun(path, params, outputs, objDir, threads);
     }
     bool json = false, inPlace = false, checkOnly = false;
     for (int i = 3; i < argc; ++i) {

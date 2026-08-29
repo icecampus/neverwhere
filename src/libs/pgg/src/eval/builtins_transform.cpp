@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "builtins.h"
+#include "parallel.h"
 
 namespace pgg {
 namespace {
@@ -123,10 +124,16 @@ Value opSmooth(const BoundCall& bound) {
 // compute_normals(geo, mode): smooth = area-weighted vertex normals;
 // by_angle = corner-angle-weighted; flat = per-corner "N" attribute
 // (faceted look; points @N is left untouched in flat mode).
-Value opComputeNormals(const BoundCall& bound) {
+//
+// Parallel structure (N7): face normals per face (disjoint slots), then a
+// per-point gather over sequentially built incident-corner lists — the gather
+// keeps the original ascending-corner accumulation order per point (bit-
+// identical to the old face loop) while writing disjoint point slots.
+Value opComputeNormals(const BoundCall& bound, RunContext& run) {
     const Geo& in = *asGeo(bound.values[0]);
     const std::string& mode = asString(bound.values[1]);
     const size_t count = in.pointCount();
+    const unsigned threads = run.threads;
 
     if (in.faceCount() == 0) {
         // No surface: deterministic up normal (documented v0 fallback).
@@ -134,17 +141,21 @@ Value opComputeNormals(const BoundCall& bound) {
     }
 
     std::vector<glm::vec3> faceN(in.faceCount());
-    for (size_t f = 0; f < in.faceCount(); ++f) faceN[f] = faceNormal(in, f);
+    parallelFor(in.faceCount(), threads, [&](size_t s, size_t e) {
+        for (size_t f = s; f < e; ++f) faceN[f] = faceNormal(in, f);
+    });
 
     if (mode == "flat") {
         std::vector<glm::vec3> cornerN(in.cornerCount());
-        for (size_t f = 0; f < in.faceCount(); ++f) {
-            glm::vec3 n = faceN[f];
-            const float len = glm::length(n);
-            n = len > 0.0f ? n / len : glm::vec3(0, 1, 0);
-            for (int32_t c = (*in.faceOffsets)[f]; c < (*in.faceOffsets)[f + 1]; ++c)
-                cornerN[static_cast<size_t>(c)] = n;
-        }
+        parallelFor(in.faceCount(), threads, [&](size_t s, size_t e) {
+            for (size_t f = s; f < e; ++f) {
+                glm::vec3 n = faceN[f];
+                const float len = glm::length(n);
+                n = len > 0.0f ? n / len : glm::vec3(0, 1, 0);
+                for (int32_t c = (*in.faceOffsets)[f]; c < (*in.faceOffsets)[f + 1]; ++c)
+                    cornerN[static_cast<size_t>(c)] = n;
+            }
+        });
         Geo out = in;
         AttrSet attrs = out.cornerAttrs ? *out.cornerAttrs : AttrSet{};
         attrs.columns["N"] = AttrColumn{std::make_shared<const std::vector<glm::vec3>>(std::move(cornerN))};
@@ -152,35 +163,58 @@ Value opComputeNormals(const BoundCall& bound) {
         return Value(std::make_shared<const Geo>(std::move(out)));
     }
 
-    std::vector<glm::vec3> nrm(count, glm::vec3(0.0f));
-    const bool byAngle = mode == "by_angle";
-    for (size_t f = 0; f < in.faceCount(); ++f) {
-        const int32_t begin = (*in.faceOffsets)[f];
-        const int32_t end = (*in.faceOffsets)[f + 1];
-        for (int32_t c = begin; c < end; ++c) {
-            const int32_t v = (*in.cornerVerts)[c];
-            float w = 1.0f;
-            if (byAngle) {
-                const glm::vec3& p = (*in.positions)[v];
-                const glm::vec3 a = (*in.positions)[(*in.cornerVerts)[c > begin ? c - 1 : end - 1]] - p;
-                const glm::vec3 b = (*in.positions)[(*in.cornerVerts)[c + 1 < end ? c + 1 : begin]] - p;
-                const float la = glm::length(a);
-                const float lb = glm::length(b);
-                if (la > 0.0f && lb > 0.0f) {
-                    const glm::vec3 ua = a / la;
-                    const glm::vec3 ub = b / lb;
-                    w = std::atan2(glm::length(glm::cross(ua, ub)), glm::dot(ua, ub));
-                } else {
-                    w = 0.0f;
-                }
+    // Incident-corner lists per point + the face of every corner (sequential
+    // build, ascending corner order per point = the old accumulation order).
+    const size_t cornerCount = in.cornerCount();
+    std::vector<int32_t> faceOf(cornerCount);
+    std::vector<int32_t> incidentBegin(count + 1, 0);
+    for (int32_t v : *in.cornerVerts) incidentBegin[static_cast<size_t>(v) + 1] += 1;
+    for (size_t v = 0; v < count; ++v) incidentBegin[v + 1] += incidentBegin[v];
+    std::vector<int32_t> incidentCorners(cornerCount);
+    {
+        std::vector<int32_t> cursor(incidentBegin.begin(), incidentBegin.end() - 1);
+        for (size_t f = 0; f < in.faceCount(); ++f) {
+            const int32_t begin = (*in.faceOffsets)[f];
+            const int32_t end = (*in.faceOffsets)[f + 1];
+            for (int32_t c = begin; c < end; ++c) {
+                faceOf[static_cast<size_t>(c)] = static_cast<int32_t>(f);
+                const int32_t v = (*in.cornerVerts)[static_cast<size_t>(c)];
+                incidentCorners[static_cast<size_t>(cursor[static_cast<size_t>(v)]++)] = c;
             }
-            nrm[v] += faceN[f] * w;
         }
     }
-    for (glm::vec3& n : nrm) {
-        const float len = glm::length(n);
-        n = len > 0.0f ? n / len : glm::vec3(0, 1, 0);
-    }
+
+    std::vector<glm::vec3> nrm(count);
+    const bool byAngle = mode == "by_angle";
+    parallelFor(count, threads, [&](size_t s, size_t e) {
+        for (size_t v = s; v < e; ++v) {
+            glm::vec3 sum(0.0f);
+            for (int32_t k = incidentBegin[v]; k < incidentBegin[v + 1]; ++k) {
+                const int32_t c = incidentCorners[static_cast<size_t>(k)];
+                const int32_t f = faceOf[static_cast<size_t>(c)];
+                float w = 1.0f;
+                if (byAngle) {
+                    const int32_t begin = (*in.faceOffsets)[static_cast<size_t>(f)];
+                    const int32_t end = (*in.faceOffsets)[static_cast<size_t>(f) + 1];
+                    const glm::vec3& p = (*in.positions)[v];
+                    const glm::vec3 a = (*in.positions)[(*in.cornerVerts)[c > begin ? c - 1 : end - 1]] - p;
+                    const glm::vec3 b = (*in.positions)[(*in.cornerVerts)[c + 1 < end ? c + 1 : begin]] - p;
+                    const float la = glm::length(a);
+                    const float lb = glm::length(b);
+                    if (la > 0.0f && lb > 0.0f) {
+                        const glm::vec3 ua = a / la;
+                        const glm::vec3 ub = b / lb;
+                        w = std::atan2(glm::length(glm::cross(ua, ub)), glm::dot(ua, ub));
+                    } else {
+                        w = 0.0f;
+                    }
+                }
+                sum += faceN[static_cast<size_t>(f)] * w;
+            }
+            const float len = glm::length(sum);
+            nrm[v] = len > 0.0f ? sum / len : glm::vec3(0, 1, 0);
+        }
+    });
     return Value(withNormals(in, std::move(nrm)));
 }
 
@@ -191,7 +225,7 @@ Value evalTransformBuiltin(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Transform: return opTransform(bound);
         case BuiltinId::SetPosition: return opSetPosition(bound, run);
         case BuiltinId::Smooth: return opSmooth(bound);
-        case BuiltinId::ComputeNormals: return opComputeNormals(bound);
+        case BuiltinId::ComputeNormals: return opComputeNormals(bound, run);
         default: return Value();
     }
 }
