@@ -146,21 +146,23 @@ TEST(Typecheck, DeferredOperationsReportCleanly) {
     EXPECT_EQ(countCode(rc, "E201"), 1);
 }
 
-TEST(Typecheck, UnsupportedFileShapesReportCleanly) {
-    // Zones parse (E0 grammar) but must not run (def/imports work since E5).
+TEST(Typecheck, ZonesAreSupportedSinceE7) {
+    // Zones parse (E0 grammar) and run (E7); misuse is diagnosed statically.
     pgg::RunResult zone = runSrc(
         "r = repeat (1, iterations = 2) |cur| {\n"
         "    cur = cur + 1\n"
         "}\n"
         "output r\n");
-    EXPECT_EQ(countCode(zone, "E201"), 1);
+    EXPECT_FALSE(zone.hasErrors());
+    EXPECT_EQ(pgg::asInt(zone.outputs[0].value), 3);
+    // An item port never bound in the body is a static E204.
     pgg::RunResult fe = runSrc(
         "b = ico_sphere(subdiv = 1, radius = 1.0)\n"
         "f = foreach piece in b {\n"
         "    q = b\n"
         "}\n"
         "output f\n");
-    EXPECT_EQ(countCode(fe, "E201"), 1);
+    EXPECT_EQ(countCode(fe, "E204"), 1);
 }
 
 TEST(Typecheck, QualifiedCallWithoutImportIsRejected) {

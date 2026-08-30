@@ -75,6 +75,7 @@ private:
     std::vector<std::pair<std::string, Span>> outputs_;
     const BuiltinSig* lastSig_ = nullptr;  // sig of the last inferred call (multi-output check)
     bool allowMulti_ = false;              // destructuring position accepts multi-output calls
+    std::vector<bool> zoneStack_;          // enclosing zones: true = repeat, false = foreach (§5.4)
 
     bool isBound(const std::string& name) const {
         return std::find(boundParams_.begin(), boundParams_.end(), name) != boundParams_.end();
@@ -166,14 +167,177 @@ private:
                 break;
             }
             case NodeKind::RepeatZone:
-                error("E201", s->span, "repeat zones are not supported at stage E5", "zones are stage E7");
+                repeatZone(static_cast<const RepeatZone*>(s));
                 break;
             case NodeKind::ForeachZone:
-                error("E201", s->span, "foreach zones are not supported at stage E5", "zones are stage E7");
+                foreachZone(static_cast<const ForeachZone*>(s));
                 break;
             default:
                 break;  // tap: diagnostics layer, a no-op while debug=off (§9.2)
         }
+    }
+
+    // --- zones (E7, spec §5.4) ---------------------------------------------------
+    //
+    // Body names are globally unique (validator E102 forbids shadowing), so
+    // the body typechecks in the same flat env_/schemas_/closures_; the names
+    // it introduces are erased on exit. State/item ports behave as value
+    // channels: defined before the body (the input port), bound exactly once
+    // in it (the output port), with the channel type preserved (drift = E204).
+
+    void eraseBodyNames(const std::vector<std::string>& names) {
+        for (const std::string& n : names) {
+            env_.erase(n);
+            schemas_.erase(n);
+            closures_.erase(n);
+        }
+    }
+
+    // Every name a statement introduces into the enclosing (zone-body) scope:
+    // binding targets and nested-zone targets. Nested zone bodies clean their
+    // own names up.
+    static void collectStmtDefs(const Stmt* s, std::vector<std::string>& out) {
+        if (!s) return;
+        if (s->kind == NodeKind::Binding) {
+            for (const std::string& n : static_cast<const Binding*>(s)->targets.names) out.push_back(n);
+        } else if (s->kind == NodeKind::RepeatZone) {
+            for (const std::string& n : static_cast<const RepeatZone*>(s)->targets.names) out.push_back(n);
+        } else if (s->kind == NodeKind::ForeachZone) {
+            out.push_back(static_cast<const ForeachZone*>(s)->target);
+        }
+    }
+
+    // Counts bindings of each port name in the body (validator pins the max
+    // at 1; 0 = unbound output port, E204).
+    static std::unordered_map<std::string, int> portBindCounts(const std::vector<Stmt*>& body) {
+        std::unordered_map<std::string, int> counts;
+        for (const Stmt* s : body) {
+            if (!s || s->kind != NodeKind::Binding) continue;
+            for (const std::string& n : static_cast<const Binding*>(s)->targets.names) counts[n] += 1;
+        }
+        return counts;
+    }
+
+    void checkPortsBound(const std::vector<std::string>& ports, const std::vector<Span>& spans,
+                         const std::unordered_map<std::string, int>& counts, const char* zoneWord) {
+        for (size_t i = 0; i < ports.size(); ++i) {
+            auto it = counts.find(ports[i]);
+            if (it == counts.end() || it->second == 0) {
+                error("E204", i < spans.size() ? spans[i] : Span{},
+                      "state port '" + ports[i] + "' of the " + zoneWord +
+                          " zone is never bound in the body",
+                      "bind it exactly once to wire the output port of the iteration (§5.4)");
+            }
+        }
+    }
+
+    void repeatZone(const RepeatZone* z) {
+        const size_t nState = z->state.names.size();
+        const size_t nTargets = z->targets.names.size();
+        if (nTargets != nState) {
+            error("E202", z->span,
+                  "repeat zone has " + std::to_string(nTargets) + " target(s) but " +
+                      std::to_string(nState) + " state port(s)",
+                  "destructure one target per state port (§5.4)");
+        }
+        // Header: value-expr types of the input ports. Multi-state needs a
+        // multi-output call destructured across the ports.
+        lastSig_ = nullptr;
+        allowMulti_ = nState > 1;
+        const Type valueT = infer(z->value);
+        allowMulti_ = false;
+        std::vector<Type> portTypes(nState);
+        if (nState == 1) {
+            portTypes[0] = valueT;
+        } else if (!lastSig_ || lastSig_->results.size() != nState) {
+            error("E202", z->span,
+                  "repeat with " + std::to_string(nState) +
+                      " state ports needs a multi-output value of the same arity",
+                  "a, b = repeat(bbox(g), iterations = N) |a, b| { ... }");
+        } else {
+            for (size_t i = 0; i < nState; ++i) portTypes[i] = lastSig_->results[i];
+        }
+        const Type iterT = infer(z->iterations);
+        if (iterT.base != ScalarType::None &&
+            (iterT.isField || !canConvert(iterT, Type{ScalarType::Int, false, GeoKind::Any}))) {
+            error(iterT.isField ? "E205" : "E204", z->iterations ? z->iterations->span : z->span,
+                  "repeat iterations must be a value int, got " + typeName(iterT));
+        }
+        // Input-port schemas (per port).
+        const GeoSchema& valueSchema = schemaOfExpr(z->value);
+        // Body.
+        zoneStack_.push_back(true);
+        std::vector<std::string> bodyDefs;
+        for (size_t i = 0; i < nState; ++i) {
+            define(z->state.names[i], portTypes[i]);
+            bodyDefs.push_back(z->state.names[i]);
+            if (nState == 1) {
+                schemas_[z->state.names[i]] = valueSchema;
+                closures_[z->state.names[i]] = gather(z->value);
+            }
+        }
+        for (const Stmt* s : z->body) {
+            collectStmtDefs(s, bodyDefs);
+            stmt(s);
+        }
+        checkPortsBound(z->state.names, z->state.spans, portBindCounts(z->body), "repeat");
+        // Channel type preservation: the output port keeps the input's type.
+        for (size_t i = 0; i < nState; ++i) {
+            auto it = env_.find(z->state.names[i]);
+            if (it == env_.end() || portTypes[i].base == ScalarType::None) continue;
+            if (it->second.base != ScalarType::None && !canConvert(it->second, portTypes[i])) {
+                error("E204", z->span,
+                      "state port '" + z->state.names[i] + "' changes type across the iteration: " +
+                          typeName(portTypes[i]) + " in, " + typeName(it->second) + " out",
+                      "the state channel keeps one type — introduce a fresh name for other data");
+                continue;
+            }
+            // Targets inherit the output port's type and steady-state schema.
+            if (i < nTargets) {
+                define(z->targets.names[i], portTypes[i]);
+                if (auto sit = schemas_.find(z->state.names[i]); sit != schemas_.end())
+                    schemas_[z->targets.names[i]] = sit->second;
+                if (auto cit = closures_.find(z->state.names[i]); cit != closures_.end())
+                    closures_[z->targets.names[i]] = cit->second;
+            }
+        }
+        zoneStack_.pop_back();
+        eraseBodyNames(bodyDefs);
+    }
+
+    void foreachZone(const ForeachZone* z) {
+        const Type collT = infer(z->collection);
+        if (collT.base == ScalarType::Geo && collT.geoKind != GeoKind::Any &&
+            collT.geoKind != GeoKind::Mesh) {
+            error("E204", z->collection ? z->collection->span : z->span,
+                  "foreach over geo<" + std::string(geoKindName(collT.geoKind)) +
+                      "> is not supported at stage E7",
+                  "v0 iterates connected pieces of a geo<mesh> (§5.4)");
+        }
+        static const Type kMesh{ScalarType::Geo, false, GeoKind::Mesh};
+        zoneStack_.push_back(false);
+        std::vector<std::string> bodyDefs{z->item};
+        define(z->item, kMesh);
+        schemas_[z->item] = schemaOfExpr(z->collection);
+        closures_[z->item] = gather(z->collection);
+        for (const Stmt* s : z->body) {
+            collectStmtDefs(s, bodyDefs);
+            stmt(s);
+        }
+        checkPortsBound({z->item}, {z->itemSpan}, portBindCounts(z->body), "foreach");
+        if (auto it = env_.find(z->item); it != env_.end() && it->second.base != ScalarType::None &&
+            !canConvert(it->second, kMesh)) {
+            error("E204", z->span,
+                  "item port '" + z->item + "' of the foreach zone must stay a geo<mesh>, got " +
+                      typeName(it->second),
+                  "the piece channel keeps one type — introduce a fresh name for other data");
+        }
+        // Target: geo<mesh>, schema of the output piece.
+        define(z->target, kMesh);
+        if (auto sit = schemas_.find(z->item); sit != schemas_.end()) schemas_[z->target] = sit->second;
+        if (auto cit = closures_.find(z->item); cit != closures_.end()) closures_[z->target] = cit->second;
+        zoneStack_.pop_back();
+        eraseBodyNames(bodyDefs);
     }
 
     // --- schema inference (merged into the same topological pass) --------------
@@ -466,6 +630,19 @@ private:
                 // Attribute barrier (§8.4): the extracted mesh carries @P only.
                 storeSchema(&c, sourceSchema(GeoKind::Mesh, false));
                 break;
+            case BuiltinId::Islands: {
+                GeoSchema s = argSchema(byParam, 0);
+                if (!s.open) s.attrs[domainIndex("faces")]["island_id"] = ScalarType::Int;
+                storeSchema(&c, std::move(s));
+                break;
+            }
+            case BuiltinId::Fracture: {
+                // SDF extraction barrier: the pieces carry @P + @island_id only.
+                GeoSchema s = sourceSchema(GeoKind::Mesh, false);
+                s.attrs[domainIndex("faces")]["island_id"] = ScalarType::Int;
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::Count:
                 checkFieldArgs(argSchema(byParam, 0), byParam, {2});  // where
                 break;
@@ -605,9 +782,14 @@ private:
                 }
                 break;
             }
-            case NodeKind::AttrRef:
-                out.attrs.push_back({static_cast<const AttrRef*>(e)->name, e->span});
+            case NodeKind::AttrRef: {
+                const std::string& n = static_cast<const AttrRef*>(e)->name;
+                // @iteration/@piece_index are zone-provided int values (§6.3),
+                // not attribute reads — the static schema check skips them.
+                if (n == "iteration" || n == "piece_index") break;
+                out.attrs.push_back({n, e->span});
                 break;
+            }
             case NodeKind::Paren:
                 gatherInto(static_cast<const Paren*>(e)->inner, out);
                 break;
@@ -721,9 +903,16 @@ private:
         if (ref->name == "P" || ref->name == "N") return field(ScalarType::Vec3);
         if (ref->name == "index") return field(ScalarType::Int);
         if (ref->name == "iteration" || ref->name == "piece_index") {
-            error("E302", ref->span, "'@" + ref->name + "' is only valid inside a zone body",
-                  "zones are stage E7");
-            return field(ScalarType::Int);
+            // Zone constants are VALUES (int), the only @-names with value
+            // semantics (§6.3) — valid when an enclosing zone provides them.
+            const bool needRepeat = ref->name == "iteration";
+            for (auto it = zoneStack_.rbegin(); it != zoneStack_.rend(); ++it)
+                if (*it == needRepeat) return scalar(ScalarType::Int);
+            error("E302", ref->span,
+                  "'@" + ref->name + "' is only valid inside a " +
+                      (needRepeat ? std::string("repeat") : std::string("foreach")) + " zone body",
+                  "the zone provides it as an int constant (§5.4)");
+            return scalar(ScalarType::Int);
         }
         // Named user attributes: at an open schema a read gets a provisional
         // f32 type and a missing attribute is a runtime E302; closed schemas

@@ -404,6 +404,14 @@ const std::vector<BuiltinSig>& registry() {
             }
         }
 
+        // --- §8.3 islands / §8.11 fracture (E7) --------------------------------
+        r.push_back(sig(BuiltinId::Islands, "islands", {geoArg("geo", GeoKind::Mesh)},
+                        Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        r.push_back(sig(BuiltinId::Fracture, "fracture",
+                        {geoArg("geo", GeoKind::Mesh), geoArg("planes", GeoKind::Points),
+                         val("rng", ScalarType::Rng, true)},
+                        Type{ScalarType::Geo, false, GeoKind::Mesh}));
+
         // --- known but deferred past this stage ---------------------------------
         r.push_back(deferredSig("import_mesh", "deferred: no host asset contract yet, Q4"));
         r.push_back(deferredSig("subdivide", "topology ops are a later stage (post-E4)"));
@@ -411,10 +419,8 @@ const std::vector<BuiltinSig>& registry() {
         r.push_back(deferredSig("merge_by_distance", "topology ops are a later stage (post-E4)"));
         r.push_back(deferredSig("delete", "topology ops are a later stage (post-E4)"));
         r.push_back(deferredSig("separate", "topology ops are a later stage (post-E4)"));
-        r.push_back(deferredSig("islands", "topology ops are a later stage (post-E4)"));
         for (const char* n : {"raycast", "transfer"})
             r.push_back(deferredSig(n, "sampling ops are a later stage (post-E4)"));
-        r.push_back(deferredSig("fracture", "fracture is stage E7"));
         return r;
     }();
     return kRegistry;
@@ -553,6 +559,9 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::SdfFromMesh:
         case BuiltinId::MeshFromSdf:
             return evalSdfBuiltin(bound, run);
+        case BuiltinId::Islands:
+        case BuiltinId::Fracture:
+            return evalFractureBuiltin(bound, run);
         default:
             break;
     }

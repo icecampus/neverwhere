@@ -76,6 +76,11 @@ struct RunContext {
     // Resolved lane count for per-element loops (RunParams::threads, 0 ->
     // hardware). 1 = fully sequential; results are bit-identical either way.
     unsigned threads = 1;
+    // E7 zone constants (§5.4/§6.3): @iteration/@piece_index are int VALUES
+    // provided by the enclosing zone — pushed/popped by the engine around an
+    // iteration/piece. compileAttrRef resolves them from the stack top into
+    // constants (a field use becomes a Const node via the usual conversion).
+    std::vector<std::pair<std::string, Value>> zoneConstants;
 
     FieldNode* newNode();
     void report(const std::string& code, Span span, std::string message, std::string hint = {});

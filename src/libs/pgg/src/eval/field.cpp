@@ -416,6 +416,18 @@ TypedValue makeValueResult(const Value& v) {
 }
 
 TypedValue compileAttrRef(const AttrRef* ref, RunContext& run) {
+    // Zone constants (§6.3): @iteration/@piece_index are int VALUES, resolved
+    // from the enclosing zone's constant stack (innermost wins). In a field
+    // context the value becomes a Const node via the usual conversion.
+    if (ref->name == "iteration" || ref->name == "piece_index") {
+        for (auto it = run.zoneConstants.rbegin(); it != run.zoneConstants.rend(); ++it)
+            if (it->first == ref->name) return makeValueResult(it->second);
+        run.report("E302", ref->span,
+                   "'@" + ref->name + "' is only valid inside a " +
+                       std::string(ref->name == "iteration" ? "repeat" : "foreach") + " zone body",
+                   "the zone provides it as an int constant (§5.4)");
+        return makeValueResult(Value(int64_t(0)));  // recovery: zero constant
+    }
     FieldNode* n = run.newNode();
     n->span = ref->span;
     if (ref->name == "P") {
@@ -427,12 +439,6 @@ TypedValue compileAttrRef(const AttrRef* ref, RunContext& run) {
     } else if (ref->name == "index") {
         n->kind = FKind::AttrIndex;
         n->type = ScalarType::Int;
-    } else if (ref->name == "iteration" || ref->name == "piece_index") {
-        run.report("E302", ref->span, "'@" + ref->name + "' is only valid inside a zone body",
-                   "zones are stage E7");
-        n->kind = FKind::Const;
-        n->type = ScalarType::Int;
-        n->constValue = Value(int64_t(0));
     } else {
         // Static typecheck rejects unknown attributes at E1; the node stays
         // for defensive completeness (runtime E302 on evaluation).

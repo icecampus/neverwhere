@@ -37,6 +37,7 @@ enum class SdfKind {
     Displace,
     Instance,
     Grid,
+    VoronoiCell,
 };
 
 // One transformed instance anchor (sdf_instance_on_points). Transforms mirror
@@ -64,6 +65,12 @@ struct SdfNode {
     float ampEstimate = 0.0f;
     // Instance
     std::vector<SdfInstanceAnchor> anchors;
+    // VoronoiCell (fracture, §8.11): precomputed half-planes of one Voronoi
+    // cell — eval = max over planes of dot(p - cellPoints[k], cellNormals[k]).
+    // Unbounded field: it has no finite conservative bbox and is only valid
+    // as the clipped operand of an Intersect (whose bbox comes from `a`).
+    std::vector<glm::vec3> cellNormals;
+    std::vector<glm::vec3> cellPoints;
     // Grid (sdf_from_mesh): trilinear lattice of signed distances
     glm::vec3 origin{0.0f};
     glm::ivec3 dims{0};
@@ -87,6 +94,10 @@ SdfPtr sdfIntersect(SdfPtr a, SdfPtr b);
 SdfPtr sdfDisplace(SdfPtr child, const FieldNode* amount);
 // Anchors are read from the points' stamp attributes by the builtin.
 SdfPtr sdfInstance(SdfPtr source, std::vector<SdfInstanceAnchor> anchors, float k);
+// One Voronoi cell of the deduped site set (fracture §8.11): the half-plane
+// intersection dot(p - (pi+pj)/2, normalize(pj-pi)) for j != site, planes in
+// ascending site order (deterministic; degenerate pairs skipped).
+SdfPtr sdfVoronoiCell(const std::vector<glm::vec3>& sites, int32_t site);
 
 // Unique-node count of the DAG (shared children counted once; PggTool summary).
 size_t sdfNodeCount(const SdfNode& root);

@@ -83,6 +83,7 @@ public:
                     break;
             }
         }
+        lintZones(f);
         reportUnused(scope);
     }
 
@@ -128,9 +129,25 @@ private:
     }
 
     void defineStatePort(Scope& scope, const std::string& name, Span span) {
+        // State/item ports are fresh names like any other definition: no
+        // redefinition, no shadowing of outer names (E102; zones were
+        // non-executable before E7, so this check is new but regression-free).
+        if (scope.defined.count(name)) {
+            error("E102", span, "name '" + name + "' is already defined",
+                  "every name is a graph node — pick a fresh name (SSA)");
+            return;
+        }
+        for (const Scope* s = scope.parent; s; s = s->parent) {
+            if (s->defined.count(name)) {
+                error("E102", span,
+                      "name '" + name + "' shadows an outer definition",
+                      "two nodes cannot share a name, even in nested scopes");
+                return;
+            }
+        }
         BindingInfo info;
         info.span = span;
-        info.used = true;  // state channels are checked by a later stage (§5.4)
+        info.used = true;  // the bound-exactly-once check is the typecheck's (§5.4)
         info.warnIfUnused = false;
         info.isStatePort = true;
         scope.defined.emplace(name, info);
@@ -238,6 +255,9 @@ private:
                 for (size_t i = 0; i < b->targets.names.size(); ++i) {
                     Span ts = i < b->targets.spans.size() ? b->targets.spans[i] : s->span;
                     define(scope, b->targets.names[i], ts, /*warnIfUnused=*/true, /*isRuntimeValue=*/true);
+                    // SSA-alias table for the zone rng lint (W004/W005): names
+                    // are globally unique (E102), so one flat map is exact.
+                    aliases_[b->targets.names[i]] = b->value;
                 }
                 break;
             }
@@ -270,7 +290,10 @@ private:
                 define(scope, z->target, z->targetSpan, /*warnIfUnused=*/true, /*isRuntimeValue=*/true);
                 Scope body;
                 body.parent = &scope;
-                define(body, z->item, z->itemSpan);
+                // The item is a state port (§5.4): readable as the input piece
+                // and bound exactly once in the body as the output piece — the
+                // spec example rebinds it (`piece = smooth(...)`).
+                defineStatePort(body, z->item, z->itemSpan);
                 stmts(z->body, body);
                 reportUnused(body);
                 break;
@@ -339,6 +362,184 @@ private:
                 break;  // literals, attr refs, error sentinels: no name resolution
         }
     }
+
+    // --- W004/W005: rng lineage lint inside zones (§6.5) ------------------------
+    //
+    // A stochastic operation inside a repeat/foreach body whose rng does not
+    // depend on @iteration/@piece_index repeats the exact same sequence every
+    // iteration/piece — legal, but a suspicious intentional repeat. The rng
+    // argument is resolved through local SSA aliases (binding chains and
+    // split_rng/alias_rng calls, DFS with a cycle guard); the rules of every
+    // enclosing zone apply.
+
+    struct StochasticOp {
+        const char* name;
+        int rngPos;  // positional index of the rng parameter
+    };
+
+    static constexpr StochasticOp kStochasticOps[] = {
+        {"fbm", 3}, {"vnoise", 2},          {"random", 2}, {"random_vec", 2},
+        {"random_int", 1}, {"point_cloud", 2}, {"distribute_points", 4},
+    };
+
+    void warnZone(const char* code, Span span, std::string msg, std::string hint = {}) {
+        diags_.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), true});
+    }
+
+    bool exprMentionsZoneConst(const Expr* e, const std::string& zoneConst,
+                               std::unordered_set<std::string>& visiting) const {
+        if (!e) return false;
+        switch (e->kind) {
+            case NodeKind::AttrRef:
+                return static_cast<const AttrRef*>(e)->name == zoneConst;
+            case NodeKind::Ident: {
+                const std::string& n = static_cast<const Ident*>(e)->name;
+                auto it = aliases_.find(n);
+                if (it == aliases_.end() || !visiting.insert(n).second) return false;
+                const bool r = exprMentionsZoneConst(it->second, zoneConst, visiting);
+                visiting.erase(n);
+                return r;
+            }
+            case NodeKind::Paren:
+                return exprMentionsZoneConst(static_cast<const Paren*>(e)->inner, zoneConst, visiting);
+            case NodeKind::Unary:
+                return exprMentionsZoneConst(static_cast<const Unary*>(e)->operand, zoneConst, visiting);
+            case NodeKind::Binary: {
+                const auto* b = static_cast<const Binary*>(e);
+                return exprMentionsZoneConst(b->lhs, zoneConst, visiting) ||
+                       exprMentionsZoneConst(b->rhs, zoneConst, visiting);
+            }
+            case NodeKind::Ternary: {
+                const auto* t = static_cast<const Ternary*>(e);
+                return exprMentionsZoneConst(t->cond, zoneConst, visiting) ||
+                       exprMentionsZoneConst(t->thenExpr, zoneConst, visiting) ||
+                       exprMentionsZoneConst(t->elseExpr, zoneConst, visiting);
+            }
+            case NodeKind::VecLit:
+                for (const Expr* el : static_cast<const VecLit*>(e)->elems)
+                    if (exprMentionsZoneConst(el, zoneConst, visiting)) return true;
+                return false;
+            case NodeKind::ListLit:
+                for (const Expr* el : static_cast<const ListLit*>(e)->elems)
+                    if (exprMentionsZoneConst(el, zoneConst, visiting)) return true;
+                return false;
+            case NodeKind::Call:
+                for (const CallArg& a : static_cast<const Call*>(e)->args)
+                    if (exprMentionsZoneConst(a.value, zoneConst, visiting)) return true;
+                return false;
+            default:
+                return false;  // literals, error sentinels
+        }
+    }
+
+    bool rngDependsOn(const Expr* rngExpr, const std::string& zoneConst) const {
+        std::unordered_set<std::string> visiting;
+        return exprMentionsZoneConst(rngExpr, zoneConst, visiting);
+    }
+
+    void lintStochasticCall(const Call* c, const StochasticOp& op, int repDepth, int feDepth) {
+        const Expr* rngExpr = nullptr;
+        for (const CallArg& a : c->args)
+            if (a.hasName && a.name == "rng") rngExpr = a.value;
+        if (!rngExpr) {
+            int positional = 0;
+            for (const CallArg& a : c->args) {
+                if (a.hasName) continue;
+                if (positional == op.rngPos) rngExpr = a.value;
+                ++positional;
+            }
+        }
+        if (!rngExpr) return;  // a missing rng is E202 at typecheck, not a lint topic
+        if (repDepth > 0 && !rngDependsOn(rngExpr, "iteration")) {
+            warnZone("W004", c->span,
+                     "stochastic operation '" + std::string(c->path[0]) +
+                         "' inside a repeat zone uses an rng that does not depend on @iteration",
+                     "legal, but reads as an unintentional exact repeat — split the rng by "
+                     "@iteration (split_rng(r, key = @iteration)) to vary per iteration");
+        }
+        if (feDepth > 0 && !rngDependsOn(rngExpr, "piece_index")) {
+            warnZone("W005", c->span,
+                     "stochastic operation '" + std::string(c->path[0]) +
+                         "' inside a foreach zone uses an rng that does not depend on @piece_index",
+                     "legal, but reads as an unintentional exact repeat — split the rng by "
+                     "@piece_index (split_rng(r, key = @piece_index)) to vary per piece");
+        }
+    }
+
+    void lintExprCalls(const Expr* e, int repDepth, int feDepth) {
+        if (!e) return;
+        switch (e->kind) {
+            case NodeKind::Paren:
+                lintExprCalls(static_cast<const Paren*>(e)->inner, repDepth, feDepth);
+                break;
+            case NodeKind::Unary:
+                lintExprCalls(static_cast<const Unary*>(e)->operand, repDepth, feDepth);
+                break;
+            case NodeKind::Binary: {
+                const auto* b = static_cast<const Binary*>(e);
+                lintExprCalls(b->lhs, repDepth, feDepth);
+                lintExprCalls(b->rhs, repDepth, feDepth);
+                break;
+            }
+            case NodeKind::Ternary: {
+                const auto* t = static_cast<const Ternary*>(e);
+                lintExprCalls(t->cond, repDepth, feDepth);
+                lintExprCalls(t->thenExpr, repDepth, feDepth);
+                lintExprCalls(t->elseExpr, repDepth, feDepth);
+                break;
+            }
+            case NodeKind::VecLit:
+                for (const Expr* el : static_cast<const VecLit*>(e)->elems) lintExprCalls(el, repDepth, feDepth);
+                break;
+            case NodeKind::ListLit:
+                for (const Expr* el : static_cast<const ListLit*>(e)->elems) lintExprCalls(el, repDepth, feDepth);
+                break;
+            case NodeKind::Call: {
+                const auto* c = static_cast<const Call*>(e);
+                if (c->path.size() == 1) {
+                    for (const StochasticOp& op : kStochasticOps)
+                        if (c->path[0] == op.name) lintStochasticCall(c, op, repDepth, feDepth);
+                }
+                for (const CallArg& a : c->args) lintExprCalls(a.value, repDepth, feDepth);
+                break;
+            }
+            default:
+                break;  // idents, attr refs, literals
+        }
+    }
+
+    void lintZoneStmts(const std::vector<Stmt*>& body, int repDepth, int feDepth) {
+        for (const Stmt* s : body) {
+            if (!s) continue;
+            switch (s->kind) {
+                case NodeKind::Binding:
+                    lintExprCalls(static_cast<const Binding*>(s)->value, repDepth, feDepth);
+                    break;
+                case NodeKind::RepeatZone:
+                    lintZoneStmts(static_cast<const RepeatZone*>(s)->body, repDepth + 1, feDepth);
+                    break;
+                case NodeKind::ForeachZone:
+                    lintZoneStmts(static_cast<const ForeachZone*>(s)->body, repDepth, feDepth + 1);
+                    break;
+                default:
+                    break;  // tap: no calls
+            }
+        }
+    }
+
+    void lintZones(const File* f) {
+        for (const Node* item : f->items) {
+            if (item->kind == NodeKind::Def) {
+                lintZoneStmts(static_cast<const Def*>(item)->body, 0, 0);
+            } else if (item->kind == NodeKind::RepeatZone) {
+                lintZoneStmts(static_cast<const RepeatZone*>(item)->body, 1, 0);
+            } else if (item->kind == NodeKind::ForeachZone) {
+                lintZoneStmts(static_cast<const ForeachZone*>(item)->body, 0, 1);
+            }
+        }
+    }
+
+    std::unordered_map<std::string, const Expr*> aliases_;  // SSA name -> value expr (W004/W005)
 };
 
 }  // namespace

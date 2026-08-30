@@ -155,6 +155,12 @@ float SdfNode::eval(const glm::vec3& p) const {
             // holds positive distances for the 3-voxel margin).
             return s + glm::length(p - pc);
         }
+        case SdfKind::VoronoiCell: {
+            float cur = -std::numeric_limits<float>::infinity();
+            for (size_t i = 0; i < cellNormals.size(); ++i)
+                cur = std::max(cur, glm::dot(p - cellPoints[i], cellNormals[i]));
+            return cur;
+        }
     }
     return 0.0f;
 }
@@ -212,6 +218,13 @@ void SdfNode::conservativeBBox(glm::vec3& outMin, glm::vec3& outMax) const {
             outMin = origin;
             outMax = origin + glm::vec3(dims - 1) * voxel;
             return;
+        case SdfKind::VoronoiCell:
+            // Unbounded field: no finite conservative bbox. The node is only
+            // valid inside an Intersect (bbox(a) wins there); reaching this
+            // case directly yields the invalid box (mesh extraction -> empty).
+            outMin = glm::vec3(std::numeric_limits<float>::infinity());
+            outMax = glm::vec3(-std::numeric_limits<float>::infinity());
+            return;
     }
 }
 
@@ -253,6 +266,21 @@ SdfPtr sdfSubtractSmooth(SdfPtr a, SdfPtr b, float k) {
     return sdfCsg(SdfKind::SubtractSmooth, std::move(a), std::move(b), k);
 }
 SdfPtr sdfIntersect(SdfPtr a, SdfPtr b) { return sdfCsg(SdfKind::Intersect, std::move(a), std::move(b), 0.0f); }
+
+SdfPtr sdfVoronoiCell(const std::vector<glm::vec3>& sites, int32_t site) {
+    auto n = std::make_shared<SdfNode>();
+    n->kind = SdfKind::VoronoiCell;
+    const glm::vec3& pi = sites[static_cast<size_t>(site)];
+    for (size_t j = 0; j < sites.size(); ++j) {
+        if (static_cast<int32_t>(j) == site) continue;
+        const glm::vec3 d = sites[j] - pi;
+        const float len = glm::length(d);
+        if (len <= 0.0f) continue;  // degenerate pair (defensive; sites are deduped)
+        n->cellNormals.push_back(d / len);
+        n->cellPoints.push_back((pi + sites[j]) * 0.5f);
+    }
+    return n;
+}
 
 SdfPtr sdfDisplace(SdfPtr child, const FieldNode* amount) {
     auto n = std::make_shared<SdfNode>();

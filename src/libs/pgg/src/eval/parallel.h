@@ -33,4 +33,9 @@ unsigned resolveThreadCount(unsigned threads);
 // pool worker (nested call).
 void parallelFor(size_t count, unsigned threads, const std::function<void(size_t begin, size_t end)>& fn);
 
+// parallelFor without the small-count threshold (E7 foreach zones, §5.4: a
+// piece is a heavy work unit — sub-graph evaluation — so >= 2 pieces already
+// pay for the dispatch). Same determinism and anti-nesting rules.
+void parallelForPieces(size_t count, unsigned threads, const std::function<void(size_t begin, size_t end)>& fn);
+
 }  // namespace pgg

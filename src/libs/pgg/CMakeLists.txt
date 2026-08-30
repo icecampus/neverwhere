@@ -44,6 +44,8 @@ nw_add_lib_sources(
         src/eval/sdf.h
         src/eval/sdf.cpp
         src/eval/mc_tables.h
+        src/eval/fracture.h
+        src/eval/fracture.cpp
         src/eval/builtins.h
         src/eval/builtins.cpp
         src/eval/builtins_sources.cpp
@@ -53,6 +55,7 @@ nw_add_lib_sources(
         src/eval/builtins_scatter.cpp
         src/eval/builtins_aggregate.cpp
         src/eval/builtins_sdf.cpp
+        src/eval/builtins_fracture.cpp
         src/eval/typecheck.h
         src/eval/typecheck.cpp
         src/eval/modules.h

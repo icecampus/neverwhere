@@ -3,11 +3,13 @@
 #include "engine.h"
 
 #include <filesystem>
+#include <unordered_set>
 
 #include "builtins.h"
 #include "cache.h"
 #include "expand.h"
 #include "fingerprint.h"
+#include "fracture.h"
 #include "modules.h"
 #include "parallel.h"
 #include "pgg/eval.h"
@@ -100,8 +102,16 @@ public:
                     for (const std::string& n : b->targets.names) topLevel_[n] = item;
                     break;
                 }
+                case NodeKind::RepeatZone: {
+                    const auto* z = static_cast<const RepeatZone*>(item);
+                    for (const std::string& n : z->targets.names) topLevel_[n] = item;
+                    break;
+                }
+                case NodeKind::ForeachZone:
+                    topLevel_[static_cast<const ForeachZone*>(item)->target] = item;
+                    break;
                 default:
-                    break;  // zones (rejected statically), tap (no-op while debug=off)
+                    break;  // tap (no-op while debug=off), imports/defs (expanded)
             }
         }
         // Runtime half of the def contracts (§7.4): grouped per instance;
@@ -198,8 +208,11 @@ private:
 
     bool isValueBinding(const std::string& name) const {
         auto it = topLevel_.find(name);
-        return it != topLevel_.end() &&
-               (it->second->kind == NodeKind::Binding || it->second->kind == NodeKind::ParamDecl);
+        if (it == topLevel_.end()) return false;
+        const NodeKind k = it->second->kind;
+        // Zone targets are pullable values (E7): probes work on zone outputs.
+        return k == NodeKind::Binding || k == NodeKind::ParamDecl || k == NodeKind::RepeatZone ||
+               k == NodeKind::ForeachZone;
     }
 
     const FlatInstance* findInstanceByPath(const std::string& path) const {
@@ -514,6 +527,19 @@ private:
             env_.emplace(name, tv);
             return tv;
         }
+        if (node->kind == NodeKind::RepeatZone || node->kind == NodeKind::ForeachZone) {
+            // Zones are runtime constructs of the engine (E7, §5.4): evaluating
+            // a zone installs ALL its targets, so sibling targets memoize too.
+            // Zone fingerprints are 0 (v0): the cross-run cache skips them.
+            const IdentResolver topResolve = [this](const std::string& n, Span s) { return resolveIdent(n, s); };
+            if (node->kind == NodeKind::RepeatZone) {
+                evalRepeatZone(static_cast<const RepeatZone*>(node), env_, topResolve, run_);
+            } else {
+                evalForeachZone(static_cast<const ForeachZone*>(node), env_, topResolve, run_);
+            }
+            auto eit = env_.find(name);
+            return eit != env_.end() ? eit->second : TypedValue{};
+        }
         if (node->kind != NodeKind::Binding) {
             run_.report("E201", span, "'" + name + "' is not evaluable at stage E5");
             return {};
@@ -587,6 +613,297 @@ private:
                 c.cond, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
             if (valueBase(v) == ScalarType::Bool && !asBool(v)) reportContract(c);
         }
+    }
+
+    // --- zones (E7, spec §5.4) ---------------------------------------------------
+    //
+    // A zone is a runtime construct: the iteration count (repeat) and the
+    // piece count (foreach) are only known at run time, so there is no static
+    // unrolling — the engine executes the zone when one of its targets is
+    // pulled, installing every target into the environment (laziness N2: a
+    // zone whose targets are never pulled never runs).
+    //
+    // The body executes as a sub-program in a local scope: statements run in
+    // text order; name resolution looks at the local environment first, then
+    // falls through to the outer resolver. At the start of an iteration/piece
+    // the state/item ports hold the input value; the body's single binding of
+    // a port overwrites the entry (reads before it see the input port, reads
+    // after see the output port — the validator's scope model). Taps inside a
+    // zone body are ignored at v0 (§19 v1.5).
+
+    using EnvMap = std::unordered_map<std::string, TypedValue>;
+
+    void execBody(const std::vector<Stmt*>& body, EnvMap& localEnv, const IdentResolver& outerResolve,
+                  RunContext& run) {
+        const IdentResolver resolve = [&](const std::string& n, Span s) -> TypedValue {
+            if (auto it = localEnv.find(n); it != localEnv.end()) return it->second;
+            return outerResolve(n, s);
+        };
+        for (const Stmt* s : body) {
+            if (!s) continue;
+            switch (s->kind) {
+                case NodeKind::Binding: {
+                    const auto* b = static_cast<const Binding*>(s);
+                    TypedValue tv = compileExpr(b->value, run, resolve);
+                    installLocal(b, tv, localEnv);
+                    break;
+                }
+                case NodeKind::RepeatZone: {
+                    const auto* z = static_cast<const RepeatZone*>(s);
+                    evalRepeatZone(z, localEnv, resolve, run);
+                    break;
+                }
+                case NodeKind::ForeachZone: {
+                    const auto* z = static_cast<const ForeachZone*>(s);
+                    evalForeachZone(z, localEnv, resolve, run);
+                    break;
+                }
+                default:
+                    break;  // tap inside a zone body: ignored at v0
+            }
+        }
+    }
+
+    // install() for a local zone environment: the state/item port rebind must
+    // overwrite the seeded input entry, so this assigns rather than emplaces.
+    void installLocal(const Binding* b, const TypedValue& tv, EnvMap& env) {
+        if (b->targets.names.size() > 1) {
+            if (tv && isListValue(tv.value)) {
+                const std::vector<Value>& elems = asList(tv.value);
+                for (size_t i = 0; i < b->targets.names.size(); ++i) {
+                    const Value elem = i < elems.size() ? elems[i] : Value();
+                    env[b->targets.names[i]] = TypedValue{Type{valueBase(elem), false, GeoKind::Any}, nullptr, elem};
+                }
+            }
+            return;
+        }
+        env[b->targets.names[0]] = tv;
+    }
+
+    void evalRepeatZone(const RepeatZone* z, EnvMap& env, const IdentResolver& outerResolve,
+                        RunContext& run) {
+        const size_t nState = z->state.names.size();
+        std::vector<TypedValue> ports(nState);
+        const TypedValue input = compileExpr(z->value, run, outerResolve);
+        if (nState == 1) {
+            ports[0] = input;
+        } else if (input && isListValue(input.value)) {
+            // Multi-state: the value is a multi-output tuple destructured
+            // across the ports (arity checked statically).
+            const std::vector<Value>& elems = asList(input.value);
+            for (size_t i = 0; i < nState; ++i) {
+                const Value elem = i < elems.size() ? elems[i] : Value();
+                ports[i] = TypedValue{Type{valueBase(elem), false, GeoKind::Any}, nullptr, elem};
+            }
+        }
+        int64_t iterations = numericValueInt(compileExprToValue(z->iterations, run, outerResolve));
+        if (iterations < 0) {
+            run.report("E607", z->span,
+                       "repeat iterations must be >= 0, got " + std::to_string(iterations),
+                       "a negative count behaves as 0 (the output is the input)");
+            iterations = 0;
+        }
+        for (int64_t it = 0; it < iterations; ++it) {
+            run.zoneConstants.emplace_back("iteration", Value(it));
+            EnvMap localEnv;
+            for (size_t i = 0; i < nState; ++i) localEnv.emplace(z->state.names[i], ports[i]);
+            execBody(z->body, localEnv, outerResolve, run);
+            for (size_t i = 0; i < nState; ++i)
+                if (auto it2 = localEnv.find(z->state.names[i]); it2 != localEnv.end())
+                    ports[i] = it2->second;  // an unbound port (static E204) keeps its input
+            run.zoneConstants.pop_back();
+        }
+        for (size_t i = 0; i < z->targets.names.size(); ++i)
+            env[z->targets.names[i]] = i < nState ? ports[i] : TypedValue{};
+    }
+
+    void evalForeachZone(const ForeachZone* z, EnvMap& env, const IdentResolver& outerResolve,
+                         RunContext& run) {
+        static const Type kMesh{ScalarType::Geo, false, GeoKind::Mesh};
+        const TypedValue coll = compileExpr(z->collection, run, outerResolve);
+        GeoPtr collGeo;
+        if (coll && !coll.field && valueBase(coll.value) == ScalarType::Geo) collGeo = asGeo(coll.value);
+        if (!collGeo || collGeo->kind != GeoKind::Mesh) {
+            run.report("E607", z->span, "foreach expects a geo<mesh> collection",
+                       "v0 iterates connected pieces of a mesh (§5.4)");
+            env[z->target] = TypedValue{};
+            return;
+        }
+        const std::vector<GeoPtr> pieces = splitMeshPieces(*collGeo);
+        // Free-name pre-evaluation (N1): every name the body reads but does
+        // not define is force-evaluated sequentially here, so during the
+        // parallel piece loop the outer environment is only read.
+        preEvaluateFreeNames(z->body, z->item, outerResolve);
+
+        struct PieceOut {
+            TypedValue value;
+            std::vector<Diagnostic> diagnostics;
+            uint64_t fieldsEvaluated = 0;
+        };
+        std::vector<PieceOut> outs(pieces.size());
+        parallelForPieces(pieces.size(), run.threads, [&](size_t begin, size_t end) {
+            for (size_t pi = begin; pi < end; ++pi) {
+                // Every piece runs with its own RunContext: own field arena,
+                // memo cache, diagnostics and counters — no shared mutable
+                // state between pieces (bit-identical at any lane count).
+                RunContext pieceRun;
+                pieceRun.diagnostics = &outs[pi].diagnostics;
+                pieceRun.threads = run.threads;
+                pieceRun.zoneConstants.emplace_back("piece_index", Value(static_cast<int64_t>(pi)));
+                EnvMap localEnv;
+                localEnv.emplace(z->item, TypedValue{kMesh, nullptr, Value(pieces[pi])});
+                execBody(z->body, localEnv, outerResolve, pieceRun);
+                outs[pi].value = localEnv.count(z->item) ? localEnv[z->item] : TypedValue{};
+                outs[pi].fieldsEvaluated = pieceRun.fieldsEvaluated;
+            }
+        });
+        // Join in piece order: diagnostics, counters, then the rigid merge.
+        std::vector<GeoPtr> outPieces;
+        outPieces.reserve(pieces.size());
+        for (size_t pi = 0; pi < pieces.size(); ++pi) {
+            for (const Diagnostic& d : outs[pi].diagnostics) result_.diagnostics.push_back(d);
+            run.fieldsEvaluated += outs[pi].fieldsEvaluated;
+            const TypedValue& tv = outs[pi].value;
+            if (tv && !tv.field && valueBase(tv.value) == ScalarType::Geo &&
+                asGeo(tv.value)->kind == GeoKind::Mesh) {
+                outPieces.push_back(asGeo(tv.value));
+                continue;
+            }
+            run.report("E607", z->span, "foreach body did not produce a geo<mesh> piece",
+                       "the item port must stay a geo<mesh> (its input is the split piece)");
+            outPieces.push_back(pieces[pi]);  // defensive: pass the piece through
+        }
+        env[z->target] = TypedValue{kMesh, nullptr, Value(mergeMeshPieces(outPieces))};
+    }
+
+    // Names defined by the body itself (bindings, nested zone targets and
+    // ports): these resolve locally during the piece loop.
+    static void collectDefined(const std::vector<Stmt*>& body, std::unordered_set<std::string>& out) {
+        for (const Stmt* s : body) {
+            if (!s) continue;
+            switch (s->kind) {
+                case NodeKind::Binding:
+                    for (const std::string& n : static_cast<const Binding*>(s)->targets.names) out.insert(n);
+                    break;
+                case NodeKind::RepeatZone: {
+                    const auto* z = static_cast<const RepeatZone*>(s);
+                    for (const std::string& n : z->targets.names) out.insert(n);
+                    for (const std::string& n : z->state.names) out.insert(n);
+                    collectDefined(z->body, out);
+                    break;
+                }
+                case NodeKind::ForeachZone: {
+                    const auto* z = static_cast<const ForeachZone*>(s);
+                    out.insert(z->target);
+                    out.insert(z->item);
+                    collectDefined(z->body, out);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+
+    void scanExprFreeNames(const Expr* e, const std::unordered_set<std::string>& defined,
+                           std::unordered_set<std::string>& seen, const IdentResolver& resolve) {
+        if (!e) return;
+        switch (e->kind) {
+            case NodeKind::Ident: {
+                const std::string& n = static_cast<const Ident*>(e)->name;
+                if (!defined.count(n) && seen.insert(n).second) resolve(n, e->span);
+                return;
+            }
+            case NodeKind::Paren:
+                scanExprFreeNames(static_cast<const Paren*>(e)->inner, defined, seen, resolve);
+                return;
+            case NodeKind::Unary:
+                scanExprFreeNames(static_cast<const Unary*>(e)->operand, defined, seen, resolve);
+                return;
+            case NodeKind::Binary: {
+                const auto* b = static_cast<const Binary*>(e);
+                scanExprFreeNames(b->lhs, defined, seen, resolve);
+                scanExprFreeNames(b->rhs, defined, seen, resolve);
+                return;
+            }
+            case NodeKind::Ternary: {
+                const auto* t = static_cast<const Ternary*>(e);
+                scanExprFreeNames(t->cond, defined, seen, resolve);
+                scanExprFreeNames(t->thenExpr, defined, seen, resolve);
+                scanExprFreeNames(t->elseExpr, defined, seen, resolve);
+                return;
+            }
+            case NodeKind::VecLit:
+                for (const Expr* el : static_cast<const VecLit*>(e)->elems)
+                    scanExprFreeNames(el, defined, seen, resolve);
+                return;
+            case NodeKind::ListLit:
+                for (const Expr* el : static_cast<const ListLit*>(e)->elems)
+                    scanExprFreeNames(el, defined, seen, resolve);
+                return;
+            case NodeKind::Call: {
+                const auto* c = static_cast<const Call*>(e);
+                const BuiltinSig* sig = c->path.size() == 1 ? findBuiltin(c->path[0]) : nullptr;
+                size_t posIdx = 0;
+                for (const CallArg& a : c->args) {
+                    // Mirror the compiler's enum rule: a bare ident naming an
+                    // enum value of its parameter is a literal, never resolved.
+                    const ParamSig* p = nullptr;
+                    if (sig) {
+                        if (a.hasName) {
+                            for (const ParamSig& ps : sig->params)
+                                if (ps.name == a.name) p = &ps;
+                        } else if (posIdx < sig->params.size()) {
+                            p = &sig->params[posIdx];
+                        }
+                    }
+                    if (!a.hasName) ++posIdx;
+                    if (p && !p->enumValues.empty() && a.value && a.value->kind == NodeKind::Ident &&
+                        std::find(p->enumValues.begin(), p->enumValues.end(),
+                                  static_cast<const Ident*>(a.value)->name) != p->enumValues.end())
+                        continue;
+                    scanExprFreeNames(a.value, defined, seen, resolve);
+                }
+                return;
+            }
+            default:
+                return;  // literals, attr refs
+        }
+    }
+
+    void scanFreeNames(const std::vector<Stmt*>& body, const std::unordered_set<std::string>& defined,
+                       std::unordered_set<std::string>& seen, const IdentResolver& resolve) {
+        for (const Stmt* s : body) {
+            if (!s) continue;
+            switch (s->kind) {
+                case NodeKind::Binding:
+                    scanExprFreeNames(static_cast<const Binding*>(s)->value, defined, seen, resolve);
+                    break;
+                case NodeKind::RepeatZone: {
+                    const auto* z = static_cast<const RepeatZone*>(s);
+                    scanExprFreeNames(z->value, defined, seen, resolve);
+                    scanExprFreeNames(z->iterations, defined, seen, resolve);
+                    scanFreeNames(z->body, defined, seen, resolve);
+                    break;
+                }
+                case NodeKind::ForeachZone: {
+                    const auto* z = static_cast<const ForeachZone*>(s);
+                    scanExprFreeNames(z->collection, defined, seen, resolve);
+                    scanFreeNames(z->body, defined, seen, resolve);
+                    break;
+                }
+                default:
+                    break;  // tap
+            }
+        }
+    }
+
+    void preEvaluateFreeNames(const std::vector<Stmt*>& body, const std::string& item,
+                              const IdentResolver& resolve) {
+        std::unordered_set<std::string> defined{item};
+        collectDefined(body, defined);
+        std::unordered_set<std::string> seen;
+        scanFreeNames(body, defined, seen, resolve);
     }
 
     void checkAttrContract(const FlatContract& c) {

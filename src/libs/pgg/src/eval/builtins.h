@@ -44,6 +44,8 @@ enum class BuiltinId {
     // §8.4 SDF
     SdfSphere, SdfBox, SdfUnion, SdfUnionSmooth, SdfSubtract, SdfSubtractSmooth,
     SdfIntersect, SdfDisplace, SdfInstanceOnPoints, SdfFromMesh, MeshFromSdf,
+    // §8.3 islands / §8.11 fracture (E7)
+    Islands, Fracture,
     // Known but not supported at this stage.
     Deferred,
 };
@@ -148,6 +150,9 @@ Value evalAggregateBuiltin(const BoundCall& bound, RunContext& run);
 
 // §8.4 SDF nodes, value level (builtins_sdf.cpp).
 Value evalSdfBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.3 islands and §8.11 fracture nodes, value level (builtins_fracture.cpp, E7).
+Value evalFractureBuiltin(const BoundCall& bound, RunContext& run);
 
 // Materializes geo<instances> into geo<mesh> (spec §8.8); host entry point
 // for tools that export instances without running the graph. nullptr when the

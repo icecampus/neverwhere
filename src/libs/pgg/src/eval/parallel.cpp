@@ -108,6 +108,23 @@ private:
 
 }  // namespace
 
+// Shared chunked dispatch: ~4 chunks per lane over the pool, the calling
+// thread drains and is marked for anti-nesting for the whole dispatch.
+void dispatch(size_t count, unsigned lanes, const std::function<void(size_t, size_t)>& fn) {
+    ThreadPool& pool = ThreadPool::instance();
+    size_t chunkCount = std::min<size_t>(count, static_cast<size_t>(std::min(lanes, pool.laneCount())) * 4);
+    const size_t chunkSize = (count + chunkCount - 1) / chunkCount;
+    chunkCount = (count + chunkSize - 1) / chunkSize;
+    // The caller drains chunks too, so mark it for the whole dispatch: chunk
+    // code calling parallelFor again must take the inline path here as well.
+    tInParallelChunk = true;
+    pool.run(chunkCount, [&](size_t c) {
+        const size_t begin = c * chunkSize;
+        fn(begin, std::min(count, begin + chunkSize));
+    });
+    tInParallelChunk = false;
+}
+
 unsigned resolveThreadCount(unsigned threads) {
     if (threads > 0) return threads;
     const unsigned hw = std::thread::hardware_concurrency();
@@ -121,19 +138,17 @@ void parallelFor(size_t count, unsigned threads, const std::function<void(size_t
         fn(0, count);
         return;
     }
-    ThreadPool& pool = ThreadPool::instance();
-    // ~4 chunks per lane for load balance; chunk size stays >= 1 element.
-    size_t chunkCount = std::min<size_t>(count, static_cast<size_t>(std::min(lanes, pool.laneCount())) * 4);
-    const size_t chunkSize = (count + chunkCount - 1) / chunkCount;
-    chunkCount = (count + chunkSize - 1) / chunkSize;
-    // The caller drains chunks too, so mark it for the whole dispatch: chunk
-    // code calling parallelFor again must take the inline path here as well.
-    tInParallelChunk = true;
-    pool.run(chunkCount, [&](size_t c) {
-        const size_t begin = c * chunkSize;
-        fn(begin, std::min(count, begin + chunkSize));
-    });
-    tInParallelChunk = false;
+    dispatch(count, lanes, fn);
+}
+
+void parallelForPieces(size_t count, unsigned threads, const std::function<void(size_t, size_t)>& fn) {
+    if (count == 0) return;
+    const unsigned lanes = resolveThreadCount(threads);
+    if (lanes <= 1 || count < 2 || tInParallelChunk) {
+        fn(0, count);
+        return;
+    }
+    dispatch(count, lanes, fn);
 }
 
 }  // namespace pgg

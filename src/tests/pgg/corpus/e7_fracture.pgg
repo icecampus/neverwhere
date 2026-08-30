@@ -1,0 +1,31 @@
+param seed: int = 42
+
+# E7 acceptance etalon (spec §15 E7): per-piece processing of a fracture
+# (foreach zone). A displaced ico rock is cut by an SDF-Voronoi fracture;
+# every chunk gets its own rng derived from @piece_index, a uniform jitter
+# (counter = 0) plus an fbm surface displacement, and a smoothing pass.
+root_rng = rng_from_seed(seed)
+noise_rng = split_rng(root_rng, key = "surface")
+sites_rng = split_rng(root_rng, key = "fracture_sites")
+cut_rng = split_rng(root_rng, key = "fracture")
+parts_rng = split_rng(root_rng, key = "parts")
+
+base = ico_sphere(subdiv = 2, radius = 1.0)
+n = fbm(scale = 2.5, octaves = 4, rng = noise_rng)
+rock = set_position(base, offset = @N * n * 0.15)
+
+sites = point_cloud(count = 3, bounds = (1.2, 1.2, 1.2), rng = sites_rng)
+fractured = fracture(rock, planes = sites, rng = cut_rng)
+
+chunks = foreach piece in fractured {
+    piece_rng = split_rng(parts_rng, key = @piece_index)
+    jitter_rng = split_rng(piece_rng, key = "jitter")
+    surf_rng = split_rng(piece_rng, key = "surface")
+    point_jitter = random_vec(lo = vec3(-0.04, -0.04, -0.04), hi = (0.04, 0.04, 0.04), rng = jitter_rng, counter = 0)
+    displaced = set_position(piece, offset = fbm(@P, scale = 3, rng = surf_rng) * 0.04 + point_jitter)
+    piece = smooth(displaced, iterations = 1)
+}
+
+output rock
+output fractured
+output chunks

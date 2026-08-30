@@ -1,0 +1,29 @@
+param seed: int = 42
+
+# E7 acceptance etalon (spec §15 E7): relaxation of a scatter (repeat zone).
+# A point cloud settles onto a displaced-grid terrain: every iteration moves
+# each point a fraction of its distance to the terrain straight down, with
+# the step shrinking as a function of @iteration.
+root_rng = rng_from_seed(seed)
+terrain_rng = split_rng(root_rng, key = "terrain")
+scatter_rng = split_rng(root_rng, key = "scatter")
+
+ground = grid(size = (4, 4), res = 8)
+tn = fbm(scale = 1.5, octaves = 4, rng = terrain_rng)
+terrain = set_position(ground, offset = (0, 1, 0) * tn * 0.5)
+
+pts = point_cloud(count = 12, bounds = (4, 1, 4), rng = scatter_rng)
+lifted = set_position(pts, offset = (0, 1, 0) * 1.5)
+
+settled = repeat (lifted, iterations = 20) |state| {
+    step = 0.5 / (f32(@iteration) + 1.0)
+    state = set_position(state, offset = vec3(0, -1, 0) * distance_to(terrain) * step)
+}
+
+dist_before = avg_of(distance_to(terrain), on = lifted)
+dist_after = avg_of(distance_to(terrain), on = settled)
+
+output terrain
+output settled
+output dist_before
+output dist_after

@@ -56,7 +56,7 @@ struct CalleeWalk {
     void stmt(const Stmt* s) {
         if (!s) return;
         if (s->kind == NodeKind::Binding) expr(static_cast<const Binding*>(s)->value);
-        // zones are stage E7; tap carries no calls
+        // zones in def bodies are E201 (checkDefGraph); tap carries no calls
     }
 
     void contract(const ContractStmt* c) {
@@ -189,6 +189,14 @@ public:
                     processBinding(static_cast<const Binding*>(item), kNoRename, mainScope_, "", items,
                                    kNoInstance);
                     break;
+                case NodeKind::RepeatZone:
+                case NodeKind::ForeachZone:
+                    // Zones pass through as-is, but a def call inside a zone
+                    // body cannot be expanded (the body runs per iteration/
+                    // piece) — reject it cleanly instead of "unknown operation".
+                    checkZoneForDefCalls(static_cast<const Stmt*>(item), mainScope_);
+                    items.push_back(const_cast<Node*>(item));
+                    break;
                 default:
                     items.push_back(const_cast<Node*>(item));  // param/output/tap: shared as-is
                     break;
@@ -300,6 +308,17 @@ private:
                       "add `rng: rng` to the signature and wire it to the stochastic nodes (§7.3)");
             }
         }
+
+        // E7 deferral: a zone inside a def body cannot be expanded (its body
+        // would need per-iteration instantiation) — reject it cleanly instead
+        // of silently dropping it (the pre-E7 behaviour).
+        for (const Def* def : allDefs_)
+            for (const Stmt* s : def->body)
+                if (s && (s->kind == NodeKind::RepeatZone || s->kind == NodeKind::ForeachZone)) {
+                    error("E201", s->span, "zones inside def bodies are not supported at stage E7",
+                          "hoist the zone to the top level and feed its inputs through the def "
+                          "signature");
+                }
     }
 
     // --- call resolution --------------------------------------------------------
@@ -541,6 +560,108 @@ private:
         registerTargets(nb);
     }
 
+    // --- zone checks (E7 deferral: no def calls inside zone bodies) -------------
+
+    // Silent def resolution (no E505 side effects — unknown names take the
+    // usual expansion/typecheck paths).
+    const Def* findDefSilently(const Call& c, const FileScope& scope) const {
+        if (c.path.size() == 1) {
+            if (auto it = scope.localDefs.find(c.path[0]); it != scope.localDefs.end()) return it->second;
+            return nullptr;
+        }
+        if (c.path.size() == 2) {
+            if (auto ns = scope.namespaces.find(c.path[0]); ns != scope.namespaces.end())
+                if (auto d = ns->second->defs.find(c.path[1]); d != ns->second->defs.end())
+                    return d->second;
+        }
+        return nullptr;
+    }
+
+    void scanZoneExprForDefCalls(const Expr* e, const FileScope& scope) {
+        if (!e) return;
+        switch (e->kind) {
+            case NodeKind::Paren:
+                scanZoneExprForDefCalls(static_cast<const Paren*>(e)->inner, scope);
+                return;
+            case NodeKind::Unary:
+                scanZoneExprForDefCalls(static_cast<const Unary*>(e)->operand, scope);
+                return;
+            case NodeKind::Binary: {
+                const auto* b = static_cast<const Binary*>(e);
+                scanZoneExprForDefCalls(b->lhs, scope);
+                scanZoneExprForDefCalls(b->rhs, scope);
+                return;
+            }
+            case NodeKind::Ternary: {
+                const auto* t = static_cast<const Ternary*>(e);
+                scanZoneExprForDefCalls(t->cond, scope);
+                scanZoneExprForDefCalls(t->thenExpr, scope);
+                scanZoneExprForDefCalls(t->elseExpr, scope);
+                return;
+            }
+            case NodeKind::VecLit:
+                for (const Expr* el : static_cast<const VecLit*>(e)->elems) scanZoneExprForDefCalls(el, scope);
+                return;
+            case NodeKind::ListLit:
+                for (const Expr* el : static_cast<const ListLit*>(e)->elems) scanZoneExprForDefCalls(el, scope);
+                return;
+            case NodeKind::Call: {
+                const auto* c = static_cast<const Call*>(e);
+                if (findDefSilently(*c, scope)) {
+                    error("E201", c->span,
+                          "def call '" + qualified(c->path) + "' inside a zone body is not supported at "
+                          "stage E7",
+                          "hoist the call out of the zone and feed its result through a zone input");
+                }
+                for (const CallArg& a : c->args) scanZoneExprForDefCalls(a.value, scope);
+                return;
+            }
+            default:
+                return;  // idents, attr refs, literals
+        }
+    }
+
+    void checkZoneBodyForDefCalls(const std::vector<Stmt*>& body, const FileScope& scope) {
+        for (const Stmt* s : body) {
+            if (!s) continue;
+            switch (s->kind) {
+                case NodeKind::Binding:
+                    scanZoneExprForDefCalls(static_cast<const Binding*>(s)->value, scope);
+                    break;
+                case NodeKind::RepeatZone: {
+                    const auto* z = static_cast<const RepeatZone*>(s);
+                    scanZoneExprForDefCalls(z->value, scope);
+                    scanZoneExprForDefCalls(z->iterations, scope);
+                    checkZoneBodyForDefCalls(z->body, scope);
+                    break;
+                }
+                case NodeKind::ForeachZone: {
+                    const auto* z = static_cast<const ForeachZone*>(s);
+                    scanZoneExprForDefCalls(z->collection, scope);
+                    checkZoneBodyForDefCalls(z->body, scope);
+                    break;
+                }
+                default:
+                    break;  // tap
+            }
+        }
+    }
+
+    void checkZoneForDefCalls(const Stmt* zoneStmt, const FileScope& scope) {
+        // The header expressions are covered too: they evaluate once outside
+        // the body, but expansion has no machinery for them either.
+        if (zoneStmt->kind == NodeKind::RepeatZone) {
+            const auto* z = static_cast<const RepeatZone*>(zoneStmt);
+            scanZoneExprForDefCalls(z->value, scope);
+            scanZoneExprForDefCalls(z->iterations, scope);
+            checkZoneBodyForDefCalls(z->body, scope);
+        } else {
+            const auto* z = static_cast<const ForeachZone*>(zoneStmt);
+            scanZoneExprForDefCalls(z->collection, scope);
+            checkZoneBodyForDefCalls(z->body, scope);
+        }
+    }
+
     // --- instantiation -------------------------------------------------------------
 
     // Inlines one def call: parameters become bindings of the caller's
@@ -634,7 +755,7 @@ private:
                 ft.path = renamedTapPath(t->path, renames);
                 out_.taps.push_back(std::move(ft));
             }
-            // zones are stage E7
+            // zones in def bodies: rejected with E201 by checkDefGraph (E7)
         }
         for (const ContractStmt* c : def->ensures) addContract(c, true, renames, origin, ipath, instIdx, sink);
 
