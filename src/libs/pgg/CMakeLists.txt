@@ -23,6 +23,10 @@ nw_add_lib_sources(
         src/error_listener.cpp
         src/formatter.h
         src/formatter.cpp
+        src/graph.h
+        src/graph.cpp
+        src/layout.h
+        src/layout.cpp
         src/validate.h
         src/validate.cpp
         src/pgg.cpp
