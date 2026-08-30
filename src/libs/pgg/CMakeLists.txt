@@ -61,6 +61,8 @@ nw_add_lib_sources(
         src/eval/expand.cpp
         src/eval/schema.h
         src/eval/schema.cpp
+        src/eval/probe.h
+        src/eval/probe.cpp
         src/eval/engine.h
         src/eval/engine.cpp
         ${PARSER_GEN}

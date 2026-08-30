@@ -102,6 +102,8 @@ std::string exprText(const Expr* e) {
     }
 }
 
+}  // namespace
+
 std::string pathText(const std::vector<PathElem>& path) {
     std::string out;
     for (const PathElem& el : path) {
@@ -114,6 +116,8 @@ std::string pathText(const std::vector<PathElem>& path) {
     }
     return out;
 }
+
+namespace {
 
 std::string joinNames(const NameList& l) {
     std::string out;

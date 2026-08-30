@@ -49,6 +49,17 @@ struct FlatInstance {
     std::vector<std::string> outputs;  // flat names of the output bindings
 };
 
+// E6 (spec §9.3/§9.4): a tap inside a def body, recorded per instantiation
+// (50 rocks -> 50 concrete taps). The path root is already renamed to the
+// instance's flat local (`make_rock[1].raw`); top-level taps are not here —
+// they are read from the flat file items as-is. Fires only in debug mode.
+struct FlatTap {
+    std::string label;    // inspector name when hasLabel (`tap stats: ...`)
+    bool hasLabel = false;
+    std::string path;     // concrete flat path string (PathElems, root renamed)
+    size_t instance = 0;  // index into FlatProgram::instances
+};
+
 struct FlatProgram {
     std::vector<std::unique_ptr<Node>> arena;  // nodes created by expansion
     const File* file = nullptr;                // original file when !expanded
@@ -58,6 +69,7 @@ struct FlatProgram {
     std::unordered_map<std::string, size_t> instanceOfBinding;
     std::vector<FlatInstance> instances;
     std::vector<FlatContract> contracts;
+    std::vector<FlatTap> taps;  // def-body taps, expansion order
 };
 
 // Expands the main file into a flat program. Reports E503 (def recursion) and

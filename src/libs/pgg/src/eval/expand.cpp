@@ -23,6 +23,30 @@ std::string qualified(const std::vector<std::string>& path) {
     return q;
 }
 
+// Dotted string of a def-body tap path with the root renamed through the
+// instance map (`raw` -> `make_rock[1].raw`); the remaining path elements
+// (instance indices, attr terminals) pass through unchanged. A root not in
+// the map (not a param/local — e.g. a def name) is kept as written.
+std::string renamedTapPath(const std::vector<PathElem>& path, const RenameMap& renames) {
+    std::string out;
+    for (size_t i = 0; i < path.size(); ++i) {
+        const PathElem& el = path[i];
+        if (el.isIndex) {
+            out += "[" + std::to_string(el.index) + "]";
+            continue;
+        }
+        if (!out.empty()) out += ".";
+        if (i == 0) {
+            if (auto it = renames.find(el.name); it != renames.end()) {
+                out += it->second;
+                continue;
+            }
+        }
+        out += el.name;
+    }
+    return out;
+}
+
 // Collects the defs a def body directly refers to (its own resolution scope).
 struct CalleeWalk {
     const FileScope* scope = nullptr;
@@ -597,8 +621,20 @@ private:
         for (const Stmt* s : def->body) {
             if (s->kind == NodeKind::Binding) {
                 processBinding(static_cast<const Binding*>(s), renames, origin, ipath, sink, instIdx);
+            } else if (s->kind == NodeKind::Tap) {
+                // E6: def-body taps are no longer dropped — recorded per
+                // instantiation, they fire on every instance in debug mode
+                // (§9.4). The path root (a param or local of the def) renames
+                // to this instance's flat binding.
+                const auto* t = static_cast<const Tap*>(s);
+                FlatTap ft;
+                ft.label = t->label;
+                ft.hasLabel = t->hasLabel;
+                ft.instance = instIdx;
+                ft.path = renamedTapPath(t->path, renames);
+                out_.taps.push_back(std::move(ft));
             }
-            // zones are stage E7; tap stays a no-op (debug=off, §9.2)
+            // zones are stage E7
         }
         for (const ContractStmt* c : def->ensures) addContract(c, true, renames, origin, ipath, instIdx, sink);
 

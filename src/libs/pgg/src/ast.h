@@ -306,6 +306,10 @@ struct Diagnostic {
 
 // --- utilities -------------------------------------------------------------
 
+// Dotted text form of a tap path (`make_rock[1].disp`); instance indices
+// render as `[k]` suffixes. Used by the E6 debug subsystem (tap -> probe).
+std::string pathText(const std::vector<PathElem>& path);
+
 // Indented tree dump for debugging (`PggTool ast`) and test goldens.
 std::string dumpAst(const Node* node);
 

@@ -9,11 +9,15 @@
 // the resolved thread count and the numeric profile id (§5.2).
 // E5: RunParams carries the import roots (§7.6) and the engine checks the
 // runtime half of the def contracts (E303/E304) at instance-output pulls.
+// E6: RunParams carries probe specs and the debug flag (spec §9); a probe is
+// an extra lazy pull root — with probes present and no explicitly requested
+// outputs the declared outputs are not computed (probe-only run, §9.2).
 
 #include <unordered_map>
 
 #include "../ast.h"
 #include "field.h"
+#include "probe.h"
 #include "value.h"
 
 namespace pgg {
@@ -32,6 +36,13 @@ struct RunParams {
     // Import roots (spec §7.6), searched in order for `<root>/<path>.pgg`.
     // runFile appends the importing file's own directory implicitly.
     std::vector<std::string> importRoots;
+    // E6 probe specs (§9): `path:inspector[param=value,...]`. When non-empty
+    // and the run request names no outputs explicitly, declared outputs are
+    // NOT computed (a probe-only run pulls exactly the probe targets).
+    std::vector<std::string> probes;
+    // E6 debug flag: false = taps are ignored (production behaviour);
+    // true = taps become probes and pull their targets (§9.3).
+    bool debug = false;
 };
 
 struct RunOutput {
@@ -55,6 +66,9 @@ struct RunStats {
 struct RunResult {
     std::vector<RunOutput> outputs;
     std::vector<Diagnostic> diagnostics;  // E0 findings + static + runtime, in that order
+    // E6 probe/tap records: CLI probes in flag order, then taps (top-level in
+    // file order, then def-body taps in expansion order).
+    std::vector<ProbeRecord> probes;
     RunStats stats;
     bool hasErrors() const;
 };

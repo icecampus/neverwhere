@@ -3,8 +3,9 @@
 //   PggTool fmt <file.pgg> [--check]    canonical format
 //   PggTool ast <file.pgg>              dump the AST
 //   PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]
-//                      [--threads N] [--lib <dir>]...
+//                      [--threads N] [--lib <dir>]... [--probe <spec>]... [--debug]
 //                                       run the graph, print output summaries
+//                                       (E6: probes/taps print inspector records)
 //   PggTool docs <file.pgg> <symbol> [--lib <dir>]...
 //                                       print a def's signature + docstring (§7.5)
 // Exit codes: 0 ok, 1 diagnostics with errors, 2 usage/io failure.
@@ -32,9 +33,13 @@ void usage() {
                  "  PggTool fmt <file.pgg> [-i|--check] canonical format (stdout, write-back, or diff-check)\n"
                  "  PggTool ast <file.pgg>              dump the AST\n"
                  "  PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]\n"
-                 "                        [--threads N] [--lib <dir>]...\n"
+                 "                        [--threads N] [--lib <dir>]... [--probe <spec>]... [--debug]\n"
                  "                                      run the graph, print output summaries\n"
-                 "                                      (--obj writes one Wavefront OBJ per geo output)\n"
+                 "                                      (--obj writes one Wavefront OBJ per geo output;\n"
+                 "                                      --probe 'path:inspector[param=value,...]' inspects a\n"
+                 "                                      binding without computing downstream nodes — probes\n"
+                 "                                      without --output skip the declared outputs;\n"
+                 "                                      --debug also fires the file's tap marks)\n"
                  "  PggTool docs <file.pgg> <symbol> [--lib <dir>]...\n"
                  "                                      print a def's signature + docstring (§7.5)\n");
 }
@@ -220,11 +225,13 @@ bool writeObj(const std::string& path, const pgg::Geo& geo) {    std::ofstream o
 
 int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std::string>>& params,
            const std::vector<std::string>& outputs, const std::string& objDir, unsigned threads,
-           const std::vector<std::string>& libRoots) {
+           const std::vector<std::string>& libRoots, const std::vector<std::string>& probes, bool debug) {
     pgg::RunParams rp;
     for (const auto& [k, v] : params) rp.values.push_back({k, parseCliValue(v)});
     rp.threads = threads;
     rp.importRoots = libRoots;
+    rp.probes = probes;
+    rp.debug = debug;
     pgg::RunResult result = pgg::runFile(path, rp, outputs);
     for (const pgg::Diagnostic& d : result.diagnostics) {
         std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
@@ -241,6 +248,10 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
                         pgg::valueToString(o.value).c_str());
         }
     }
+    // E6 probe/tap records (§9), after the outputs (or standalone in a
+    // probe-only run), before the run stats line.
+    for (const pgg::ProbeRecord& pr : result.probes)
+        std::printf("%s %s: %s\n", pr.origin.c_str(), pr.path.c_str(), pr.text.c_str());
     std::printf("run: %zu output(s), %llu field evaluation(s)\n", result.outputs.size(),
                 (unsigned long long)result.stats.fieldsEvaluated);
     std::printf("profile: %016llx threads: %u cache: %llu hit(s) %llu miss(es)\n",
@@ -466,8 +477,10 @@ int main(int argc, char** argv) {
         std::vector<std::pair<std::string, std::string>> params;
         std::vector<std::string> outputs;
         std::vector<std::string> libRoots;
+        std::vector<std::string> probes;
         std::string objDir;
         unsigned threads = 0;  // 0 = hardware concurrency (RunParams default)
+        bool debug = false;
         for (int i = 3; i < argc; ++i) {
             const std::string a = argv[i];
             auto takeValue = [&](const std::string& flag, std::string& out) -> bool {
@@ -497,12 +510,16 @@ int main(int argc, char** argv) {
                 threads = static_cast<unsigned>(std::strtoul(v.c_str(), nullptr, 10));
             } else if (takeValue("--lib", v)) {
                 libRoots.push_back(v);
+            } else if (takeValue("--probe", v)) {
+                probes.push_back(v);
+            } else if (a == "--debug") {
+                debug = true;
             } else {
                 usage();
                 return 2;
             }
         }
-        return cmdRun(path, params, outputs, objDir, threads, libRoots);
+        return cmdRun(path, params, outputs, objDir, threads, libRoots, probes, debug);
     }
     bool json = false, inPlace = false, checkOnly = false;
     for (int i = 3; i < argc; ++i) {
