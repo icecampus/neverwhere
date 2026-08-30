@@ -3,7 +3,10 @@
 //   PggTool fmt <file.pgg> [--check]    canonical format
 //   PggTool ast <file.pgg>              dump the AST
 //   PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]
-//                      [--threads N]    run the graph, print output summaries
+//                      [--threads N] [--lib <dir>]...
+//                                       run the graph, print output summaries
+//   PggTool docs <file.pgg> <symbol> [--lib <dir>]...
+//                                       print a def's signature + docstring (§7.5)
 // Exit codes: 0 ok, 1 diagnostics with errors, 2 usage/io failure.
 
 #include <algorithm>
@@ -17,6 +20,7 @@
 #include <pgg/eval.h>
 #include <pgg/pgg.h>
 #include <pgg/src/eval/builtins.h>  // realizeInstances for the --obj export
+#include <pgg/src/eval/modules.h>   // import closure for docs of qualified symbols
 #include <pgg/src/eval/sdf.h>       // sdf output summaries
 
 namespace {
@@ -28,9 +32,11 @@ void usage() {
                  "  PggTool fmt <file.pgg> [-i|--check] canonical format (stdout, write-back, or diff-check)\n"
                  "  PggTool ast <file.pgg>              dump the AST\n"
                  "  PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]\n"
-                 "                        [--threads N]\n"
+                 "                        [--threads N] [--lib <dir>]...\n"
                  "                                      run the graph, print output summaries\n"
-                 "                                      (--obj writes one Wavefront OBJ per geo output)\n");
+                 "                                      (--obj writes one Wavefront OBJ per geo output)\n"
+                 "  PggTool docs <file.pgg> <symbol> [--lib <dir>]...\n"
+                 "                                      print a def's signature + docstring (§7.5)\n");
 }
 
 std::string jsonEscape(const std::string& s) {
@@ -213,10 +219,12 @@ bool writeObj(const std::string& path, const pgg::Geo& geo) {    std::ofstream o
 }
 
 int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std::string>>& params,
-           const std::vector<std::string>& outputs, const std::string& objDir, unsigned threads) {
+           const std::vector<std::string>& outputs, const std::string& objDir, unsigned threads,
+           const std::vector<std::string>& libRoots) {
     pgg::RunParams rp;
     for (const auto& [k, v] : params) rp.values.push_back({k, parseCliValue(v)});
     rp.threads = threads;
+    rp.importRoots = libRoots;
     pgg::RunResult result = pgg::runFile(path, rp, outputs);
     for (const pgg::Diagnostic& d : result.diagnostics) {
         std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
@@ -270,6 +278,159 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
     }
     return 0;
 }
+// --- docs (spec §7.5): a def's signature as written + its docstring ---------
+
+std::string typeRefText(const pgg::TypeRef* t) {
+    if (!t) return "?";
+    std::string out = t->base;
+    if (t->base == "geo" && !t->geoKind.empty()) out += "<" + t->geoKind + ">";
+    if (t->base == "field" && t->arg) out = "field<" + typeRefText(t->arg) + ">";
+    if (t->base == "enum" && !t->enumValues.empty()) {
+        out = "enum {";
+        for (size_t i = 0; i < t->enumValues.size(); ++i) out += (i ? ", " : "") + t->enumValues[i];
+        out += "}";
+    }
+    if (t->optional) out += "?";
+    if (t->list) out += "[]";
+    return out;
+}
+
+// Minimal expression rendering for signature defaults (literals and simple
+// arithmetic is all the grammar allows there).
+std::string exprText(const pgg::Expr* e) {
+    if (!e) return "?";
+    switch (e->kind) {
+        case pgg::NodeKind::NumberLit: return static_cast<const pgg::NumberLit*>(e)->text;
+        case pgg::NodeKind::StringLit:
+            return "\"" + static_cast<const pgg::StringLit*>(e)->value + "\"";
+        case pgg::NodeKind::BoolLit:
+            return static_cast<const pgg::BoolLit*>(e)->value ? "true" : "false";
+        case pgg::NodeKind::NoneLit: return "none";
+        case pgg::NodeKind::EnumLit: return static_cast<const pgg::EnumLit*>(e)->name;
+        case pgg::NodeKind::Ident: return static_cast<const pgg::Ident*>(e)->name;
+        case pgg::NodeKind::AttrRef: return "@" + static_cast<const pgg::AttrRef*>(e)->name;
+        case pgg::NodeKind::VecLit: {
+            std::string out = "(";
+            const auto* v = static_cast<const pgg::VecLit*>(e);
+            for (size_t i = 0; i < v->elems.size(); ++i) out += (i ? ", " : "") + exprText(v->elems[i]);
+            return out + ")";
+        }
+        case pgg::NodeKind::ListLit: {
+            std::string out = "[";
+            const auto* l = static_cast<const pgg::ListLit*>(e);
+            for (size_t i = 0; i < l->elems.size(); ++i) out += (i ? ", " : "") + exprText(l->elems[i]);
+            return out + "]";
+        }
+        case pgg::NodeKind::Paren: return "(" + exprText(static_cast<const pgg::Paren*>(e)->inner) + ")";
+        case pgg::NodeKind::Unary: {
+            const auto* u = static_cast<const pgg::Unary*>(e);
+            return u->op + exprText(u->operand);
+        }
+        case pgg::NodeKind::Binary: {
+            const auto* b = static_cast<const pgg::Binary*>(e);
+            return exprText(b->lhs) + " " + b->op + " " + exprText(b->rhs);
+        }
+        case pgg::NodeKind::Ternary: {
+            const auto* t = static_cast<const pgg::Ternary*>(e);
+            return exprText(t->cond) + " ? " + exprText(t->thenExpr) + " : " + exprText(t->elseExpr);
+        }
+        case pgg::NodeKind::Call: {
+            const auto* c = static_cast<const pgg::Call*>(e);
+            std::string out;
+            for (const std::string& p : c->path) out += (out.empty() ? "" : ".") + p;
+            out += "(";
+            for (size_t i = 0; i < c->args.size(); ++i) {
+                out += i ? ", " : "";
+                if (c->args[i].hasName) out += c->args[i].name + " = ";
+                out += exprText(c->args[i].value);
+            }
+            return out + ")";
+        }
+        default: return "?";
+    }
+}
+
+std::string signatureText(const pgg::Def* d) {
+    std::string out = "def " + d->name + "(";
+    for (size_t i = 0; i < d->params.size(); ++i) {
+        const pgg::DefParam& p = d->params[i];
+        out += (i ? ", " : "") + p.name + ": " + typeRefText(p.type);
+        if (p.hasDefault) out += " = " + exprText(p.def);
+    }
+    out += ") -> (";
+    for (size_t i = 0; i < d->outputs.size(); ++i) {
+        const pgg::OutDecl& o = d->outputs[i];
+        out += (i ? ", " : "") + o.name + ": " + typeRefText(o.type);
+    }
+    return out + ")";
+}
+
+void printDocCard(const pgg::Def* d) {
+    std::puts(signatureText(d).c_str());
+    if (d->hasDoc) {
+        std::string doc = d->docstring;
+        // Docstrings are written as one indented block; dedent line-by-line.
+        std::stringstream ss(doc);
+        std::string line;
+        while (std::getline(ss, line)) {
+            const size_t first = line.find_first_not_of(" \t");
+            std::puts((first == std::string::npos ? "" : line.substr(first)).c_str());
+        }
+    } else {
+        std::puts("(no docstring)");
+    }
+}
+
+int cmdDocs(const std::string& path, const std::string& symbol, const std::vector<std::string>& libRoots) {
+    pgg::Document doc = pgg::parseFile(path);
+    for (const pgg::Diagnostic& d : doc.diagnostics) {
+        if (!d.isWarning) {
+            std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
+            std::fputc('\n', stderr);
+        }
+    }
+    if (!doc.file) return 1;
+
+    const pgg::Def* found = nullptr;
+    const size_t dot = symbol.rfind('.');
+    if (dot == std::string::npos) {
+        for (const pgg::Node* item : doc.file->items) {
+            if (item->kind != pgg::NodeKind::Def) continue;
+            const auto* d = static_cast<const pgg::Def*>(item);
+            if (d->name == symbol) found = d;
+        }
+        if (!found) {
+            std::fprintf(stderr, "no def '%s' in %s\n", symbol.c_str(), path.c_str());
+            return 1;
+        }
+    } else {
+        // Qualified symbol: resolve through the file's import closure (same
+        // roots as a run: --lib + the file's own directory).
+        const std::string ns = symbol.substr(0, dot);
+        const std::string name = symbol.substr(dot + 1);
+        std::vector<std::string> roots = libRoots;
+        const std::string dir = std::filesystem::path(path).parent_path().string();
+        if (!dir.empty()) roots.push_back(dir);
+        std::vector<pgg::Diagnostic> diags;
+        pgg::ModuleClosure closure = pgg::loadModuleClosure(*doc.file, roots, diags);
+        for (const pgg::Diagnostic& d : diags) {
+            std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
+            std::fputc('\n', stderr);
+        }
+        bool errors = false;
+        for (const pgg::Diagnostic& d : diags) errors = errors || !d.isWarning;
+        if (errors) return 1;
+        if (auto it = closure.mainNamespaces.find(ns); it != closure.mainNamespaces.end()) {
+            if (auto d = it->second->defs.find(name); d != it->second->defs.end()) found = d->second;
+        }
+        if (!found) {
+            std::fprintf(stderr, "unknown qualified symbol '%s' (E505)\n", symbol.c_str());
+            return 1;
+        }
+    }
+    printDocCard(found);
+    return 0;
+}
 
 
 }  // namespace
@@ -281,9 +442,30 @@ int main(int argc, char** argv) {
     }
     const std::string cmd = argv[1];
     const std::string path = argv[2];
+    if (cmd == "docs") {
+        if (argc < 4) {
+            usage();
+            return 2;
+        }
+        const std::string symbol = argv[3];
+        std::vector<std::string> libRoots;
+        for (int i = 4; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--lib" && i + 1 < argc) {
+                libRoots.push_back(argv[++i]);
+            } else if (a.rfind("--lib=", 0) == 0) {
+                libRoots.push_back(a.substr(6));
+            } else {
+                usage();
+                return 2;
+            }
+        }
+        return cmdDocs(path, symbol, libRoots);
+    }
     if (cmd == "run") {
         std::vector<std::pair<std::string, std::string>> params;
         std::vector<std::string> outputs;
+        std::vector<std::string> libRoots;
         std::string objDir;
         unsigned threads = 0;  // 0 = hardware concurrency (RunParams default)
         for (int i = 3; i < argc; ++i) {
@@ -313,12 +495,14 @@ int main(int argc, char** argv) {
                 objDir = v;
             } else if (takeValue("--threads", v)) {
                 threads = static_cast<unsigned>(std::strtoul(v.c_str(), nullptr, 10));
+            } else if (takeValue("--lib", v)) {
+                libRoots.push_back(v);
             } else {
                 usage();
                 return 2;
             }
         }
-        return cmdRun(path, params, outputs, objDir, threads);
+        return cmdRun(path, params, outputs, objDir, threads, libRoots);
     }
     bool json = false, inPlace = false, checkOnly = false;
     for (int i = 3; i < argc; ++i) {

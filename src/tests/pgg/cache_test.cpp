@@ -230,4 +230,100 @@ TEST(Fingerprint, ValueHashIsStructural) {
     EXPECT_EQ(hf1, hf2);
 }
 
+// --- E5: per-instance invalidation through the flat expansion (§7.6) ---------
+
+const char* kInstSrc =
+    "def mk(size: f32) -> (out: geo<mesh>) {\n"
+    "    \"\"\"One box.\"\"\"\n"
+    "    out = box(size = vec3(size, size, size))\n"
+    "}\n"
+    "a = mk(size = 1.0)\n"
+    "b = mk(size = 2.0)\n"
+    "scene = merge(a, b)\n"
+    "output scene\n";
+
+TEST(Cache, ArgumentEditInvalidatesOneInstanceOnly) {
+    // Editing the argument of call b must miss exactly b's instance chain
+    // (size param, out, alias) and the merge; call a's chain stays cached.
+    pgg::MemoryCache cache;
+    pgg::RunResult r1 = pgg::run(std::string(kInstSrc), withCache(cache));
+    pggtest::expectNoErrors(r1);
+    EXPECT_EQ(r1.stats.cacheMisses, 7u);  // mk[0].size/.out, a, mk[1].size/.out, b, scene
+
+    const std::string edited =
+        "def mk(size: f32) -> (out: geo<mesh>) {\n"
+        "    \"\"\"One box.\"\"\"\n"
+        "    out = box(size = vec3(size, size, size))\n"
+        "}\n"
+        "a = mk(size = 1.0)\n"
+        "b = mk(size = 3.0)\n"
+        "scene = merge(a, b)\n"
+        "output scene\n";
+    pgg::RunResult r2 = pgg::run(edited, withCache(cache));
+    pggtest::expectNoErrors(r2);
+    // The alias `a` hits and its hit covers the whole mk[0] subtree (it is
+    // never pulled); only b's chain (size param, out, alias) and the merge miss.
+    EXPECT_EQ(r2.stats.cacheHits, 1u);    // a
+    EXPECT_EQ(r2.stats.cacheMisses, 4u);  // scene, b, mk[1].out, mk[1].size
+    EXPECT_EQ(r2.stats.fieldsEvaluated, 0u);
+}
+
+TEST(Cache, DefBodyEditInvalidatesOnlyItsInstances) {
+    const std::string src1 =
+        "def ma(size: f32) -> (out: geo<mesh>) {\n"
+        "    \"\"\"A.\"\"\"\n"
+        "    out = box(size = vec3(size, size, size))\n"
+        "}\n"
+        "def mb(size: f32) -> (out: geo<mesh>) {\n"
+        "    \"\"\"B.\"\"\"\n"
+        "    out = box(size = vec3(size, size, size))\n"
+        "}\n"
+        "a = ma(1.0)\n"
+        "b = mb(2.0)\n"
+        "scene = merge(a, b)\n"
+        "output scene\n";
+    pgg::MemoryCache cache;
+    pgg::RunResult r1 = pgg::run(src1, withCache(cache));
+    pggtest::expectNoErrors(r1);
+    EXPECT_EQ(r1.stats.cacheMisses, 7u);
+
+    // Edit ma's body only: ma[0].out/a/scene miss; mb's whole chain and the
+    // unchanged size-parameter bindings hit.
+    const std::string src2 =
+        "def ma(size: f32) -> (out: geo<mesh>) {\n"
+        "    \"\"\"A.\"\"\"\n"
+        "    box0 = box(size = vec3(size, size, size))\n"
+        "    out = transform(box0, translate = (10, 0, 0))\n"
+        "}\n"
+        "def mb(size: f32) -> (out: geo<mesh>) {\n"
+        "    \"\"\"B.\"\"\"\n"
+        "    out = box(size = vec3(size, size, size))\n"
+        "}\n"
+        "a = ma(1.0)\n"
+        "b = mb(2.0)\n"
+        "scene = merge(a, b)\n"
+        "output scene\n";
+    pgg::RunResult r2 = pgg::run(src2, withCache(cache));
+    pggtest::expectNoErrors(r2);
+    // `b` hits and covers mb's whole subtree; ma[0].box0 hits too — its
+    // structural fingerprint is exactly src1's cached ma[0].out (the box did
+    // not change, only a transform was added after it). That hit covers
+    // ma[0].size, which is therefore never pulled.
+    EXPECT_EQ(r2.stats.cacheHits, 2u);    // b, ma[0].box0
+    EXPECT_EQ(r2.stats.cacheMisses, 3u);  // scene, a, ma[0].out
+}
+
+TEST(Cache, DefRunSecondTimeIsAllHits) {
+    // N3 on instances: a second run of the same file is 100% hits.
+    pgg::MemoryCache cache;
+    pgg::RunResult r1 = pgg::run(std::string(kInstSrc), withCache(cache));
+    pggtest::expectNoErrors(r1);
+    pgg::RunResult r2 = pgg::run(std::string(kInstSrc), withCache(cache));
+    pggtest::expectNoErrors(r2);
+    EXPECT_EQ(r2.stats.cacheMisses, 0u);
+    EXPECT_EQ(r2.stats.cacheHits, 1u);  // only the requested output is pulled
+    EXPECT_EQ(r2.stats.fieldsEvaluated, 0u);
+    EXPECT_EQ(*pggtest::geoOutput(r1, "scene")->positions, *pggtest::geoOutput(r2, "scene")->positions);
+}
+
 }  // namespace

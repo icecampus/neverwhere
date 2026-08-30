@@ -147,19 +147,7 @@ TEST(Typecheck, DeferredOperationsReportCleanly) {
 }
 
 TEST(Typecheck, UnsupportedFileShapesReportCleanly) {
-    // def declarations, imports, zones parse (E0 grammar) but must not run.
-    pgg::RunResult def = runSrc(
-        "def f(x: geo) -> (o: geo) {\n"
-        "    o = x\n"
-        "}\n"
-        "b = ico_sphere(subdiv = 1, radius = 1.0)\n"
-        "output b\n");
-    EXPECT_EQ(countCode(def, "E201"), 1);
-    pgg::RunResult imp = runSrc(
-        "import lib.noise\n"
-        "b = ico_sphere(subdiv = 1, radius = 1.0)\n"
-        "output b\n");
-    EXPECT_EQ(countCode(imp, "E201"), 1);
+    // Zones parse (E0 grammar) but must not run (def/imports work since E5).
     pgg::RunResult zone = runSrc(
         "r = repeat (1, iterations = 2) |cur| {\n"
         "    cur = cur + 1\n"
@@ -175,7 +163,9 @@ TEST(Typecheck, UnsupportedFileShapesReportCleanly) {
     EXPECT_EQ(countCode(fe, "E201"), 1);
 }
 
-TEST(Typecheck, QualifiedCallsAreStageE5) {
+TEST(Typecheck, QualifiedCallWithoutImportIsRejected) {
+    // No import binds the namespace: the qualified call survives expansion
+    // (nothing to expand) and is caught by the defensive typecheck branch.
     pgg::RunResult r = runSrc(
         "b = ico_sphere(subdiv = 1, radius = 1.0)\n"
         "m = lib.make_rock(size = 1.0)\n"

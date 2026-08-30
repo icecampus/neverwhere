@@ -1,0 +1,6 @@
+import lib.cyc_a
+
+def b_fn(x: geo) -> (out: geo) {
+    """Звено цикла B."""
+    out = x
+}

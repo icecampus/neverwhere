@@ -55,6 +55,12 @@ nw_add_lib_sources(
         src/eval/builtins_sdf.cpp
         src/eval/typecheck.h
         src/eval/typecheck.cpp
+        src/eval/modules.h
+        src/eval/modules.cpp
+        src/eval/expand.h
+        src/eval/expand.cpp
+        src/eval/schema.h
+        src/eval/schema.cpp
         src/eval/engine.h
         src/eval/engine.cpp
         ${PARSER_GEN}

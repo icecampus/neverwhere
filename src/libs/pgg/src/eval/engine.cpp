@@ -2,9 +2,13 @@
 
 #include "engine.h"
 
+#include <filesystem>
+
 #include "builtins.h"
 #include "cache.h"
+#include "expand.h"
 #include "fingerprint.h"
+#include "modules.h"
 #include "parallel.h"
 #include "pgg/eval.h"
 #include "pgg/pgg.h"
@@ -55,23 +59,17 @@ bool cacheable(const TypedValue& tv) { return tv && !tv.field && cacheableValue(
 
 class Engine {
 public:
-    Engine(const Document& doc, const RunParams& params, RunResult& result)
-        : doc_(doc), params_(params), result_(result), fps_(*doc_.file, params_.values, numericProfileId()) {
+    Engine(const FlatProgram& flat, const RunParams& params, RunResult& result,
+           const std::vector<size_t>& runtimeContracts)
+        : flat_(flat), params_(params), result_(result),
+          fps_(*flat_.file, params_.values, numericProfileId()) {
         run_.diagnostics = &result_.diagnostics;
         run_.threads = resolveThreadCount(params_.threads);
-        for (const Node* item : doc_.file->items) {
+        for (const Node* item : flat_.file->items) {
             switch (item->kind) {
                 case NodeKind::ParamDecl:
                     topLevel_[static_cast<const ParamDecl*>(item)->name] = item;
                     break;
-                case NodeKind::Def:
-                    topLevel_[static_cast<const Def*>(item)->name] = item;
-                    break;
-                case NodeKind::Import: {
-                    const auto* im = static_cast<const Import*>(item);
-                    topLevel_[im->hasAlias ? im->alias : im->path.back()] = item;
-                    break;
-                }
                 case NodeKind::OutputDecl: {
                     const auto* o = static_cast<const OutputDecl*>(item);
                     outputNames_.push_back(o->name);
@@ -84,9 +82,18 @@ public:
                     break;
                 }
                 default:
-                    break;  // zones (rejected statically), tap (no-op at E3)
+                    break;  // zones (rejected statically), tap (no-op while debug=off)
             }
         }
+        // Runtime half of the def contracts (§7.4): grouped per instance;
+        // instance outputs are the pulls that trigger them.
+        for (const size_t idx : runtimeContracts) {
+            const FlatContract& c = flat_.contracts[idx];
+            instanceContracts_[c.instance].push_back(idx);
+        }
+        for (size_t i = 0; i < flat_.instances.size(); ++i)
+            for (const std::string& o : flat_.instances[i].outputs) outputInstance_[o] = i;
+        contractState_.assign(flat_.instances.size(), 0);
     }
 
     void run(const std::vector<std::string>& requested) {
@@ -120,7 +127,9 @@ public:
     }
 
 private:
-    const Document& doc_;
+    static constexpr size_t kNoInstance = ~size_t(0);
+
+    const FlatProgram& flat_;
     const RunParams& params_;
     RunResult& result_;
     RunContext run_;
@@ -129,6 +138,9 @@ private:
     std::unordered_map<std::string, const Node*> outputDecl_;
     std::vector<std::string> outputNames_;
     std::unordered_map<std::string, TypedValue> env_;
+    std::unordered_map<size_t, std::vector<size_t>> instanceContracts_;  // instance -> contract indices
+    std::unordered_map<std::string, size_t> outputInstance_;             // output binding -> instance
+    std::vector<uint8_t> contractState_;  // 0 = untouched, 1 = expects done, 2 = done
     uint64_t cacheHits_ = 0;
     uint64_t cacheMisses_ = 0;
 
@@ -136,6 +148,14 @@ private:
 
     TypedValue evalBinding(const std::string& name, Span span) {
         if (auto it = env_.find(name); it != env_.end()) return it->second;
+        // Instance outputs trigger the def contracts once per run (§7.4):
+        // expects before the first pull, ensures after it.
+        size_t inst = kNoInstance;
+        if (auto oi = outputInstance_.find(name); oi != outputInstance_.end()) inst = oi->second;
+        if (inst != kNoInstance && contractState_[inst] == 0) {
+            contractState_[inst] = 1;
+            runContracts(inst, /*ensures=*/false);
+        }
         auto it = topLevel_.find(name);
         if (it == topLevel_.end()) {
             run_.report("E103", span, "'" + name + "' is not defined");
@@ -148,25 +168,40 @@ private:
             return tv;
         }
         if (node->kind != NodeKind::Binding) {
-            run_.report("E201", span, "'" + name + "' is not evaluable at stage E4");
+            run_.report("E201", span, "'" + name + "' is not evaluable at stage E5");
             return {};
         }
         const auto* b = static_cast<const Binding*>(node);
         // Cross-run content-addressed cache (N3/N4): structural fingerprint of
         // the binding (0 = uncacheable); a hit short-circuits evaluation.
         const uint64_t fp = params_.cache ? fps_.fingerprint(name) : 0;
+        TypedValue tv;
+        bool hit = false;
         if (fp != 0) {
-            TypedValue cached;
-            if (params_.cache->lookup(fp, cached)) {
+            if (params_.cache->lookup(fp, tv)) {
                 ++cacheHits_;
-                return install(name, b, cached);
+                hit = true;
+            } else {
+                ++cacheMisses_;
             }
-            ++cacheMisses_;
         }
-        TypedValue tv =
-            compileExpr(b->value, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
-        if (fp != 0 && cacheable(tv)) params_.cache->store(fp, tv);
-        return install(name, b, tv);
+        if (!hit) {
+            const size_t diagBefore = result_.diagnostics.size();
+            tv = compileExpr(b->value, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
+            // Runtime diagnostics raised inside an instance carry the instance
+            // path (basic §9.5 chain; nested frames append outward).
+            if (auto bi = flat_.instanceOfBinding.find(name); bi != flat_.instanceOfBinding.end()) {
+                for (size_t i = diagBefore; i < result_.diagnostics.size(); ++i)
+                    result_.diagnostics[i].message += " [instance " + flat_.instances[bi->second].path + "]";
+            }
+            if (fp != 0 && cacheable(tv)) params_.cache->store(fp, tv);
+        }
+        TypedValue installed = install(name, b, tv);
+        if (inst != kNoInstance && contractState_[inst] == 1) {
+            contractState_[inst] = 2;
+            runContracts(inst, /*ensures=*/true);
+        }
+        return installed;
     }
 
     // Memoizes a binding result in env_ and fans a multi-output tuple out to
@@ -189,6 +224,49 @@ private:
         }
         env_.emplace(name, tv);
         return tv;
+    }
+
+    void runContracts(size_t inst, bool ensures) {
+        auto it = instanceContracts_.find(inst);
+        if (it == instanceContracts_.end()) return;
+        for (const size_t idx : it->second) {
+            const FlatContract& c = flat_.contracts[idx];
+            if (c.isEnsure != ensures) continue;
+            if (c.attrForm) {
+                checkAttrContract(c);
+                continue;
+            }
+            const Value v = compileExprToValue(
+                c.cond, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
+            if (valueBase(v) == ScalarType::Bool && !asBool(v)) reportContract(c);
+        }
+    }
+
+    void checkAttrContract(const FlatContract& c) {
+        const TypedValue tv = evalBinding(c.ident, c.span);
+        if (!tv) return;  // the binding's own error was already reported
+        bool present = false;
+        if (!tv.field && valueBase(tv.value) == ScalarType::Geo) {
+            const Geo& g = *asGeo(tv.value);
+            if (c.attrName == "P") {
+                present = g.positions != nullptr;
+            } else if (c.attrName == "index") {
+                present = true;
+            } else if (c.attrName == "N") {
+                present = g.normals != nullptr || attrExistsOnAnyDomain(g, "N");
+            } else {
+                present = attrExistsOnAnyDomain(g, c.attrName);
+            }
+        }
+        if (!present) reportContract(c);
+    }
+
+    void reportContract(const FlatContract& c) {
+        const FlatInstance& inst = flat_.instances[c.instance];
+        std::string msg = c.hasMessage ? c.message
+                                       : (c.isEnsure ? "ensure of '" + inst.defName + "' failed"
+                                                     : "expect of '" + inst.defName + "' failed");
+        run_.report(c.isEnsure ? "E304" : "E303", c.span, msg + " [instance " + inst.path + "]");
     }
 
     TypedValue bindParam(const ParamDecl* p) {
@@ -221,11 +299,25 @@ RunResult run(const Document& doc, const RunParams& params, const std::vector<st
     RunResult result;
     result.diagnostics = doc.diagnostics;  // E0 parse/lint findings first
     if (doc.hasErrors() || !doc.file) return result;
+
+    // E5 pipeline: import closure (only when imports exist), then full static
+    // expansion of def calls into a flat graph (pass-through otherwise).
+    ModuleClosure closure;
+    const ModuleClosure* closurePtr = nullptr;
+    if (hasImports(*doc.file)) {
+        closure = loadModuleClosure(*doc.file, params.importRoots, result.diagnostics);
+        closurePtr = &closure;
+    }
+    FlatProgram flat = expandProgram(*doc.file, closurePtr, result.diagnostics);
+    if (hasErrors(result.diagnostics)) return result;
+
     std::vector<std::string> boundNames;
     for (const auto& [name, v] : params.values) boundNames.push_back(name);
-    typecheck(doc.file, boundNames, result.diagnostics);
+    std::vector<size_t> runtimeContracts;
+    typecheckFlat(flat, boundNames, result.diagnostics, runtimeContracts);
     if (hasErrors(result.diagnostics)) return result;
-    Engine eng(doc, params, result);
+
+    Engine eng(flat, params, result, runtimeContracts);
     eng.run(outputs);
     return result;
 }
@@ -236,7 +328,11 @@ RunResult run(const std::string& text, const RunParams& params, const std::vecto
 }
 
 RunResult runFile(const std::string& path, const RunParams& params, const std::vector<std::string>& outputs) {
-    return run(parseFile(path), params, outputs);
+    RunParams p = params;
+    // The importing file's own directory is an implicit import root (§7.6).
+    const std::string dir = std::filesystem::path(path).parent_path().string();
+    if (!dir.empty()) p.importRoots.push_back(dir);
+    return run(parseFile(path), p, outputs);
 }
 
 }  // namespace pgg

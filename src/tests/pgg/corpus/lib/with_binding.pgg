@@ -1,0 +1,6 @@
+secret = 42
+
+def get_it(x: f32) -> (out: f32) {
+    """Единственный def модуля; binding secret снаружи не виден (§7.6)."""
+    out = x
+}

@@ -1,0 +1,19 @@
+def make_pebble(size: f32 = 1.0, rng: rng) -> (out: geo<mesh>) {
+    """Мелкий камень-кубик заданного размера.
+    Требует: rng (интерфейс единообразия, сейчас форма детерминирована). Пишет: @P, @N.
+    Пример: p = rocks.make_pebble(size = 0.5, rng = r)
+    """
+    out = box(size = vec3(size, size, size))
+}
+
+def pebble_pair(size: f32 = 1.0, rng: rng) -> (first: geo<mesh>, second: geo<mesh>) {
+    """Пара камней рядом: второй сдвинут на два размера по x (мультивыход)."""
+    first = make_pebble(size = size, rng = rng)
+    second = transform(first, translate = vec3(size * 2, 0, 0))
+}
+
+def scale_of(g: geo) -> (out: f32) {
+    """Ширина bbox по x — числовой выход для проверки qualified value-вызовов."""
+    mn, mx = bbox(g)
+    out = dot(mx - mn, (1, 0, 0))
+}

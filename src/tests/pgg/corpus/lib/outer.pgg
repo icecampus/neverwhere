@@ -1,0 +1,7 @@
+import lib.inner
+
+def quadruple_it(x: f32) -> (out: f32) {
+    """Учетверить число (два вызова inner.double_it)."""
+    two = inner.double_it(x = x)
+    out = inner.double_it(x = two)
+}

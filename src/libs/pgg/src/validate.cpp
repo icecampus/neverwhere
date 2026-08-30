@@ -24,10 +24,12 @@ struct BindingInfo {
     bool warnIfUnused = true;
     bool isStatePort = false;
     bool boundAsOutput = false;
+    bool isRuntimeValue = false;  // param/binding: capturable (hermeticity, E105)
 };
 
 struct Scope {
     const Scope* parent = nullptr;
+    bool isDefBoundary = false;  // def body scope: hermeticity boundary (§7.6)
     std::unordered_map<std::string, BindingInfo> defined;
 
     const BindingInfo* lookup(const std::string& name) const {
@@ -54,13 +56,16 @@ public:
             switch (item->kind) {
                 case NodeKind::Import: {
                     const auto* im = static_cast<const Import*>(item);
-                    if (im->hasAlias) define(scope, im->alias, item->span, /*warnIfUnused=*/false);
+                    // The namespace (alias or last path component) is a defined
+                    // name: collisions with params/bindings/defs are E102.
+                    define(scope, im->hasAlias ? im->alias : im->path.back(), item->span,
+                           /*warnIfUnused=*/false);
                     break;
                 }
                 case NodeKind::ParamDecl: {
                     const auto* p = static_cast<const ParamDecl*>(item);
                     type(p->type);
-                    define(scope, p->name, item->span, /*warnIfUnused=*/false);
+                    define(scope, p->name, item->span, /*warnIfUnused=*/false, /*isRuntimeValue=*/true);
                     break;
                 }
                 case NodeKind::Def: {
@@ -92,7 +97,8 @@ private:
         diags_.push_back(Diagnostic{"W001", span, std::move(msg), std::move(hint), true});
     }
 
-    void define(Scope& scope, const std::string& name, Span span, bool warnIfUnused = true) {
+    void define(Scope& scope, const std::string& name, Span span, bool warnIfUnused = true,
+                bool isRuntimeValue = false) {
         auto it = scope.defined.find(name);
         if (it != scope.defined.end()) {
             BindingInfo& prev = it->second;
@@ -117,6 +123,7 @@ private:
         BindingInfo info;
         info.span = span;
         info.warnIfUnused = warnIfUnused;
+        info.isRuntimeValue = isRuntimeValue;
         scope.defined.emplace(name, info);
     }
 
@@ -131,12 +138,45 @@ private:
 
     void read(Scope& scope, const std::string& name, Span span) {
         BindingInfo* info = scope.lookup(name);
-        if (info) {
-            info->used = true;
-        } else {
+        if (!info) {
             error("E103", span, "'" + name + "' is used before definition",
                   "define the name above this line (define-before-use)");
+            return;
         }
+        if (capturedAcrossDefBoundary(scope, name, *info)) {
+            error("E105", span,
+                  "'" + name + "' is a top-level runtime value captured by a def body",
+                  "def bodies are hermetic — pass it through the def signature (§7.6)");
+            return;
+        }
+        info->used = true;
+    }
+
+    // A def body may not capture top-level params/rng/bindings of its file
+    // (spec §7.6); defs and namespaces stay free names. The boundary counts
+    // only when the definition sits above it.
+    bool capturedAcrossDefBoundary(Scope& scope, const std::string& name, const BindingInfo& info) {
+        if (!info.isRuntimeValue) return false;
+        for (const Scope* s = &scope; s; s = s->parent) {
+            if (s->defined.count(name)) return false;  // defined at/below the boundary
+            if (s->isDefBoundary) return true;
+        }
+        return false;
+    }
+
+    // Named-arg bare idents may be enum literals (mode = poisson) — the
+    // distinction is type-driven (E206 stage): count as a use when defined,
+    // forgive when not. The hermeticity rule still applies when defined.
+    void readNamedArgIdent(Scope& scope, const std::string& name, Span span) {
+        BindingInfo* info = scope.lookup(name);
+        if (!info) return;
+        if (capturedAcrossDefBoundary(scope, name, *info)) {
+            error("E105", span,
+                  "'" + name + "' is a top-level runtime value captured by a def body",
+                  "def bodies are hermetic — pass it through the def signature (§7.6)");
+            return;
+        }
+        info->used = true;
     }
 
     void reportUnused(const Scope& scope) {
@@ -159,9 +199,10 @@ private:
     void def(const Def* d, Scope& fileScope) {
         Scope scope;
         scope.parent = &fileScope;
+        scope.isDefBoundary = true;  // hermeticity boundary for read() (E105)
         for (const DefParam& p : d->params) {
             type(p.type);
-            define(scope, p.name, d->span, /*warnIfUnused=*/false);
+            define(scope, p.name, d->span, /*warnIfUnused=*/false, /*isRuntimeValue=*/true);
         }
         for (const OutDecl& o : d->outputs) type(o.type);
         for (const ContractStmt* e : d->expects) contract(e, scope);
@@ -196,7 +237,7 @@ private:
                 expr(b->value, scope);
                 for (size_t i = 0; i < b->targets.names.size(); ++i) {
                     Span ts = i < b->targets.spans.size() ? b->targets.spans[i] : s->span;
-                    define(scope, b->targets.names[i], ts);
+                    define(scope, b->targets.names[i], ts, /*warnIfUnused=*/true, /*isRuntimeValue=*/true);
                 }
                 break;
             }
@@ -211,7 +252,7 @@ private:
                 expr(z->iterations, scope);
                 for (size_t i = 0; i < z->targets.names.size(); ++i) {
                     Span ts = i < z->targets.spans.size() ? z->targets.spans[i] : s->span;
-                    define(scope, z->targets.names[i], ts);
+                    define(scope, z->targets.names[i], ts, /*warnIfUnused=*/true, /*isRuntimeValue=*/true);
                 }
                 Scope body;
                 body.parent = &scope;
@@ -226,7 +267,7 @@ private:
             case NodeKind::ForeachZone: {
                 const auto* z = static_cast<const ForeachZone*>(s);
                 expr(z->collection, scope);
-                define(scope, z->target, z->targetSpan);
+                define(scope, z->target, z->targetSpan, /*warnIfUnused=*/true, /*isRuntimeValue=*/true);
                 Scope body;
                 body.parent = &scope;
                 define(body, z->item, z->itemSpan);
@@ -266,14 +307,18 @@ private:
             }
             case NodeKind::Call: {
                 const auto* c = static_cast<const Call*>(e);
+                // Qualified call: mark the namespace used when it is defined
+                // (unknown namespaces are E505 at the module stage).
+                if (c->path.size() >= 2) {
+                    if (BindingInfo* info = scope.lookup(c->path.front())) info->used = true;
+                }
                 for (const CallArg& a : c->args) {
                     if (a.hasName && a.value && a.value->kind == NodeKind::Ident) {
                         // Named-arg bare ident may be an enum literal
                         // (mode = poisson) — the distinction is type-driven
                         // (E206 stage). Count as a use when defined, forgive
-                        // when not.
-                        const std::string& name = static_cast<const Ident*>(a.value)->name;
-                        if (BindingInfo* info = scope.lookup(name)) info->used = true;
+                        // when not; hermeticity still applies when defined.
+                        readNamedArgIdent(scope, static_cast<const Ident*>(a.value)->name, a.value->span);
                         continue;
                     }
                     expr(a.value, scope);

@@ -2,10 +2,13 @@
 
 // Pull-based lazy driver (spec §5.1, §6.6-6.7): binds launch params, then
 // evaluates only the bindings on the path to the requested outputs (N2).
-// Static checks (typecheck) run first; the graph executes only when clean.
+// Static checks (expansion + typecheck) run first; the graph executes only
+// when clean.
 // E3: RunParams selects the lane count for per-element loops (N7) and carries
 // the caller-owned cross-run cache (N3/N4); RunStats reports cache counters,
 // the resolved thread count and the numeric profile id (§5.2).
+// E5: RunParams carries the import roots (§7.6) and the engine checks the
+// runtime half of the def contracts (E303/E304) at instance-output pulls.
 
 #include <unordered_map>
 
@@ -26,6 +29,9 @@ struct RunParams {
     // Caller-owned cross-run cache (nullptr = disabled). Value bindings only;
     // inspector/debug sessions use their own instance by design (spec §5.3).
     MemoryCache* cache = nullptr;
+    // Import roots (spec §7.6), searched in order for `<root>/<path>.pgg`.
+    // runFile appends the importing file's own directory implicitly.
+    std::vector<std::string> importRoots;
 };
 
 struct RunOutput {

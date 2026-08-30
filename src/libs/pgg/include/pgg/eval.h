@@ -1,9 +1,11 @@
 #pragma once
 
-// PGG public execution API (stages E1–E4): run a .pgg graph to its declared
-// outputs. Parsing (pgg/pgg.h) and E0 checks happen inside; the result
-// carries outputs, diagnostics (E0 + static + runtime) and evaluation stats
-// (incl. cache counters, resolved thread count and the numeric profile id).
+// PGG public execution API (stages E1–E5): run a .pgg graph to its declared
+// outputs. Parsing (pgg/pgg.h) and E0 checks happen inside; imports resolve
+// against RunParams::importRoots (runFile adds the file's own directory),
+// def calls are statically expanded, and the result carries outputs,
+// diagnostics (E0 + static + runtime) and evaluation stats (incl. cache
+// counters, resolved thread count and the numeric profile id).
 
 #include <string>
 #include <vector>
