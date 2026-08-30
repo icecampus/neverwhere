@@ -585,7 +585,7 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
     if (c->path.size() != 1) {
         std::string q;
         for (const std::string& p : c->path) q += (q.empty() ? "" : ".") + p;
-        run.report("E201", c->span, "qualified operation '" + q + "' is not supported at stage E2",
+        run.report("E201", c->span, "qualified operation '" + q + "' is not supported at stage E4",
                    "def/imports are stage E5");
         return {};
     }
@@ -598,7 +598,7 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
     }
     if (sig->deferredStage) {
         run.report("E201", c->span,
-                   "operation '" + name + "' is not supported at stage E2 (" + sig->deferredStage + ")");
+                   "operation '" + name + "' is not supported at stage E4 (" + sig->deferredStage + ")");
         return {};
     }
 

@@ -683,7 +683,7 @@ ConstBufferPtr evalFieldGenBuf(int callId, const FieldNode& node,
             // Brute-force point-to-surface distance (perf: later stages).
             const GeoPtr target = asGeo(node.params[0]);
             if (ctx.domain != Domain::Points) {
-                ctx.run.report("E301", node.span, "distance_to is only evaluable on the points domain at stage E2");
+                ctx.run.report("E301", node.span, "distance_to is only evaluable on the points domain at stage E4");
                 return std::make_shared<const Buffer>(F32Buf(count, 0.0f));
             }
             const auto& pos = *ctx.geo.positions;

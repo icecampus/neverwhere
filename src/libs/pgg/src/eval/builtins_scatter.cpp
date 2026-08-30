@@ -134,7 +134,7 @@ Value opMerge(const BoundCall& bound, RunContext& run) {
     const Geo& a = *asGeo(bound.values[0]);
     const Geo& b = *asGeo(bound.values[1]);
     if (a.kind == GeoKind::Instances || b.kind == GeoKind::Instances) {
-        run.report("E201", bound.span, "merge of geo<instances> is not supported at stage E2",
+        run.report("E201", bound.span, "merge of geo<instances> is not supported at stage E4",
                    "realize the instances first, then merge meshes");
         return Value(asGeo(bound.values[0]));
     }

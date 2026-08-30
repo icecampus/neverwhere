@@ -372,20 +372,48 @@ const std::vector<BuiltinSig>& registry() {
                             Type{ScalarType::F32, false, GeoKind::Any}));
         }
 
-        // --- known but deferred past E2 -----------------------------------------
+        // --- §8.4 SDF ----------------------------------------------------------
+        {
+            Type sdfResult{ScalarType::Sdf, false, GeoKind::Any};
+            ParamSig sdfA = val("a", ScalarType::Sdf, true);
+            ParamSig sdfB = val("b", ScalarType::Sdf, true);
+            r.push_back(sig(BuiltinId::SdfSphere, "sdf_sphere", {val("r", ScalarType::F32, true)}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfBox, "sdf_box", {val("size", ScalarType::Vec3, true)}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfUnion, "sdf_union", {sdfA, sdfB}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfUnionSmooth, "sdf_union_smooth",
+                            {sdfA, sdfB, val("k", ScalarType::F32, true)}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfSubtract, "sdf_subtract", {sdfA, sdfB}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfSubtractSmooth, "sdf_subtract_smooth",
+                            {sdfA, sdfB, val("k", ScalarType::F32, true)}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfIntersect, "sdf_intersect", {sdfA, sdfB}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfDisplace, "sdf_displace",
+                            {val("s", ScalarType::Sdf, true), fld("amount", ScalarType::F32, true)}, sdfResult));
+            r.push_back(sig(BuiltinId::SdfInstanceOnPoints, "sdf_instance_on_points",
+                            {geoArg("pts", GeoKind::Points), val("source", ScalarType::Sdf, true),
+                             valDef("k", ScalarType::F32, Value(0.0f))},
+                            sdfResult));
+            r.push_back(sig(BuiltinId::SdfFromMesh, "sdf_from_mesh",
+                            {geoArg("geo"), val("voxel", ScalarType::F32, true)}, sdfResult));
+            {
+                ParamSig method = valDef("method", ScalarType::String, Value(std::string("marching_cubes")));
+                method.enumValues = {"marching_cubes"};
+                r.push_back(sig(BuiltinId::MeshFromSdf, "mesh_from_sdf",
+                                {val("s", ScalarType::Sdf, true), val("voxel", ScalarType::F32, true),
+                                 valDef("iso", ScalarType::F32, Value(0.0f)), method},
+                                Type{ScalarType::Geo, false, GeoKind::Mesh}));
+            }
+        }
+
+        // --- known but deferred past this stage ---------------------------------
         r.push_back(deferredSig("import_mesh", "deferred: no host asset contract yet, Q4"));
-        r.push_back(deferredSig("subdivide", "topology ops are a later stage (post-E2)"));
-        r.push_back(deferredSig("triangulate", "topology ops are a later stage (post-E2)"));
-        r.push_back(deferredSig("merge_by_distance", "topology ops are a later stage (post-E2)"));
-        r.push_back(deferredSig("delete", "topology ops are a later stage (post-E2)"));
-        r.push_back(deferredSig("separate", "topology ops are a later stage (post-E2)"));
-        r.push_back(deferredSig("islands", "topology ops are a later stage (post-E2)"));
-        for (const char* n : {"sdf_sphere", "sdf_box", "sdf_union", "sdf_union_smooth", "sdf_subtract",
-                              "sdf_subtract_smooth", "sdf_intersect", "sdf_displace", "sdf_instance_on_points",
-                              "sdf_from_mesh", "mesh_from_sdf"})
-            r.push_back(deferredSig(n, "SDF is stage E4"));
+        r.push_back(deferredSig("subdivide", "topology ops are a later stage (post-E4)"));
+        r.push_back(deferredSig("triangulate", "topology ops are a later stage (post-E4)"));
+        r.push_back(deferredSig("merge_by_distance", "topology ops are a later stage (post-E4)"));
+        r.push_back(deferredSig("delete", "topology ops are a later stage (post-E4)"));
+        r.push_back(deferredSig("separate", "topology ops are a later stage (post-E4)"));
+        r.push_back(deferredSig("islands", "topology ops are a later stage (post-E4)"));
         for (const char* n : {"raycast", "transfer"})
-            r.push_back(deferredSig(n, "sampling ops are a later stage (post-E2)"));
+            r.push_back(deferredSig(n, "sampling ops are a later stage (post-E4)"));
         r.push_back(deferredSig("fracture", "fracture is stage E7"));
         return r;
     }();
@@ -513,6 +541,18 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::AvgOf:
         case BuiltinId::SumOf:
             return evalAggregateBuiltin(bound, run);
+        case BuiltinId::SdfSphere:
+        case BuiltinId::SdfBox:
+        case BuiltinId::SdfUnion:
+        case BuiltinId::SdfUnionSmooth:
+        case BuiltinId::SdfSubtract:
+        case BuiltinId::SdfSubtractSmooth:
+        case BuiltinId::SdfIntersect:
+        case BuiltinId::SdfDisplace:
+        case BuiltinId::SdfInstanceOnPoints:
+        case BuiltinId::SdfFromMesh:
+        case BuiltinId::MeshFromSdf:
+            return evalSdfBuiltin(bound, run);
         default:
             break;
     }

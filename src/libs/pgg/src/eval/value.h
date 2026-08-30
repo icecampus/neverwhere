@@ -27,6 +27,9 @@ namespace pgg {
 struct FieldNode;
 using FieldPtr = std::shared_ptr<const FieldNode>;
 
+struct SdfNode;
+using SdfPtr = std::shared_ptr<const SdfNode>;
+
 enum class ScalarType {
     None,
     Bool,
@@ -184,9 +187,12 @@ struct Value;
 using ListValuePtr = std::shared_ptr<const std::vector<Value>>;
 
 struct Value {
+    // Index-stable variant: new alternatives are appended at the END (12 =
+    // sdf, stage E4); existing indices 0..11 are part of the cache/switch
+    // contract and must not move.
     using Data = std::variant<std::monostate,  // none
                               bool, int64_t, float, glm::vec2, glm::vec3, glm::vec4,
-                              std::string, Rng, GeoPtr, FieldPtr, ListValuePtr>;
+                              std::string, Rng, GeoPtr, FieldPtr, ListValuePtr, SdfPtr>;
     Data data;
 
     Value() = default;
@@ -202,6 +208,7 @@ struct Value {
     Value(GeoPtr v) : data(std::move(v)) {}
     Value(FieldPtr v) : data(std::move(v)) {}
     Value(ListValuePtr v) : data(std::move(v)) {}
+    Value(SdfPtr v) : data(std::move(v)) {}
 };
 
 inline bool isNone(const Value& v) { return std::holds_alternative<std::monostate>(v.data); }
@@ -219,6 +226,7 @@ inline ScalarType valueBase(const Value& v) {
         case 9: return ScalarType::Geo;
         case 10: return ScalarType::Any;  // field: element type lives in the node
         case 11: return ScalarType::Any;  // list: element type is not in the payload
+        case 12: return ScalarType::Sdf;
         default: return ScalarType::None;
     }
 }
@@ -233,7 +241,9 @@ inline const std::string& asString(const Value& v) { return std::get<std::string
 inline Rng asRng(const Value& v) { return std::get<Rng>(v.data); }
 inline GeoPtr asGeo(const Value& v) { return std::get<GeoPtr>(v.data); }
 inline FieldPtr asField(const Value& v) { return std::get<FieldPtr>(v.data); }
+inline SdfPtr asSdf(const Value& v) { return std::get<SdfPtr>(v.data); }
 inline bool isFieldValue(const Value& v) { return std::holds_alternative<FieldPtr>(v.data); }
+inline bool isSdfValue(const Value& v) { return std::holds_alternative<SdfPtr>(v.data); }
 inline bool isListValue(const Value& v) { return std::holds_alternative<ListValuePtr>(v.data); }
 inline const std::vector<Value>& asList(const Value& v) { return *std::get<ListValuePtr>(v.data); }
 
@@ -415,6 +425,7 @@ inline std::string valueToString(const Value& v) {
             }
             return out + "]";
         }
+        case 12: return "<sdf>";
         default: return "?";
     }
 }

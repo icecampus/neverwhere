@@ -1,0 +1,28 @@
+param seed: int = 42
+
+root_rng = rng_from_seed(seed)
+rock_rng = split_rng(root_rng, key = "rock")
+wall_rng = split_rng(root_rng, key = "wall")
+scale_rng = split_rng(root_rng, key = "scale")
+orient_rng = split_rng(root_rng, key = "orient")
+
+# criterion 1: a rock fully in the SDF pipeline (union_smooth + displace + subtract -> mesh_from_sdf)
+base = sdf_union_smooth(sdf_sphere(r = 1.2), sdf_box(size = (1.6, 1.0, 1.4)), k = 0.5)
+lumps = sdf_displace(base, amount = fbm(scale = 2.0, octaves = 4, rng = rock_rng) * 0.18)
+crater_anchor = transform(mesh_line(count = 1, length = 0.0), translate = (0.85, 0.45, 0.3))
+crater = sdf_instance_on_points(crater_anchor, sdf_sphere(r = 0.55))
+rock_field = sdf_subtract(lumps, crater)
+rock = compute_normals(mesh_from_sdf(rock_field, voxel = 0.05))
+
+# criterion 2: a wall of N transformed instances of one immutable SDF form
+wall_pts0 = mesh_line(count = 6, length = 10.0, dir = (1, 0, 0))
+wall_pts1 = transform(wall_pts0, translate = (0, 0, 4.0))
+wall_pts2 = set(wall_pts1, "scale", random(lo = 0.7, hi = 1.3, rng = scale_rng))
+wall_pts = set(wall_pts2, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = orient_rng)))
+brick = sdf_displace(sdf_box(size = (1.6, 1.0, 0.9)), amount = fbm(scale = 3.0, octaves = 3, rng = wall_rng) * 0.06)
+wall_field = sdf_instance_on_points(wall_pts, brick, k = 0.25)
+wall = compute_normals(mesh_from_sdf(wall_field, voxel = 0.06))
+
+output rock
+output wall
+output rock_field

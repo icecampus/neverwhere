@@ -41,6 +41,9 @@ nw_add_lib_sources(
         src/eval/value.h
         src/eval/field.h
         src/eval/field.cpp
+        src/eval/sdf.h
+        src/eval/sdf.cpp
+        src/eval/mc_tables.h
         src/eval/builtins.h
         src/eval/builtins.cpp
         src/eval/builtins_sources.cpp
@@ -49,6 +52,7 @@ nw_add_lib_sources(
         src/eval/builtins_attrs.cpp
         src/eval/builtins_scatter.cpp
         src/eval/builtins_aggregate.cpp
+        src/eval/builtins_sdf.cpp
         src/eval/typecheck.h
         src/eval/typecheck.cpp
         src/eval/engine.h

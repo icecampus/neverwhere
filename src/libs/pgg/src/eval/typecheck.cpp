@@ -19,7 +19,7 @@ public:
         for (const Node* item : f->items) {
             switch (item->kind) {
                 case NodeKind::Import:
-                    error("E201", item->span, "import is not supported at stage E2", "modules are stage E5");
+                    error("E201", item->span, "import is not supported at stage E4", "modules are stage E5");
                     break;
                 case NodeKind::ParamDecl: {
                     const auto* p = static_cast<const ParamDecl*>(item);
@@ -32,7 +32,7 @@ public:
                     break;
                 }
                 case NodeKind::Def:
-                    error("E201", item->span, "def is not supported at stage E2", "composition is stage E5");
+                    error("E201", item->span, "def is not supported at stage E4", "composition is stage E5");
                     break;
                 case NodeKind::OutputDecl:
                     output(static_cast<const OutputDecl*>(item));
@@ -80,7 +80,7 @@ private:
             if (t.isField) {
                 error("E204", o->span,
                       "output '" + o->name + "' cannot export " + typeName(t) + " (spec §6.7)",
-                      "bind a concrete geo/value root; materialize the field with set() (stage E2)");
+                      "bind a concrete geo/value root; materialize the field with set()");
             } else if (t.base == ScalarType::Rng) {
                 error("E204", o->span, "output '" + o->name + "' cannot export rng (spec §6.7)",
                       "rng is an internal generator value, not an exportable result");
@@ -120,10 +120,10 @@ private:
                 break;
             }
             case NodeKind::RepeatZone:
-                error("E201", s->span, "repeat zones are not supported at stage E2", "zones are stage E7");
+                error("E201", s->span, "repeat zones are not supported at stage E4", "zones are stage E7");
                 break;
             case NodeKind::ForeachZone:
-                error("E201", s->span, "foreach zones are not supported at stage E2", "zones are stage E7");
+                error("E201", s->span, "foreach zones are not supported at stage E4", "zones are stage E7");
                 break;
             default:
                 break;  // tap: diagnostics layer, a no-op at E2
@@ -297,7 +297,7 @@ private:
         if (c->path.size() != 1) {
             std::string q;
             for (const std::string& p : c->path) q += (q.empty() ? "" : ".") + p;
-            error("E201", c->span, "qualified operation '" + q + "' is not supported at stage E2",
+            error("E201", c->span, "qualified operation '" + q + "' is not supported at stage E4",
                   "def/imports are stage E5");
             return {};
         }
@@ -308,7 +308,7 @@ private:
             return {};
         }
         if (sig->deferredStage) {
-            error("E201", c->span, "operation '" + name + "' is not supported at stage E2 (" + sig->deferredStage + ")");
+            error("E201", c->span, "operation '" + name + "' is not supported at stage E4 (" + sig->deferredStage + ")");
             return {};
         }
         if (!sig->results.empty() && !allowMulti_) {

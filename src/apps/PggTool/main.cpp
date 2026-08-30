@@ -17,6 +17,7 @@
 #include <pgg/eval.h>
 #include <pgg/pgg.h>
 #include <pgg/src/eval/builtins.h>  // realizeInstances for the --obj export
+#include <pgg/src/eval/sdf.h>       // sdf output summaries
 
 namespace {
 
@@ -181,8 +182,18 @@ void printGeoSummary(const std::string& name, const pgg::Geo& geo) {
     std::printf("\n");
 }
 
-bool writeObj(const std::string& path, const pgg::Geo& geo) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+void printSdfSummary(const std::string& name, const pgg::SdfNode& sdf) {
+    glm::vec3 mn, mx;
+    sdf.conservativeBBox(mn, mx);
+    std::printf("%s: sdf nodes=%zu", name.c_str(), pgg::sdfNodeCount(sdf));
+    if (mn.x <= mx.x && mn.y <= mx.y && mn.z <= mx.z)
+        std::printf(" bbox=(%g, %g, %g)..(%g, %g, %g)", mn.x, mn.y, mn.z, mx.x, mx.y, mx.z);
+    else
+        std::printf(" bbox=(empty)");
+    std::printf("\n");
+}
+
+bool writeObj(const std::string& path, const pgg::Geo& geo) {    std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) return false;
     out << "# PggTool run export\n";
     for (const glm::vec3& p : *geo.positions)
@@ -215,6 +226,8 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
     for (const pgg::RunOutput& o : result.outputs) {
         if (pgg::valueBase(o.value) == pgg::ScalarType::Geo) {
             printGeoSummary(o.name, *pgg::asGeo(o.value));
+        } else if (pgg::valueBase(o.value) == pgg::ScalarType::Sdf) {
+            printSdfSummary(o.name, *pgg::asSdf(o.value));
         } else {
             std::printf("%s: %s = %s\n", o.name.c_str(), pgg::scalarName(pgg::valueBase(o.value)),
                         pgg::valueToString(o.value).c_str());
@@ -229,6 +242,11 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
         std::error_code ec;
         std::filesystem::create_directories(objDir, ec);
         for (const pgg::RunOutput& o : result.outputs) {
+            if (pgg::valueBase(o.value) == pgg::ScalarType::Sdf) {
+                std::printf("skipping %s: sdf outputs are not exported; mesh them with mesh_from_sdf\n",
+                            o.name.c_str());
+                continue;
+            }
             if (pgg::valueBase(o.value) != pgg::ScalarType::Geo) continue;
             const pgg::Geo& geo = *pgg::asGeo(o.value);
             const std::string objPath = objDir + "/" + o.name + ".obj";

@@ -201,6 +201,9 @@ bool fingerprintValue(const Value& v, uint64_t& out) {
             break;
         case 9: addGeo(m, *asGeo(v)); break;
         case 10: return false;  // compiled fields have no structural hash
+        case 12: return false;  // sdf payloads have no structural hash (safe
+                                // direction: uncacheable as a launch param;
+                                // sdf bindings fingerprint by AST structure)
         case 11: {
             m.add(kTagList);
             const auto& elems = asList(v);

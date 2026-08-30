@@ -130,7 +130,7 @@ TEST(Typecheck, OutputRejectsFieldAndRng) {
 }
 
 TEST(Typecheck, DeferredOperationsReportCleanly) {
-    // Known catalog names past E2: precise "not supported" diagnostic, no crash.
+    // Known catalog names past E4: precise "not supported" diagnostic, no crash.
     pgg::RunResult m = runSrc(
         "a = ico_sphere(subdiv = 1, radius = 1.0)\n"
         "b = subdivide(a, level = 2)\n"
@@ -138,8 +138,12 @@ TEST(Typecheck, DeferredOperationsReportCleanly) {
     EXPECT_EQ(countCode(m, "E201"), 1);
     pgg::RunResult im = runSrc("m = import_mesh(uri = \"rock.obj\")\noutput m\n");
     EXPECT_EQ(countCode(im, "E201"), 1);
-    pgg::RunResult sdf = runSrc("s = sdf_sphere(r = 1.0)\noutput s\n");
-    EXPECT_EQ(countCode(sdf, "E201"), 1);
+    pgg::RunResult rc = runSrc(
+        "a = ico_sphere(subdiv = 1, radius = 1.0)\n"
+        "b = ico_sphere(subdiv = 1, radius = 1.0)\n"
+        "r = raycast(a, b)\n"
+        "output r\n");
+    EXPECT_EQ(countCode(rc, "E201"), 1);
 }
 
 TEST(Typecheck, UnsupportedFileShapesReportCleanly) {

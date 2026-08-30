@@ -40,6 +40,7 @@ bool cacheableValue(const Value& v) {
         case 6:   // vec4
         case 7:   // string
         case 9:   // geo
+        case 12:  // sdf (self-contained payload: the displace field DAG is owned)
             return true;
         case 11: {  // list
             for (const Value& e : asList(v))
@@ -147,7 +148,7 @@ private:
             return tv;
         }
         if (node->kind != NodeKind::Binding) {
-            run_.report("E201", span, "'" + name + "' is not evaluable at stage E3");
+            run_.report("E201", span, "'" + name + "' is not evaluable at stage E4");
             return {};
         }
         const auto* b = static_cast<const Binding*>(node);

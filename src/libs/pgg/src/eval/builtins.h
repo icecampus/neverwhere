@@ -8,10 +8,10 @@
 // the static type checker (E2xx), the expression compiler and the runtime
 // dispatch — one source of truth for signatures.
 //
-// Operations deferred past E2 (import_mesh, §8.3 topology beyond merge,
-// SDF, raycast/transfer, zones, ...) are registered with a deferredStage note so
-// calling them produces a precise "not supported at this stage" diagnostic
-// instead of E201.
+// Operations deferred past the current stage (import_mesh, §8.3 topology
+// beyond merge, raycast/transfer, zones, ...) are registered with a
+// deferredStage note so calling them produces a precise "not supported at
+// this stage" diagnostic instead of E201.
 
 #include "field.h"
 #include "value.h"
@@ -41,6 +41,9 @@ enum class BuiltinId {
     DistributePoints, InstanceOnPoints, Realize,
     // §8.10 aggregators
     Bbox, Extent, Centroid, Count, MinOf, MaxOf, AvgOf, SumOf,
+    // §8.4 SDF
+    SdfSphere, SdfBox, SdfUnion, SdfUnionSmooth, SdfSubtract, SdfSubtractSmooth,
+    SdfIntersect, SdfDisplace, SdfInstanceOnPoints, SdfFromMesh, MeshFromSdf,
     // Known but not supported at this stage.
     Deferred,
 };
@@ -76,7 +79,7 @@ struct BuiltinSig {
     bool variadic = false;                   // ramp: trailing values after declared params
     bool resultGeoKindOfFirstArg = false;    // geo<K> of the first geo argument is kept
     bool exprFunc = false;                   // §6.3 expression function (field-polymorphic)
-    const char* deferredStage = nullptr;     // non-null -> known, but not supported at E2
+    const char* deferredStage = nullptr;     // non-null -> known, but not supported at this stage
 };
 
 const BuiltinSig* findBuiltin(const std::string& name);
@@ -142,6 +145,9 @@ Value evalScatterBuiltin(const BoundCall& bound, RunContext& run);
 
 // §8.10 aggregators, value level (builtins_aggregate.cpp).
 Value evalAggregateBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.4 SDF nodes, value level (builtins_sdf.cpp).
+Value evalSdfBuiltin(const BoundCall& bound, RunContext& run);
 
 // Materializes geo<instances> into geo<mesh> (spec §8.8); host entry point
 // for tools that export instances without running the graph. nullptr when the
