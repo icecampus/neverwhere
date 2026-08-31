@@ -53,6 +53,7 @@ public:
         if (!f) return;
         Scope scope;
         for (const Node* item : f->items) {
+            if (!item) continue;
             switch (item->kind) {
                 case NodeKind::Import: {
                     const auto* im = static_cast<const Import*>(item);
@@ -529,6 +530,7 @@ private:
 
     void lintZones(const File* f) {
         for (const Node* item : f->items) {
+            if (!item) continue;
             if (item->kind == NodeKind::Def) {
                 lintZoneStmts(static_cast<const Def*>(item)->body, 0, 0);
             } else if (item->kind == NodeKind::RepeatZone) {

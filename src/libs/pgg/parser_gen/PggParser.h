@@ -118,7 +118,7 @@ public:
 
   class  FileContext : public antlr4::ParserRuleContext {
   public:
-    pgg::File* result;
+    pgg::File* result = nullptr;
     PggParser::Import_stmtContext *i = nullptr;
     PggParser::Param_stmtContext *p = nullptr;
     PggParser::Def_stmtContext *d = nullptr;
@@ -147,7 +147,7 @@ public:
 
   class  Import_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Import* result;
+    pgg::Import* result = nullptr;
     PggParser::Qualified_nameContext *q = nullptr;
     antlr4::Token *a = nullptr;
     antlr4::Token *v = nullptr;
@@ -168,7 +168,7 @@ public:
 
   class  Param_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::ParamDecl* result;
+    pgg::ParamDecl* result = nullptr;
     pgg::Expr* def = nullptr;
     bool hasDef = false;
     antlr4::Token *n = nullptr;
@@ -191,7 +191,7 @@ public:
 
   class  Output_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::OutputDecl* result;
+    pgg::OutputDecl* result = nullptr;
     antlr4::Token *n = nullptr;
     Output_stmtContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
@@ -206,7 +206,7 @@ public:
 
   class  Def_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Def* result;
+    pgg::Def* result = nullptr;
     pgg::DefParamList ps;
     antlr4::Token *n = nullptr;
     PggParser::ParamsContext *p = nullptr;
@@ -318,7 +318,7 @@ public:
 
   class  Expect_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::ContractStmt* result;
+    pgg::ContractStmt* result = nullptr;
     pgg::Expr* cond = nullptr;
     pgg::Expr* attr = nullptr;
     bool formA = false;
@@ -348,7 +348,7 @@ public:
 
   class  Ensure_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::ContractStmt* result;
+    pgg::ContractStmt* result = nullptr;
     pgg::Expr* cond = nullptr;
     pgg::Expr* attr = nullptr;
     bool formA = false;
@@ -378,7 +378,7 @@ public:
 
   class  StmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Stmt* result;
+    pgg::Stmt* result = nullptr;
     PggParser::BindingContext *b = nullptr;
     PggParser::Tap_stmtContext *t = nullptr;
     PggParser::Repeat_zoneContext *r = nullptr;
@@ -399,7 +399,7 @@ public:
 
   class  BindingContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Stmt* result;
+    pgg::Stmt* result = nullptr;
     PggParser::TargetsContext *t = nullptr;
     PggParser::AexprContext *v = nullptr;
     BindingContext(antlr4::ParserRuleContext *parent, size_t invokingState);
@@ -432,7 +432,7 @@ public:
 
   class  Tap_stmtContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Stmt* result;
+    pgg::Stmt* result = nullptr;
     std::string label;
     bool hasLabel = false;
     antlr4::Token *l = nullptr;
@@ -476,7 +476,7 @@ public:
 
   class  Repeat_zoneContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Stmt* result;
+    pgg::Stmt* result = nullptr;
     PggParser::TargetsContext *t = nullptr;
     PggParser::AexprContext *v = nullptr;
     antlr4::Token *it = nullptr;
@@ -515,7 +515,7 @@ public:
 
   class  Foreach_zoneContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Stmt* result;
+    pgg::Stmt* result = nullptr;
     antlr4::Token *tgt = nullptr;
     antlr4::Token *item = nullptr;
     PggParser::AexprContext *c = nullptr;
@@ -543,7 +543,7 @@ public:
 
   class  AexprContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::TernaryContext *t = nullptr;
     AexprContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
@@ -556,7 +556,7 @@ public:
 
   class  TernaryContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::Or_exprContext *c = nullptr;
     PggParser::AexprContext *t = nullptr;
     PggParser::AexprContext *e = nullptr;
@@ -575,7 +575,7 @@ public:
 
   class  Or_exprContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::Or_exprContext *l = nullptr;
     PggParser::And_exprContext *a = nullptr;
     PggParser::And_exprContext *r = nullptr;
@@ -592,7 +592,7 @@ public:
   Or_exprContext* or_expr(int precedence);
   class  And_exprContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::And_exprContext *l = nullptr;
     PggParser::Cmp_exprContext *a = nullptr;
     PggParser::Cmp_exprContext *r = nullptr;
@@ -609,7 +609,7 @@ public:
   And_exprContext* and_expr(int precedence);
   class  Cmp_exprContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::Add_exprContext *l = nullptr;
     antlr4::Token *op = nullptr;
     PggParser::Add_exprContext *r = nullptr;
@@ -631,7 +631,7 @@ public:
 
   class  Add_exprContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::Add_exprContext *l = nullptr;
     PggParser::Mul_exprContext *a = nullptr;
     antlr4::Token *op = nullptr;
@@ -650,7 +650,7 @@ public:
   Add_exprContext* add_expr(int precedence);
   class  Mul_exprContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::Mul_exprContext *l = nullptr;
     PggParser::UnaryContext *a = nullptr;
     antlr4::Token *op = nullptr;
@@ -670,7 +670,7 @@ public:
   Mul_exprContext* mul_expr(int precedence);
   class  UnaryContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     antlr4::Token *op = nullptr;
     PggParser::UnaryContext *u = nullptr;
     PggParser::PostfixContext *p = nullptr;
@@ -688,7 +688,7 @@ public:
 
   class  PostfixContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::CallContext *c = nullptr;
     PggParser::PrimaryContext *p = nullptr;
     PostfixContext(antlr4::ParserRuleContext *parent, size_t invokingState);
@@ -703,7 +703,7 @@ public:
 
   class  CallContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::Qualified_nameContext *q = nullptr;
     PggParser::ArgContext *argContext = nullptr;
     std::vector<ArgContext *> a;
@@ -758,7 +758,7 @@ public:
 
   class  PrimaryContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     antlr4::Token *n = nullptr;
     antlr4::Token *s = nullptr;
     antlr4::Token *b = nullptr;
@@ -789,7 +789,7 @@ public:
 
   class  Attr_refContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     antlr4::Token *n = nullptr;
     Attr_refContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
@@ -803,7 +803,7 @@ public:
 
   class  Vec_literalContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     antlr4::Token *numberToken = nullptr;
     std::vector<antlr4::Token *> n;
     Vec_literalContext(antlr4::ParserRuleContext *parent, size_t invokingState);
@@ -822,7 +822,7 @@ public:
 
   class  List_literalContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     PggParser::AexprContext *aexprContext = nullptr;
     std::vector<AexprContext *> e;
     List_literalContext(antlr4::ParserRuleContext *parent, size_t invokingState);
@@ -841,7 +841,7 @@ public:
 
   class  LiteralContext : public antlr4::ParserRuleContext {
   public:
-    pgg::Expr* result;
+    pgg::Expr* result = nullptr;
     antlr4::Token *n = nullptr;
     antlr4::Token *s = nullptr;
     antlr4::Token *b = nullptr;
@@ -864,7 +864,7 @@ public:
 
   class  TypeContext : public antlr4::ParserRuleContext {
   public:
-    pgg::TypeRef* result;
+    pgg::TypeRef* result = nullptr;
     PggParser::TypeContext *t = nullptr;
     antlr4::Token *b = nullptr;
     PggParser::TypeContext *a = nullptr;

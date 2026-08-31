@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 
 #include "pgg/pgg.h"
+#include "pgg/src/ast.h"
+#include "pgg/src/graph.h"
 
 namespace {
 
@@ -182,6 +184,181 @@ TEST(Parse, WrongContextualKeywordIsE100) {
 TEST(Parse, UnknownEscapeIsE100) {
     pgg::Document doc = pgg::parse("a = f(key = \"x\\q\")\n");
     EXPECT_TRUE(hasCode(doc, "E100"));
+}
+
+// --- error-recovery hardening (spec §19 v1.7) ---------------------------------
+//
+// ANTLR error recovery ends a rule without its action firing; since v1.7 every
+// pointer-valued `returns` initializes to nullptr and the compositor turns
+// nullptr inputs into ErrorExpr sentinels, so downstream walkers (validate,
+// dumpAst, buildGraph) never see a wild pointer. These tests pin the class:
+// malformed sources parse with diagnostics, a partial AST and no crash.
+
+// Recursive invariant: no nullptr in any expression slot of the AST
+// (CallArg::value, VecLit/ListLit::elems, Binding::value, zone heads, contracts).
+void expectNoNullExprs(const pgg::Expr* e) {
+    ASSERT_TRUE(e != nullptr);
+    switch (e->kind) {
+        case pgg::NodeKind::Paren:
+            expectNoNullExprs(static_cast<const pgg::Paren*>(e)->inner);
+            break;
+        case pgg::NodeKind::Unary:
+            expectNoNullExprs(static_cast<const pgg::Unary*>(e)->operand);
+            break;
+        case pgg::NodeKind::Binary: {
+            const auto* b = static_cast<const pgg::Binary*>(e);
+            expectNoNullExprs(b->lhs);
+            expectNoNullExprs(b->rhs);
+            break;
+        }
+        case pgg::NodeKind::Ternary: {
+            const auto* t = static_cast<const pgg::Ternary*>(e);
+            expectNoNullExprs(t->cond);
+            expectNoNullExprs(t->thenExpr);
+            expectNoNullExprs(t->elseExpr);
+            break;
+        }
+        case pgg::NodeKind::Call: {
+            const auto* c = static_cast<const pgg::Call*>(e);
+            for (const pgg::CallArg& a : c->args) expectNoNullExprs(a.value);
+            break;
+        }
+        case pgg::NodeKind::VecLit:
+            for (const pgg::Expr* el : static_cast<const pgg::VecLit*>(e)->elems)
+                expectNoNullExprs(el);
+            break;
+        case pgg::NodeKind::ListLit:
+            for (const pgg::Expr* el : static_cast<const pgg::ListLit*>(e)->elems)
+                expectNoNullExprs(el);
+            break;
+        default:
+            break;  // literals, idents, attr refs, error sentinels: no child slots
+    }
+}
+
+void expectNoNullExprs(const pgg::Stmt* s) {
+    ASSERT_TRUE(s != nullptr);
+    switch (s->kind) {
+        case pgg::NodeKind::Binding:
+            expectNoNullExprs(static_cast<const pgg::Binding*>(s)->value);
+            break;
+        case pgg::NodeKind::RepeatZone: {
+            const auto* z = static_cast<const pgg::RepeatZone*>(s);
+            expectNoNullExprs(z->value);
+            expectNoNullExprs(z->iterations);
+            for (const pgg::Stmt* b : z->body) expectNoNullExprs(b);
+            break;
+        }
+        case pgg::NodeKind::ForeachZone: {
+            const auto* z = static_cast<const pgg::ForeachZone*>(s);
+            expectNoNullExprs(z->collection);
+            for (const pgg::Stmt* b : z->body) expectNoNullExprs(b);
+            break;
+        }
+        case pgg::NodeKind::Expect:
+        case pgg::NodeKind::Ensure: {
+            const auto* c = static_cast<const pgg::ContractStmt*>(s);
+            expectNoNullExprs(c->attr);
+            expectNoNullExprs(c->cond);
+            break;
+        }
+        default:
+            break;  // tap: no expression slots
+    }
+}
+
+void expectNoNullExprs(const pgg::File* f) {
+    ASSERT_TRUE(f != nullptr);
+    for (const pgg::Node* item : f->items) {
+        ASSERT_TRUE(item != nullptr);
+        switch (item->kind) {
+            case pgg::NodeKind::ParamDecl: {
+                // A default is an optional (legal nullptr) slot; when present
+                // it still holds a real expression.
+                const auto* p = static_cast<const pgg::ParamDecl*>(item);
+                if (p->hasDefault && p->def) expectNoNullExprs(p->def);
+                break;
+            }
+            case pgg::NodeKind::Def: {
+                const auto* d = static_cast<const pgg::Def*>(item);
+                for (const pgg::ContractStmt* e : d->expects) expectNoNullExprs(e);
+                for (const pgg::Stmt* s : d->body) expectNoNullExprs(s);
+                for (const pgg::ContractStmt* e : d->ensures) expectNoNullExprs(e);
+                break;
+            }
+            case pgg::NodeKind::Binding:
+            case pgg::NodeKind::RepeatZone:
+            case pgg::NodeKind::ForeachZone:
+            case pgg::NodeKind::Tap:
+                expectNoNullExprs(static_cast<const pgg::Stmt*>(item));
+                break;
+            default:
+                break;  // import/output: no expression slots
+        }
+    }
+}
+
+TEST(Parse, NegativeVecLiteralDoesNotCrash) {
+    // The original SIGSEGV repro: a negative number inside a vec literal kills
+    // the vec_literal rule, and error recovery used to leave a wild pointer in
+    // the call arg (spec §19 v1.7; vec literals stay non-negative by design).
+    pgg::Document doc = pgg::parse(
+        "param size: float = 1\n"
+        "out geo = translate(box(size = size), by = (-0.5, 0, 0))\n");
+    EXPECT_TRUE(doc.hasErrors());
+    ASSERT_TRUE(doc.file != nullptr);
+    EXPECT_FALSE(pgg::dumpAst(doc.file).empty());
+    expectNoNullExprs(doc.file);
+}
+
+TEST(Parse, MemberAccessOnCallDoesNotCrash) {
+    // Pre-existing defect logged in spec §19 v1.3, fixed with v1.7.
+    pgg::Document doc = pgg::parse("a = f(x).y\n");
+    EXPECT_TRUE(doc.hasErrors());
+    ASSERT_TRUE(doc.file != nullptr);
+    EXPECT_FALSE(pgg::dumpAst(doc.file).empty());
+    expectNoNullExprs(doc.file);
+}
+
+TEST(Parse, MalformedSnippetsDoNotCrash) {
+    const std::string snippets[] = {
+        "a = f(x, )\n",             // missing arg after comma
+        "a = (1, , 2)\n",           // missing vec component
+        "a = [1, , 2]\n",           // missing list element
+        "param a: geo< = 1\n",      // truncated generic type
+        "def f(x: geo) -> (o: geo) {\n"  // broken expect (missing attr ref)
+        "    expect x has\n"
+        "    o = x\n"
+        "}\n",
+        "r = repeat (x, iterations = ) |s| {\n"  // broken repeat header
+        "    s = x\n"
+        "}\n",
+        "a = f(1 +\n",              // file cut mid-expression
+        "a = f(\n",                 // unclosed call
+        "def f(x: ) -> (o: geo) {\n"  // missing param type
+        "}\n",
+        "param a: vec3? = (1, -2, 3)\n",  // negative number in a default vec
+    };
+    for (const std::string& src : snippets) {
+        SCOPED_TRACE(src);
+        pgg::Document doc = pgg::parse(src);
+        EXPECT_TRUE(doc.hasErrors());
+        ASSERT_TRUE(doc.file != nullptr);
+        pgg::dumpAst(doc.file);  // must not crash on the partial AST
+        expectNoNullExprs(doc.file);
+    }
+}
+
+TEST(Parse, GraphBuildsOnBrokenDoc) {
+    // PggViewer derives the projection without gating on diagnostics.
+    pgg::Document doc = pgg::parse(
+        "param size: float = 1\n"
+        "out geo = translate(box(size = size), by = (-0.5, 0, 0))\n"
+        "a = f(x).y\n");
+    EXPECT_TRUE(doc.hasErrors());
+    ASSERT_TRUE(doc.file != nullptr);
+    const pgg::GraphProject gp = pgg::buildGraph(doc, nullptr);  // must not crash
+    (void)gp;
 }
 
 }  // namespace

@@ -140,7 +140,8 @@ Expr* GrammarCompositor::newAttr(const std::string& name, Span span) {
 
 Expr* GrammarCompositor::newVec(std::vector<Expr*> elems, Span span) {
     auto* n = make<VecLit>(span);
-    n->elems = std::move(elems);
+    n->elems.reserve(elems.size());
+    for (Expr* e : elems) n->elems.push_back(e ? e : newError(span));
     return n;
 }
 
@@ -153,7 +154,8 @@ Expr* GrammarCompositor::newNumberVec(const std::vector<antlr4::Token*>& numbers
 
 Expr* GrammarCompositor::newList(std::vector<Expr*> elems, Span span) {
     auto* n = make<ListLit>(span);
-    n->elems = std::move(elems);
+    n->elems.reserve(elems.size());
+    for (Expr* e : elems) n->elems.push_back(e ? e : newError(span));
     return n;
 }
 
@@ -195,6 +197,8 @@ Expr* GrammarCompositor::newCall(std::vector<std::string> path, std::vector<Call
     auto* n = make<Call>(span);
     n->path = std::move(path);
     n->args = std::move(args);
+    for (CallArg& a : n->args)
+        if (!a.value) a.value = newError(span);
     return n;
 }
 
@@ -251,12 +255,14 @@ TypeRef* GrammarCompositor::newTypeEnum(const antlr4::Token* kw,
 }
 
 TypeRef* GrammarCompositor::typeOptional(TypeRef* t, Span span) {
+    if (!t) return nullptr;
     t->optional = true;
     t->span = span;
     return t;
 }
 
 TypeRef* GrammarCompositor::typeList(TypeRef* t, Span span) {
+    if (!t) return nullptr;
     t->list = true;
     t->span = span;
     return t;
@@ -286,8 +292,8 @@ ContractStmt* GrammarCompositor::newContract(NodeKind kind, bool attrForm, std::
     auto* n = make<ContractStmt>(span, kind);
     n->attrForm = attrForm;
     n->ident = std::move(ident);
-    n->attr = attr;
-    n->cond = cond;
+    n->attr = attr ? attr : newError(span);
+    n->cond = cond ? cond : newError(span);
     n->message = std::move(message);
     n->hasMessage = hasMessage;
     return n;

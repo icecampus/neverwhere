@@ -37,7 +37,7 @@ public:
 
 // --- file --------------------------------------------------------------------
 
-file returns [pgg::File* result]
+file returns [pgg::File* result = nullptr]
     : { gc->beginFile(); }
       ( NEWLINE
       | i=import_stmt  { gc->addNode($i.result); }
@@ -49,24 +49,24 @@ file returns [pgg::File* result]
       EOF { $result = gc->endFile(spanOf(_localctx)); }
     ;
 
-import_stmt returns [pgg::Import* result]
+import_stmt returns [pgg::Import* result = nullptr]
     : IMPORT q=qualified_name (AS a=IDENT)? (AT v=NUMBER)? NEWLINE
       { $result = gc->newImport($q.result, $a, $v, spanOf(_localctx)); }
     ;
 
-param_stmt returns [pgg::ParamDecl* result]
+param_stmt returns [pgg::ParamDecl* result = nullptr]
     locals [pgg::Expr* def = nullptr, bool hasDef = false]
     : PARAM n=IDENT COLON t=type (ASSIGN d=literal { $def = $d.result; $hasDef = true; })? NEWLINE
       { $result = gc->newParam($n.text, spanTok($n), $t.result, $def, $hasDef, spanOf(_localctx)); }
     ;
 
-output_stmt returns [pgg::OutputDecl* result]
+output_stmt returns [pgg::OutputDecl* result = nullptr]
     : OUTPUT n=IDENT NEWLINE { $result = gc->newOutput($n.text, spanTok($n), spanOf(_localctx)); }
     ;
 
 // --- def ---------------------------------------------------------------------
 
-def_stmt returns [pgg::Def* result]
+def_stmt returns [pgg::Def* result = nullptr]
     locals [pgg::DefParamList ps]
     : DEF n=IDENT LPAREN (p=params { $ps = $p.result; })? RPAREN ARROW LPAREN o=outputs RPAREN
       { gc->beginDef($n.text, spanTok($n), $ps, $o.result, spanOf(_localctx)); }
@@ -99,7 +99,7 @@ out_decl returns [pgg::OutDecl result]
     : n=IDENT COLON t=type { $result = gc->newOutDecl($n.text, $t.result); }
     ;
 
-expect_stmt returns [pgg::ContractStmt* result]
+expect_stmt returns [pgg::ContractStmt* result = nullptr]
     locals [pgg::Expr* cond = nullptr, pgg::Expr* attr = nullptr, bool formA = false,
             std::string id, std::string msg, bool hasMsg = false]
     : EXPECT
@@ -113,7 +113,7 @@ expect_stmt returns [pgg::ContractStmt* result]
                                   spanOf(_localctx)); }
     ;
 
-ensure_stmt returns [pgg::ContractStmt* result]
+ensure_stmt returns [pgg::ContractStmt* result = nullptr]
     locals [pgg::Expr* cond = nullptr, pgg::Expr* attr = nullptr, bool formA = false,
             std::string id, std::string msg, bool hasMsg = false]
     : ENSURE
@@ -129,14 +129,14 @@ ensure_stmt returns [pgg::ContractStmt* result]
 
 // --- statements -----------------------------------------------------------------
 
-stmt returns [pgg::Stmt* result]
+stmt returns [pgg::Stmt* result = nullptr]
     : b=binding (NEWLINE | EOF) { $result = $b.result; }
     | t=tap_stmt (NEWLINE | EOF) { $result = $t.result; }
     | r=repeat_zone { $result = $r.result; }
     | f=foreach_zone { $result = $f.result; }
     ;
 
-binding returns [pgg::Stmt* result]
+binding returns [pgg::Stmt* result = nullptr]
     : t=targets ASSIGN v=aexpr { $result = gc->newBinding($t.result, $v.result, spanOf(_localctx)); }
     ;
 
@@ -144,7 +144,7 @@ targets returns [pgg::NameList result]
     : i+=IDENT (COMMA i+=IDENT)* { $result = gc->nameListOf($i); }
     ;
 
-tap_stmt returns [pgg::Stmt* result]
+tap_stmt returns [pgg::Stmt* result = nullptr]
     locals [std::string label, bool hasLabel = false]
     : TAP (l=IDENT COLON { $label = $l.text; $hasLabel = true; })? p=path
       { $result = gc->newTap($label, $hasLabel, $p.result, spanOf(_localctx)); }
@@ -159,7 +159,7 @@ path returns [pgg::PathElemList result]
       { $result = $elems; }
     ;
 
-repeat_zone returns [pgg::Stmt* result]
+repeat_zone returns [pgg::Stmt* result = nullptr]
     : t=targets ASSIGN REPEAT LPAREN v=aexpr COMMA it=IDENT ASSIGN n=aexpr RPAREN
       { gc->checkKeyword($it, "iterations"); }
       PIPE (s+=IDENT (COMMA s+=IDENT)*)? PIPE
@@ -170,7 +170,7 @@ repeat_zone returns [pgg::Stmt* result]
       { $result = gc->endRepeat(spanOf(_localctx)); }
     ;
 
-foreach_zone returns [pgg::Stmt* result]
+foreach_zone returns [pgg::Stmt* result = nullptr]
     : tgt=IDENT ASSIGN FOREACH item=IDENT IN c=aexpr
       { gc->beginForeach($tgt.text, spanTok($tgt), $item.text, spanTok($item), $c.result,
                          spanOf(_localctx)); }
@@ -182,55 +182,55 @@ foreach_zone returns [pgg::Stmt* result]
 
 // --- expressions ------------------------------------------------------------------
 
-aexpr returns [pgg::Expr* result]
+aexpr returns [pgg::Expr* result = nullptr]
     : t=ternary { $result = $t.result; }
     ;
 
-ternary returns [pgg::Expr* result]
+ternary returns [pgg::Expr* result = nullptr]
     : c=or_expr { $result = $c.result; }
       (QUESTION t=aexpr COLON e=aexpr
        { $result = gc->newTernary($c.result, $t.result, $e.result, spanOf(_localctx)); })?
     ;
 
-or_expr returns [pgg::Expr* result]
+or_expr returns [pgg::Expr* result = nullptr]
     : l=or_expr PIPE r=and_expr { $result = gc->newBinary("|", $l.result, $r.result, spanOf(_localctx)); }
     | a=and_expr { $result = $a.result; }
     ;
 
-and_expr returns [pgg::Expr* result]
+and_expr returns [pgg::Expr* result = nullptr]
     : l=and_expr AMP r=cmp_expr { $result = gc->newBinary("&", $l.result, $r.result, spanOf(_localctx)); }
     | a=cmp_expr { $result = $a.result; }
     ;
 
-cmp_expr returns [pgg::Expr* result]
+cmp_expr returns [pgg::Expr* result = nullptr]
     : l=add_expr { $result = $l.result; }
       (op=(LT|GT|LTE|GTE|EQ|NEQ) r=add_expr
        { $result = gc->newBinary($op.text, $l.result, $r.result, spanOf(_localctx)); })?
     ;
 
-add_expr returns [pgg::Expr* result]
+add_expr returns [pgg::Expr* result = nullptr]
     : l=add_expr op=(PLUS|MINUS) r=mul_expr
       { $result = gc->newBinary($op.text, $l.result, $r.result, spanOf(_localctx)); }
     | a=mul_expr { $result = $a.result; }
     ;
 
-mul_expr returns [pgg::Expr* result]
+mul_expr returns [pgg::Expr* result = nullptr]
     : l=mul_expr op=(STAR|SLASH|PERCENT) r=unary
       { $result = gc->newBinary($op.text, $l.result, $r.result, spanOf(_localctx)); }
     | a=unary { $result = $a.result; }
     ;
 
-unary returns [pgg::Expr* result]
+unary returns [pgg::Expr* result = nullptr]
     : op=(MINUS|BANG) u=unary { $result = gc->newUnary($op.text, $u.result, spanOf(_localctx)); }
     | p=postfix { $result = $p.result; }
     ;
 
-postfix returns [pgg::Expr* result]
+postfix returns [pgg::Expr* result = nullptr]
     : c=call { $result = $c.result; }
     | p=primary { $result = $p.result; }
     ;
 
-call returns [pgg::Expr* result]
+call returns [pgg::Expr* result = nullptr]
     : q=qualified_name LPAREN (a+=arg (COMMA a+=arg)*)? RPAREN
       { $result = gc->newCall($q.result, gc->resultsOf($a), spanOf(_localctx)); }
     ;
@@ -245,7 +245,7 @@ arg returns [pgg::CallArg result]
       { $a.value = $v.result; $result = $a; }
     ;
 
-primary returns [pgg::Expr* result]
+primary returns [pgg::Expr* result = nullptr]
     : n=NUMBER { $result = gc->newNumber($n.text, spanTok($n)); }
     | s=STRING { $result = gc->newString($s.text, spanTok($s)); }
     | b=(TRUE|FALSE) { $result = gc->newBool($b.text, spanTok($b)); }
@@ -257,11 +257,11 @@ primary returns [pgg::Expr* result]
     | LPAREN e=aexpr RPAREN { $result = gc->newParen($e.result, spanOf(_localctx)); }
     ;
 
-attr_ref returns [pgg::Expr* result]
+attr_ref returns [pgg::Expr* result = nullptr]
     : AT n=IDENT { $result = gc->newAttr($n.text, spanOf(_localctx)); }
     ;
 
-vec_literal returns [pgg::Expr* result]
+vec_literal returns [pgg::Expr* result = nullptr]
     : LPAREN n+=NUMBER (COMMA n+=NUMBER)* RPAREN
       { $result = gc->newNumberVec($n, spanOf(_localctx)); }
     ;
@@ -269,7 +269,7 @@ vec_literal returns [pgg::Expr* result]
 // list literal (spec §13: T[] values, e.g. variants = [a, b]). Any expressions
 // as elements; an optional trailing comma is accepted (multiline canonical
 // form, §6.4 — the E2 formatter still emits single-line statements).
-list_literal returns [pgg::Expr* result]
+list_literal returns [pgg::Expr* result = nullptr]
     : LBRACKET (e+=aexpr (COMMA e+=aexpr)* COMMA?)? RBRACKET
       { $result = gc->newList(gc->resultsOf($e), spanOf(_localctx)); }
     ;
@@ -277,7 +277,7 @@ list_literal returns [pgg::Expr* result]
 // literal: defaults in param positions (spec §6.6). A bare ident here is an
 // enum/domain literal; in general expressions idents parse as Ident and the
 // enum reading is a type-driven decision of a later stage.
-literal returns [pgg::Expr* result]
+literal returns [pgg::Expr* result = nullptr]
     : n=NUMBER { $result = gc->newNumber($n.text, spanTok($n)); }
     | s=STRING { $result = gc->newString($s.text, spanTok($s)); }
     | b=(TRUE|FALSE) { $result = gc->newBool($b.text, spanTok($b)); }
@@ -288,7 +288,7 @@ literal returns [pgg::Expr* result]
 
 // --- types ---------------------------------------------------------------------------
 
-type returns [pgg::TypeRef* result]
+type returns [pgg::TypeRef* result = nullptr]
     : t=type QUESTION { $result = gc->typeOptional($t.result, spanOf(_localctx)); }
     | t=type LBRACKET RBRACKET { $result = gc->typeList($t.result, spanOf(_localctx)); }
     | b=IDENT LT a=type GT
