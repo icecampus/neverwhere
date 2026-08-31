@@ -2,6 +2,7 @@
 
 #include "validate.h"
 
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -85,6 +86,7 @@ public:
             }
         }
         lintZones(f);
+        lintSharedRng(f);
         reportUnused(scope);
     }
 
@@ -387,6 +389,23 @@ private:
         diags_.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), true});
     }
 
+    // Named `name =` wins; otherwise the pos-th positional argument. Shared by
+    // the rng lints (W003/W004/W005).
+    static const Expr* callArgOf(const Call* c, const char* name, int pos) {
+        const Expr* v = nullptr;
+        for (const CallArg& a : c->args)
+            if (a.hasName && a.name == name) v = a.value;
+        if (!v) {
+            int positional = 0;
+            for (const CallArg& a : c->args) {
+                if (a.hasName) continue;
+                if (positional == pos) v = a.value;
+                ++positional;
+            }
+        }
+        return v;
+    }
+
     bool exprMentionsZoneConst(const Expr* e, const std::string& zoneConst,
                                std::unordered_set<std::string>& visiting) const {
         if (!e) return false;
@@ -439,17 +458,7 @@ private:
     }
 
     void lintStochasticCall(const Call* c, const StochasticOp& op, int repDepth, int feDepth) {
-        const Expr* rngExpr = nullptr;
-        for (const CallArg& a : c->args)
-            if (a.hasName && a.name == "rng") rngExpr = a.value;
-        if (!rngExpr) {
-            int positional = 0;
-            for (const CallArg& a : c->args) {
-                if (a.hasName) continue;
-                if (positional == op.rngPos) rngExpr = a.value;
-                ++positional;
-            }
-        }
+        const Expr* rngExpr = callArgOf(c, "rng", op.rngPos);
         if (!rngExpr) return;  // a missing rng is E202 at typecheck, not a lint topic
         if (repDepth > 0 && !rngDependsOn(rngExpr, "iteration")) {
             warnZone("W004", c->span,
@@ -541,7 +550,184 @@ private:
         }
     }
 
-    std::unordered_map<std::string, const Expr*> aliases_;  // SSA name -> value expr (W004/W005)
+    // --- W003: one rng feeds 2+ stochastic nodes (§6.5) -------------------------
+    //
+    // One generator (through SSA aliases) feeding two or more built-in
+    // stochastic operations is a probable unwanted correlation: independence is
+    // spelled split_rng, an intentional repeat is declared with alias_rng
+    // (§8.5). Scope: built-in stochastic ops only (kStochasticOps, the same
+    // list as W004/W005) — one rng on two def instances is the pinned §7.3
+    // idiom (bit-identical results), and def stochasticity is only known at
+    // expansion time, which the validator cannot see.
+
+    struct RngConsumer {
+        std::string nodeName;  // enclosing binding (graph node), or "<expr>"
+        std::string rngIdent;  // ident at the rng arg position (for the hint), else ""
+        Span span;             // the consumer's statement span
+    };
+
+    // Structural identity of a generator expression, resolved through SSA
+    // aliases. rng_from_seed: one call node = one generator (two separate
+    // rng_from_seed(1) stay distinct — "one rng" is literal). split_rng with a
+    // constant key: same parent + same key text = the same subsequence, even
+    // across call sites; with a non-constant key (@piece_index, a variable)
+    // the call node itself is the identity (one split node = one
+    // subsequence). alias_rng declares an intentional repeat and exempts the
+    // whole chain. Unaliased names (def params, undeclared idents) fall back
+    // to their name, scoped per def so two defs with a `rng` param stay
+    // distinct generators. Anything else has no identity — no warning.
+    std::optional<std::string> resolveRngKey(const Expr* e, const std::string& scope,
+                                             std::unordered_set<std::string>& visiting) const {
+        if (!e) return std::nullopt;
+        switch (e->kind) {
+            case NodeKind::Paren:
+                return resolveRngKey(static_cast<const Paren*>(e)->inner, scope, visiting);
+            case NodeKind::Ident: {
+                const std::string& n = static_cast<const Ident*>(e)->name;
+                auto it = aliases_.find(n);
+                if (it == aliases_.end()) return "name:" + scope + n;
+                if (!visiting.insert(n).second) return std::nullopt;  // alias cycle (broken file)
+                std::optional<std::string> r = resolveRngKey(it->second, scope, visiting);
+                visiting.erase(n);
+                return r;
+            }
+            case NodeKind::Call: {
+                const auto* c = static_cast<const Call*>(e);
+                if (c->path.size() != 1) return std::nullopt;
+                const std::string& op = c->path[0];
+                if (op == "alias_rng") return std::nullopt;  // declared intentional repeat (§8.5)
+                if (op == "rng_from_seed")
+                    return "seed@" + std::to_string(reinterpret_cast<uintptr_t>(c));
+                if (op == "split_rng") {
+                    std::optional<std::string> parent =
+                        resolveRngKey(callArgOf(c, "parent", 0), scope, visiting);
+                    if (!parent) return std::nullopt;
+                    const Expr* key = callArgOf(c, "key", 1);
+                    if (key && key->kind == NodeKind::NumberLit)
+                        return "split(" + *parent + "," + static_cast<const NumberLit*>(key)->text + ")";
+                    if (key && key->kind == NodeKind::StringLit)
+                        return "split(" + *parent + "," + static_cast<const StringLit*>(key)->value + ")";
+                    return "split*(" + *parent + ")@" + std::to_string(reinterpret_cast<uintptr_t>(c));
+                }
+                return std::nullopt;
+            }
+            default:
+                return std::nullopt;  // ternary etc.: no identity
+        }
+    }
+
+    void collectRngExpr(const Expr* e, const std::string& nodeName, Span span, const std::string& scope) {
+        if (!e) return;
+        switch (e->kind) {
+            case NodeKind::Paren:
+                collectRngExpr(static_cast<const Paren*>(e)->inner, nodeName, span, scope);
+                break;
+            case NodeKind::Unary:
+                collectRngExpr(static_cast<const Unary*>(e)->operand, nodeName, span, scope);
+                break;
+            case NodeKind::Binary: {
+                const auto* b = static_cast<const Binary*>(e);
+                collectRngExpr(b->lhs, nodeName, span, scope);
+                collectRngExpr(b->rhs, nodeName, span, scope);
+                break;
+            }
+            case NodeKind::Ternary: {
+                const auto* t = static_cast<const Ternary*>(e);
+                collectRngExpr(t->cond, nodeName, span, scope);
+                collectRngExpr(t->thenExpr, nodeName, span, scope);
+                collectRngExpr(t->elseExpr, nodeName, span, scope);
+                break;
+            }
+            case NodeKind::VecLit:
+                for (const Expr* el : static_cast<const VecLit*>(e)->elems)
+                    collectRngExpr(el, nodeName, span, scope);
+                break;
+            case NodeKind::ListLit:
+                for (const Expr* el : static_cast<const ListLit*>(e)->elems)
+                    collectRngExpr(el, nodeName, span, scope);
+                break;
+            case NodeKind::Call: {
+                const auto* c = static_cast<const Call*>(e);
+                if (c->path.size() == 1) {
+                    for (const StochasticOp& op : kStochasticOps) {
+                        if (c->path[0] != op.name) continue;
+                        const Expr* rngExpr = callArgOf(c, "rng", op.rngPos);
+                        if (!rngExpr) continue;  // a missing rng is E202 at typecheck
+                        std::unordered_set<std::string> visiting;
+                        if (std::optional<std::string> key = resolveRngKey(rngExpr, scope, visiting)) {
+                            RngConsumer rc;
+                            rc.nodeName = nodeName;
+                            rc.rngIdent = rngExpr->kind == NodeKind::Ident
+                                              ? static_cast<const Ident*>(rngExpr)->name
+                                              : "";
+                            rc.span = span;
+                            rngConsumers_[*key].push_back(std::move(rc));
+                        }
+                    }
+                }
+                for (const CallArg& a : c->args) collectRngExpr(a.value, nodeName, span, scope);
+                break;
+            }
+            default:
+                break;  // idents, attr refs, literals
+        }
+    }
+
+    void collectRngStmt(const Stmt* s, const std::string& scope) {
+        if (!s) return;
+        switch (s->kind) {
+            case NodeKind::Binding: {
+                const auto* b = static_cast<const Binding*>(s);
+                collectRngExpr(b->value, b->targets.names.empty() ? "<expr>" : b->targets.names[0],
+                               s->span, scope);
+                break;
+            }
+            case NodeKind::RepeatZone:
+                for (const Stmt* st : static_cast<const RepeatZone*>(s)->body) collectRngStmt(st, scope);
+                break;
+            case NodeKind::ForeachZone:
+                for (const Stmt* st : static_cast<const ForeachZone*>(s)->body) collectRngStmt(st, scope);
+                break;
+            default:
+                break;  // tap: no calls
+        }
+    }
+
+    void lintSharedRng(const File* f) {
+        for (const Node* item : f->items) {
+            if (!item) continue;
+            if (item->kind == NodeKind::Def) {
+                const auto* d = static_cast<const Def*>(item);
+                collectRngStmts(d->body, d->name + ".");
+            } else if (item->kind == NodeKind::Binding || item->kind == NodeKind::RepeatZone ||
+                       item->kind == NodeKind::ForeachZone) {
+                collectRngStmt(static_cast<const Stmt*>(item), "");
+            }
+        }
+        // One warning per generator with 2+ consumers, at the second consumer.
+        for (const auto& [key, consumers] : rngConsumers_) {
+            if (consumers.size() < 2) continue;
+            const RngConsumer& second = consumers[1];
+            std::string names;
+            for (size_t i = 0; i < consumers.size(); ++i) {
+                if (i) names += ", ";
+                names += "'" + consumers[i].nodeName + "'";
+            }
+            const std::string rngName = second.rngIdent.empty() ? "r" : second.rngIdent;
+            warnZone("W003", second.span,
+                     "one rng feeds " + std::to_string(consumers.size()) + " stochastic nodes (" + names +
+                         ") — probable unwanted correlation",
+                     "use split_rng(" + rngName + ", key = ...) for independence, or alias_rng(" + rngName +
+                         ") to declare an intentional repeat (§6.5)");
+        }
+    }
+
+    void collectRngStmts(const std::vector<Stmt*>& body, const std::string& scope) {
+        for (const Stmt* s : body) collectRngStmt(s, scope);
+    }
+
+    std::unordered_map<std::string, const Expr*> aliases_;  // SSA name -> value expr (W003/W004/W005)
+    std::unordered_map<std::string, std::vector<RngConsumer>> rngConsumers_;  // generator key -> consumers
 };
 
 }  // namespace
