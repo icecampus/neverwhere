@@ -1,0 +1,135 @@
+param width: f32 = 6.0
+param depth: f32 = 4.5
+param wall_h: f32 = 2.6
+param plinth_h: f32 = 0.4
+param overhang: f32 = 0.5
+
+# Небольшой деревенский дом: каменный цоколь, оштукатуренные стены с
+# фахверковыми балками, двускатная крыша 45° с выносом, дымоход, дверь с
+# крылечком и окна с рамами. Верх — ось Y, фасад с дверью смотрит в +Z,
+# конёк вдоль X.
+# 
+# Материалы — группы faces (в PggViewer: highlight = faces:<имя>):
+# stone (цоколь, дымоход, ступени), wall (штукатурка + фронтоны),
+# wood (балки, рамы, дверь), glass (стёкла), roof (скаты).
+# 
+# Крыша — SDF: скат = большой бокс, повёрнутый на 45° вокруг X через @orient
+# одиночной точки (mesh_line(count = 1) — детерминированная точка в начале
+# координат, без rng) и sdf_instance_on_points; пересечение двух скатов и
+# ограничивающего бокса даёт призму. Внешняя призма минус узкая призма
+# фронтонов = кровля толщиной roof_t с открытыми торцами, а узкая призма
+# отдельно идёт в группу wall — так фронтоны остаются стеной.
+def piece(size: vec3, pos: vec3, grp: string) -> (out: geo<mesh>) {
+    """Прямоугольный брус/блок: box размером size с центром в pos, все грани в группе grp."""
+    b = box(size = size)
+    placed = transform(b, translate = pos)
+    out = mark(placed, grp, where = true, domain = faces)
+}
+
+def slab_at(ridge: vec3, tilt_deg: f32, span: f32) -> (out: sdf) {
+    """Полупространство-скат под 45°: бокс span×span×span, повёрнутый на tilt_deg
+    вокруг X, верхняя грань проходит через точку ridge (толщина бокса — вниз)."""
+    pt0 = mesh_line(count = 1, length = 0.0)
+    pt1 = set(pt0, "orient", orient_from_euler(vec3(tilt_deg, 0, 0)))
+    # Центр бокса на half-span ниже плоскости ската вдоль её нормали.
+    pt = transform(pt1, translate = ridge)
+    slab0 = sdf_box(size = vec3(span, span, span))
+    slab_c = sdf_instance_on_points(pt, source = slab0)
+    out = slab_c
+}
+
+def gable_prism(ridge_y: f32, drop: f32, w: f32, d: f32, floor_y: f32) -> (out: sdf) {
+    """Треугольная призма крыши 45°: конёк на высоте ridge_y − drop, ширина w вдоль X,
+    скаты до floor_y. drop — сдвиг плоскостей скатов вниз (толщина кровли)."""
+    span = (w + d) * 3.0
+    # Нормаль ската после поворота на ±45° вокруг X: (0, cos45, ±sin45); центр
+    # бокса = конёк − нормаль·span/2, чтобы верхняя грань лежала на скате.
+    half = span * 0.5 * 0.70710678
+    right = slab_at(ridge = vec3(0, ridge_y - drop - half, half), tilt_deg = 45.0, span = span)
+    left = slab_at(ridge = vec3(0, ridge_y - drop - half, 0 - half), tilt_deg = 0.0 - 45.0, span = span)
+    top_y = ridge_y - drop
+    # Ограничивающий бокс — ПЕРВЫЙ операнд intersect: conservative bbox
+    # пересечения = bbox(a), и грид mesh_from_sdf берётся по нему, а не по
+    # гигантскому скату (иначе 600³ вокселей и минуты счёта).
+    bounds = sdf_box_at(size = vec3(w, top_y - floor_y, (top_y - floor_y) * 2.0 + 0.1), pos = vec3(0, (top_y + floor_y) * 0.5, 0))
+    out = sdf_intersect(bounds, sdf_intersect(right, left))
+}
+
+def sdf_box_at(size: vec3, pos: vec3) -> (out: sdf) {
+    """SDF-бокс с центром в pos (через @P одиночной точки)."""
+    pt0 = mesh_line(count = 1, length = 0.0)
+    pt = transform(pt0, translate = pos)
+    out = sdf_instance_on_points(pt, source = sdf_box(size = size))
+}
+
+def window(pos: vec3, yaw_deg: f32) -> (out: geo<mesh>) {
+    """Окно: деревянная рама 0.9×1.0 с крестовиной и стекло, торчит из стены на 0.06.
+    pos — центр окна на поверхности стены, yaw_deg — поворот вокруг Y (0 = фасад +Z)."""
+    frame = piece(size = (0.9, 1.0, 0.12), pos = (0, 0, 0), grp = "wood")
+    glass = piece(size = (0.7, 0.8, 0.14), pos = (0, 0, 0), grp = "glass")
+    bar_v = piece(size = (0.06, 0.8, 0.16), pos = (0, 0, 0), grp = "wood")
+    bar_h = piece(size = (0.7, 0.06, 0.16), pos = (0, 0, 0), grp = "wood")
+    sill = piece(size = (1.1, 0.08, 0.22), pos = vec3(0, 0 - 0.52, 0.03), grp = "wood")
+    w0 = merge(merge(frame, glass), merge(merge(bar_v, bar_h), sill))
+    w1 = transform(w0, rotate = vec3(0, yaw_deg, 0))
+    out = transform(w1, translate = pos)
+}
+
+# --- каркас -----------------------------------------------------------------
+wall_top = plinth_h + wall_h
+plinth = piece(size = vec3(width + 0.3, plinth_h, depth + 0.3), pos = vec3(0, plinth_h * 0.5, 0), grp = "stone")
+walls = piece(size = vec3(width, wall_h, depth), pos = vec3(0, plinth_h + wall_h * 0.5, 0), grp = "wall")
+
+# Фахверк: угловые столбы, обвязка по верху и по низу стен, по одной раскосине на фасаде.
+post_fl = piece(size = vec3(0.2, wall_h, 0.2), pos = vec3(0 - width * 0.5, plinth_h + wall_h * 0.5, depth * 0.5), grp = "wood")
+post_fr = piece(size = vec3(0.2, wall_h, 0.2), pos = vec3(width * 0.5, plinth_h + wall_h * 0.5, depth * 0.5), grp = "wood")
+post_bl = piece(size = vec3(0.2, wall_h, 0.2), pos = vec3(0 - width * 0.5, plinth_h + wall_h * 0.5, 0 - depth * 0.5), grp = "wood")
+post_br = piece(size = vec3(0.2, wall_h, 0.2), pos = vec3(width * 0.5, plinth_h + wall_h * 0.5, 0 - depth * 0.5), grp = "wood")
+beam_top_f = piece(size = vec3(width + 0.2, 0.18, 0.2), pos = vec3(0, wall_top - 0.09, depth * 0.5), grp = "wood")
+beam_top_b = piece(size = vec3(width + 0.2, 0.18, 0.2), pos = vec3(0, wall_top - 0.09, 0 - depth * 0.5), grp = "wood")
+beam_low_f = piece(size = vec3(width + 0.2, 0.16, 0.2), pos = vec3(0, plinth_h + 0.08, depth * 0.5), grp = "wood")
+beam_low_b = piece(size = vec3(width + 0.2, 0.16, 0.2), pos = vec3(0, plinth_h + 0.08, 0 - depth * 0.5), grp = "wood")
+beam_mid_f = piece(size = vec3(width + 0.2, 0.14, 0.2), pos = vec3(0, plinth_h + wall_h * 0.78, depth * 0.5), grp = "wood")
+brace0 = piece(size = vec3(0.14, wall_h * 0.6, 0.2), pos = (0, 0, 0), grp = "wood")
+brace = transform(transform(brace0, rotate = vec3(0, 0, 0 - 38)), translate = vec3(width * 0.5 - 0.65, plinth_h + wall_h * 0.31, depth * 0.5))
+posts = merge(merge(post_fl, post_fr), merge(post_bl, post_br))
+beams = merge(merge(merge(beam_top_f, beam_top_b), merge(beam_low_f, beam_low_b)), merge(beam_mid_f, brace))
+timber = merge(posts, beams)
+
+# --- крыша ------------------------------------------------------------------
+roof_t = 0.22
+eave_y = wall_top - 0.15
+ridge_y = wall_top + (depth * 0.5 + overhang)
+roof_outer = gable_prism(ridge_y = ridge_y, drop = 0.0, w = width + overhang * 2.0, d = depth, floor_y = eave_y)
+roof_inner = gable_prism(ridge_y = ridge_y, drop = roof_t, w = width - 0.02, d = depth, floor_y = eave_y - 0.5)
+roof_shell = sdf_subtract(roof_outer, roof_inner)
+roof_mesh = mesh_from_sdf(roof_shell, voxel = 0.05)
+roof = mark(roof_mesh, "roof", where = true, domain = faces)
+# Фронтоны: призма под кровлей шириной в стены (стеновой материал).
+gable_sdf = gable_prism(ridge_y = ridge_y, drop = roof_t + 0.01, w = width, d = depth, floor_y = wall_top - 0.05)
+gable_mesh = mesh_from_sdf(gable_sdf, voxel = 0.05)
+gables = mark(gable_mesh, "wall", where = true, domain = faces)
+chimney = piece(size = (0.7, 2.0, 0.7), pos = vec3(width * 0.25, ridge_y - 0.9, 0 - 0.9), grp = "stone")
+chimney_cap = piece(size = (0.9, 0.16, 0.9), pos = vec3(width * 0.25, ridge_y + 0.15, 0 - 0.9), grp = "stone")
+
+# --- дверь, крыльцо, окна --------------------------------------------------
+door_x = 0 - width * 0.22
+door_frame = piece(size = (1.1, 2.1, 0.14), pos = vec3(door_x, plinth_h + 1.05, depth * 0.5), grp = "wood")
+door_leaf = piece(size = (0.86, 1.9, 0.18), pos = vec3(door_x, plinth_h + 0.95, depth * 0.5), grp = "wood")
+door_knob = piece(size = (0.08, 0.08, 0.1), pos = vec3(door_x + 0.3, plinth_h + 1.0, depth * 0.5 + 0.12), grp = "stone")
+step1 = piece(size = vec3(1.5, plinth_h * 0.5, 0.5), pos = vec3(door_x, plinth_h * 0.25, depth * 0.5 + 0.4), grp = "stone")
+step2 = piece(size = vec3(1.3, plinth_h, 0.35), pos = vec3(door_x, plinth_h * 0.5, depth * 0.5 + 0.15 + 0.1), grp = "stone")
+win_f1 = window(pos = vec3(width * 0.17, plinth_h + wall_h * 0.58, depth * 0.5), yaw_deg = 0.0)
+win_b1 = window(pos = vec3(0 - width * 0.25, plinth_h + wall_h * 0.58, 0 - depth * 0.5), yaw_deg = 180.0)
+win_b2 = window(pos = vec3(width * 0.25, plinth_h + wall_h * 0.58, 0 - depth * 0.5), yaw_deg = 180.0)
+win_l = window(pos = vec3(0 - width * 0.5, plinth_h + wall_h * 0.58, 0.3), yaw_deg = 270.0)
+win_r = window(pos = vec3(width * 0.5, plinth_h + wall_h * 0.58, 0 - 0.3), yaw_deg = 90.0)
+gable_win = window(pos = vec3(width * 0.5 - 0.02, wall_top + 0.9, 0), yaw_deg = 90.0)
+
+door = merge(merge(door_frame, door_leaf), merge(door_knob, merge(step1, step2)))
+windows = merge(merge(merge(win_f1, win_b1), merge(win_b2, win_l)), merge(win_r, gable_win))
+
+body = merge(merge(plinth, walls), timber)
+top = merge(merge(roof, gables), merge(chimney, chimney_cap))
+house = merge(merge(body, top), merge(door, windows))
+output house
