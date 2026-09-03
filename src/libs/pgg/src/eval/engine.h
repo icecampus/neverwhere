@@ -43,6 +43,12 @@ struct RunParams {
     // E6 debug flag: false = taps are ignored (production behaviour);
     // true = taps become probes and pull their targets (§9.3).
     bool debug = false;
+    // Value pulls (viewer preview, §9 L3 groundwork): binding / instance /
+    // `<ipath>.<local>` paths in the probe-path syntax (no attr terminal,
+    // no index-less def). Each resolved target's value lands in
+    // RunResult::pulled. Like probes, pulls are extra lazy roots and
+    // suppress the declared outputs when none are requested explicitly.
+    std::vector<std::string> pulls;
 };
 
 struct RunOutput {
@@ -69,6 +75,10 @@ struct RunResult {
     // E6 probe/tap records: CLI probes in flag order, then taps (top-level in
     // file order, then def-body taps in expansion order).
     std::vector<ProbeRecord> probes;
+    // RunParams::pulls results in pull order (one record per resolved target;
+    // name = record path — instance path or `<ipath>.<output>` for
+    // multi-output instances). Unresolvable pulls report E606.
+    std::vector<RunOutput> pulled;
     RunStats stats;
     bool hasErrors() const;
 };

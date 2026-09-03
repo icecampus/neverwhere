@@ -2,15 +2,19 @@
 
 #include "SmokeTest.h"
 
+#include <cmath>
 #include <filesystem>
 
 #include <spdlog/spdlog.h>
 
+#include <pgg/eval.h>
 #include <pgg/pgg.h>
 #include <pgg/src/eval/expand.h>
 #include <pgg/src/eval/modules.h>
 #include <pgg/src/graph.h>
 #include <pgg/src/layout.h>
+
+#include "GeometryPreview.h"
 
 namespace {
 
@@ -177,6 +181,46 @@ bool runPggViewerSmokeTest() {
                                replaced.find("# @pos 500 600") != std::string::npos &&
                                pgg::applyPosHint(replaced, 2, -5, 7) == replaced;
         check(roundTrip, "hint write-back round-trip (append + replace + astEqual)");
+    }
+
+    // 7. Geometry preview (CPU half): value pulls of a mid-graph binding and
+    //    the value -> triangles conversion for mesh / sdf / points.
+    {
+        const std::string src =
+            "g = rng_from_seed(3)\n"
+            "base = ico_sphere(subdiv = 2, radius = 1.0)\n"
+            "m = mark(base, \"top\", where = dot(@N, (0, 1, 0)) > 0.5)\n"
+            "field = sdf_sphere(r = 1.0)\n"
+            "pts = mesh_line(count = 5, length = 4.0)\n"
+            "rock = mesh_from_sdf(field, voxel = 0.5)\n"
+            "output rock\n";
+        pgg::RunParams rp;
+        rp.pulls = {"m", "field", "pts"};
+        pgg::RunResult r = pgg::run(src, rp, {}, "<smoke-preview>");
+        check(!r.hasErrors() && r.outputs.empty() && r.pulled.size() == 3, "value pulls (3 targets, outputs suppressed)");
+        if (r.pulled.size() == 3) {
+            PreviewBuildOptions opts;
+            opts.highlightGroup = "points:top";
+            opts.sdfResolution = 24;
+            const PreviewGeometry mesh = buildPreviewGeometry(r.pulled[0].value, opts);
+            size_t lit = 0;
+            for (const PreviewVertex& v : mesh.vertices) lit += v.mask > 0.5f ? 1 : 0;
+            check(mesh.ok && mesh.indices.size() % 3 == 0 && mesh.vertices.size() == 162 && lit > 0 &&
+                      lit < mesh.vertices.size() && mesh.groups == std::vector<std::string>{"points:top"} &&
+                      std::abs(mesh.bmax.y - 1.0f) < 1e-3f,
+                  "preview mesh (smooth indexed, group highlight, bbox)");
+            const PreviewGeometry sdf = buildPreviewGeometry(r.pulled[1].value, opts);
+            check(sdf.ok && sdf.indices.size() % 3 == 0 && sdf.summary.rfind("sdf (preview voxel", 0) == 0 &&
+                      std::abs(sdf.bmax.x - 1.0f) < 0.15f && std::abs(sdf.bmin.x + 1.0f) < 0.15f,
+                  "preview sdf (meshed at preview voxel, unit sphere bbox)");
+            const PreviewGeometry pts = buildPreviewGeometry(r.pulled[2].value, opts);
+            check(pts.ok && pts.vertices.size() == 5 * 24 && pts.indices.size() == 5 * 24 &&
+                      pts.summary == "points 5 pts",
+                  "preview points (octahedron markers)");
+        }
+        PreviewBuildOptions opts;
+        const PreviewGeometry none = buildPreviewGeometry(pgg::Value(1.5f), opts);
+        check(!none.ok && none.summary.find("no geometry") != std::string::npos, "preview of a scalar reports no geometry");
     }
 
     if (g_failures == 0) {

@@ -1,12 +1,16 @@
 // PggViewer: read-only node-graph projection of .pgg files (spec §10, stage E8).
-//   PggViewer <file.pgg> [--shot=out.png] [--zoom=Z] [--center=X,Y] [--no-ui]
+//   PggViewer [file.pgg] [--shot=out.png] [--shot-delay=S] [--zoom=Z] [--center=X,Y] [--no-ui]
+//             [--dive=<ipath>] [--preview=<pull path>] [--preview-highlight=<domain>:<group>]
+//             [--preview-size=W,H] [--param=name=value]...
 //   PggViewer --smoke
 // The graph is derived from the text (no separate storage): names are nodes,
 // uses are wires, def calls collapse into diveable nodes addressed by their
 // instance path, repeat/foreach zones draw as subgraphs with iteration ports
 // and a state loop. Layout hints live in trailing `# @pos X Y` comments and
 // are written back on node drags (in memory; Save persists). The probe panel
-// reuses the E6 probe API (PggTool --probe).
+// reuses the E6 probe API (PggTool --probe). The Preview window renders the
+// value of the selected node (RunParams::pulls -> GeometryPreview): meshes and
+// points directly, instances realized, sdf meshed at a preview voxel.
 
 #include "pch.h"
 
@@ -26,6 +30,8 @@
 #include <pgg/src/graph.h>
 #include <pgg/src/layout.h>
 
+#include "FileDialog.h"
+#include "GeometryPreview.h"
 #include "GraphCanvas.h"
 #include "SmokeTest.h"
 
@@ -86,11 +92,29 @@ GraphCanvasState g_canvas;
 bool g_needFitView = false;
 std::string g_probeText;
 char g_pathBuf[1024] = {0};
+FileDialogState g_fileDialog;
+
+// --- geometry preview -----------------------------------------------------------
+
+GeometryPreview g_preview;
+bool g_showPreview = true;
+bool g_autoPreview = true;           // re-run the preview when the selection changes
+std::string g_previewTarget;         // pull path currently shown
+pgg::Value g_previewValue;           // last pulled value (rebuilt on highlight/resolution changes)
+bool g_previewHasValue = false;
+PreviewBuildOptions g_previewOpts;
+std::vector<std::string> g_previewGroups;
+int g_previewLastSelected = -2;      // (selected index, scope) the auto-preview last ran for
+std::string g_previewLastScope;
+std::string g_cliPreview;            // --preview=<path>: pull + show at startup
+ImVec2 g_cliPreviewSize{0.0f, 0.0f};  // --preview-size=W,H: initial preview window size (points)
+std::vector<std::pair<std::string, std::string>> g_cliParams;  // --param=name=value
 
 // --- CLI ----------------------------------------------------------------------------
 
 std::string g_pendingLoad;
 std::string g_shotPath;
+double g_shotDelaySec = 1.0;  // --shot-delay=: wall time before the capture
 std::optional<float> g_cliZoom;
 std::optional<ImVec2> g_cliCenter;
 std::string g_cliDive;
@@ -144,6 +168,13 @@ bool loadFile(const std::string& path) {
     g_dive.clear();
     g_canvas = GraphCanvasState{};
     g_probeText.clear();
+    g_preview.clear();
+    g_preview.setSummary({});
+    g_preview.setError({});
+    g_previewTarget.clear();
+    g_previewHasValue = false;
+    g_previewGroups.clear();
+    g_previewLastSelected = -2;
     g_dirty = false;
     g_needFitView = true;
     g_paramValues.clear();
@@ -154,6 +185,10 @@ bool loadFile(const std::string& path) {
             g_paramValues.push_back({p->name, p->hasDefault ? literalText(p->def) : std::string{}});
         }
     }
+    // CLI --param overrides (applied on every load, so Reload keeps them).
+    for (const auto& [name, text] : g_cliParams)
+        for (auto& [pname, ptext] : g_paramValues)
+            if (pname == name) ptext = text;
     std::snprintf(g_pathBuf, sizeof(g_pathBuf), "%s", path.c_str());
     spdlog::info("PggViewer: loaded {} ({} nodes, {} instance scopes)", path, g_project.top.nodes.size(),
                  g_project.instanceScopes.size());
@@ -256,6 +291,80 @@ void runProbe(const std::string& inspector) {
     g_probeText = std::move(out);
 }
 
+// Rebuilds the GPU geometry from the cached value (highlight / sdf resolution
+// changes do not need a new run).
+void rebuildPreviewGeometry(bool refit) {
+    if (!g_previewHasValue) return;
+    PreviewGeometry geo = buildPreviewGeometry(g_previewValue, g_previewOpts);
+    g_previewGroups = geo.groups;
+    // Drop a highlight that the new value no longer carries.
+    if (!g_previewOpts.highlightGroup.empty() &&
+        std::find(geo.groups.begin(), geo.groups.end(), g_previewOpts.highlightGroup) == geo.groups.end())
+        g_previewOpts.highlightGroup.clear();
+    g_preview.setGeometry(geo, refit);
+}
+
+// Pulls the value at `target` (probe-path syntax) with a synchronous run and
+// shows it. Same MVP trade-off as the probes: heavy graphs block the UI.
+void runPreview(const std::string& target) {
+    if (target.empty() || g_filePath.empty()) return;
+    pgg::RunParams rp;
+    for (const auto& [name, text] : g_paramValues)
+        if (!text.empty()) rp.values.push_back({name, parseCliValue(text)});
+    rp.pulls = {target};
+    const uint64_t t0 = stm_now();
+    pgg::RunResult r = pgg::runFile(g_filePath, rp);
+    const double ms = stm_ms(stm_diff(stm_now(), t0));
+
+    const bool newTarget = target != g_previewTarget;
+    g_previewTarget = target;
+    g_previewHasValue = false;
+    for (const pgg::RunOutput& o : r.pulled) {
+        const pgg::ScalarType base = pgg::valueBase(o.value);
+        if (base == pgg::ScalarType::Geo || base == pgg::ScalarType::Sdf) {
+            g_previewValue = o.value;
+            g_previewHasValue = true;
+            break;
+        }
+    }
+    if (!g_previewHasValue) {
+        g_preview.clear();
+        std::string why;
+        bool unboundParam = false;
+        for (const pgg::Diagnostic& d : r.diagnostics) {
+            if (d.isWarning) continue;
+            why += (why.empty() ? "" : "\n") + d.code + " " + d.message;
+            unboundParam |= d.code == "E604" && d.message.find("no default") != std::string::npos;
+        }
+        if (unboundParam) why += "\n-> set the value in the Params section of the side panel";
+        if (why.empty()) why = r.pulled.empty() ? "no value" : "value has no geometry (" +
+                                                              std::string(pgg::scalarName(pgg::valueBase(r.pulled[0].value))) + ")";
+        g_preview.setSummary(target + ": run failed");
+        g_preview.setError(why);
+        g_showPreview = true;
+        return;
+    }
+    g_preview.setError({});
+    rebuildPreviewGeometry(newTarget);
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "  [%.0f ms]", ms);
+    g_preview.setSummary(target + ": " + g_preview.summary() + buf);
+    g_showPreview = true;
+}
+
+// Open... starts next to the current file; with nothing loaded — at the test
+// corpus (the only .pgg examples in the repo), else at cwd.
+void openFileDialog() {
+    std::filesystem::path start;
+    if (!g_filePath.empty()) {
+        start = std::filesystem::path(g_filePath).parent_path();
+    } else {
+        std::error_code ec;
+        start = findPggCorpusDir(std::filesystem::current_path(ec));
+    }
+    fileDialogOpen(g_fileDialog, start);
+}
+
 void diveTo(const std::string& instancePath) {
     g_dive.push_back(instancePath);
     g_canvas.selected = -1;
@@ -281,9 +390,17 @@ void drawPanel(int w, int h) {
 
     const ImGuiIO& io = ImGui::GetIO();
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S) && g_dirty && !g_filePath.empty()) saveFile();
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O) && !g_fileDialog.open) openFileDialog();
 
     // File.
-    ImGui::InputText("##path", g_pathBuf, sizeof(g_pathBuf));
+    if (ImGui::Button("Open...")) openFileDialog();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Browse for a .pgg file (Ctrl+O)");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::InputText("##path", g_pathBuf, sizeof(g_pathBuf), ImGuiInputTextFlags_EnterReturnsTrue) &&
+        g_pathBuf[0] != '\0')
+        loadFile(g_pathBuf);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Path of a .pgg file; Enter or Load to open");
     if (ImGui::Button("Load") && g_pathBuf[0] != '\0') loadFile(g_pathBuf);
     ImGui::SameLine();
     if (ImGui::Button("Reload") && !g_filePath.empty()) loadFile(g_filePath);
@@ -295,6 +412,8 @@ void drawPanel(int w, int h) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.9f, 0.75f, 0.3f, 1.0f), "(modified)");
     }
+    if (g_filePath.empty()) ImGui::TextDisabled("no file loaded");
+    if (const auto picked = fileDialogDraw(g_fileDialog)) loadFile(picked->string());
 
     // Breadcrumb (dive path).
     ImGui::Separator();
@@ -330,6 +449,9 @@ void drawPanel(int w, int h) {
                     if (insp[0] != 's') ImGui::SameLine();
                     if (ImGui::SmallButton(insp)) runProbe(insp);
                 }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Preview")) runPreview(target);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Render this node's geometry in the Preview window");
             }
         }
         if (!g_probeText.empty()) {
@@ -339,12 +461,60 @@ void drawPanel(int w, int h) {
         }
     }
 
+    // Geometry preview options.
+    if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("show window", &g_showPreview);
+        ImGui::SameLine();
+        ImGui::Checkbox("auto on select", &g_autoPreview);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Pull and render the selected node's value as soon as it is selected\n"
+                              "(synchronous run: heavy graphs pause the UI)");
+        if (!g_previewTarget.empty()) ImGui::TextDisabled("showing: %s", g_previewTarget.c_str());
+        // Group highlight.
+        const std::string& cur = g_previewOpts.highlightGroup;
+        if (ImGui::BeginCombo("highlight", cur.empty() ? "(none)" : cur.c_str())) {
+            if (ImGui::Selectable("(none)", cur.empty())) {
+                g_previewOpts.highlightGroup.clear();
+                rebuildPreviewGeometry(false);
+            }
+            for (const std::string& gname : g_previewGroups) {
+                if (ImGui::Selectable(gname.c_str(), gname == cur)) {
+                    g_previewOpts.highlightGroup = gname;
+                    rebuildPreviewGeometry(false);
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (g_previewGroups.empty()) ImGui::TextDisabled("(no groups on the previewed geometry)");
+        // sdf meshing resolution (only matters for sdf values).
+        if (ImGui::SliderInt("sdf voxels", &g_previewOpts.sdfResolution, 16, 256)) {
+            if (g_previewHasValue && pgg::valueBase(g_previewValue) == pgg::ScalarType::Sdf)
+                rebuildPreviewGeometry(false);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Longest bbox axis in voxels when meshing an sdf value for preview");
+    }
+
     // Launch params of the file (used by probe runs).
+    // A param without a default and without a value blocks every run (E604):
+    // keep the section open and flag the field until it is filled in.
+    bool missingParam = false;
+    for (const auto& [name, text] : g_paramValues) missingParam |= text.empty();
+    if (missingParam) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
     if (!g_paramValues.empty() && ImGui::CollapsingHeader("Params")) {
+        if (missingParam)
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
+                               "required: params without a default must be set before a run");
         for (auto& [name, text] : g_paramValues) {
             char buf[256];
             std::snprintf(buf, sizeof(buf), "%s", text.c_str());
-            if (ImGui::InputText(name.c_str(), buf, sizeof(buf))) text = buf;
+            const bool missing = text.empty();
+            if (missing) ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.45f, 0.15f, 0.12f, 1.0f));
+            if (ImGui::InputTextWithHint(name.c_str(), missing ? "required" : "", buf, sizeof(buf))) text = buf;
+            if (missing) ImGui::PopStyleColor();
+            // Re-run the shown preview once the edit is committed (focus leaves
+            // the field / Enter), not on every keystroke.
+            if (ImGui::IsItemDeactivatedAfterEdit() && g_autoPreview && !g_previewTarget.empty())
+                runPreview(g_previewTarget);
         }
     }
 
@@ -365,6 +535,9 @@ void drawPanel(int w, int h) {
     }
 
     if (ImGui::CollapsingHeader("Help")) {
+        ImGui::TextWrapped("Open... / Ctrl+O: browse for a .pgg file. Ctrl+S: save layout hints.");
+        ImGui::TextWrapped("Preview window: LMB drag orbit, RMB/MMB drag pan, wheel zoom, Fit resets. "
+                           "Meshes/points render directly, instances are realized, sdf is meshed at 'sdf voxels'.");
         ImGui::TextWrapped("LMB drag node: move (writes a # @pos hint on release; Save persists).");
         ImGui::TextWrapped("LMB drag empty / RMB drag: pan. Wheel: zoom to cursor.");
         ImGui::TextWrapped("Double-click a def node: dive into the instance body. Esc / breadcrumb: back.");
@@ -408,7 +581,7 @@ void drawCanvasWindow(int w, int h) {
         }
         g_needFitView = false;
     }
-    if (scope) {
+    if (scope && !g_filePath.empty()) {
         const bool editable = scope->originFile.empty();
         const GraphCanvasResult res = drawGraphCanvas(*scope, g_layout, g_canvas, editable);
         if (res.diveNode >= 0) {
@@ -424,8 +597,47 @@ void drawCanvasWindow(int w, int h) {
             n.hintY = n.y;
             g_dirty = true;
         }
+    } else {
+        // Empty state: tell the user how to get a graph on screen.
+        const char* line1 = "No .pgg file loaded";
+        const char* line2 = "Open... (Ctrl+O), type a path in the panel, or pass a file on the command line";
+        const ImVec2 s1 = ImGui::CalcTextSize(line1);
+        const ImVec2 s2 = ImGui::CalcTextSize(line2);
+        ImGui::SetCursorPos(ImVec2((view.x - s1.x) * 0.5f, view.y * 0.5f - s1.y));
+        ImGui::TextDisabled("%s", line1);
+        ImGui::SetCursorPos(ImVec2((view.x - s2.x) * 0.5f, view.y * 0.5f + s1.y * 0.5f));
+        ImGui::TextDisabled("%s", line2);
     }
     ImGui::End();
+}
+
+// Floating, resizable preview window over the canvas (bottom-right by default).
+void drawPreviewWindow(int w, int h) {
+    if (!g_showPreview) return;
+    float pw = std::min(560.0f, (static_cast<float>(w) - panelWidth()) * 0.5f);
+    float ph = std::min(420.0f, static_cast<float>(h) * 0.5f);
+    if (g_cliPreviewSize.x > 0.0f && g_cliPreviewSize.y > 0.0f) {
+        pw = std::min(g_cliPreviewSize.x, static_cast<float>(w) - panelWidth() - 24.0f);
+        ph = std::min(g_cliPreviewSize.y, static_cast<float>(h) - 24.0f);
+    }
+    ImGui::SetNextWindowPos(ImVec2(static_cast<float>(w) - pw - 12.0f, static_cast<float>(h) - ph - 12.0f),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(pw, ph), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Preview", &g_showPreview)) g_preview.drawWindowContents();
+    ImGui::End();
+}
+
+// Auto-preview: the selection changed -> pull the node's value.
+void updateAutoPreview() {
+    if (!g_autoPreview || g_filePath.empty()) return;
+    pgg::GraphScope* scope = currentScope();
+    const std::string scopePath = currentScopePath();
+    if (g_canvas.selected == g_previewLastSelected && scopePath == g_previewLastScope) return;
+    g_previewLastSelected = g_canvas.selected;
+    g_previewLastScope = scopePath;
+    if (!scope || g_canvas.selected < 0) return;
+    const std::string target = probePathFor(scope->nodes[g_canvas.selected]);
+    if (!target.empty() && target != g_previewTarget) runPreview(target);
 }
 
 // Portable --shot capture (GL readback; the documented sokol/GL trap keeps
@@ -473,6 +685,7 @@ void init() {
         simgui_desc_t imgui_desc = {};
         simgui_setup(&imgui_desc);
         g_state.imguiOk = true;
+        g_preview.init();
     }
 
     if (!g_pendingLoad.empty()) loadFile(g_pendingLoad);
@@ -481,6 +694,8 @@ void init() {
         g_dive.push_back(g_cliDive);
         g_needFitView = true;
     }
+    // --preview=<path>: pull and show a value at startup (shots / smoke by eye).
+    if (!g_cliPreview.empty() && g_state.imguiOk) runPreview(g_cliPreview);
 }
 
 void frame() {
@@ -503,6 +718,11 @@ void frame() {
         simgui_new_frame(&fd);
         drawPanel(w, h);
         drawCanvasWindow(w, h);
+        updateAutoPreview();
+        drawPreviewWindow(w, h);
+        // Offscreen preview pass: outside (before) the swapchain pass that
+        // draws the ImGui image referencing its target.
+        g_preview.render();
     }
 
     sg_pass_action action = {};
@@ -518,7 +738,7 @@ void frame() {
 
     // Headless capture: the graph is laid out at load time, so a short
     // wall-time settle is enough before grabbing the framebuffer.
-    if (!g_shotPath.empty() && stm_sec(stm_now()) >= 1.0) {
+    if (!g_shotPath.empty() && stm_sec(stm_now()) >= g_shotDelaySec) {
         if (capturePng(g_shotPath.c_str())) {
             spdlog::info("PggViewer: screenshot saved to {}", g_shotPath);
         } else {
@@ -531,6 +751,7 @@ void frame() {
 
 void cleanup() {
     if (g_state.imguiOk) {
+        g_preview.shutdown();
         simgui_shutdown();
         g_state.imguiOk = false;
     }
@@ -560,12 +781,25 @@ int main(int argc, char* argv[]) {
             g_noUi = true;
         } else if (arg.rfind("--shot=", 0) == 0) {
             g_shotPath = arg.substr(7);
+        } else if (arg.rfind("--shot-delay=", 0) == 0) {
+            g_shotDelaySec = std::max(0.0, std::atof(arg.substr(13).c_str()));
         } else if (arg.rfind("--zoom=", 0) == 0) {
             g_cliZoom = static_cast<float>(std::atof(arg.substr(7).c_str()));
         } else if (arg.rfind("--center=", 0) == 0) {
             g_cliCenter = parseVec2Arg(arg.substr(9));
         } else if (arg.rfind("--dive=", 0) == 0) {
             g_cliDive = arg.substr(7);
+        } else if (arg.rfind("--preview=", 0) == 0) {
+            g_cliPreview = arg.substr(10);
+        } else if (arg.rfind("--preview-highlight=", 0) == 0) {
+            g_previewOpts.highlightGroup = arg.substr(20);
+        } else if (arg.rfind("--preview-size=", 0) == 0) {
+            float pw = 0.0f, ph = 0.0f;
+            if (std::sscanf(arg.c_str() + 15, "%f,%f", &pw, &ph) == 2) g_cliPreviewSize = ImVec2(pw, ph);
+        } else if (arg.rfind("--param=", 0) == 0) {
+            const std::string kv = arg.substr(8);
+            const size_t eq = kv.find('=');
+            if (eq != std::string::npos) g_cliParams.push_back({kv.substr(0, eq), kv.substr(eq + 1)});
         } else if (arg.rfind("--", 0) != 0) {
             g_pendingLoad = arg;
         }

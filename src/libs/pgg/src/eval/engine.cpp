@@ -151,15 +151,22 @@ public:
             resolveSpec("probe", spec, probes);
         }
         if (params_.debug) collectTaps(probes);
+        // Value pulls (RunParams::pulls) resolve with the probe-path rules
+        // minus the attr terminal: a binding, an instance path or
+        // `<ipath>.<local>`; an index-less def name is rejected (one pull =
+        // one record set with a definite target).
+        std::vector<ProbeTarget> pullTargets;
+        for (const std::string& path : params_.pulls) resolvePullPath(path, pullTargets);
         if (hasErrors(result_.diagnostics)) return;
 
-        // Output suppression (§9.2): CLI probes without explicitly requested
-        // outputs skip the declared outputs (probe-only run); taps never
-        // suppress (debug mode is a normal run plus observation).
+        // Output suppression (§9.2): CLI probes (and value pulls) without
+        // explicitly requested outputs skip the declared outputs (probe-only
+        // run); taps never suppress (debug mode is a normal run plus
+        // observation).
         const std::vector<std::string> pull =
             !requested.empty() ? requested
-            : params_.probes.empty() ? outputNames_
-                                     : std::vector<std::string>{};
+            : (params_.probes.empty() && params_.pulls.empty()) ? outputNames_
+                                                                : std::vector<std::string>{};
         for (const std::string& w : pull) {
             const Node* decl = outputDecl_[w];
             TypedValue tv = evalBinding(w, decl ? decl->span : Span{});
@@ -171,6 +178,18 @@ public:
         // target already computed for an output is not recomputed) and
         // evaluate the inspectors over the values.
         for (const ResolvedProbe& rp : probes) executeProbe(rp);
+
+        // Value pulls share the environment too: a target already computed
+        // for an output/probe is not recomputed.
+        for (const ProbeTarget& t : pullTargets) {
+            const TypedValue tv = evalBinding(t.binding, Span{});
+            if (!tv) continue;  // the binding's own error was already reported
+            if (tv.field) {
+                run_.report("E606", Span{}, "pull target '" + t.recordPath + "' is a field, not a value");
+                continue;
+            }
+            result_.pulled.push_back({t.recordPath, tv.value});
+        }
 
         result_.stats.fieldsEvaluated = run_.fieldsEvaluated;
         result_.stats.cacheHits = cacheHits_;
@@ -321,6 +340,34 @@ private:
         run_.report("E606", Span{},
                     "probe target '" + path + "' not found (no such binding, instance or def)");
         return false;
+    }
+
+    // Resolves a value-pull path (RunParams::pulls): exact binding, exact
+    // instance path (every output), or `<ipath>.<local>`. No attr terminal
+    // and no index-less def (E606 — a pull must name definite values).
+    void resolvePullPath(const std::string& path, std::vector<ProbeTarget>& out) {
+        if (isValueBinding(path)) {
+            out.push_back({path, path, ""});
+            return;
+        }
+        if (const FlatInstance* inst = findInstanceByPath(path)) {
+            targetsForInstance(*inst, path, "", out);
+            return;
+        }
+        const size_t dot = path.rfind('.');
+        if (dot != std::string::npos && dot > 0 && dot + 1 < path.size()) {
+            const std::string prefix = path.substr(0, dot);
+            const std::string term = path.substr(dot + 1);
+            if (const FlatInstance* inst = findInstanceByPath(prefix)) {
+                const std::string flatLocal = inst->name + "." + term;
+                if (isValueBinding(flatLocal)) {
+                    out.push_back({path, flatLocal, ""});
+                    return;
+                }
+            }
+        }
+        run_.report("E606", Span{},
+                    "pull target '" + path + "' not found (a pull names a binding, an instance or <instance>.<local>)");
     }
 
     // Parses/validates one spec and appends resolved probes (a spec without
