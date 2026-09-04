@@ -113,10 +113,35 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewGeometry
     const std::vector<int32_t>& FO = *g.faceOffsets;
 
     if (smooth) {
+        // merge() zero-fills @N for operands that never had normals (e.g. a
+        // realized instance mesh next to a box) — a zero normal shades black.
+        // Fall back to accumulated face normals for those points.
+        std::vector<glm::vec3> fixedNormals;
+        const std::vector<glm::vec3>* N = g.normals.get();
+        bool anyZero = false;
+        for (const glm::vec3& n : *N)
+            if (glm::dot(n, n) < 1e-12f) { anyZero = true; break; }
+        if (anyZero) {
+            fixedNormals.assign(P.size(), glm::vec3(0.0f));
+            for (size_t f = 0; f < g.faceCount(); ++f) {
+                const glm::vec3 fn = pgg::faceNormal(g, f);
+                for (int32_t c = FO[f]; c < FO[f + 1]; ++c) fixedNormals[static_cast<size_t>(CV[c])] += fn;
+            }
+            for (size_t i = 0; i < P.size(); ++i) {
+                const glm::vec3& n = (*N)[i];
+                if (glm::dot(n, n) >= 1e-12f) {
+                    fixedNormals[i] = n;
+                } else {
+                    const float len = glm::length(fixedNormals[i]);
+                    fixedNormals[i] = len > 1e-12f ? fixedNormals[i] / len : glm::vec3(0, 1, 0);
+                }
+            }
+            N = &fixedNormals;
+        }
         out.vertices.reserve(P.size());
         for (size_t i = 0; i < P.size(); ++i) {
             const float m = (mask && i < mask->size() && (*mask)[i]) ? 1.0f : 0.0f;
-            out.vertices.push_back({P[i], (*g.normals)[i], m});
+            out.vertices.push_back({P[i], (*N)[i], m});
         }
         for (size_t f = 0; f < g.faceCount(); ++f) {
             const int32_t begin = FO[f], end = FO[f + 1];
