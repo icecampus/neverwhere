@@ -1,0 +1,142 @@
+param seed: int = 7
+param gap: f32 = 0.05
+
+# Арка из грубых валунов («циклопическая» кладка): два столба-опоры по два
+# камня и полукруглая дуга из семи сводчатых камней с замковым в центре.
+# 
+# Приёмы (наследуют stone_row.pgg, def'ы вынесены в lib/masonry.pgg):
+# 1. Радиальная ориентация сводчатых камней: локальная ось +Y валуна смотрит
+# из центра дуги — orient_from_euler((0, yaw, theta - 90)) (glm: компоненты
+# (pitch X, yaw Y, roll Z), применяются Z → X → Y, поэтому yaw-джиттер крутит
+# уже повёрнутый камень вокруг мировой вертикали). Тригонометрии в выражениях
+# нет, поэтому позиции дуги — предвычисленные константы (R = 1.75, центр дуги
+# на y = 1.95, theta = 12°..168° с шагом 26°).
+# 2. Контактные отпечатки по ЦЕПОЧКЕ кладки: каждый камень режется раздутым
+# на gap объединением полей ближайших соседей по цепочке (подошва столба →
+# верх столба → пята → ... → замок → ... → второй столб) — швы ~gap, камни
+# сидят друг на друге без клиппинга.
+# 3. Оседанию (repeat + distance_to) подвергаются только нижние камни столбов
+# и галька: верхние камни и дуга стоят на соседях, а не на грунте, поэтому
+# ставятся геометрически с перекрытием 0.2 (оно же глотает ±12 см бугров
+# грунта под осевшей подошвой).
+import lib.masonry
+
+world_rng = rng_from_seed(seed)
+r_pier_lb = split_rng(world_rng, key = "pier_lb")
+r_pier_lt = split_rng(world_rng, key = "pier_lt")
+r_pier_rb = split_rng(world_rng, key = "pier_rb")
+r_pier_rt = split_rng(world_rng, key = "pier_rt")
+r_arc_l1 = split_rng(world_rng, key = "arc_l1")
+r_arc_l2 = split_rng(world_rng, key = "arc_l2")
+r_arc_l3 = split_rng(world_rng, key = "arc_l3")
+r_key = split_rng(world_rng, key = "key")
+r_arc_r3 = split_rng(world_rng, key = "arc_r3")
+r_arc_r2 = split_rng(world_rng, key = "arc_r2")
+r_arc_r1 = split_rng(world_rng, key = "arc_r1")
+r_yaw = split_rng(world_rng, key = "yaw_jitter")
+r_moss = split_rng(world_rng, key = "moss")
+r_ground = split_rng(world_rng, key = "ground")
+r_pebble = split_rng(world_rng, key = "pebble")
+r_pebble_moss = split_rng(world_rng, key = "pebble_moss")
+r_scatter = split_rng(world_rng, key = "scatter")
+r_pscale = split_rng(world_rng, key = "pebble_scale")
+r_porient = split_rng(world_rng, key = "pebble_orient")
+
+# Грунт: пологие fbm-бугры до ~12 см над базовой плоскостью.
+ground = set_position(grid(size = (10, 8), res = 20), offset = (0, 1, 0) * fbm(scale = 0.55, octaves = 3, rng = r_ground) * 0.12)
+
+# Формы камней (центрированы в origin; постановка — якорями ниже). У сводчатых
+# камней локальная ось Y — радиальная (после поворота смотрит из центра дуги),
+# X — вдоль дуги: он чуть шире хорды 0.79, чтобы соседи перекрывались.
+f_pier_lb = masonry.boulder_field(size = 1.8, aspect = (1.15, 0.85, 1.05), cracks = 3, rng = r_pier_lb)
+f_pier_lt = masonry.boulder_field(size = 1.5, aspect = (1.05, 0.8, 0.95), cracks = 2, rng = r_pier_lt)
+f_pier_rb = masonry.boulder_field(size = 1.75, aspect = (1.1, 0.85, 1.0), cracks = 3, rng = r_pier_rb)
+f_pier_rt = masonry.boulder_field(size = 1.45, aspect = (1.0, 0.8, 0.95), cracks = 2, rng = r_pier_rt)
+f_arc_l1 = masonry.boulder_field(size = 1.0, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_l1)
+f_arc_l2 = masonry.boulder_field(size = 0.95, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_l2)
+f_arc_l3 = masonry.boulder_field(size = 0.9, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_l3)
+f_key = masonry.boulder_field(size = 1.05, aspect = (1.05, 1.0, 0.95), cracks = 3, rng = r_key)
+f_arc_r3 = masonry.boulder_field(size = 0.9, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_r3)
+f_arc_r2 = masonry.boulder_field(size = 0.95, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_r2)
+f_arc_r1 = masonry.boulder_field(size = 1.0, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_r1)
+
+# Якоря столбов: нижние стартуют на y = 0.35 (выше бугров) и оседают зоной,
+# верхние ставятся с перекрытием 0.25 над верхом нижних (~1.26).
+a_pier_lb = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, 8, -2), hi = (0, 20, 2), rng = split_rng(r_yaw, key = "pier_lb")))), translate = (-1.85, 0.35, 0))
+a_pier_rb = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -22, -2), hi = (0, -10, 2), rng = split_rng(r_yaw, key = "pier_rb")))), translate = (1.87, 0.35, -0.05))
+a_pier_lt = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (-2, -26, 1), hi = (2, -14, 5), rng = split_rng(r_yaw, key = "pier_lt")))), translate = (-1.83, 1.61, 0.05))
+a_pier_rt = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (-2, 20, -5), hi = (2, 32, -1), rng = split_rng(r_yaw, key = "pier_rt")))), translate = (1.84, 1.6, 0))
+
+# Якоря дуги: позиции — (±R·cos θ, 1.95 + R·sin θ, джиттер z), roll = θ − 90°.
+a_arc_l1 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, 75.5), hi = (0, 8, 80.5), rng = split_rng(r_yaw, key = "arc_l1")))), translate = (-1.712, 2.314, 0))
+a_arc_l2 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, 49.5), hi = (0, 8, 54.5), rng = split_rng(r_yaw, key = "arc_l2")))), translate = (-1.379, 3.027, 0.04))
+a_arc_l3 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, 23.5), hi = (0, 8, 28.5), rng = split_rng(r_yaw, key = "arc_l3")))), translate = (-0.767, 3.523, -0.03))
+a_key = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -6, -2), hi = (0, 6, 2), rng = split_rng(r_yaw, key = "key")))), translate = (0, 3.72, 0))
+a_arc_r3 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, -28.5), hi = (0, 8, -23.5), rng = split_rng(r_yaw, key = "arc_r3")))), translate = (0.767, 3.523, 0.03))
+a_arc_r2 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, -54.5), hi = (0, 8, -49.5), rng = split_rng(r_yaw, key = "arc_r2")))), translate = (1.379, 3.027, -0.04))
+a_arc_r1 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, -80.5), hi = (0, 8, -75.5), rng = split_rng(r_yaw, key = "arc_r1")))), translate = (1.712, 2.314, 0))
+
+# Оседание на грунт: только нижние камни столбов (12 итераций, затухающий шаг).
+s_pier_lb = repeat (a_pier_lb, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+s_pier_rb = repeat (a_pier_rb, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+
+# Якорь сел на грунт → поднимаем на 0.4·высоту камня минус посадка ~0.12.
+lift_pier_lb = set_position(s_pier_lb, offset = (0, 0.49, 0))
+lift_pier_rb = set_position(s_pier_rb, offset = (0, 0.47, 0))
+
+i_pier_lb = sdf_instance_on_points(lift_pier_lb, source = f_pier_lb)
+i_pier_lt = sdf_instance_on_points(a_pier_lt, source = f_pier_lt)
+i_pier_rb = sdf_instance_on_points(lift_pier_rb, source = f_pier_rb)
+i_pier_rt = sdf_instance_on_points(a_pier_rt, source = f_pier_rt)
+i_arc_l1 = sdf_instance_on_points(a_arc_l1, source = f_arc_l1)
+i_arc_l2 = sdf_instance_on_points(a_arc_l2, source = f_arc_l2)
+i_arc_l3 = sdf_instance_on_points(a_arc_l3, source = f_arc_l3)
+i_key = sdf_instance_on_points(a_key, source = f_key)
+i_arc_r3 = sdf_instance_on_points(a_arc_r3, source = f_arc_r3)
+i_arc_r2 = sdf_instance_on_points(a_arc_r2, source = f_arc_r2)
+i_arc_r1 = sdf_instance_on_points(a_arc_r1, source = f_arc_r1)
+
+# Контактные отпечатки по цепочке кладки: каждый камень режется раздутым на
+# gap объединением ближайших соседей — на стыках остаются борозды-швы.
+c_pier_lb = sdf_subtract(i_pier_lb, sdf_displace(i_pier_lt, -gap))
+c_pier_lt = sdf_subtract(i_pier_lt, sdf_displace(sdf_union(i_pier_lb, i_arc_l1), -gap))
+c_arc_l1 = sdf_subtract(i_arc_l1, sdf_displace(sdf_union(i_pier_lt, i_arc_l2), -gap))
+c_arc_l2 = sdf_subtract(i_arc_l2, sdf_displace(sdf_union(i_arc_l1, i_arc_l3), -gap))
+c_arc_l3 = sdf_subtract(i_arc_l3, sdf_displace(sdf_union(i_arc_l2, i_key), -gap))
+c_key = sdf_subtract(i_key, sdf_displace(sdf_union(i_arc_l3, i_arc_r3), -gap))
+c_arc_r3 = sdf_subtract(i_arc_r3, sdf_displace(sdf_union(i_key, i_arc_r2), -gap))
+c_arc_r2 = sdf_subtract(i_arc_r2, sdf_displace(sdf_union(i_arc_r3, i_arc_r1), -gap))
+c_arc_r1 = sdf_subtract(i_arc_r1, sdf_displace(sdf_union(i_arc_r2, i_pier_rt), -gap))
+c_pier_rt = sdf_subtract(i_pier_rt, sdf_displace(sdf_union(i_arc_r1, i_pier_rb), -gap))
+c_pier_rb = sdf_subtract(i_pier_rb, sdf_displace(i_pier_rt, -gap))
+
+m_pier_lb = masonry.stone_from_field(c_pier_lb, 1.8, split_rng(r_moss, key = "pier_lb"))
+m_pier_lt = masonry.stone_from_field(c_pier_lt, 1.5, split_rng(r_moss, key = "pier_lt"))
+m_pier_rb = masonry.stone_from_field(c_pier_rb, 1.75, split_rng(r_moss, key = "pier_rb"))
+m_pier_rt = masonry.stone_from_field(c_pier_rt, 1.45, split_rng(r_moss, key = "pier_rt"))
+m_arc_l1 = masonry.stone_from_field(c_arc_l1, 1.0, split_rng(r_moss, key = "arc_l1"))
+m_arc_l2 = masonry.stone_from_field(c_arc_l2, 0.95, split_rng(r_moss, key = "arc_l2"))
+m_arc_l3 = masonry.stone_from_field(c_arc_l3, 0.9, split_rng(r_moss, key = "arc_l3"))
+m_key = masonry.stone_from_field(c_key, 1.05, split_rng(r_moss, key = "key"))
+m_arc_r3 = masonry.stone_from_field(c_arc_r3, 0.9, split_rng(r_moss, key = "arc_r3"))
+m_arc_r2 = masonry.stone_from_field(c_arc_r2, 0.95, split_rng(r_moss, key = "arc_r2"))
+m_arc_r1 = masonry.stone_from_field(c_arc_r1, 1.0, split_rng(r_moss, key = "arc_r1"))
+
+# Галька у подножия: две полосы — спереди и за аркой (читается сквозь проём).
+pebble0 = transform(masonry.stone_from_field(masonry.boulder_field(size = 0.35, aspect = (1.0, 0.65, 0.85), cracks = 1, rng = r_pebble), 0.35, r_pebble_moss), translate = (0, 0.091, 0))
+spots0 = point_cloud(count = 16, bounds = (6.0, 0, 4.6), rng = r_scatter)
+spots1 = repeat (transform(spots0, translate = (0, 0.35, 0)), iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+spots2 = set(spots1, "scale", random(lo = 0.5, hi = 1.4, rng = r_pscale))
+spots = set(spots2, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = r_porient)))
+pebbles = realize(instance_on_points(spots, source = pebble0))
+
+stones = merge(merge(m_pier_lb, m_pier_lt), merge(m_pier_rb, m_pier_rt))
+arch = merge(merge(merge(m_arc_l1, m_arc_l2), merge(m_arc_l3, m_key)), merge(merge(m_arc_r3, m_arc_r2), m_arc_r1))
+scene = transform(merge(merge(merge(stones, arch), pebbles), ground), rotate = (0, 8, 0))
+output scene

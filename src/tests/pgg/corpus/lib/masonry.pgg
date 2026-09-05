@@ -1,0 +1,38 @@
+def boulder_field(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int = 3, rng: rng) -> (field: sdf) {
+    """SDF-ядро гранёного валуна, центрированное в origin (половина высоты
+    выше/ниже нуля). Вход для полевой композиции (контактные отпечатки через
+    sdf_subtract раздутого соседа) и mesh_from_sdf.
+    Пример: f = masonry.boulder_field(size = 1.5, rng = r)"""
+    expect size > 0: "размер в метрах, положительный"
+    cut_rng = split_rng(rng, key = "cut")
+    yaw_rng = split_rng(rng, key = "cut_yaw")
+    cut2_rng = split_rng(rng, key = "cut2")
+    yaw2_rng = split_rng(rng, key = "cut2_yaw")
+    shape_rng = split_rng(rng, key = "shape")
+    site_rng = split_rng(rng, key = "crack_sites")
+    tilt_rng = split_rng(rng, key = "crack_tilt")
+    core = sdf_box(size = aspect * size)
+    pivot0 = point_cloud(count = 1, bounds = (0, 0, 0), rng = cut_rng)
+    pivot = set(pivot0, "orient", orient_from_euler(random_vec(lo = vec3(-20, 0, -20), hi = (20, 360, 20), rng = yaw_rng)))
+    cutter = sdf_instance_on_points(pivot, source = sdf_box(size = aspect * size * 1.08))
+    pivot2_0 = point_cloud(count = 1, bounds = (0, 0, 0), rng = cut2_rng)
+    pivot2 = set(pivot2_0, "orient", orient_from_euler(random_vec(lo = vec3(-30, 0, -30), hi = (30, 360, 30), rng = yaw2_rng)))
+    cutter2 = sdf_instance_on_points(pivot2, source = sdf_box(size = aspect * size * 1.12))
+    faceted = sdf_intersect(sdf_intersect(core, cutter), cutter2)
+    bumpy = sdf_displace(faceted, fbm(@P * (0.8 / size), octaves = 3, rng = shape_rng) * 0.04 * size)
+    sites0 = point_cloud(count = cracks, bounds = aspect * size * 0.8, rng = site_rng)
+    sites = set(sites0, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (360, 360, 360), rng = tilt_rng)))
+    slabs = sdf_instance_on_points(sites, source = sdf_box(size = vec3(size * 1.6, size * 1.6, size * 0.015)))
+    core_inner = sdf_displace(bumpy, size * 0.03)
+    field = sdf_union(sdf_subtract(bumpy, slabs), core_inner)
+}
+
+def stone_from_field(f: sdf, size: f32, rng: rng) -> (out: geo<mesh>) {
+    """Мешит SDF-валун (воксель пропорционален size) и мечит мох на верхних
+    гранях (группа faces «moss»; fbm по мировому @P — метка после извлечения,
+    атрибутный барьер §8.4).
+    Пример: m = masonry.stone_from_field(f, 1.5, r_moss)"""
+    raw = mesh_from_sdf(f, voxel = size * 0.015)
+    shaped = compute_normals(raw)
+    out = mark(shaped, "moss", where = (dot(@N, (0, 1, 0)) > 0.75) & (fbm(scale = 2.5 / size, rng = rng) > 0.2), domain = faces)
+}
