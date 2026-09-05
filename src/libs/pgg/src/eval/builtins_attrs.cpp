@@ -5,7 +5,10 @@
 // missing group is E305 while a missing attribute is E302. `set` infers its
 // domain from the field: a constant field lands on detail, anything else on
 // points (the working domain, §4.1) — faces/corners are reachable by reading
-// through the silent interpolation or by an explicit promote.
+// through the silent interpolation or by an explicit promote. The attribute
+// name is global: `set` replaces any same-named column on the other domains —
+// the read path takes the first domain hit in points/corners/faces/detail
+// order (resampleAttr), so a leftover copy would shadow the new value.
 
 #include "builtins.h"
 
@@ -88,9 +91,26 @@ Value opSet(const BoundCall& bound, RunContext& run) {
     const Domain domain = field->kind == FKind::Const ? Domain::Detail : Domain::Points;
     ConstBufferPtr buf = evalField(field, in, domain, run);
 
-    AttrSet attrs = in.attrs(domain) ? *in.attrs(domain) : AttrSet{};
+    // The name is global: drop any same-named column from every domain (the
+    // target domain included — it is rewritten below), so no stale copy can
+    // shadow the new value on the read path.
+    Geo out = in;
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const AttrSet* as = out.attrs(d);
+        if (!as || !as->find(name)) continue;
+        AttrSet copy = *as;
+        copy.columns.erase(name);
+        auto ptr = std::make_shared<const AttrSet>(std::move(copy));
+        switch (d) {
+            case Domain::Points: out.pointAttrs = std::move(ptr); break;
+            case Domain::Corners: out.cornerAttrs = std::move(ptr); break;
+            case Domain::Faces: out.faceAttrs = std::move(ptr); break;
+            case Domain::Detail: out.detailAttrs = std::move(ptr); break;
+        }
+    }
+    AttrSet attrs = out.attrs(domain) ? *out.attrs(domain) : AttrSet{};
     attrs.columns[name] = AttrColumn{bufferToColumn(*buf)};
-    return Value(withAttrs(in, domain, std::make_shared<const AttrSet>(std::move(attrs))));
+    return Value(withAttrs(out, domain, std::make_shared<const AttrSet>(std::move(attrs))));
 }
 
 // remove_attr(geo, name): drop the column from every domain that has it.

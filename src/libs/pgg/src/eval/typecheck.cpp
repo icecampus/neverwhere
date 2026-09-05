@@ -506,9 +506,12 @@ private:
                     if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit) &&
                         lit != "P" && lit != "N" && lit != "index") {
                         // Domain inference mirrors the runtime rule: constant
-                        // field -> detail, otherwise points (§19 v0.9).
+                        // field -> detail, otherwise points (§19 v0.9). The
+                        // name is global (§8.7): other domains drop the column.
                         const Type vt = byParam.size() > 2 && byParam[2] ? argTypes[2] : Type{};
                         const size_t dom = vt.isField ? domainIndex("points") : domainIndex("detail");
+                        for (size_t d2 = 0; d2 < s.attrs.size(); ++d2)
+                            if (d2 != dom) s.attrs[d2].erase(lit);
                         s.attrs[dom][lit] = vt.base == ScalarType::None ? ScalarType::F32 : vt.base;
                     } else {
                         s = openSchema();

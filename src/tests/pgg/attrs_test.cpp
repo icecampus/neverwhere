@@ -229,4 +229,80 @@ TEST(Attrs, SetReservedNameIsE301) {
     EXPECT_EQ(countCode(r, "E301"), 1);
 }
 
+TEST(Attrs, SetReplacesSameNameOnOtherDomains) {
+    // §8.7: the attribute name is global — a later set() replaces the column on
+    // every domain (last write wins), so no stale copy can shadow the new value
+    // on the read path (the reader takes the first hit in points/.../detail).
+    pgg::RunResult r = pgg::run(std::string(kGrid) +
+                                "s1 = set(b, \"k\", dot(@P, (1, 0, 0)))\n"
+                                "s2 = set(s1, \"k\", 7.5)\n"
+                                "c = sum_of(@k, on = s2)\n"
+                                "output s2\n"
+                                "output c\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "s2");
+    ASSERT_TRUE(g);
+    EXPECT_FALSE(g->pointAttrs && g->pointAttrs->find("k"));
+    auto det = columnOf<float>(*g, pgg::Domain::Detail, "k");
+    ASSERT_TRUE(det);
+    EXPECT_FLOAT_EQ((*det)[0], 7.5f);
+    // Expression reads on points see the constant (broadcast), not the stale column.
+    EXPECT_FLOAT_EQ(pgg::asF32(valueOutput(r, "c")), 67.5f);
+}
+
+TEST(Attrs, SetFieldReplacesStaleDetailColumn) {
+    pgg::RunResult r = pgg::run(std::string(kGrid) +
+                                "s1 = set(b, \"k\", 7.5)\n"
+                                "s2 = set(s1, \"k\", dot(@P, (1, 0, 0)))\n"
+                                "output s2\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "s2");
+    ASSERT_TRUE(g);
+    EXPECT_FALSE(g->detailAttrs && g->detailAttrs->find("k"));
+    auto pts = columnOf<float>(*g, pgg::Domain::Points, "k");
+    ASSERT_TRUE(pts);
+    ASSERT_EQ(pts->size(), g->pointCount());
+    EXPECT_FLOAT_EQ((*pts)[0], -2.0f);
+}
+
+TEST(Attrs, ConstantOrientOnAnchorIsHonoredByInstancer) {
+    // Regression (stone_arch): an anchor that already carries a points-domain
+    // @orient must honor a later CONSTANT set() — the constant used to land on
+    // detail and be shadowed by the stale points column, so the roll below was
+    // silently dropped by instance_on_points.
+    pgg::RunResult r = pgg::run(
+        "r = rng_from_seed(1)\n"
+        "a0 = set(mesh_line(count = 1, length = 0.0), \"orient\", orient_from_euler(random_vec(lo = (0, 10, 0), hi = (0, 10, 0), rng = r)))\n"
+        "a = set(a0, \"orient\", orient_from_euler((0, 0, 90)))\n"
+        "m = realize(instance_on_points(a, source = box(size = (2, 0.2, 0.2))))\n"
+        "output m\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "m");
+    ASSERT_TRUE(g);
+    glm::vec3 mn, mx;
+    pgg::geoBBox(*g, mn, mx);
+    const glm::vec3 ext = mx - mn;
+    // Roll 90° around Z maps the long X axis of the box onto Y.
+    EXPECT_NEAR(ext.x, 0.2f, 1e-4f);
+    EXPECT_NEAR(ext.y, 2.0f, 1e-4f);
+    EXPECT_NEAR(ext.z, 0.2f, 1e-4f);
+}
+
+TEST(Attrs, ConstantScaleOnAnchorIsHonoredByInstancer) {
+    // Same shadowing trap through @scale: a constant scale set over an
+    // inherited points-domain scale must win (doubling the box).
+    pgg::RunResult r = pgg::run(
+        "r = rng_from_seed(1)\n"
+        "a0 = set(mesh_line(count = 1, length = 0.0), \"scale\", random(lo = 0.5, hi = 0.5, rng = r))\n"
+        "a = set(a0, \"scale\", 2.0)\n"
+        "m = realize(instance_on_points(a, source = box(size = (1, 1, 1))))\n"
+        "output m\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "m");
+    ASSERT_TRUE(g);
+    glm::vec3 mn, mx;
+    pgg::geoBBox(*g, mn, mx);
+    EXPECT_NEAR((mx - mn).x, 2.0f, 1e-4f);
+}
+
 }  // namespace

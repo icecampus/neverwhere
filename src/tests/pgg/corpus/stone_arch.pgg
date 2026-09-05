@@ -1,5 +1,5 @@
 param seed: int = 7
-param gap: f32 = 0.02
+param gap: f32 = 0.01
 
 # Арка из тёсаных блоков (ashlar) по фото-референсу: два столба в перевязку
 # (цоколь-тумба, чередование полных блоков и пар половинок, выступающая плита-
@@ -10,23 +10,39 @@ param gap: f32 = 0.02
 # грани обрезаны в плоскость ПОСЛЕ fbm-дисплейса (срез — верхняя граница
 # поверхности, проникновение невозможно), у клиньев (voussoir_field) плоские
 # радиальные боковые грани, проходящие через центр дуги. Всё выставляется с
-# постоянным зазором gap — швы ровные и тонкие, как на референсе. Притирка
-# (sdf_grind) здесь больше не нужна: она для нерегулярных камней (stone_row),
-# а тесаные блоки стыкуются плоскостями.
-# 2. Столб — def с мультивыходом (тело + якорь линии пяты geo<points>): вертикаль
-# столба параметризована joint'ом, половинки венца смещены на ±(0.22+joint/2) —
-# вертикальный шов между ними выходит ровно gap, наружные грани заподлицо с
-# полными блоками. Джиттер постановки только ВОКРУГ ВЕРТИКАЛИ (yaw): наклон
-# качал бы плоскую постель, а поворот — нет.
-# 3. Радиальная раскладка дуги предвычисленными константами (тригонометрии в
+# постоянным зазором gap. Притирка (sdf_grind) здесь не нужна: она для
+# нерегулярных камней (stone_row), а тесаные блоки стыкуются плоскостями.
+# 2. РАСТВОРНАЯ ПОДЛОЖКА: шов — сквозной канал между отдельными мешами и на
+# ракурсе просвечивал бы насквозь, поэтому за швами лежит утопленный
+# (~3–5 см от лицевой плоскости) заполнитель группы «mortar»: у столба —
+# сплошное ядро-бокс (задевает и шов пяты на 0.05), у дуги — непрерывный
+# бандаж из 11 тех же клиньев, но уже и реже (утоплен за intrados/extrados
+# и торцы) и с полушириной 8.4° > полушага 8.18° (куски перекрываются —
+# бандаж без трещин). Шов читается тонкой тёмной линией, но не дырой.
+# 3. Столб — def с мультивыходом (тело + якорь линии пяты geo<points>); вертикаль
+# параметризована joint'ом, половинки на ±(0.22+joint/2) — шов ровно gap,
+# наружу заподлицо с полными блоками.
+# 4. Радиальная раскладка дуги предвычисленными константами (тригонометрии в
 # выражениях нет): R = 1.75, 11 камней шагом 16.36°, roll = θ − 90° через
-# orient_from_euler((0, yaw, roll)). Угловая полуширина клина half_deg =
-# 8.18° − gap·16.37 (пересчёт зазора в градусы на среднем радиусе) — швы
-# между клиньями выходят радиальными и равномерными.
-# 4. Плоская постель пяты: круглая дуга уводит нижний угол крайнего клина под
+# orient_from_euler((0, yaw, roll)). Угловая полуширина half_deg =
+# 8.18° − gap·16.37 (пересчёт зазора в градусы на среднем радиусе).
+# 5. ДЖИТТЕР ПОСТАНОВКИ (грабли точной кладки): джиттер крена клина вокруг его
+# центра сдвигает радиальные плоскости на ±1.75·sin(δ) (≈4.6 см при 1.5° ≫
+# gap — соседи сомкнулись бы), поэтому клинья джиттеруются ТАНГЕНЦИАЛЬНО
+# вдоль дуги (±6 мм, плоскости остаются радиальными — шов лишь чуть плывёт
+# по ширине) и по глубине z; roll строго θ − 90°. У половинок венца yaw
+# урезан до ±0.5° (их общий вертикальный шов защищён: 2·0.45·sin(0.5°) <
+# gap), у цельных блоков yaw ±3° — постели плоские, контакт не нарушается,
+# а боковые грани столба получают ручную неровность.
+# Заметка истории (PGG < v1.11): константный orient в set() уходил в detail-
+# домен и ТЕНЕВАЛСЯ унаследованной points-колонкой (читатели берут первую
+# находку по points→…→detail) — вся дуга получала yaw цоколя ~8° вместо
+# радиальных кренов. С v1.11 set() заменяет атрибут ГЛОБАЛЬНО (стирает имя
+# с остальных доменов, last-write-wins) — константы работают.
+# 6. Плоская постель пяты: круглая дуга уводит нижний угол крайнего клина под
 # линию пяты — горизонтальный срез мировым полупространством, поднятым якорем
 # к рантаймовой высоте импоста (на gap выше его верха).
-# 5. Цепочные якоря: оседает на грунт только ЛЕВЫЙ цоколь (repeat + distance_to);
+# 7. Цепочные якоря: оседает на грунт только ЛЕВЫЙ цоколь (repeat + distance_to);
 # все остальные якоря выводятся из него transform-translate смещениями — оба
 # столба и дуга держат общий уровень при любых буграх грунта. Правый цоколь с
 # заглублённой на 0.3 юбкой против зависания над локальным понижением.
@@ -47,6 +63,7 @@ r_vr3 = split_rng(world_rng, key = "vr3")
 r_vr2 = split_rng(world_rng, key = "vr2")
 r_vr1 = split_rng(world_rng, key = "vr1")
 r_vr0 = split_rng(world_rng, key = "vr0")
+r_band = split_rng(world_rng, key = "band")
 r_pebble = split_rng(world_rng, key = "pebble")
 r_pebble_moss = split_rng(world_rng, key = "pebble_moss")
 r_scatter = split_rng(world_rng, key = "scatter")
@@ -60,10 +77,10 @@ ground = set_position(grid(size = (10, 8), res = 20), offset = (0, 1, 0) * fbm(s
 def ashlar_pillar(base: geo<points>, joint: f32, rng: rng) -> (body: geo<mesh>, top: geo<points>) {
     """Столб арки в перевязку точной кладкой: цоколь-тумба, 5 венцов (полный
     блок / пара половинок), выступающая плита-импост; у всех блоков плоские
-    постели (ashlar_block) и постоянный зазор joint — без притирки. base —
-    осевший якорь цоколя (центр блока; задаёт уровень всего столба). Выходы:
-    body — меш столба целиком; top — якорь верха импоста (линия пяты) для
-    раскладки дуги."""
+    постели (ashlar_block) и постоянный зазор joint — без притирки. Швы заделаны
+    утопленным ядром-«раствором» (группа mortar). base — осевший якорь цоколя
+    (центр блока; задаёт уровень всего столба). Выходы: body — меш столба
+    целиком; top — якорь верха импоста (линия пяты) для раскладки дуги."""
     f_plinth = masonry.ashlar_block(1.3, 0.75, 1.02, split_rng(rng, key = "f_plinth"))
     f_full = masonry.ashlar_block(0.9, 0.6, 0.78, split_rng(rng, key = "f_full"))
     f_half_l = masonry.ashlar_block(0.44, 0.6, 0.78, split_rng(rng, key = "f_half_l"))
@@ -75,14 +92,15 @@ def ashlar_pillar(base: geo<points>, joint: f32, rng: rng) -> (body: geo<mesh>, 
     f_impost = masonry.ashlar_block(1.2, 0.28, 0.95, split_rng(rng, key = "f_impost"))
     # Якоря: точные смещения от осевшего цоколя (высоты параметризованы joint'ом)
     # + мелкий джиттер: горизонталь (до ±2 см) и yaw — постели плоские, контакт
-    # не нарушается; наклонных компонент euler нет нарочно.
+    # не нарушается; наклонных компонент euler нет нарочно, yaw половинок ≤0.5°
+    # (защита их общего вертикального шва).
     a_plinth = base
     a_full = set(set_position(transform(base, translate = vec3(0, 0.675 + joint, 0)), offset = random_vec(lo = vec3(-0.02, 0, -0.02), hi = (0.02, 0, 0.02), rng = split_rng(rng, key = "j_full"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_full"))))
-    a_half_l = set(set_position(transform(base, translate = vec3(0.0 - 0.22 - joint * 0.5, 1.275 + joint * 2.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half_l"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half_l"))))
-    a_half_r = set(set_position(transform(base, translate = vec3(0.22 + joint * 0.5, 1.275 + joint * 2.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half_r"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half_r"))))
+    a_half_l = set(set_position(transform(base, translate = vec3(0.0 - 0.22 - joint * 0.5, 1.275 + joint * 2.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half_l"))), "orient", orient_from_euler(random_vec(lo = (0, -0.5, 0), hi = (0, 0.5, 0), rng = split_rng(rng, key = "o_half_l"))))
+    a_half_r = set(set_position(transform(base, translate = vec3(0.22 + joint * 0.5, 1.275 + joint * 2.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half_r"))), "orient", orient_from_euler(random_vec(lo = (0, -0.5, 0), hi = (0, 0.5, 0), rng = split_rng(rng, key = "o_half_r"))))
     a_full2 = set(set_position(transform(base, translate = vec3(0, 1.875 + joint * 3.0, 0)), offset = random_vec(lo = vec3(-0.02, 0, -0.02), hi = (0.02, 0, 0.02), rng = split_rng(rng, key = "j_full2"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_full2"))))
-    a_half2_l = set(set_position(transform(base, translate = vec3(0.0 - 0.22 - joint * 0.5, 2.475 + joint * 4.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half2_l"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half2_l"))))
-    a_half2_r = set(set_position(transform(base, translate = vec3(0.22 + joint * 0.5, 2.475 + joint * 4.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half2_r"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half2_r"))))
+    a_half2_l = set(set_position(transform(base, translate = vec3(0.0 - 0.22 - joint * 0.5, 2.475 + joint * 4.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half2_l"))), "orient", orient_from_euler(random_vec(lo = (0, -0.5, 0), hi = (0, 0.5, 0), rng = split_rng(rng, key = "o_half2_l"))))
+    a_half2_r = set(set_position(transform(base, translate = vec3(0.22 + joint * 0.5, 2.475 + joint * 4.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half2_r"))), "orient", orient_from_euler(random_vec(lo = (0, -0.5, 0), hi = (0, 0.5, 0), rng = split_rng(rng, key = "o_half2_r"))))
     a_full3 = set(set_position(transform(base, translate = vec3(0, 3.075 + joint * 5.0, 0)), offset = random_vec(lo = vec3(-0.02, 0, -0.02), hi = (0.02, 0, 0.02), rng = split_rng(rng, key = "j_full3"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_full3"))))
     a_impost = set(set_position(transform(base, translate = vec3(0, 3.515 + joint * 6.0, 0)), offset = random_vec(lo = vec3(-0.01, 0, -0.01), hi = (0.01, 0, 0.01), rng = split_rng(rng, key = "j_impost"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 0), hi = (0, 2, 0), rng = split_rng(rng, key = "o_impost"))))
     i_plinth = sdf_instance_on_points(a_plinth, source = f_plinth)
@@ -104,7 +122,15 @@ def ashlar_pillar(base: geo<points>, joint: f32, rng: rng) -> (body: geo<mesh>, 
     m_half2_r = masonry.stone_from_field(i_half2_r, 1.0, split_rng(rng, key = "m_half2_r"))
     m_full3 = masonry.stone_from_field(i_full3, 1.0, split_rng(rng, key = "m_full3"))
     m_impost = masonry.stone_from_field(i_impost, 1.0, split_rng(rng, key = "m_impost"))
-    body = merge(merge(merge(m_plinth, m_full), merge(m_half_l, m_half_r)), merge(merge(merge(m_full2, m_half2_l), merge(m_half2_r, m_full3)), m_impost))
+    # Ядро-«раствор»: сплошной бокс от земли до самого верха импоста (заделывает
+    # и шов пяты), утоплен за лицевые плоскости (блоки 0.9×0.78 → ядро 0.8×0.68).
+    # Нулевой orient ЯВНО (константой): иначе якорь ядра унаследовал бы yaw
+    # цоколя из base и углы ядра выперли бы за грани блоков.
+    core_h = 3.755 + joint * 6.0
+    core_src = box(size = vec3(0.8, core_h, 0.68))
+    a_core = set(transform(base, translate = vec3(0, 1.7775 + joint * 3.0, 0)), "orient", orient_from_euler((0, 0, 0)))
+    m_core = mark(realize(instance_on_points(a_core, source = core_src)), "mortar", where = true, domain = faces)
+    body = merge(merge(merge(m_plinth, m_full), merge(m_half_l, m_half_r)), merge(merge(merge(m_full2, m_half2_l), merge(m_half2_r, m_full3)), merge(m_impost, m_core)))
     top = transform(base, translate = vec3(0, 3.655 + joint * 6.0, 0))
 }
 
@@ -138,18 +164,20 @@ f_vr2 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_
 f_vr1 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr1, key = "field"))
 f_vr0 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr0, key = "field"))
 
-# Якоря дуги: (±R·cos θ, R·sin θ, джиттер z) от ring_c, roll = θ − 90° + джиттер.
-a_vl0 = set(set_position(transform(ring_c, translate = (-1.732, 0.249, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl0, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 80.4), hi = (0, 2, 83.4), rng = split_rng(r_vl0, key = "o"))))
-a_vl1 = set(set_position(transform(ring_c, translate = (-1.592, 0.727, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl1, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 64.1), hi = (0, 2, 67.1), rng = split_rng(r_vl1, key = "o"))))
-a_vl2 = set(set_position(transform(ring_c, translate = (-1.323, 1.146, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl2, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 47.7), hi = (0, 2, 50.7), rng = split_rng(r_vl2, key = "o"))))
-a_vl3 = set(set_position(transform(ring_c, translate = (-0.946, 1.472, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl3, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 31.3), hi = (0, 2, 34.3), rng = split_rng(r_vl3, key = "o"))))
-a_vl4 = set(set_position(transform(ring_c, translate = (-0.493, 1.679, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl4, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 15), hi = (0, 2, 18), rng = split_rng(r_vl4, key = "o"))))
-a_key = set(set_position(transform(ring_c, translate = (0, 1.75, 0)), offset = random_vec(lo = (0, 0, -0.015), hi = (0, 0, 0.015), rng = split_rng(r_key, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -1.5, -1), hi = (0, 1.5, 1), rng = split_rng(r_key, key = "o"))))
-a_vr4 = set(set_position(transform(ring_c, translate = (0.493, 1.679, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr4, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -18), hi = (0, 2, -15), rng = split_rng(r_vr4, key = "o"))))
-a_vr3 = set(set_position(transform(ring_c, translate = (0.946, 1.472, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr3, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -34.3), hi = (0, 2, -31.3), rng = split_rng(r_vr3, key = "o"))))
-a_vr2 = set(set_position(transform(ring_c, translate = (1.323, 1.146, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr2, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -50.7), hi = (0, 2, -47.7), rng = split_rng(r_vr2, key = "o"))))
-a_vr1 = set(set_position(transform(ring_c, translate = (1.592, 0.727, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr1, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -67.1), hi = (0, 2, -64.1), rng = split_rng(r_vr1, key = "o"))))
-a_vr0 = set(set_position(transform(ring_c, translate = (1.732, 0.249, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr0, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -83.4), hi = (0, 2, -80.4), rng = split_rng(r_vr0, key = "o"))))
+# Якоря дуги: (±R·cos θ, R·sin θ) от ring_c, roll = θ − 90° СТРОГО (джиттер
+# крена сдвигал бы радиальные плоскости на ±1.75·sin δ ≫ gap). Джиттер —
+# тангенциальный вдоль дуги (±6 мм, направление τ = (−sin θ, cos θ)) и по z.
+a_vl0 = set(set_position(transform(ring_c, translate = (-1.732, 0.249, 0)), offset = vec3(-0.1423, -0.9898, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vl0, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vl0, key = "j_z"))), "orient", orient_from_euler((0, 0, 81.82)))
+a_vl1 = set(set_position(transform(ring_c, translate = (-1.592, 0.727, 0)), offset = vec3(-0.4155, -0.9096, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vl1, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vl1, key = "j_z"))), "orient", orient_from_euler((0, 0, 65.45)))
+a_vl2 = set(set_position(transform(ring_c, translate = (-1.323, 1.146, 0)), offset = vec3(-0.6549, -0.756, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vl2, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vl2, key = "j_z"))), "orient", orient_from_euler((0, 0, 49.09)))
+a_vl3 = set(set_position(transform(ring_c, translate = (-0.946, 1.472, 0)), offset = vec3(-0.8413, -0.5406, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vl3, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vl3, key = "j_z"))), "orient", orient_from_euler((0, 0, 32.73)))
+a_vl4 = set(set_position(transform(ring_c, translate = (-0.493, 1.679, 0)), offset = vec3(-0.9595, -0.2817, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vl4, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vl4, key = "j_z"))), "orient", orient_from_euler((0, 0, 16.36)))
+a_key = set(set_position(transform(ring_c, translate = (0, 1.75, 0)), offset = vec3(-1, 0, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_key, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.015, hi = 0.015, rng = split_rng(r_key, key = "j_z"))), "orient", orient_from_euler((0, 0, 0)))
+a_vr4 = set(set_position(transform(ring_c, translate = (0.493, 1.679, 0)), offset = vec3(-0.9595, 0.2817, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vr4, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vr4, key = "j_z"))), "orient", orient_from_euler((0, 0, -16.36)))
+a_vr3 = set(set_position(transform(ring_c, translate = (0.946, 1.472, 0)), offset = vec3(-0.8413, 0.5406, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vr3, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vr3, key = "j_z"))), "orient", orient_from_euler((0, 0, -32.73)))
+a_vr2 = set(set_position(transform(ring_c, translate = (1.323, 1.146, 0)), offset = vec3(-0.6549, 0.756, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vr2, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vr2, key = "j_z"))), "orient", orient_from_euler((0, 0, -49.09)))
+a_vr1 = set(set_position(transform(ring_c, translate = (1.592, 0.727, 0)), offset = vec3(-0.4155, 0.9096, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vr1, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vr1, key = "j_z"))), "orient", orient_from_euler((0, 0, -65.45)))
+a_vr0 = set(set_position(transform(ring_c, translate = (1.732, 0.249, 0)), offset = vec3(-0.1423, 0.9898, 0) * random(lo = -0.006, hi = 0.006, rng = split_rng(r_vr0, key = "j_t")) + vec3(0, 0, 1) * random(lo = -0.02, hi = 0.02, rng = split_rng(r_vr0, key = "j_z"))), "orient", orient_from_euler((0, 0, -81.82)))
 
 i_vl0 = sdf_instance_on_points(a_vl0, source = f_vl0)
 i_vl1 = sdf_instance_on_points(a_vl1, source = f_vl1)
@@ -172,6 +200,24 @@ cut_pt_r = transform(top_r, translate = vec3(0, 8.0 + gap, 0))
 cut_slab_r = sdf_instance_on_points(cut_pt_r, source = sdf_box(size = (20, 16, 20)))
 i_vl0f = sdf_intersect(i_vl0, cut_slab_l)
 i_vr0f = sdf_intersect(i_vr0, cut_slab_r)
+
+# Растворный бандаж дуги: те же клинья, но реже/уже/ниже (утоплен ~3–5 см) и с
+# полушириной 8.4° (куски перекрываются — бандаж непрерывный). Якоря ТОЧНЫЕ
+# (без джиттера), один вызов instance на слитых точках = union кусков.
+b_vl0 = set(transform(ring_c, translate = (-1.732, 0.249, 0)), "orient", orient_from_euler((0, 0, 81.82)))
+b_vl1 = set(transform(ring_c, translate = (-1.592, 0.727, 0)), "orient", orient_from_euler((0, 0, 65.45)))
+b_vl2 = set(transform(ring_c, translate = (-1.323, 1.146, 0)), "orient", orient_from_euler((0, 0, 49.09)))
+b_vl3 = set(transform(ring_c, translate = (-0.946, 1.472, 0)), "orient", orient_from_euler((0, 0, 32.73)))
+b_vl4 = set(transform(ring_c, translate = (-0.493, 1.679, 0)), "orient", orient_from_euler((0, 0, 16.36)))
+b_key = set(transform(ring_c, translate = (0, 1.75, 0)), "orient", orient_from_euler((0, 0, 0)))
+b_vr4 = set(transform(ring_c, translate = (0.493, 1.679, 0)), "orient", orient_from_euler((0, 0, -16.36)))
+b_vr3 = set(transform(ring_c, translate = (0.946, 1.472, 0)), "orient", orient_from_euler((0, 0, -32.73)))
+b_vr2 = set(transform(ring_c, translate = (1.323, 1.146, 0)), "orient", orient_from_euler((0, 0, -49.09)))
+b_vr1 = set(transform(ring_c, translate = (1.592, 0.727, 0)), "orient", orient_from_euler((0, 0, -65.45)))
+b_vr0 = set(transform(ring_c, translate = (1.732, 0.249, 0)), "orient", orient_from_euler((0, 0, -81.82)))
+band_pts = merge(merge(merge(b_vl0, b_vl1), merge(b_vl2, b_vl3)), merge(merge(merge(b_vl4, b_key), merge(b_vr4, b_vr3)), merge(merge(b_vr2, b_vr1), b_vr0)))
+f_band = masonry.voussoir_field(radius = 1.75, height = 0.76, depth = 0.75, half_deg = 8.4, rng = split_rng(r_band, key = "field"))
+m_band = mark(masonry.stone_from_field(sdf_instance_on_points(band_pts, source = f_band), 0.85, split_rng(r_band, key = "moss")), "mortar", where = true, domain = faces)
 
 m_vl0 = masonry.stone_from_field(i_vl0f, 0.85, split_rng(r_vl0, key = "moss"))
 m_vl1 = masonry.stone_from_field(i_vl1, 0.85, split_rng(r_vl1, key = "moss"))
@@ -197,6 +243,6 @@ pebbles = realize(instance_on_points(spots, source = pebble0))
 
 pillars = merge(body_l, body_r)
 arch = merge(merge(merge(m_vl0, m_vl1), merge(m_vl2, m_vl3)), merge(merge(m_vl4, m_key), merge(m_vr4, m_vr3)))
-arch_ring = merge(arch, merge(merge(m_vr2, m_vr1), m_vr0))
+arch_ring = merge(merge(arch, merge(merge(m_vr2, m_vr1), m_vr0)), m_band)
 scene = transform(merge(merge(pillars, arch_ring), merge(pebbles, ground)), rotate = (0, 8, 0))
 output scene
