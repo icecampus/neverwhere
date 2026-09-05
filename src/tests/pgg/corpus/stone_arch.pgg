@@ -1,42 +1,52 @@
 param seed: int = 7
-param gap: f32 = 0.05
+param gap: f32 = 0.02
 
-# Арка из грубых валунов («циклопическая» кладка): два столба-опоры по два
-# камня и полукруглая дуга из семи сводчатых камней с замковым в центре.
+# Арка из тёсаных блоков (ashlar) по фото-референсу: два столба в перевязку
+# (цоколь-тумба, чередование полных блоков и пар половинок, выступающая плита-
+# импост) и полукруглая дуга из 11 сводчатых клиньев с укрупнённым замковым.
 # 
-# Приёмы (наследуют stone_row.pgg, def'ы вынесены в lib/masonry.pgg):
-# 1. Радиальная ориентация сводчатых камней: локальная ось +Y валуна смотрит
-# из центра дуги — orient_from_euler((0, yaw, theta - 90)) (glm: компоненты
-# (pitch X, yaw Y, roll Z), применяются Z → X → Y, поэтому yaw-джиттер крутит
-# уже повёрнутый камень вокруг мировой вертикали). Тригонометрии в выражениях
-# нет, поэтому позиции дуги — предвычисленные константы (R = 1.75, центр дуги
-# на y = 1.95, theta = 12°..168° с шагом 26°).
-# 2. Притирка контактов (sdf_grind): каждый камень режется по СРЕДИННОЙ
-# поверхности взаимного проникновения с соседями по цепочке (подошва столба →
-# верх столба → пята → ... → замок → ... → второй столб) — операция
-# симметрична, порядок кладки не важен; щель выходит ровно gap независимо от
-# глубины перекрытия. Камни сидят друг на друге без клиппинга и долин.
-# 3. Оседанию (repeat + distance_to) подвергаются только нижние камни столбов
-# и галька: верхние камни и дуга стоят на соседях, а не на грунте, поэтому
-# ставятся геометрически с перекрытием 0.2 (оно же глотает ±12 см бугров
-# грунта под осевшей подошвой).
+# Приёмы (генераторы — в lib/masonry.pgg):
+# 1. ТОЧНАЯ кладка вместо притирки: у блоков (ashlar_block) постели и боковые
+# грани обрезаны в плоскость ПОСЛЕ fbm-дисплейса (срез — верхняя граница
+# поверхности, проникновение невозможно), у клиньев (voussoir_field) плоские
+# радиальные боковые грани, проходящие через центр дуги. Всё выставляется с
+# постоянным зазором gap — швы ровные и тонкие, как на референсе. Притирка
+# (sdf_grind) здесь больше не нужна: она для нерегулярных камней (stone_row),
+# а тесаные блоки стыкуются плоскостями.
+# 2. Столб — def с мультивыходом (тело + якорь линии пяты geo<points>): вертикаль
+# столба параметризована joint'ом, половинки венца смещены на ±(0.22+joint/2) —
+# вертикальный шов между ними выходит ровно gap, наружные грани заподлицо с
+# полными блоками. Джиттер постановки только ВОКРУГ ВЕРТИКАЛИ (yaw): наклон
+# качал бы плоскую постель, а поворот — нет.
+# 3. Радиальная раскладка дуги предвычисленными константами (тригонометрии в
+# выражениях нет): R = 1.75, 11 камней шагом 16.36°, roll = θ − 90° через
+# orient_from_euler((0, yaw, roll)). Угловая полуширина клина half_deg =
+# 8.18° − gap·16.37 (пересчёт зазора в градусы на среднем радиусе) — швы
+# между клиньями выходят радиальными и равномерными.
+# 4. Плоская постель пяты: круглая дуга уводит нижний угол крайнего клина под
+# линию пяты — горизонтальный срез мировым полупространством, поднятым якорем
+# к рантаймовой высоте импоста (на gap выше его верха).
+# 5. Цепочные якоря: оседает на грунт только ЛЕВЫЙ цоколь (repeat + distance_to);
+# все остальные якоря выводятся из него transform-translate смещениями — оба
+# столба и дуга держат общий уровень при любых буграх грунта. Правый цоколь с
+# заглублённой на 0.3 юбкой против зависания над локальным понижением.
 import lib.masonry
 
 world_rng = rng_from_seed(seed)
-r_pier_lb = split_rng(world_rng, key = "pier_lb")
-r_pier_lt = split_rng(world_rng, key = "pier_lt")
-r_pier_rb = split_rng(world_rng, key = "pier_rb")
-r_pier_rt = split_rng(world_rng, key = "pier_rt")
-r_arc_l1 = split_rng(world_rng, key = "arc_l1")
-r_arc_l2 = split_rng(world_rng, key = "arc_l2")
-r_arc_l3 = split_rng(world_rng, key = "arc_l3")
-r_key = split_rng(world_rng, key = "key")
-r_arc_r3 = split_rng(world_rng, key = "arc_r3")
-r_arc_r2 = split_rng(world_rng, key = "arc_r2")
-r_arc_r1 = split_rng(world_rng, key = "arc_r1")
-r_yaw = split_rng(world_rng, key = "yaw_jitter")
-r_moss = split_rng(world_rng, key = "moss")
 r_ground = split_rng(world_rng, key = "ground")
+r_pier_l = split_rng(world_rng, key = "pier_l")
+r_pier_r = split_rng(world_rng, key = "pier_r")
+r_vl0 = split_rng(world_rng, key = "vl0")
+r_vl1 = split_rng(world_rng, key = "vl1")
+r_vl2 = split_rng(world_rng, key = "vl2")
+r_vl3 = split_rng(world_rng, key = "vl3")
+r_vl4 = split_rng(world_rng, key = "vl4")
+r_key = split_rng(world_rng, key = "key")
+r_vr4 = split_rng(world_rng, key = "vr4")
+r_vr3 = split_rng(world_rng, key = "vr3")
+r_vr2 = split_rng(world_rng, key = "vr2")
+r_vr1 = split_rng(world_rng, key = "vr1")
+r_vr0 = split_rng(world_rng, key = "vr0")
 r_pebble = split_rng(world_rng, key = "pebble")
 r_pebble_moss = split_rng(world_rng, key = "pebble_moss")
 r_scatter = split_rng(world_rng, key = "scatter")
@@ -46,90 +56,134 @@ r_porient = split_rng(world_rng, key = "pebble_orient")
 # Грунт: пологие fbm-бугры до ~12 см над базовой плоскостью.
 ground = set_position(grid(size = (10, 8), res = 20), offset = (0, 1, 0) * fbm(scale = 0.55, octaves = 3, rng = r_ground) * 0.12)
 
-# Формы камней (центрированы в origin; постановка — якорями ниже). У сводчатых
-# камней локальная ось Y — радиальная (после поворота смотрит из центра дуги),
-# X — вдоль дуги: он чуть шире хорды 0.79, чтобы соседи перекрывались.
-f_pier_lb = masonry.boulder_field(size = 1.8, aspect = (1.15, 0.85, 1.05), cracks = 3, rng = r_pier_lb)
-f_pier_lt = masonry.boulder_field(size = 1.5, aspect = (1.05, 0.8, 0.95), cracks = 2, rng = r_pier_lt)
-f_pier_rb = masonry.boulder_field(size = 1.75, aspect = (1.1, 0.85, 1.0), cracks = 3, rng = r_pier_rb)
-f_pier_rt = masonry.boulder_field(size = 1.45, aspect = (1.0, 0.8, 0.95), cracks = 2, rng = r_pier_rt)
-f_arc_l1 = masonry.boulder_field(size = 1.0, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_l1)
-f_arc_l2 = masonry.boulder_field(size = 0.95, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_l2)
-f_arc_l3 = masonry.boulder_field(size = 0.9, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_l3)
-f_key = masonry.boulder_field(size = 1.05, aspect = (1.05, 1.0, 0.95), cracks = 3, rng = r_key)
-f_arc_r3 = masonry.boulder_field(size = 0.9, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_r3)
-f_arc_r2 = masonry.boulder_field(size = 0.95, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_r2)
-f_arc_r1 = masonry.boulder_field(size = 1.0, aspect = (0.95, 1.05, 0.9), cracks = 2, rng = r_arc_r1)
+# --- столб (def с мультивыходом: тело + якорь линии пяты) ----------------------
+def ashlar_pillar(base: geo<points>, joint: f32, rng: rng) -> (body: geo<mesh>, top: geo<points>) {
+    """Столб арки в перевязку точной кладкой: цоколь-тумба, 5 венцов (полный
+    блок / пара половинок), выступающая плита-импост; у всех блоков плоские
+    постели (ashlar_block) и постоянный зазор joint — без притирки. base —
+    осевший якорь цоколя (центр блока; задаёт уровень всего столба). Выходы:
+    body — меш столба целиком; top — якорь верха импоста (линия пяты) для
+    раскладки дуги."""
+    f_plinth = masonry.ashlar_block(1.3, 0.75, 1.02, split_rng(rng, key = "f_plinth"))
+    f_full = masonry.ashlar_block(0.9, 0.6, 0.78, split_rng(rng, key = "f_full"))
+    f_half_l = masonry.ashlar_block(0.44, 0.6, 0.78, split_rng(rng, key = "f_half_l"))
+    f_half_r = masonry.ashlar_block(0.44, 0.6, 0.78, split_rng(rng, key = "f_half_r"))
+    f_full2 = masonry.ashlar_block(0.9, 0.6, 0.78, split_rng(rng, key = "f_full2"))
+    f_half2_l = masonry.ashlar_block(0.44, 0.6, 0.78, split_rng(rng, key = "f_half2_l"))
+    f_half2_r = masonry.ashlar_block(0.44, 0.6, 0.78, split_rng(rng, key = "f_half2_r"))
+    f_full3 = masonry.ashlar_block(0.9, 0.6, 0.78, split_rng(rng, key = "f_full3"))
+    f_impost = masonry.ashlar_block(1.2, 0.28, 0.95, split_rng(rng, key = "f_impost"))
+    # Якоря: точные смещения от осевшего цоколя (высоты параметризованы joint'ом)
+    # + мелкий джиттер: горизонталь (до ±2 см) и yaw — постели плоские, контакт
+    # не нарушается; наклонных компонент euler нет нарочно.
+    a_plinth = base
+    a_full = set(set_position(transform(base, translate = vec3(0, 0.675 + joint, 0)), offset = random_vec(lo = vec3(-0.02, 0, -0.02), hi = (0.02, 0, 0.02), rng = split_rng(rng, key = "j_full"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_full"))))
+    a_half_l = set(set_position(transform(base, translate = vec3(0.0 - 0.22 - joint * 0.5, 1.275 + joint * 2.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half_l"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half_l"))))
+    a_half_r = set(set_position(transform(base, translate = vec3(0.22 + joint * 0.5, 1.275 + joint * 2.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half_r"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half_r"))))
+    a_full2 = set(set_position(transform(base, translate = vec3(0, 1.875 + joint * 3.0, 0)), offset = random_vec(lo = vec3(-0.02, 0, -0.02), hi = (0.02, 0, 0.02), rng = split_rng(rng, key = "j_full2"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_full2"))))
+    a_half2_l = set(set_position(transform(base, translate = vec3(0.0 - 0.22 - joint * 0.5, 2.475 + joint * 4.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half2_l"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half2_l"))))
+    a_half2_r = set(set_position(transform(base, translate = vec3(0.22 + joint * 0.5, 2.475 + joint * 4.0, 0)), offset = random_vec(lo = vec3(-0.015, 0, -0.015), hi = (0.015, 0, 0.015), rng = split_rng(rng, key = "j_half2_r"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_half2_r"))))
+    a_full3 = set(set_position(transform(base, translate = vec3(0, 3.075 + joint * 5.0, 0)), offset = random_vec(lo = vec3(-0.02, 0, -0.02), hi = (0.02, 0, 0.02), rng = split_rng(rng, key = "j_full3"))), "orient", orient_from_euler(random_vec(lo = (0, -3, 0), hi = (0, 3, 0), rng = split_rng(rng, key = "o_full3"))))
+    a_impost = set(set_position(transform(base, translate = vec3(0, 3.515 + joint * 6.0, 0)), offset = random_vec(lo = vec3(-0.01, 0, -0.01), hi = (0.01, 0, 0.01), rng = split_rng(rng, key = "j_impost"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 0), hi = (0, 2, 0), rng = split_rng(rng, key = "o_impost"))))
+    i_plinth = sdf_instance_on_points(a_plinth, source = f_plinth)
+    i_full = sdf_instance_on_points(a_full, source = f_full)
+    i_half_l = sdf_instance_on_points(a_half_l, source = f_half_l)
+    i_half_r = sdf_instance_on_points(a_half_r, source = f_half_r)
+    i_full2 = sdf_instance_on_points(a_full2, source = f_full2)
+    i_half2_l = sdf_instance_on_points(a_half2_l, source = f_half2_l)
+    i_half2_r = sdf_instance_on_points(a_half2_r, source = f_half2_r)
+    i_full3 = sdf_instance_on_points(a_full3, source = f_full3)
+    i_impost = sdf_instance_on_points(a_impost, source = f_impost)
+    # Меши (мох — на верхних гранях, после извлечения; швы — чистая геометрия).
+    m_plinth = masonry.stone_from_field(i_plinth, 1.0, split_rng(rng, key = "m_plinth"))
+    m_full = masonry.stone_from_field(i_full, 1.0, split_rng(rng, key = "m_full"))
+    m_half_l = masonry.stone_from_field(i_half_l, 1.0, split_rng(rng, key = "m_half_l"))
+    m_half_r = masonry.stone_from_field(i_half_r, 1.0, split_rng(rng, key = "m_half_r"))
+    m_full2 = masonry.stone_from_field(i_full2, 1.0, split_rng(rng, key = "m_full2"))
+    m_half2_l = masonry.stone_from_field(i_half2_l, 1.0, split_rng(rng, key = "m_half2_l"))
+    m_half2_r = masonry.stone_from_field(i_half2_r, 1.0, split_rng(rng, key = "m_half2_r"))
+    m_full3 = masonry.stone_from_field(i_full3, 1.0, split_rng(rng, key = "m_full3"))
+    m_impost = masonry.stone_from_field(i_impost, 1.0, split_rng(rng, key = "m_impost"))
+    body = merge(merge(merge(m_plinth, m_full), merge(m_half_l, m_half_r)), merge(merge(merge(m_full2, m_half2_l), merge(m_half2_r, m_full3)), m_impost))
+    top = transform(base, translate = vec3(0, 3.655 + joint * 6.0, 0))
+}
 
-# Якоря столбов: нижние стартуют на y = 0.35 (выше бугров) и оседают зоной,
-# верхние ставятся с перекрытием 0.25 над верхом нижних (~1.26).
-a_pier_lb = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, 8, -2), hi = (0, 20, 2), rng = split_rng(r_yaw, key = "pier_lb")))), translate = (-1.85, 0.35, 0))
-a_pier_rb = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -22, -2), hi = (0, -10, 2), rng = split_rng(r_yaw, key = "pier_rb")))), translate = (1.87, 0.35, -0.05))
-a_pier_lt = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (-2, -26, 1), hi = (2, -14, 5), rng = split_rng(r_yaw, key = "pier_lt")))), translate = (-1.83, 1.61, 0.05))
-a_pier_rt = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (-2, 20, -5), hi = (2, 32, -1), rng = split_rng(r_yaw, key = "pier_rt")))), translate = (1.84, 1.6, 0))
-
-# Якоря дуги: позиции — (±R·cos θ, 1.95 + R·sin θ, джиттер z), roll = θ − 90°.
-a_arc_l1 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, 75.5), hi = (0, 8, 80.5), rng = split_rng(r_yaw, key = "arc_l1")))), translate = (-1.712, 2.314, 0))
-a_arc_l2 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, 49.5), hi = (0, 8, 54.5), rng = split_rng(r_yaw, key = "arc_l2")))), translate = (-1.379, 3.027, 0.04))
-a_arc_l3 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, 23.5), hi = (0, 8, 28.5), rng = split_rng(r_yaw, key = "arc_l3")))), translate = (-0.767, 3.523, -0.03))
-a_key = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -6, -2), hi = (0, 6, 2), rng = split_rng(r_yaw, key = "key")))), translate = (0, 3.72, 0))
-a_arc_r3 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, -28.5), hi = (0, 8, -23.5), rng = split_rng(r_yaw, key = "arc_r3")))), translate = (0.767, 3.523, 0.03))
-a_arc_r2 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, -54.5), hi = (0, 8, -49.5), rng = split_rng(r_yaw, key = "arc_r2")))), translate = (1.379, 3.027, -0.04))
-a_arc_r1 = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = (0, -8, -80.5), hi = (0, 8, -75.5), rng = split_rng(r_yaw, key = "arc_r1")))), translate = (1.712, 2.314, 0))
-
-# Оседание на грунт: только нижние камни столбов (12 итераций, затухающий шаг).
-s_pier_lb = repeat (a_pier_lb, iterations = 12) |s| {
+# --- постановка: оседает только левый цоколь, остальное — цепочкой от него -----
+a_base = set(transform(mesh_line(count = 1, length = 0.0), translate = (-1.75, 0.5, 0)), "orient", orient_from_euler(random_vec(lo = (0, 6, 0), hi = (0, 14, 0), rng = split_rng(r_pier_l, key = "base_yaw"))))
+s_base = repeat (a_base, iterations = 12) |s| {
     s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
 }
-s_pier_rb = repeat (a_pier_rb, iterations = 12) |s| {
-    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
-}
+# Якорь сел на грунт → центр тумбы на 0.075 выше контакта (юбка 0.3 в грунте).
+lift_base = set_position(s_base, offset = (0, 0.075, 0))
 
-# Якорь сел на грунт → поднимаем на 0.4·высоту камня минус посадка ~0.12.
-lift_pier_lb = set_position(s_pier_lb, offset = (0, 0.49, 0))
-lift_pier_rb = set_position(s_pier_rb, offset = (0, 0.47, 0))
+body_l, top_l = ashlar_pillar(base = lift_base, joint = gap, rng = r_pier_l)
+base_r = set(transform(lift_base, translate = (3.5, 0, 0)), "orient", orient_from_euler(random_vec(lo = (0, -14, 0), hi = (0, -6, 0), rng = split_rng(r_pier_r, key = "base_yaw"))))
+body_r, top_r = ashlar_pillar(base = base_r, joint = gap, rng = r_pier_r)
 
-i_pier_lb = sdf_instance_on_points(lift_pier_lb, source = f_pier_lb)
-i_pier_lt = sdf_instance_on_points(a_pier_lt, source = f_pier_lt)
-i_pier_rb = sdf_instance_on_points(lift_pier_rb, source = f_pier_rb)
-i_pier_rt = sdf_instance_on_points(a_pier_rt, source = f_pier_rt)
-i_arc_l1 = sdf_instance_on_points(a_arc_l1, source = f_arc_l1)
-i_arc_l2 = sdf_instance_on_points(a_arc_l2, source = f_arc_l2)
-i_arc_l3 = sdf_instance_on_points(a_arc_l3, source = f_arc_l3)
+# Центр дуги — на линии пяты + gap (постель пяты над верхом импоста) посередине.
+ring_c = transform(top_l, translate = vec3(1.75, gap, 0))
+
+# --- дуга: 11 клиньев, шаг 16.36°, радиальные швы толщиной gap -----------------
+# Угловая полуширина: 8.18° минус пересчёт зазора в градусы на среднем радиусе.
+voussoir_half = 8.18 - gap * 16.37
+f_vl0 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vl0, key = "field"))
+f_vl1 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vl1, key = "field"))
+f_vl2 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vl2, key = "field"))
+f_vl3 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vl3, key = "field"))
+f_vl4 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vl4, key = "field"))
+f_key = masonry.voussoir_field(radius = 1.75, height = 0.95, depth = 0.88, half_deg = voussoir_half, rng = split_rng(r_key, key = "field"))
+f_vr4 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr4, key = "field"))
+f_vr3 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr3, key = "field"))
+f_vr2 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr2, key = "field"))
+f_vr1 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr1, key = "field"))
+f_vr0 = masonry.voussoir_field(radius = 1.75, height = 0.82, depth = 0.85, half_deg = voussoir_half, rng = split_rng(r_vr0, key = "field"))
+
+# Якоря дуги: (±R·cos θ, R·sin θ, джиттер z) от ring_c, roll = θ − 90° + джиттер.
+a_vl0 = set(set_position(transform(ring_c, translate = (-1.732, 0.249, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl0, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 80.4), hi = (0, 2, 83.4), rng = split_rng(r_vl0, key = "o"))))
+a_vl1 = set(set_position(transform(ring_c, translate = (-1.592, 0.727, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl1, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 64.1), hi = (0, 2, 67.1), rng = split_rng(r_vl1, key = "o"))))
+a_vl2 = set(set_position(transform(ring_c, translate = (-1.323, 1.146, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl2, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 47.7), hi = (0, 2, 50.7), rng = split_rng(r_vl2, key = "o"))))
+a_vl3 = set(set_position(transform(ring_c, translate = (-0.946, 1.472, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl3, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 31.3), hi = (0, 2, 34.3), rng = split_rng(r_vl3, key = "o"))))
+a_vl4 = set(set_position(transform(ring_c, translate = (-0.493, 1.679, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vl4, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, 15), hi = (0, 2, 18), rng = split_rng(r_vl4, key = "o"))))
+a_key = set(set_position(transform(ring_c, translate = (0, 1.75, 0)), offset = random_vec(lo = (0, 0, -0.015), hi = (0, 0, 0.015), rng = split_rng(r_key, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -1.5, -1), hi = (0, 1.5, 1), rng = split_rng(r_key, key = "o"))))
+a_vr4 = set(set_position(transform(ring_c, translate = (0.493, 1.679, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr4, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -18), hi = (0, 2, -15), rng = split_rng(r_vr4, key = "o"))))
+a_vr3 = set(set_position(transform(ring_c, translate = (0.946, 1.472, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr3, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -34.3), hi = (0, 2, -31.3), rng = split_rng(r_vr3, key = "o"))))
+a_vr2 = set(set_position(transform(ring_c, translate = (1.323, 1.146, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr2, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -50.7), hi = (0, 2, -47.7), rng = split_rng(r_vr2, key = "o"))))
+a_vr1 = set(set_position(transform(ring_c, translate = (1.592, 0.727, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr1, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -67.1), hi = (0, 2, -64.1), rng = split_rng(r_vr1, key = "o"))))
+a_vr0 = set(set_position(transform(ring_c, translate = (1.732, 0.249, 0)), offset = random_vec(lo = (0, 0, -0.02), hi = (0, 0, 0.02), rng = split_rng(r_vr0, key = "j"))), "orient", orient_from_euler(random_vec(lo = (0, -2, -83.4), hi = (0, 2, -80.4), rng = split_rng(r_vr0, key = "o"))))
+
+i_vl0 = sdf_instance_on_points(a_vl0, source = f_vl0)
+i_vl1 = sdf_instance_on_points(a_vl1, source = f_vl1)
+i_vl2 = sdf_instance_on_points(a_vl2, source = f_vl2)
+i_vl3 = sdf_instance_on_points(a_vl3, source = f_vl3)
+i_vl4 = sdf_instance_on_points(a_vl4, source = f_vl4)
 i_key = sdf_instance_on_points(a_key, source = f_key)
-i_arc_r3 = sdf_instance_on_points(a_arc_r3, source = f_arc_r3)
-i_arc_r2 = sdf_instance_on_points(a_arc_r2, source = f_arc_r2)
-i_arc_r1 = sdf_instance_on_points(a_arc_r1, source = f_arc_r1)
+i_vr4 = sdf_instance_on_points(a_vr4, source = f_vr4)
+i_vr3 = sdf_instance_on_points(a_vr3, source = f_vr3)
+i_vr2 = sdf_instance_on_points(a_vr2, source = f_vr2)
+i_vr1 = sdf_instance_on_points(a_vr1, source = f_vr1)
+i_vr0 = sdf_instance_on_points(a_vr0, source = f_vr0)
 
-# Контактные поверхности — ПРИТИРКА (sdf_grind): каждый камень режется по
-# СРЕДИННОЙ поверхности взаимного проникновения с соседями (max(A, A−B+gap)),
-# операция симметрична — порядок кладки не нужен. Щель выходит ровно gap независимо
-# от глубины перекрытия, врезка в каждый камень — половина перекрытия (вдвое
-# мельче одностороннего отпечатка), при gap = 0 камни делили бы одну общую
-# контактную поверхность. (Замеры геометрии швов — SdfImprint/SdfGrind в sdf_test.)
-c_pier_lb = sdf_grind(i_pier_lb, i_pier_lt, gap = gap)
-c_pier_lt = sdf_grind(i_pier_lt, sdf_union(i_pier_lb, i_arc_l1), gap = gap)
-c_arc_l1 = sdf_grind(i_arc_l1, sdf_union(i_pier_lt, i_arc_l2), gap = gap)
-c_arc_l2 = sdf_grind(i_arc_l2, sdf_union(i_arc_l1, i_arc_l3), gap = gap)
-c_arc_l3 = sdf_grind(i_arc_l3, sdf_union(i_arc_l2, i_key), gap = gap)
-c_key = sdf_grind(i_key, sdf_union(i_arc_l3, i_arc_r3), gap = gap)
-c_arc_r3 = sdf_grind(i_arc_r3, sdf_union(i_key, i_arc_r2), gap = gap)
-c_arc_r2 = sdf_grind(i_arc_r2, sdf_union(i_arc_r3, i_arc_r1), gap = gap)
-c_arc_r1 = sdf_grind(i_arc_r1, sdf_union(i_arc_r2, i_pier_rt), gap = gap)
-c_pier_rt = sdf_grind(i_pier_rt, sdf_union(i_arc_r1, i_pier_rb), gap = gap)
-c_pier_rb = sdf_grind(i_pier_rb, i_pier_rt, gap = gap)
+# Плоская постель пят: горизонтальный срез на уровне линии пяты (= верх импоста
+# + gap). Полупространства подняты к рантаймовой высоте якорями от top_l/top_r:
+# бокс 20×16×20, низ на линии пяты.
+cut_pt_l = transform(top_l, translate = vec3(0, 8.0 + gap, 0))
+cut_slab_l = sdf_instance_on_points(cut_pt_l, source = sdf_box(size = (20, 16, 20)))
+cut_pt_r = transform(top_r, translate = vec3(0, 8.0 + gap, 0))
+cut_slab_r = sdf_instance_on_points(cut_pt_r, source = sdf_box(size = (20, 16, 20)))
+i_vl0f = sdf_intersect(i_vl0, cut_slab_l)
+i_vr0f = sdf_intersect(i_vr0, cut_slab_r)
 
-m_pier_lb = masonry.stone_from_field(c_pier_lb, 1.8, split_rng(r_moss, key = "pier_lb"))
-m_pier_lt = masonry.stone_from_field(c_pier_lt, 1.5, split_rng(r_moss, key = "pier_lt"))
-m_pier_rb = masonry.stone_from_field(c_pier_rb, 1.75, split_rng(r_moss, key = "pier_rb"))
-m_pier_rt = masonry.stone_from_field(c_pier_rt, 1.45, split_rng(r_moss, key = "pier_rt"))
-m_arc_l1 = masonry.stone_from_field(c_arc_l1, 1.0, split_rng(r_moss, key = "arc_l1"))
-m_arc_l2 = masonry.stone_from_field(c_arc_l2, 0.95, split_rng(r_moss, key = "arc_l2"))
-m_arc_l3 = masonry.stone_from_field(c_arc_l3, 0.9, split_rng(r_moss, key = "arc_l3"))
-m_key = masonry.stone_from_field(c_key, 1.05, split_rng(r_moss, key = "key"))
-m_arc_r3 = masonry.stone_from_field(c_arc_r3, 0.9, split_rng(r_moss, key = "arc_r3"))
-m_arc_r2 = masonry.stone_from_field(c_arc_r2, 0.95, split_rng(r_moss, key = "arc_r2"))
-m_arc_r1 = masonry.stone_from_field(c_arc_r1, 1.0, split_rng(r_moss, key = "arc_r1"))
+m_vl0 = masonry.stone_from_field(i_vl0f, 0.85, split_rng(r_vl0, key = "moss"))
+m_vl1 = masonry.stone_from_field(i_vl1, 0.85, split_rng(r_vl1, key = "moss"))
+m_vl2 = masonry.stone_from_field(i_vl2, 0.85, split_rng(r_vl2, key = "moss"))
+m_vl3 = masonry.stone_from_field(i_vl3, 0.85, split_rng(r_vl3, key = "moss"))
+m_vl4 = masonry.stone_from_field(i_vl4, 0.85, split_rng(r_vl4, key = "moss"))
+m_key = masonry.stone_from_field(i_key, 0.9, split_rng(r_key, key = "moss"))
+m_vr4 = masonry.stone_from_field(i_vr4, 0.85, split_rng(r_vr4, key = "moss"))
+m_vr3 = masonry.stone_from_field(i_vr3, 0.85, split_rng(r_vr3, key = "moss"))
+m_vr2 = masonry.stone_from_field(i_vr2, 0.85, split_rng(r_vr2, key = "moss"))
+m_vr1 = masonry.stone_from_field(i_vr1, 0.85, split_rng(r_vr1, key = "moss"))
+m_vr0 = masonry.stone_from_field(i_vr0f, 0.85, split_rng(r_vr0, key = "moss"))
 
 # Галька у подножия: две полосы — спереди и за аркой (читается сквозь проём).
 pebble0 = transform(masonry.stone_from_field(masonry.boulder_field(size = 0.35, aspect = (1.0, 0.65, 0.85), cracks = 1, rng = r_pebble), 0.35, r_pebble_moss), translate = (0, 0.091, 0))
@@ -141,7 +195,8 @@ spots2 = set(spots1, "scale", random(lo = 0.5, hi = 1.4, rng = r_pscale))
 spots = set(spots2, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = r_porient)))
 pebbles = realize(instance_on_points(spots, source = pebble0))
 
-stones = merge(merge(m_pier_lb, m_pier_lt), merge(m_pier_rb, m_pier_rt))
-arch = merge(merge(merge(m_arc_l1, m_arc_l2), merge(m_arc_l3, m_key)), merge(merge(m_arc_r3, m_arc_r2), m_arc_r1))
-scene = transform(merge(merge(merge(stones, arch), pebbles), ground), rotate = (0, 8, 0))
+pillars = merge(body_l, body_r)
+arch = merge(merge(merge(m_vl0, m_vl1), merge(m_vl2, m_vl3)), merge(merge(m_vl4, m_key), merge(m_vr4, m_vr3)))
+arch_ring = merge(arch, merge(merge(m_vr2, m_vr1), m_vr0))
+scene = transform(merge(merge(pillars, arch_ring), merge(pebbles, ground)), rotate = (0, 8, 0))
 output scene

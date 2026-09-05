@@ -27,6 +27,59 @@ def boulder_field(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int =
     field = sdf_union(sdf_subtract(bumpy, slabs), core_inner)
 }
 
+def ashlar_block(width: f32, height: f32, depth: f32, rng: rng) -> (field: sdf) {
+    """Тёсаный блок (ашлар) для ТОЧНОЙ кладки без притирки: постель (±Y) и левые/
+    правые грани (±X) обрезаны в точные плоскости ПОСЛЕ fbm-дисплейса, поэтому
+    габарит width×height гарантирован сверху (выступов за плоскость нет —
+    проникновение соседей исключено, блоки выставляются с постоянным зазором).
+    Лицевые грани (±Z) со скальной fbm-фактурой и стёсанными рёбрами (пересечение
+    с чуть повёрнутым боксом). Центрирован в origin.
+    Пример: f = masonry.ashlar_block(0.9, 0.6, 0.78, r)"""
+    expect width > 0: "ширина по X, положительная"
+    expect height > 0: "высота по Y, положительная"
+    expect depth > 0: "глубина по Z, положительная"
+    shape_rng = split_rng(rng, key = "shape")
+    edge_rng = split_rng(rng, key = "edge")
+    core = sdf_box(size = vec3(width, height, depth))
+    piv = set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler(random_vec(lo = vec3(-4, -4, -4), hi = (4, 4, 4), rng = edge_rng)))
+    hewn = sdf_intersect(core, sdf_instance_on_points(piv, source = sdf_box(size = vec3(width, height, depth) * 1.03)))
+    bumpy = sdf_displace(hewn, fbm(@P * (2.4 / width), octaves = 3, rng = shape_rng) * 0.012 * width)
+    flat_y = sdf_intersect(bumpy, sdf_box(size = vec3(width * 4.0, height, depth * 4.0)))
+    field = sdf_intersect(flat_y, sdf_box(size = vec3(width, height * 4.0, depth * 4.0)))
+}
+
+def voussoir_field(radius: f32, height: f32, depth: f32, half_deg: f32, rng: rng) -> (field: sdf) {
+    """Сводчатый камень (клин арки) для ТОЧНОЙ раскладки без притирки: боковые
+    грани — плоские радиальные плоскости под ±half_deg, проходящие через центр
+    дуги (локальная точка (0, −radius, 0)), и режутся ПОСЛЕ fbm-дисплейса —
+    соседи с угловым шагом 2·half_deg + шов стыкуются встык с равномерным
+    радиальным зазором. Локальная +Y — наружу дуги, X — вдоль дуги. Extrados/
+    intrados и торцы со скальной fbm-фактурой. Наклон граней без тригонометрии:
+    канонический резец — огромный бокс, чья грань проходит через origin,
+    ставится якорем с roll = ±half_deg в центр дуги. Сырьевой бокс по X с
+    запасом (линейная аппроксимация tan + 15%): реальную ширину задают резцы.
+    Пример: f = masonry.voussoir_field(1.75, 0.82, 0.85, 7.85, r)"""
+    expect radius > 0: "радиус дуги до центра камня, положительный"
+    expect height > 0: "высота вдоль радиуса, положительная"
+    expect depth > 0: "глубина по Z, положительная"
+    shape_rng = split_rng(rng, key = "shape")
+    blank_w = (radius + height) * half_deg * 0.0401
+    bumpy = sdf_displace(sdf_box(size = vec3(blank_w, height, depth)), fbm(@P * (2.4 / height), octaves = 3, rng = shape_rng) * 0.012 * height)
+    big = (radius + height + depth) * 4.0
+    # Канонические резцы: грань через origin, тело в +X (левый) / −X (правый).
+    cut_l_src = transform(mesh_line(count = 1, length = 0.0), translate = vec3(big * 0.5, 0, 0))
+    cut_r_src = transform(mesh_line(count = 1, length = 0.0), translate = vec3(0.0 - big * 0.5, 0, 0))
+    cut_l_slab = sdf_instance_on_points(cut_l_src, source = sdf_box(size = vec3(big, big, big)))
+    cut_r_slab = sdf_instance_on_points(cut_r_src, source = sdf_box(size = vec3(big, big, big)))
+    # Якоря — в ЦЕНТРЕ дуги (0, −radius): грани резцов — точно радиальные
+    # плоскости под ±half_deg независимо от ширины сырьевого бокса.
+    anc_l = set(transform(mesh_line(count = 1, length = 0.0), translate = vec3(0, 0.0 - radius, 0)), "orient", orient_from_euler(vec3(0, 0, half_deg)))
+    anc_r = set(transform(mesh_line(count = 1, length = 0.0), translate = vec3(0, 0.0 - radius, 0)), "orient", orient_from_euler(vec3(0, 0, 0.0 - half_deg)))
+    cut_l = sdf_instance_on_points(anc_l, source = cut_l_slab)
+    cut_r = sdf_instance_on_points(anc_r, source = cut_r_slab)
+    field = sdf_intersect(sdf_intersect(bumpy, cut_l), cut_r)
+}
+
 def stone_from_field(f: sdf, size: f32, rng: rng) -> (out: geo<mesh>) {
     """Мешит SDF-валун (воксель пропорционален size) и мечит мох на верхних
     гранях (группа faces «moss»; fbm по мировому @P — метка после извлечения,
