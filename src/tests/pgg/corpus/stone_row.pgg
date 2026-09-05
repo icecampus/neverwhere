@@ -60,10 +60,10 @@ far_right = boulder(size = 1.0, aspect = (0.95, 0.8, 1.0), cracks = 1, rng = r_f
 # за друга. Roll (3-я компонента rotate) кладёт боковые камни к центру,
 # крайние — чуть наружу, как осыпавшаяся кладка.
 center_p = transform(center, translate = vec3(0, 0, 0), rotate = (0, 8, 0))
-left_p = transform(left, translate = vec3(-2.6, 0, 0.1), rotate = vec3(0, 18, -4))
-right_p = transform(right, translate = vec3(2.5, 0, -0.05), rotate = vec3(0, -14, 4))
+left_p = transform(left, translate = vec3(-2.6, 0, 0.1), rotate = (0, 18, -4))
+right_p = transform(right, translate = vec3(2.5, 0, -0.05), rotate = (0, -14, 4))
 far_left_p = transform(far_left, translate = vec3(-3.75, 0, 0.25), rotate = (0, 32, 6))
-far_right_p = transform(far_right, translate = vec3(3.7, 0, 0.55), rotate = vec3(0, -26, -6))
+far_right_p = transform(far_right, translate = vec3(3.7, 0, 0.55), rotate = (0, -26, -6))
 
 # Камера превью смотрит с азимута ~35° от +Z: поворачиваем весь ряд, чтобы
 # ось X легла поперёк кадра, а не вглубь.

@@ -119,6 +119,13 @@ TEST(Formatter, MessyBecomesCanonicalGolden) {
     EXPECT_EQ(formatted, readFile(corpusPath("messy.canonical.pgg")));
 }
 
+TEST(Formatter, SignedVecLiteralCanonical) {
+    const std::string src = "a = (-1,2.5)\noutput a\n";
+    pgg::Document doc = pgg::parse(src);
+    ASSERT_FALSE(doc.hasErrors());
+    EXPECT_EQ(pgg::format(doc.file, doc.comments), "a = (-1, 2.5)\noutput a\n");
+}
+
 TEST(Formatter, KwArgsReorderToDeclaredOrder) {
     const std::string src =
         "def f(a: int, b: int, c: int) -> (o: int) {\n"

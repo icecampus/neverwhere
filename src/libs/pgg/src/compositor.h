@@ -67,7 +67,7 @@ public:
     Expr* newIdent(const std::string& name, Span);
     Expr* newAttr(const std::string& name, Span);
     Expr* newVec(std::vector<Expr*> elems, Span);
-    Expr* newNumberVec(const std::vector<antlr4::Token*>& numbers, Span);
+    Expr* newSignedNumber(const antlr4::Token* minus, const antlr4::Token* num, Span);
     Expr* newList(std::vector<Expr*> elems, Span);
     Expr* newParen(Expr* inner, Span);
     Expr* newUnary(std::string op, Expr* operand, Span);

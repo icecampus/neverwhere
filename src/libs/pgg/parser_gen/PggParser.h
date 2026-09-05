@@ -35,7 +35,7 @@ public:
     RuleAnd_expr = 21, RuleCmp_expr = 22, RuleAdd_expr = 23, RuleMul_expr = 24, 
     RuleUnary = 25, RulePostfix = 26, RuleCall = 27, RuleQualified_name = 28, 
     RuleArg = 29, RulePrimary = 30, RuleAttr_ref = 31, RuleVec_literal = 32, 
-    RuleList_literal = 33, RuleLiteral = 34, RuleType = 35
+    RuleVec_elem = 33, RuleList_literal = 34, RuleLiteral = 35, RuleType = 36
   };
 
   explicit PggParser(antlr4::TokenStream *input);
@@ -112,6 +112,7 @@ public:
   class PrimaryContext;
   class Attr_refContext;
   class Vec_literalContext;
+  class Vec_elemContext;
   class List_literalContext;
   class LiteralContext;
   class TypeContext; 
@@ -804,14 +805,14 @@ public:
   class  Vec_literalContext : public antlr4::ParserRuleContext {
   public:
     pgg::Expr* result = nullptr;
-    antlr4::Token *numberToken = nullptr;
-    std::vector<antlr4::Token *> n;
+    PggParser::Vec_elemContext *vec_elemContext = nullptr;
+    std::vector<Vec_elemContext *> e;
     Vec_literalContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     antlr4::tree::TerminalNode *LPAREN();
     antlr4::tree::TerminalNode *RPAREN();
-    std::vector<antlr4::tree::TerminalNode *> NUMBER();
-    antlr4::tree::TerminalNode* NUMBER(size_t i);
+    std::vector<Vec_elemContext *> vec_elem();
+    Vec_elemContext* vec_elem(size_t i);
     std::vector<antlr4::tree::TerminalNode *> COMMA();
     antlr4::tree::TerminalNode* COMMA(size_t i);
 
@@ -819,6 +820,21 @@ public:
   };
 
   Vec_literalContext* vec_literal();
+
+  class  Vec_elemContext : public antlr4::ParserRuleContext {
+  public:
+    pgg::Expr* result = nullptr;
+    antlr4::Token *m = nullptr;
+    antlr4::Token *n = nullptr;
+    Vec_elemContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *NUMBER();
+    antlr4::tree::TerminalNode *MINUS();
+
+   
+  };
+
+  Vec_elemContext* vec_elem();
 
   class  List_literalContext : public antlr4::ParserRuleContext {
   public:

@@ -298,16 +298,27 @@ void expectNoNullExprs(const pgg::File* f) {
     }
 }
 
-TEST(Parse, NegativeVecLiteralDoesNotCrash) {
-    // The original SIGSEGV repro: a negative number inside a vec literal kills
-    // the vec_literal rule, and error recovery used to leave a wild pointer in
-    // the call arg (spec §19 v1.7; vec literals stay non-negative by design).
+TEST(Parse, NegativeVecLiteralParses) {
+    // Since v1.9 vec literal components are signed numeric literals:
+    // `(-0.5, 0, 0)` is a valid vec3 (the original SIGSEGV repro, spec §19
+    // v1.7, became the motivating case for lifting the non-negative rule).
     pgg::Document doc = pgg::parse(
-        "param size: float = 1\n"
-        "out geo = translate(box(size = size), by = (-0.5, 0, 0))\n");
-    EXPECT_TRUE(doc.hasErrors());
+        "param size: f32 = 1\n"
+        "moved = translate(box(size = size), by = (-0.5, 0, 0))\n"
+        "output moved\n");
+    EXPECT_FALSE(doc.hasErrors());
     ASSERT_TRUE(doc.file != nullptr);
     EXPECT_FALSE(pgg::dumpAst(doc.file).empty());
+    expectNoNullExprs(doc.file);
+}
+
+TEST(Parse, ParenthesizedNumberStaysScalar) {
+    // vec_literal requires at least one comma, so `(1)` and `(-1)` are
+    // parenthesized scalar expressions, not one-element vecs (which the
+    // typechecker would reject: vector literals are vec2..vec4).
+    pgg::Document doc = pgg::parse("a = (-1)\nb = (2.5)\noutput a\noutput b\n");
+    EXPECT_FALSE(doc.hasErrors());
+    ASSERT_TRUE(doc.file != nullptr);
     expectNoNullExprs(doc.file);
 }
 
@@ -337,7 +348,7 @@ TEST(Parse, MalformedSnippetsDoNotCrash) {
         "a = f(\n",                 // unclosed call
         "def f(x: ) -> (o: geo) {\n"  // missing param type
         "}\n",
-        "param a: vec3? = (1, -2, 3)\n",  // negative number in a default vec
+        "param a: vec3? = (1, , 3)\n",  // hole in a default vec
     };
     for (const std::string& src : snippets) {
         SCOPED_TRACE(src);

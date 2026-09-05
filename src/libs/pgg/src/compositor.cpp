@@ -145,11 +145,8 @@ Expr* GrammarCompositor::newVec(std::vector<Expr*> elems, Span span) {
     return n;
 }
 
-Expr* GrammarCompositor::newNumberVec(const std::vector<antlr4::Token*>& numbers, Span span) {
-    std::vector<Expr*> elems;
-    elems.reserve(numbers.size());
-    for (const antlr4::Token* t : numbers) elems.push_back(newNumber(textOf(t), spanOfTok(t)));
-    return newVec(std::move(elems), span);
+Expr* GrammarCompositor::newSignedNumber(const antlr4::Token* minus, const antlr4::Token* num, Span span) {
+    return newNumber(minus ? "-" + textOf(num) : textOf(num), minus ? span : spanOfTok(num));
 }
 
 Expr* GrammarCompositor::newList(std::vector<Expr*> elems, Span span) {

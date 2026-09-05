@@ -262,8 +262,14 @@ attr_ref returns [pgg::Expr* result = nullptr]
     ;
 
 vec_literal returns [pgg::Expr* result = nullptr]
-    : LPAREN n+=NUMBER (COMMA n+=NUMBER)* RPAREN
-      { $result = gc->newNumberVec($n, spanOf(_localctx)); }
+    : LPAREN e+=vec_elem (COMMA e+=vec_elem)+ RPAREN
+      { $result = gc->newVec(gc->resultsOf($e), spanOf(_localctx)); }
+    ;
+
+// A vec component is a signed numeric literal; at least one COMMA is required,
+// so a parenthesized `(-1)` stays a scalar expression, not a broken vec1.
+vec_elem returns [pgg::Expr* result = nullptr]
+    : (m=MINUS)? n=NUMBER { $result = gc->newSignedNumber($m, $n, spanOf(_localctx)); }
     ;
 
 // list literal (spec §13: T[] values, e.g. variants = [a, b]). Any expressions

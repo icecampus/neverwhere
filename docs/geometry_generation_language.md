@@ -234,7 +234,7 @@ chunks    = foreach piece in fractured {
     jitter_rng = split_rng(piece_rng, key = "jitter")
     noise_rng  = split_rng(piece_rng, key = "surface")
     # per-element джиттер (counter = index() по умолчанию); для uniform-сдвига всего куска — counter = 0
-    point_jitter = random_vec(lo = vec3(-0.1, -0.1, -0.1), hi = (0.1, 0.1, 0.1), rng = jitter_rng)
+    point_jitter = random_vec(lo = (-0.1, -0.1, -0.1), hi = (0.1, 0.1, 0.1), rng = jitter_rng)
     displaced  = set_position(piece, offset = fbm(@P, scale = 3, rng = noise_rng) * 0.1 + point_jitter)
     piece      = smooth(displaced, iterations = 2)
 }
@@ -292,7 +292,7 @@ disp = @N * fbm(@P * 2.5, octaves = 5, rng = surface_rng) * 0.35
 
 `@name` читает атрибут как поле. Операторы: арифметика, сравнения, `&` `|` `!`, тернарный `cond ? a : b` (GLSL-форма, единый вид с остальными выражениями), `ramp(x, points...)`. Встроенные функции выражений: `dot/cross/length/normalize/clamp/smoothstep/mix/abs/min/max/floor/pow`, конструкторы `vec2(x, y)` / `vec3(x, y, z)` / `vec4(...)`, касты `int(x)` / `f32(x)` / `bool(x)`, ориентация `orient_from_euler(rot: field<vec3>) -> field<vec4>` (Эйлер, градусы → кватернион (x, y, z, w)) — способ авторинга `@orient` для инстансинга (§8.4, §8.8). Выражение компилируется в подграф полей — семантически это сахар, в AST — узлы.
 
-Правила конверсий — §4.5 (bool→int→f32, broadcast скаляра в вектор, покомпонентная векторная арифметика). Векторный литерал `(0, 0, 1)` — только из числовых констант; вектор из вычисленных значений собирается `vec3(x, y, z)`.
+Правила конверсий — §4.5 (bool→int→f32, broadcast скаляра в вектор, покомпонентная векторная арифметика). Векторный литерал `(0, 0, 1)` — только из числовых констант, компоненты могут быть со знаком (`(-0.5, 0, 1)` — валидный vec3); вектор из вычисленных значений собирается `vec3(x, y, z)`. Литерал обязан содержать хотя бы одну запятую: `(1)` и `(-1)` — скалярные выражения в скобках, а не vec1 (векторные литералы — vec2..vec4).
 
 Два особых `@`-имени: **`@iteration`** (в теле `repeat`) и **`@piece_index`** (в теле `foreach`) — это константы-**значения** (int), предоставляемые зоной, а не поля; их можно использовать как ключи `split_rng`. Это единственные `@`-имена со value-семантикой.
 
@@ -729,7 +729,9 @@ type         = "geo" [ "<" geo_kind ">" ] | "sdf" | "rng"
              | type "?"                                 (* optional, значение none *)
              | type "[" "]" ;                           (* список, напр. string[] *)
 literal      = number | string | bool | vec_literal | ident | "none" ;
-vec_literal  = "(" number { "," number } ")" ;           (* только числа; см. vec3() *)
+vec_literal  = "(" signed_number "," { signed_number "," } signed_number ")" ;
+                                        (* константы со знаком; ≥2 компоненты,
+                                           иначе это скаляр в скобках; см. vec3() *)
 version      = number "." number ;
 path         = ident { "." ident | "[" number "]" } ;
 qualified_name = ident { "." ident } ;
@@ -909,6 +911,11 @@ PGG проектируется как новая самодостаточная 
 - **Размещение файлов и build-интеграция ненормативны:** они определяются отдельным implementation plan и не являются частью языка.
 
 ## 19. Изменения
+
+**v1.9 (2026-09-05)** — знаковые vec-литералы (снимает ограничение «только неотрицательные числа», введённое в §6.3 и обыгранное в v1.7):
+
+- **Грамматика.** `vec_literal` — `LPAREN vec_elem (COMMA vec_elem)+ RPAREN`, где `vec_elem = MINUS? NUMBER` (новое правило); команда «минус + число» собирается в `NumberLit` с текстом `-N` фабрикой `GrammarCompositor::newSignedNumber` (композиторная функция `newNumberVec` удалена — vec собирается общим `newVec`). Требование хотя бы одной запятой сохраняет детерминированность разбора: `(1)`/`(-1)` — скалярное выражение в скобках (`Paren`), а не одноэлементный вектор (который всё равно отвергался typecheck'ом «vector literals are vec2..vec4» — до v1.9 `(1)` парсился в этот заведомо битый VecLit[1]). Идиома `vec3(-1, …)` остаётся валидной, но больше не нужна для констант.
+- **Тесты.** `Parse.NegativeVecLiteralParses` (бывш. `NegativeVecLiteralDoesNotCrash`: исходное репро SIGSEGV v1.7 теперь парсится чисто), `Parse.ParenthesizedNumberStaysScalar` (`(1)`/`(-1)` — скаляры), `Expr.SignedVecLiteral` (значение/бродкаст/vec3-passthrough), `Formatter.SignedVecLiteralCanonical` (`(-1,2.5)` → `(-1, 2.5)`); из `MalformedSnippetsDoNotCrash` убран ставший валидным сниппет `param a: vec3? = (1, -2, 3)` (на его месте — дыра в дефолтном vec). Полный регресс + ctest — зелёные.
 
 **v1.8 (2026-08-31)** — A1: линт **W003 реализован** (§6.5 п.3 — последнее отложенное предупреждение раздела, переносилось с E5/v1.3):
 

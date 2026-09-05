@@ -70,6 +70,18 @@ TEST(Expr, ConversionsAndBroadcast) {
     EXPECT_EQ(evalVec3("(1, 2, 3) * (2, 2, 2)"), glm::vec3(2, 4, 6));
 }
 
+TEST(Expr, SignedVecLiteral) {
+    // Since v1.9 vec literal components may carry a sign (§6.3).
+    EXPECT_EQ(evalVec3("(-1, 2, -3)"), glm::vec3(-1, 2, -3));
+    EXPECT_EQ(pgg::asVec2(evalExpr("(-0.5, 1.25)")), glm::vec2(-0.5f, 1.25f));
+    EXPECT_EQ(evalVec3("2 * (-1, 0, 1)"), glm::vec3(-2, 0, 2));  // broadcast
+    EXPECT_EQ(evalVec3("vec3((-1, -2, -3))"), glm::vec3(-1, -2, -3));  // passthrough
+    // A parenthesized single number stays a scalar expression, not a vec1.
+    EXPECT_EQ(evalInt("(-1)"), -1);
+    EXPECT_FLOAT_EQ(evalF32("(2.5)"), 2.5f);
+    EXPECT_EQ(evalInt("2 * (-3)"), -6);
+}
+
 TEST(Expr, Ternary) {
     EXPECT_EQ(evalInt("1 > 2 ? 10 : 20"), 20);
     EXPECT_EQ(evalInt("1 < 2 ? 10 : 20"), 10);
