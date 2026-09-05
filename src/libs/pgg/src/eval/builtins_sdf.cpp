@@ -159,6 +159,8 @@ Value evalSdfBuiltin(const BoundCall& bound, RunContext& run) {
             return Value(sdfSubtractSmooth(asSdf(v[0]), asSdf(v[1]), asF32(v[2])));
         case BuiltinId::SdfIntersect:
             return Value(sdfIntersect(asSdf(v[0]), asSdf(v[1])));
+        case BuiltinId::SdfGrind:
+            return Value(sdfGrind(asSdf(v[0]), asSdf(v[1]), asF32(v[2])));
         case BuiltinId::SdfDisplace:
             return opSdfDisplace(bound, run);
         case BuiltinId::SdfInstanceOnPoints:

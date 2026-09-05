@@ -38,6 +38,7 @@ enum class SdfKind {
     Instance,
     Grid,
     VoronoiCell,
+    Grind,
 };
 
 // One transformed instance anchor (sdf_instance_on_points). Transforms mirror
@@ -90,6 +91,13 @@ SdfPtr sdfUnionSmooth(SdfPtr a, SdfPtr b, float k);
 SdfPtr sdfSubtract(SdfPtr a, SdfPtr b);
 SdfPtr sdfSubtractSmooth(SdfPtr a, SdfPtr b, float k);
 SdfPtr sdfIntersect(SdfPtr a, SdfPtr b);
+// Grind (§8.4, spec §19 v1.10): cuts a along the MIDDLE surface of the a∩b
+// penetration — eval = max(a, a - b + gap). The symmetric pair (grind(a,b,g),
+// grind(b,a,g)) leaves a uniform g-wide slit centred on the shared contact
+// surface (gap = 0: both solids share the exact middle surface, "lapped"
+// masonry). Contacts closer than gap are separated to gap; fields further
+// than gap leave a bit-exactly unchanged.
+SdfPtr sdfGrind(SdfPtr a, SdfPtr b, float gap);
 // Deep-copies the amount field and estimates its amplitude (4^3 probe).
 SdfPtr sdfDisplace(SdfPtr child, const FieldNode* amount);
 // Anchors are read from the points' stamp attributes by the builtin.

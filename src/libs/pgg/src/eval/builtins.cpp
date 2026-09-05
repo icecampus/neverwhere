@@ -402,6 +402,8 @@ const std::vector<BuiltinSig>& registry() {
                                  valDef("iso", ScalarType::F32, Value(0.0f)), method},
                                 Type{ScalarType::Geo, false, GeoKind::Mesh}));
             }
+            r.push_back(sig(BuiltinId::SdfGrind, "sdf_grind",
+                            {sdfA, sdfB, valDef("gap", ScalarType::F32, Value(0.0f))}, sdfResult));
         }
 
         // --- §8.3 islands / §8.11 fracture (E7) --------------------------------
@@ -558,6 +560,7 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::SdfInstanceOnPoints:
         case BuiltinId::SdfFromMesh:
         case BuiltinId::MeshFromSdf:
+        case BuiltinId::SdfGrind:
             return evalSdfBuiltin(bound, run);
         case BuiltinId::Islands:
         case BuiltinId::Fracture:

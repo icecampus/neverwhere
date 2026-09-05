@@ -43,7 +43,7 @@ enum class BuiltinId {
     Bbox, Extent, Centroid, Count, MinOf, MaxOf, AvgOf, SumOf,
     // §8.4 SDF
     SdfSphere, SdfBox, SdfUnion, SdfUnionSmooth, SdfSubtract, SdfSubtractSmooth,
-    SdfIntersect, SdfDisplace, SdfInstanceOnPoints, SdfFromMesh, MeshFromSdf,
+    SdfIntersect, SdfDisplace, SdfInstanceOnPoints, SdfFromMesh, MeshFromSdf, SdfGrind,
     // §8.3 islands / §8.11 fracture (E7)
     Islands, Fracture,
     // Known but not supported at this stage.

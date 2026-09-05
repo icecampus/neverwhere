@@ -11,12 +11,11 @@ param gap: f32 = 0.05
 # уже повёрнутый камень вокруг мировой вертикали). Тригонометрии в выражениях
 # нет, поэтому позиции дуги — предвычисленные константы (R = 1.75, центр дуги
 # на y = 1.95, theta = 12°..168° с шагом 26°).
-# 2. Контактные отпечатки по ЦЕПОЧКЕ кладки: режется только новый камень —
-# раздутым на gap полем уже стоящего предшественника (подошва столба → верх
-# столба → пята → ... → замок → ... → второй столб). Взаимная резка пары
-# превращала бы перекрытие δ в щель δ + 2·gap (см. SdfImprint в sdf_test),
-# односторонняя даёт равномерный шов ровно gap — камни сидят друг на друге
-# без клиппинга и без глубоких долин.
+# 2. Притирка контактов (sdf_grind): каждый камень режется по СРЕДИННОЙ
+# поверхности взаимного проникновения с соседями по цепочке (подошва столба →
+# верх столба → пята → ... → замок → ... → второй столб) — операция
+# симметрична, порядок кладки не важен; щель выходит ровно gap независимо от
+# глубины перекрытия. Камни сидят друг на друге без клиппинга и долин.
 # 3. Оседанию (repeat + distance_to) подвергаются только нижние камни столбов
 # и галька: верхние камни и дуга стоят на соседях, а не на грунте, поэтому
 # ставятся геометрически с перекрытием 0.2 (оно же глотает ±12 см бугров
@@ -102,24 +101,25 @@ i_arc_r3 = sdf_instance_on_points(a_arc_r3, source = f_arc_r3)
 i_arc_r2 = sdf_instance_on_points(a_arc_r2, source = f_arc_r2)
 i_arc_r1 = sdf_instance_on_points(a_arc_r1, source = f_arc_r1)
 
-# Контактные отпечатки по цепочке кладки: режется ТОЛЬКО новый камень —
-# раздутым на gap полем уже стоящего предшественника (порядок = порядку
-# кладки: подошва → верх столба → пята → … → замок → … → второй столб).
-# Взаимная резка пары превращает запроектированное перекрытие δ в щель
-# шириной δ + 2·gap с глубокой долиной (пингуется SdfImprint.* в sdf_test);
-# односторонняя даёт равномерный шов ровно gap независимо от перекрытия.
-c_pier_lt = sdf_subtract(i_pier_lt, sdf_displace(i_pier_lb, -gap))
-c_arc_l1 = sdf_subtract(i_arc_l1, sdf_displace(i_pier_lt, -gap))
-c_arc_l2 = sdf_subtract(i_arc_l2, sdf_displace(i_arc_l1, -gap))
-c_arc_l3 = sdf_subtract(i_arc_l3, sdf_displace(i_arc_l2, -gap))
-c_key = sdf_subtract(i_key, sdf_displace(i_arc_l3, -gap))
-c_arc_r3 = sdf_subtract(i_arc_r3, sdf_displace(i_key, -gap))
-c_arc_r2 = sdf_subtract(i_arc_r2, sdf_displace(i_arc_r3, -gap))
-c_arc_r1 = sdf_subtract(i_arc_r1, sdf_displace(i_arc_r2, -gap))
-c_pier_rt = sdf_subtract(i_pier_rt, sdf_displace(i_arc_r1, -gap))
-c_pier_rb = sdf_subtract(i_pier_rb, sdf_displace(i_pier_rt, -gap))
+# Контактные поверхности — ПРИТИРКА (sdf_grind): каждый камень режется по
+# СРЕДИННОЙ поверхности взаимного проникновения с соседями (max(A, A−B+gap)),
+# операция симметрична — порядок кладки не нужен. Щель выходит ровно gap независимо
+# от глубины перекрытия, врезка в каждый камень — половина перекрытия (вдвое
+# мельче одностороннего отпечатка), при gap = 0 камни делили бы одну общую
+# контактную поверхность. (Замеры геометрии швов — SdfImprint/SdfGrind в sdf_test.)
+c_pier_lb = sdf_grind(i_pier_lb, i_pier_lt, gap = gap)
+c_pier_lt = sdf_grind(i_pier_lt, sdf_union(i_pier_lb, i_arc_l1), gap = gap)
+c_arc_l1 = sdf_grind(i_arc_l1, sdf_union(i_pier_lt, i_arc_l2), gap = gap)
+c_arc_l2 = sdf_grind(i_arc_l2, sdf_union(i_arc_l1, i_arc_l3), gap = gap)
+c_arc_l3 = sdf_grind(i_arc_l3, sdf_union(i_arc_l2, i_key), gap = gap)
+c_key = sdf_grind(i_key, sdf_union(i_arc_l3, i_arc_r3), gap = gap)
+c_arc_r3 = sdf_grind(i_arc_r3, sdf_union(i_key, i_arc_r2), gap = gap)
+c_arc_r2 = sdf_grind(i_arc_r2, sdf_union(i_arc_r3, i_arc_r1), gap = gap)
+c_arc_r1 = sdf_grind(i_arc_r1, sdf_union(i_arc_r2, i_pier_rt), gap = gap)
+c_pier_rt = sdf_grind(i_pier_rt, sdf_union(i_arc_r1, i_pier_rb), gap = gap)
+c_pier_rb = sdf_grind(i_pier_rb, i_pier_rt, gap = gap)
 
-m_pier_lb = masonry.stone_from_field(i_pier_lb, 1.8, split_rng(r_moss, key = "pier_lb"))
+m_pier_lb = masonry.stone_from_field(c_pier_lb, 1.8, split_rng(r_moss, key = "pier_lb"))
 m_pier_lt = masonry.stone_from_field(c_pier_lt, 1.5, split_rng(r_moss, key = "pier_lt"))
 m_pier_rb = masonry.stone_from_field(c_pier_rb, 1.75, split_rng(r_moss, key = "pier_rb"))
 m_pier_rt = masonry.stone_from_field(c_pier_rt, 1.45, split_rng(r_moss, key = "pier_rt"))

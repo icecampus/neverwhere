@@ -114,6 +114,13 @@ float SdfNode::eval(const glm::vec3& p) const {
             return sdfSmax(a->eval(p), -b->eval(p), k);
         case SdfKind::Intersect:
             return std::max(a->eval(p), b->eval(p));
+        case SdfKind::Grind: {
+            // max(a, a - b + gap): a keeps the half of the penetration where
+            // it lies deeper than b (middle surface a == b), backed off by
+            // gap/2 per side (|grad(a - b)| ~ 2 across a facing contact).
+            const float fa = a->eval(p);
+            return std::max(fa, fa - b->eval(p) + k);
+        }
         case SdfKind::Displace: {
             const float base = a->eval(p);
             if (!amount) return base;  // E307 recovery: amount counts as 0
@@ -191,6 +198,10 @@ void SdfNode::conservativeBBox(glm::vec3& outMin, glm::vec3& outMax) const {
             // max(a, -b) >= a: the first child's box is cull-safe.
             a->conservativeBBox(outMin, outMax);
             return;
+        case SdfKind::Grind:
+            // max(a, a - b + gap) >= a: same invariant as Subtract.
+            a->conservativeBBox(outMin, outMax);
+            return;
         case SdfKind::Intersect:
             // The bbox intersection is tighter and contains the iso, but it
             // is NOT cull-safe (max(a,b) can fall below the distance to the
@@ -266,6 +277,7 @@ SdfPtr sdfSubtractSmooth(SdfPtr a, SdfPtr b, float k) {
     return sdfCsg(SdfKind::SubtractSmooth, std::move(a), std::move(b), k);
 }
 SdfPtr sdfIntersect(SdfPtr a, SdfPtr b) { return sdfCsg(SdfKind::Intersect, std::move(a), std::move(b), 0.0f); }
+SdfPtr sdfGrind(SdfPtr a, SdfPtr b, float gap) { return sdfCsg(SdfKind::Grind, std::move(a), std::move(b), gap); }
 
 SdfPtr sdfVoronoiCell(const std::vector<glm::vec3>& sites, int32_t site) {
     auto n = std::make_shared<SdfNode>();

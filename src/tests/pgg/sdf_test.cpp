@@ -4,7 +4,9 @@
 // instance transform mirroring realizeInstances with bit-exact AABB culling,
 // marching cubes (watertight by edge-keyed dedup, thread-count invariant),
 // the BVH voxelizer with the pseudo-sign, cache N3/N4 over sdf bindings and
-// the e4_sdf_rock corpus goldens (both §15 criteria).
+// the e4_sdf_rock corpus goldens (both §15 criteria). SdfImprint/SdfGrind pin
+// the masonry joint geometry (§19 v1.10): carve exactness, mutual vs
+// one-sided slit widths, and the middle-surface grind partition.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -669,6 +671,132 @@ TEST(SdfImprint, MutualCarveWidensSeamByOverlap) {
     pggtest::expectF32Near(mutBStart, 1.05f, 1e-4f);
     pggtest::expectF32Near(mutBStart - aEnd, 0.2f + 2.0f * 0.05f, 1e-3f);  // overlap + 2g
     pggtest::expectF32Near(bStart - aEnd, 0.05f, 1e-4f);                  // one-sided: exactly g
+}
+
+// --- 10. grind (middle-surface partition, §19 v1.10) ------------------------------
+// sdf_grind(a, b, gap) = max(a, a - b + gap): a is cut along the middle
+// surface {a == b} of the penetration, backed off by gap/2 per side, so the
+// symmetric pair leaves a uniform slit of exactly `gap` no matter how deep
+// the stones overlap — the "lap two stones together until they share a
+// contact surface" joint. Contacts closer than gap are separated to gap;
+// fields further than gap away leave `a` bit-exactly unchanged.
+
+TEST(SdfGrind, SymmetricPairLeavesUniformGapCentredOnMiddle) {
+    // Unit spheres 1.8 apart (overlap 0.2): middle surface at x = 0.9.
+    pgg::RunResult r = pgg::run(
+        "a = sdf_sphere(r = 1.0)\n"
+        "anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "b = sdf_instance_on_points(anchor, source = sdf_sphere(r = 1.0))\n"
+        "ga = sdf_grind(a, b, gap = 0.1)\n"
+        "gb = sdf_grind(b, a, gap = 0.1)\n"
+        "output ga\n"
+        "output gb\n");
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr ga = sdfOutput(r, "ga");
+    pgg::SdfPtr gb = sdfOutput(r, "gb");
+    ASSERT_TRUE(ga);
+    ASSERT_TRUE(gb);
+    const float aEnd = crossOnRay(ga, glm::vec3(1, 0, 0), 0.5f, 1.0f);
+    const float bStart = crossOnRay(gb, glm::vec3(1, 0, 0), 1.3f, 0.9f);
+    pggtest::expectF32Near(aEnd, 0.85f, 1e-4f);   // midplane minus gap/2
+    pggtest::expectF32Near(bStart, 0.95f, 1e-4f); // midplane plus gap/2
+    pggtest::expectF32Near(bStart - aEnd, 0.1f, 1e-4f);  // slit == gap exactly
+}
+
+TEST(SdfGrind, ZeroGapSharesTheExactMiddleSurface) {
+    pgg::RunResult r = pgg::run(
+        "a = sdf_sphere(r = 1.0)\n"
+        "anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "b = sdf_instance_on_points(anchor, source = sdf_sphere(r = 1.0))\n"
+        "ga = sdf_grind(a, b)\n"
+        "gb = sdf_grind(b, a)\n"
+        "output ga\n"
+        "output gb\n");
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr ga = sdfOutput(r, "ga");
+    pgg::SdfPtr gb = sdfOutput(r, "gb");
+    ASSERT_TRUE(ga);
+    ASSERT_TRUE(gb);
+    const float aEnd = crossOnRay(ga, glm::vec3(1, 0, 0), 0.5f, 1.0f);
+    const float bStart = crossOnRay(gb, glm::vec3(1, 0, 0), 1.3f, 0.85f);
+    pggtest::expectF32Near(aEnd, 0.9f, 1e-5f);
+    pggtest::expectF32Near(bStart, 0.9f, 1e-5f);  // the same plane, lapped joint
+}
+
+TEST(SdfGrind, NoContactIsBitExactAndNearTouchSeparatesToGap) {
+    pgg::RunResult r = pgg::run(
+        "a = sdf_sphere(r = 1.0)\n"
+        "far_anchor = transform(mesh_line(count = 1, length = 0.0), translate = (2.5, 0, 0))\n"
+        "near_anchor = transform(mesh_line(count = 1, length = 0.0), translate = (2.02, 0, 0))\n"
+        "b_far = sdf_instance_on_points(far_anchor, source = sdf_sphere(r = 1.0))\n"
+        "b_near = sdf_instance_on_points(near_anchor, source = sdf_sphere(r = 1.0))\n"
+        "g_far = sdf_grind(a, b_far, gap = 0.1)\n"
+        "g_near = sdf_grind(a, b_near, gap = 0.1)\n"
+        "output g_far\n"
+        "output g_near\n"
+        "output a\n");
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr gFar = sdfOutput(r, "g_far");
+    pgg::SdfPtr gNear = sdfOutput(r, "g_near");
+    pgg::SdfPtr a = sdfOutput(r, "a");
+    ASSERT_TRUE(gFar);
+    ASSERT_TRUE(gNear);
+    ASSERT_TRUE(a);
+    // 0.5 clearance > gap: the field is untouched, bit for bit.
+    for (const glm::vec3 p :
+         {glm::vec3(0, 0, 0), glm::vec3(0.9f, 0.2f, 0), glm::vec3(1, 0, 0), glm::vec3(-0.5f, 0.7f, 0.3f)})
+        EXPECT_EQ(gFar->eval(p), a->eval(p)) << p.x << " " << p.y << " " << p.z;
+    // 0.02 clearance < gap: A's face is pushed back to half the slit:
+    // boundary at (2.02 - gap)/2 = 0.96.
+    pggtest::expectF32Near(crossOnRay(gNear, glm::vec3(1, 0, 0), 0.5f, 1.05f), 0.96f, 1e-4f);
+}
+
+TEST(SdfGrind, UnionOfNeighboursGrindsEachContact) {
+    // A between two neighbours: both flanks are cut to their own middle
+    // surfaces (x = ±0.9 with gap 0.1 → ±0.85).
+    pgg::RunResult r = pgg::run(
+        "a = sdf_sphere(r = 1.0)\n"
+        "r_anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "l_anchor = transform(mesh_line(count = 1, length = 0.0), translate = (-1.8, 0, 0))\n"
+        "br = sdf_instance_on_points(r_anchor, source = sdf_sphere(r = 1.0))\n"
+        "bl = sdf_instance_on_points(l_anchor, source = sdf_sphere(r = 1.0))\n"
+        "g = sdf_grind(a, sdf_union(br, bl), gap = 0.1)\n"
+        "output g\n");
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr g = sdfOutput(r, "g");
+    ASSERT_TRUE(g);
+    pggtest::expectF32Near(crossOnRay(g, glm::vec3(1, 0, 0), 0.5f, 1.0f), 0.85f, 1e-4f);
+    pggtest::expectF32Near(crossOnRay(g, glm::vec3(-1, 0, 0), 0.5f, 1.0f), 0.85f, 1e-4f);
+}
+
+TEST(SdfGrind, MiddleSurfaceFollowsDisplacedNeighbour) {
+    // Pseudo-SDF neighbour (fbm-roughened, as in boulder_field): the cut iso
+    // of A is where b exceeds a by exactly gap — the middle surface tracks
+    // field values, not geometric distances.
+    const char* src =
+        "root_rng = rng_from_seed(11)\n"
+        "n_rng = split_rng(root_rng, key = \"n\")\n"
+        "a = sdf_sphere(r = 1.0)\n"
+        "anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "b = sdf_instance_on_points(anchor, source = sdf_displace(sdf_sphere(r = 1.0), amount = fbm(scale = 2.0, octaves = 3, rng = n_rng) * 0.04))\n"
+        "g = sdf_grind(a, b, gap = 0.1)\n"
+        "output g\n"
+        "output a\n"
+        "output b\n";
+    pgg::RunResult r = pgg::run(src);
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr g = sdfOutput(r, "g");
+    pgg::SdfPtr a = sdfOutput(r, "a");
+    pgg::SdfPtr b = sdfOutput(r, "b");
+    ASSERT_TRUE(g);
+    ASSERT_TRUE(a);
+    ASSERT_TRUE(b);
+    for (const glm::vec3 dir : {glm::normalize(glm::vec3(1, 0.3f, 0.1f)), glm::normalize(glm::vec3(1, -0.2f, 0.35f)),
+                                glm::normalize(glm::vec3(1, 0.1f, -0.3f))}) {
+        SCOPED_TRACE("ray " + std::to_string(dir.x) + " " + std::to_string(dir.y) + " " + std::to_string(dir.z));
+        const float t = crossOnRay(g, dir, 0.4f, 1.05f);
+        pggtest::expectF32Near(b->eval(dir * t) - a->eval(dir * t), 0.1f, 1e-4f);
+    }
 }
 
 }  // namespace
