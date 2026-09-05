@@ -1,16 +1,28 @@
 param seed: int = 21
+param gap: f32 = 0.045
 
-# Ряд камней «бок о бок»: самый большой в центре, два средних по бокам,
-# два мелких с краёв. Камни прижаты друг к другу (лёгкое взаимное
-# проникновение боков — так сидят клады, а не парад с зазорами) и слегка
-# наклонены к соседу (roll вокруг Z), чтобы читалось «прислонились».
+# Ряд камней «бок о бок» на холмистом грунте: самый большой в центре, два
+# средних по бокам, два мелких с краёв, осыпь гальки у подножия.
 # 
-# Приём гранёности тот же, что в rock_cluster.pgg: пересечение трёх
-# SDF-боксов (два повёрнуты через @orient одиночной точки), низкочастотный
-# fbm-дисплейс, ограниченные борозды-трещины, мох группой faces «moss».
-def boulder(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int = 3, rng: rng) -> (out: geo<mesh>) {
-    """Один гранёный валун, стоящий подошвой на y = 0 (утоплен на 10% высоты).
-    Пишет: @N (точки), группу moss (faces) — мох на верхних гранях."""
+# Приёмы поверх базового rock_cluster.pgg:
+# 1. Контактные отпечатки: камни собираются на SDF-уровне — каждый режется
+# РАЗДУТЫМ полем соседей (sdf_subtract(A, sdf_displace(B, -gap));
+# отрицательная константа раздувает поле, положительная сжимает), поэтому
+# на контакте остаётся честная борозда-шов шириной ~gap, а не клиппинг
+# мешей. Тот же приём, что imprint-carve в StoneGenerator (CGAL Nef), но
+# аналитический. Меши затем мержатся жёстко (merge) — smooth-union для
+# сухой кладки не нужен.
+# 2. Оседание: якоря камней и точки гальки стартуют над грунтом и 12
+# итераций repeat-зоны опускают их на distance_to(ground) с затухающим
+# шагом (паттерн e7_repeat_settle) — камни садятся на бугры по-разному.
+# Зона в def-теле — E201 (отложенное), поэтому зоны инлайнятся top-level:
+# по одной одноточечной на камень (per-stone lift после зоны) + одна на
+# гальку. distance_to беззнаковый — якоря обязаны стартовать ВЫШЕ грунта.
+# 3. Якоря — mesh_line(count = 1) (детерминированная точка в origin, без rng),
+# наклон/поворот — константным orient_from_euler на @orient.
+def boulder_field(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int = 3, rng: rng) -> (field: sdf) {
+    """SDF-ядро гранёного валуна, центрированное в origin (половина высоты
+    выше/ниже нуля). Вход для полевой композиции и mesh_from_sdf."""
     expect size > 0: "размер в метрах, положительный"
     cut_rng = split_rng(rng, key = "cut")
     yaw_rng = split_rng(rng, key = "cut_yaw")
@@ -19,7 +31,6 @@ def boulder(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int = 3, rn
     shape_rng = split_rng(rng, key = "shape")
     site_rng = split_rng(rng, key = "crack_sites")
     tilt_rng = split_rng(rng, key = "crack_tilt")
-    moss_rng = split_rng(rng, key = "moss")
     core = sdf_box(size = aspect * size)
     pivot0 = point_cloud(count = 1, bounds = (0, 0, 0), rng = cut_rng)
     pivot = set(pivot0, "orient", orient_from_euler(random_vec(lo = vec3(-20, 0, -20), hi = (20, 360, 20), rng = yaw_rng)))
@@ -33,11 +44,16 @@ def boulder(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int = 3, rn
     sites = set(sites0, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (360, 360, 360), rng = tilt_rng)))
     slabs = sdf_instance_on_points(sites, source = sdf_box(size = vec3(size * 1.6, size * 1.6, size * 0.015)))
     core_inner = sdf_displace(bumpy, size * 0.03)
-    cracked = sdf_union(sdf_subtract(bumpy, slabs), core_inner)
-    raw = mesh_from_sdf(cracked, voxel = size * 0.015)
+    field = sdf_union(sdf_subtract(bumpy, slabs), core_inner)
+}
+
+def stone_from_field(f: sdf, size: f32, rng: rng) -> (out: geo<mesh>) {
+    """Мешит SDF-валун (воксель пропорционален size) и мечит мох на верхних
+    гранях (группа faces «moss»; fbm по мировому @P — метка после извлечения,
+    атрибутный барьер §8.4)."""
+    raw = mesh_from_sdf(f, voxel = size * 0.015)
     shaped = compute_normals(raw)
-    mossy = mark(shaped, "moss", where = (dot(@N, (0, 1, 0)) > 0.75) & (fbm(scale = 2.5 / size, rng = moss_rng) > 0.2), domain = faces)
-    out = transform(mossy, translate = vec3(0, dot(aspect, (0, 1, 0)) * size * 0.4, 0))
+    out = mark(shaped, "moss", where = (dot(@N, (0, 1, 0)) > 0.75) & (fbm(scale = 2.5 / size, rng = rng) > 0.2), domain = faces)
 }
 
 world_rng = rng_from_seed(seed)
@@ -46,40 +62,95 @@ r_left = split_rng(world_rng, key = "left")
 r_right = split_rng(world_rng, key = "right")
 r_far_left = split_rng(world_rng, key = "far_left")
 r_far_right = split_rng(world_rng, key = "far_right")
+r_moss_center = split_rng(world_rng, key = "moss_center")
+r_moss_left = split_rng(world_rng, key = "moss_left")
+r_moss_right = split_rng(world_rng, key = "moss_right")
+r_moss_far_left = split_rng(world_rng, key = "moss_far_left")
+r_moss_far_right = split_rng(world_rng, key = "moss_far_right")
+r_ground = split_rng(world_rng, key = "ground")
 r_pebble = split_rng(world_rng, key = "pebble")
+r_pebble_moss = split_rng(world_rng, key = "pebble_moss")
 r_scatter = split_rng(world_rng, key = "scatter")
 r_pscale = split_rng(world_rng, key = "pebble_scale")
 r_porient = split_rng(world_rng, key = "pebble_orient")
 
-# Композиция: центр крупный и высокий, боковые ниже и чуть придавлены,
-# крайние — камешки. Ось ряда — X, лёгкие сдвиги по Z и yaw, чтобы ряд
-# не выглядел выстроенным по линейке.
-center = boulder(size = 3.0, aspect = (1.0, 1.05, 0.9), cracks = 4, rng = r_center)
-left = boulder(size = 2.2, aspect = (0.9, 0.95, 0.85), cracks = 3, rng = r_left)
-right = boulder(size = 2.0, aspect = (1.0, 0.9, 0.8), cracks = 3, rng = r_right)
-far_left = boulder(size = 1.2, aspect = (1.1, 0.75, 0.9), cracks = 2, rng = r_far_left)
-far_right = boulder(size = 1.0, aspect = (0.95, 0.8, 1.0), cracks = 1, rng = r_far_right)
+# Грунт: пологие fbm-бугры до ~12 см над базовой плоскостью.
+ground = set_position(grid(size = (12, 8), res = 20), offset = (0, 1, 0) * fbm(scale = 0.55, octaves = 3, rng = r_ground) * 0.12)
 
-# Расстановка вплотную: центры ближе суммы полуширин — бока заходят друг
-# за друга. Roll (3-я компонента rotate) кладёт боковые камни к центру,
-# крайние — чуть наружу, как осыпавшаяся кладка.
-center_p = transform(center, translate = vec3(0, 0, 0), rotate = (0, 8, 0))
-left_p = transform(left, translate = vec3(-2.6, 0, 0.1), rotate = (0, 18, -4))
-right_p = transform(right, translate = vec3(2.5, 0, -0.05), rotate = (0, -14, 4))
-far_left_p = transform(far_left, translate = vec3(-3.75, 0, 0.25), rotate = (0, 32, 6))
-far_right_p = transform(far_right, translate = vec3(3.7, 0, 0.55), rotate = (0, -26, -6))
+# Формы камней (центрированы в origin; постановка — якорями ниже).
+f_center = boulder_field(size = 3.0, aspect = (1.0, 1.05, 0.9), cracks = 4, rng = r_center)
+f_left = boulder_field(size = 2.2, aspect = (0.9, 0.95, 0.85), cracks = 3, rng = r_left)
+f_right = boulder_field(size = 2.0, aspect = (1.0, 0.9, 0.8), cracks = 3, rng = r_right)
+f_far_left = boulder_field(size = 1.2, aspect = (1.1, 0.75, 0.9), cracks = 2, rng = r_far_left)
+f_far_right = boulder_field(size = 1.0, aspect = (0.95, 0.8, 1.0), cracks = 1, rng = r_far_right)
 
-# Осыпь у подножия: один мелкий валун как источник, инстансы по узкой полосе
-# вдоль фронта ряда (ряд локально вдоль X, финальный поворот общий), с
-# разбросом масштаба и поворота.
-pebble0 = boulder(size = 0.35, aspect = (1.0, 0.65, 0.85), cracks = 1, rng = r_pebble)
+# Якоря: старт на y = 0.35 (выше максимального бугра), наклоны к соседям
+# (roll), лёгкий yaw против «выстроенности по линейке».
+a_center = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler((0, 8, 0))), translate = (0, 0.35, 0))
+a_left = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler((0, 18, -4))), translate = (-2.6, 0.35, 0.1))
+a_right = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler((0, -14, 4))), translate = (2.5, 0.35, -0.05))
+a_far_left = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler((0, 32, 6))), translate = (-3.75, 0.35, 0.25))
+a_far_right = transform(set(mesh_line(count = 1, length = 0.0), "orient", orient_from_euler((0, -26, -6))), translate = (3.7, 0.35, 0.55))
+
+# Оседание: 12 итераций с затухающим шагом (0.5/(i+1) от дистанции до грунта).
+s_center = repeat (a_center, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+s_left = repeat (a_left, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+s_right = repeat (a_right, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+s_far_left = repeat (a_far_left, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+s_far_right = repeat (a_far_right, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+
+# Якорь сел на грунт → поднимаем на половину высоты камня минус посадку
+# (подошва уходит под грунт на 10% высоты + sink; lift = 0.4·aspectY·size − sink).
+lift_center = set_position(s_center, offset = (0, 1.14, 0))
+lift_left = set_position(s_left, offset = (0, 0.736, 0))
+lift_right = set_position(s_right, offset = (0, 0.62, 0))
+lift_far_left = set_position(s_far_left, offset = (0, 0.3, 0))
+lift_far_right = set_position(s_far_right, offset = (0, 0.27, 0))
+
+i_center = sdf_instance_on_points(lift_center, source = f_center)
+i_left = sdf_instance_on_points(lift_left, source = f_left)
+i_right = sdf_instance_on_points(lift_right, source = f_right)
+i_far_left = sdf_instance_on_points(lift_far_left, source = f_far_left)
+i_far_right = sdf_instance_on_points(lift_far_right, source = f_far_right)
+
+# Контактные отпечатки: каждый камень режется раздутым на gap объединением
+# полей соседей — на стыках остаются борозды-швы.
+c_center = sdf_subtract(i_center, sdf_displace(sdf_union(i_left, i_right), -gap))
+c_left = sdf_subtract(i_left, sdf_displace(sdf_union(i_center, i_far_left), -gap))
+c_right = sdf_subtract(i_right, sdf_displace(sdf_union(i_center, i_far_right), -gap))
+c_far_left = sdf_subtract(i_far_left, sdf_displace(i_left, -gap))
+c_far_right = sdf_subtract(i_far_right, sdf_displace(i_right, -gap))
+
+m_center = stone_from_field(c_center, 3.0, r_moss_center)
+m_left = stone_from_field(c_left, 2.2, r_moss_left)
+m_right = stone_from_field(c_right, 2.0, r_moss_right)
+m_far_left = stone_from_field(c_far_left, 1.2, r_moss_far_left)
+m_far_right = stone_from_field(c_far_right, 1.0, r_moss_far_right)
+
+# Осыпь у подножия: мелкий валун как источник (меш с подошвой на y = 0),
+# инстансы по полосе вдоль фронта ряда, точки оседают на грунт той же зоной.
+pebble0 = transform(stone_from_field(boulder_field(size = 0.35, aspect = (1.0, 0.65, 0.85), cracks = 1, rng = r_pebble), 0.35, r_pebble_moss), translate = (0, 0.091, 0))
 spots0 = point_cloud(count = 16, bounds = (8.5, 0, 1.6), rng = r_scatter)
-spots1 = transform(spots0, translate = (0, 0, 2.2))
-spots2 = set(spots1, "scale", random(lo = 0.5, hi = 1.4, rng = r_pscale))
-spots = set(spots2, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = r_porient)))
+spots1 = transform(spots0, translate = (0, 0.35, 2.2))
+spots2 = repeat (spots1, iterations = 12) |s| {
+    s = set_position(s, offset = (0, -1, 0) * distance_to(ground) * (0.5 / (f32(@iteration) + 1.0)))
+}
+spots3 = set(spots2, "scale", random(lo = 0.5, hi = 1.4, rng = r_pscale))
+spots = set(spots3, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = r_porient)))
 pebbles = realize(instance_on_points(spots, source = pebble0))
 
-# Камера превью смотрит с азимута ~35° от +Z: поворачиваем весь ряд, чтобы
-# ось X легла поперёк кадра, а не вглубь.
-row = transform(merge(merge(center_p, left_p), merge(right_p, merge(merge(far_left_p, far_right_p), pebbles))), rotate = (0, 35, 0))
-output row
+# Камера превью смотрит с азимута ~35° от +Z: поворачиваем всю сцену, чтобы
+# ось ряда легла поперёк кадра, а не вглубь.
+stones = merge(merge(m_center, m_left), merge(m_right, merge(m_far_left, m_far_right)))
+scene = transform(merge(merge(stones, pebbles), ground), rotate = (0, 35, 0))
+output scene
