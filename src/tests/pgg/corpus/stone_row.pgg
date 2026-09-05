@@ -1,0 +1,71 @@
+param seed: int = 21
+
+# Ряд камней «бок о бок»: самый большой в центре, два средних по бокам,
+# два мелких с краёв. Камни прижаты друг к другу (лёгкое взаимное
+# проникновение боков — так сидят клады, а не парад с зазорами) и слегка
+# наклонены к соседу (roll вокруг Z), чтобы читалось «прислонились».
+# 
+# Приём гранёности тот же, что в rock_cluster.pgg: пересечение трёх
+# SDF-боксов (два повёрнуты через @orient одиночной точки), низкочастотный
+# fbm-дисплейс, ограниченные борозды-трещины, мох группой faces «moss».
+def boulder(size: f32 = 2.0, aspect: vec3 = (1.0, 0.9, 0.8), cracks: int = 3, rng: rng) -> (out: geo<mesh>) {
+    """Один гранёный валун, стоящий подошвой на y = 0 (утоплен на 10% высоты).
+    Пишет: @N (точки), группу moss (faces) — мох на верхних гранях."""
+    expect size > 0: "размер в метрах, положительный"
+    cut_rng = split_rng(rng, key = "cut")
+    yaw_rng = split_rng(rng, key = "cut_yaw")
+    cut2_rng = split_rng(rng, key = "cut2")
+    yaw2_rng = split_rng(rng, key = "cut2_yaw")
+    shape_rng = split_rng(rng, key = "shape")
+    site_rng = split_rng(rng, key = "crack_sites")
+    tilt_rng = split_rng(rng, key = "crack_tilt")
+    moss_rng = split_rng(rng, key = "moss")
+    core = sdf_box(size = aspect * size)
+    pivot0 = point_cloud(count = 1, bounds = (0, 0, 0), rng = cut_rng)
+    pivot = set(pivot0, "orient", orient_from_euler(random_vec(lo = vec3(-20, 0, -20), hi = (20, 360, 20), rng = yaw_rng)))
+    cutter = sdf_instance_on_points(pivot, source = sdf_box(size = aspect * size * 1.08))
+    pivot2_0 = point_cloud(count = 1, bounds = (0, 0, 0), rng = cut2_rng)
+    pivot2 = set(pivot2_0, "orient", orient_from_euler(random_vec(lo = vec3(-30, 0, -30), hi = (30, 360, 30), rng = yaw2_rng)))
+    cutter2 = sdf_instance_on_points(pivot2, source = sdf_box(size = aspect * size * 1.12))
+    faceted = sdf_intersect(sdf_intersect(core, cutter), cutter2)
+    bumpy = sdf_displace(faceted, fbm(@P * (0.8 / size), octaves = 3, rng = shape_rng) * 0.04 * size)
+    sites0 = point_cloud(count = cracks, bounds = aspect * size * 0.8, rng = site_rng)
+    sites = set(sites0, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (360, 360, 360), rng = tilt_rng)))
+    slabs = sdf_instance_on_points(sites, source = sdf_box(size = vec3(size * 1.6, size * 1.6, size * 0.015)))
+    core_inner = sdf_displace(bumpy, size * 0.03)
+    cracked = sdf_union(sdf_subtract(bumpy, slabs), core_inner)
+    raw = mesh_from_sdf(cracked, voxel = size * 0.015)
+    shaped = compute_normals(raw)
+    mossy = mark(shaped, "moss", where = (dot(@N, (0, 1, 0)) > 0.75) & (fbm(scale = 2.5 / size, rng = moss_rng) > 0.2), domain = faces)
+    out = transform(mossy, translate = vec3(0, dot(aspect, (0, 1, 0)) * size * 0.4, 0))
+}
+
+world_rng = rng_from_seed(seed)
+r_center = split_rng(world_rng, key = "center")
+r_left = split_rng(world_rng, key = "left")
+r_right = split_rng(world_rng, key = "right")
+r_far_left = split_rng(world_rng, key = "far_left")
+r_far_right = split_rng(world_rng, key = "far_right")
+
+# Композиция: центр крупный и высокий, боковые ниже и чуть придавлены,
+# крайние — камешки. Ось ряда — X, лёгкие сдвиги по Z и yaw, чтобы ряд
+# не выглядел выстроенным по линейке.
+center = boulder(size = 3.0, aspect = (1.0, 1.05, 0.9), cracks = 4, rng = r_center)
+left = boulder(size = 2.2, aspect = (0.9, 0.95, 0.85), cracks = 3, rng = r_left)
+right = boulder(size = 2.0, aspect = (1.0, 0.9, 0.8), cracks = 3, rng = r_right)
+far_left = boulder(size = 1.2, aspect = (1.1, 0.75, 0.9), cracks = 2, rng = r_far_left)
+far_right = boulder(size = 1.0, aspect = (0.95, 0.8, 1.0), cracks = 1, rng = r_far_right)
+
+# Расстановка вплотную: центры ближе суммы полуширин — бока заходят друг
+# за друга. Roll (3-я компонента rotate) кладёт боковые камни к центру,
+# крайние — чуть наружу, как осыпавшаяся кладка.
+center_p = transform(center, translate = vec3(0, 0, 0), rotate = (0, 8, 0))
+left_p = transform(left, translate = vec3(-2.6, 0, 0.1), rotate = vec3(0, 18, -4))
+right_p = transform(right, translate = vec3(2.5, 0, -0.05), rotate = vec3(0, -14, 4))
+far_left_p = transform(far_left, translate = vec3(-3.75, 0, 0.25), rotate = (0, 32, 6))
+far_right_p = transform(far_right, translate = vec3(3.7, 0, 0.55), rotate = vec3(0, -26, -6))
+
+# Камера превью смотрит с азимута ~35° от +Z: поворачиваем весь ряд, чтобы
+# ось X легла поперёк кадра, а не вглубь.
+row = transform(merge(merge(center_p, left_p), merge(right_p, merge(far_left_p, far_right_p))), rotate = (0, 35, 0))
+output row
