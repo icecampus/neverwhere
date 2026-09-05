@@ -1,8 +1,9 @@
 // Geometry preview (spec §9 L3 groundwork): renders the value of a selected
 // node — geo<mesh>, geo<points>, geo<instances> (realized) or sdf (meshed at
-// a preview voxel) — into an offscreen sokol target shown in an ImGui window
-// with an orbit camera. The value comes from a RunParams::pulls run (any
-// binding, not only declared outputs). Optional highlight of one group.
+// a preview voxel) — into an offscreen sokol target shown in the docked
+// preview pane (below the graph, draggable splitter) with an orbit camera.
+// The value comes from a RunParams::pulls run (any binding, not only declared
+// outputs). Optional highlight of one group.
 //
 // Frame contract: buildFrom() at load/selection time (CPU); drawWindow()
 // inside the ImGui frame (handles input, may recreate the render target on

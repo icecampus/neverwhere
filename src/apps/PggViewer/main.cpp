@@ -8,9 +8,11 @@
 // instance path, repeat/foreach zones draw as subgraphs with iteration ports
 // and a state loop. Layout hints live in trailing `# @pos X Y` comments and
 // are written back on node drags (in memory; Save persists). The probe panel
-// reuses the E6 probe API (PggTool --probe). The Preview window renders the
-// value of the selected node (RunParams::pulls -> GeometryPreview): meshes and
-// points directly, instances realized, sdf meshed at a preview voxel.
+// reuses the E6 probe API (PggTool --probe). The right region is a split
+// view: graph canvas on top, preview pane below, draggable splitter (default
+// 1:2). The preview renders the value of the selected node
+// (RunParams::pulls -> GeometryPreview): meshes and points directly,
+// instances realized, sdf meshed at a preview voxel.
 
 #include "pch.h"
 
@@ -98,6 +100,7 @@ FileDialogState g_fileDialog;
 
 GeometryPreview g_preview;
 bool g_showPreview = true;
+float g_splitRatio = 1.0f / 3.0f;  // graph : preview height share (default 1:2)
 bool g_autoPreview = true;           // re-run the preview when the selection changes
 std::string g_previewTarget;         // pull path currently shown
 pgg::Value g_previewValue;           // last pulled value (rebuilt on highlight/resolution changes)
@@ -121,6 +124,7 @@ std::string g_cliDive;
 bool g_noUi = false;
 
 constexpr float kPanelWidth = 380.0f;
+constexpr float kSplitterHeight = 6.0f;
 
 float panelWidth() { return g_state.imguiOk ? kPanelWidth : 0.0f; }
 
@@ -463,7 +467,8 @@ void drawPanel(int w, int h) {
 
     // Geometry preview options.
     if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Checkbox("show window", &g_showPreview);
+        ImGui::Checkbox("show pane", &g_showPreview);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Docked preview pane below the graph (drag the splitter to resize)");
         ImGui::SameLine();
         ImGui::Checkbox("auto on select", &g_autoPreview);
         if (ImGui::IsItemHovered())
@@ -536,7 +541,8 @@ void drawPanel(int w, int h) {
 
     if (ImGui::CollapsingHeader("Help")) {
         ImGui::TextWrapped("Open... / Ctrl+O: browse for a .pgg file. Ctrl+S: save layout hints.");
-        ImGui::TextWrapped("Preview window: LMB drag orbit, RMB/MMB drag pan, wheel zoom, Fit resets. "
+        ImGui::TextWrapped("The right region is split: graph on top, preview pane below; drag the splitter to "
+                           "resize (default 1:2). Preview pane: LMB drag orbit, RMB/MMB drag pan, wheel zoom, Fit resets. "
                            "Meshes/points render directly, instances are realized, sdf is meshed at 'sdf voxels'.");
         ImGui::TextWrapped("LMB drag node: move (writes a # @pos hint on release; Save persists).");
         ImGui::TextWrapped("LMB drag empty / RMB drag: pan. Wheel: zoom to cursor.");
@@ -547,10 +553,10 @@ void drawPanel(int w, int h) {
     ImGui::End();
 }
 
-void drawCanvasWindow(int w, int h) {
+void drawCanvasWindow(int w, float graphH) {
     const float x0 = panelWidth();
     ImGui::SetNextWindowPos(ImVec2(x0, 0.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(w) - x0, static_cast<float>(h)), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(w) - x0, graphH), ImGuiCond_Always);
     ImGui::Begin("##graph", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
@@ -611,19 +617,45 @@ void drawCanvasWindow(int w, int h) {
     ImGui::End();
 }
 
-// Floating, resizable preview window over the canvas (bottom-right by default).
-void drawPreviewWindow(int w, int h) {
-    if (!g_showPreview) return;
-    float pw = std::min(560.0f, (static_cast<float>(w) - panelWidth()) * 0.5f);
-    float ph = std::min(420.0f, static_cast<float>(h) * 0.5f);
-    if (g_cliPreviewSize.x > 0.0f && g_cliPreviewSize.y > 0.0f) {
-        pw = std::min(g_cliPreviewSize.x, static_cast<float>(w) - panelWidth() - 24.0f);
-        ph = std::min(g_cliPreviewSize.y, static_cast<float>(h) - 24.0f);
+// The right region is a split view: graph canvas on top, preview pane below,
+// separated by a draggable splitter (default ratio 1:2). The splitter is a
+// thin window drawn last so its hover/drag wins over both panes.
+void drawSplitter(int w, int h, float graphH) {
+    const float x0 = panelWidth();
+    ImGui::SetNextWindowPos(ImVec2(x0, graphH), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(w) - x0, kSplitterHeight), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("##splitter", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::InvisibleButton("##split", ImGui::GetWindowSize(), ImGuiButtonFlags_MouseButtonLeft);
+    const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    if (hot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+        const float usable = static_cast<float>(h) - kSplitterHeight;
+        g_splitRatio = std::clamp(ImGui::GetIO().MousePos.y / usable, 0.12f, 0.88f);
     }
-    ImGui::SetNextWindowPos(ImVec2(static_cast<float>(w) - pw - 12.0f, static_cast<float>(h) - ph - 12.0f),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(pw, ph), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Preview", &g_showPreview)) g_preview.drawWindowContents();
+    const ImVec2 mn = ImGui::GetWindowPos();
+    const float y = mn.y + kSplitterHeight * 0.5f - 1.0f;
+    const ImU32 col = hot ? IM_COL32(150, 160, 180, 255) : IM_COL32(80, 85, 95, 255);
+    ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(mn.x, y), ImVec2(mn.x + ImGui::GetWindowWidth(), y + 2.0f), col);
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+// Docked preview pane under the splitter.
+void drawPreviewPane(int w, int h, float graphH) {
+    if (!g_showPreview) return;
+    const float x0 = panelWidth();
+    ImGui::SetNextWindowPos(ImVec2(x0, graphH + kSplitterHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(w) - x0,
+                                    static_cast<float>(h) - graphH - kSplitterHeight),
+                           ImGuiCond_Always);
+    ImGui::Begin("##preview", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus);
+    g_preview.drawWindowContents();
     ImGui::End();
 }
 
@@ -716,10 +748,21 @@ void frame() {
         fd.delta_time = g_state.dt;
         fd.dpi_scale = dpi;
         simgui_new_frame(&fd);
+        // --preview-size=W,H: the pane spans the right region, so only the
+        // requested height maps to the split ratio (applied once at startup).
+        if (g_cliPreviewSize.y > 0.0f) {
+            g_splitRatio =
+                std::clamp(1.0f - g_cliPreviewSize.y / static_cast<float>(h), 0.12f, 0.88f);
+            g_cliPreviewSize = ImVec2(0.0f, 0.0f);
+        }
+        const float graphH =
+            g_showPreview ? std::clamp(g_splitRatio, 0.12f, 0.88f) * (static_cast<float>(h) - kSplitterHeight)
+                          : static_cast<float>(h);
         drawPanel(w, h);
-        drawCanvasWindow(w, h);
+        drawCanvasWindow(w, graphH);
         updateAutoPreview();
-        drawPreviewWindow(w, h);
+        drawPreviewPane(w, h, graphH);
+        if (g_showPreview) drawSplitter(w, h, graphH);
         // Offscreen preview pass: outside (before) the swapchain pass that
         // draws the ImGui image referencing its target.
         g_preview.render();
