@@ -338,7 +338,7 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& p [[buffer(0)]], 
 }
 )";
 
-constexpr int kMaxTarget = 2048;
+constexpr int kMaxTarget = 4096;
 constexpr sg_pixel_format kColorFormat = SG_PIXELFORMAT_RGBA8;
 constexpr sg_pixel_format kDepthFormat = SG_PIXELFORMAT_DEPTH;
 
@@ -474,8 +474,13 @@ void GeometryPreview::destroyTarget() {
 }
 
 void GeometryPreview::ensureTarget(int w, int h) {
-    w = std::clamp(w, 16, kMaxTarget);
-    h = std::clamp(h, 16, kMaxTarget);
+    // Clamp BOTH axes proportionally: clamping only the overflowing axis makes
+    // the target aspect differ from the pane rect and AddImage then stretches
+    // the image non-uniformly (HiDPI panes wider than kMaxTarget hit this).
+    const float s = std::min(1.0f, std::min(static_cast<float>(kMaxTarget) / static_cast<float>(w),
+                                            static_cast<float>(kMaxTarget) / static_cast<float>(h)));
+    w = std::clamp(static_cast<int>(w * s), 16, kMaxTarget);
+    h = std::clamp(static_cast<int>(h * s), 16, kMaxTarget);
     if (w == m_targetW && h == m_targetH) return;
     destroyTarget();
 
@@ -536,9 +541,12 @@ void GeometryPreview::drawWindowContents() {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     avail.x = std::max(avail.x, 64.0f);
     avail.y = std::max(avail.y, 64.0f);
-    const float scale = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.x);
-    m_wantW = static_cast<int>(avail.x * scale);
-    m_wantH = static_cast<int>(avail.y * scale);
+    // Per-axis points->pixels: the axes' framebuffer scales may differ, and a
+    // wrong axis here stretches the image (the camera aspect follows the
+    // TARGET size, the blit follows the rect — they must match).
+    const ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
+    m_wantW = static_cast<int>(avail.x * std::max(1.0f, fbScale.x));
+    m_wantH = static_cast<int>(avail.y * std::max(1.0f, fbScale.y));
     ensureTarget(m_wantW, m_wantH);
 
     ImGui::InvisibleButton("##preview_canvas", avail,
