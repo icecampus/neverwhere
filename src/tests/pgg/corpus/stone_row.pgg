@@ -5,11 +5,13 @@ param gap: f32 = 0.045
 # средних по бокам, два мелких с краёв, осыпь гальки у подножия.
 # 
 # Приёмы поверх базового rock_cluster.pgg:
-# 1. Контактные отпечатки: камни собираются на SDF-уровне — каждый режется
-# РАЗДУТЫМ полем соседей (sdf_subtract(A, sdf_displace(B, -gap));
-# отрицательная константа раздувает поле, положительная сжимает), поэтому
-# на контакте остаётся честная борозда-шов шириной ~gap, а не клиппинг
-# мешей. Тот же приём, что imprint-carve в StoneGenerator (CGAL Nef), но
+# 1. Контактные отпечатки: камни собираются на SDF-уровне — режется ТОЛЬКО
+# новый камень РАЗДУТЫМ полем уже стоящего соседа (sdf_subtract(A,
+# sdf_displace(B, -gap)); отрицательная константа раздувает поле), порядок
+# от центра к краям: центр нетронут, средние режутся центром, крайние —
+# средними. Взаимная резка пары превращала бы перекрытие δ в щель δ + 2·gap
+# (см. SdfImprint в sdf_test), односторонняя даёт равномерный шов ровно gap.
+# Тот же приём, что imprint-carve в StoneGenerator (CGAL Nef), но
 # аналитический. Меши затем мержатся жёстко (merge) — smooth-union для
 # сухой кладки не нужен.
 # 2. Оседание: якоря камней и точки гальки стартуют над грунтом и 12
@@ -123,15 +125,14 @@ i_right = sdf_instance_on_points(lift_right, source = f_right)
 i_far_left = sdf_instance_on_points(lift_far_left, source = f_far_left)
 i_far_right = sdf_instance_on_points(lift_far_right, source = f_far_right)
 
-# Контактные отпечатки: каждый камень режется раздутым на gap объединением
-# полей соседей — на стыках остаются борозды-швы.
-c_center = sdf_subtract(i_center, sdf_displace(sdf_union(i_left, i_right), -gap))
-c_left = sdf_subtract(i_left, sdf_displace(sdf_union(i_center, i_far_left), -gap))
-c_right = sdf_subtract(i_right, sdf_displace(sdf_union(i_center, i_far_right), -gap))
+# Контактные отпечатки: режется только новый камень — раздутым на gap полем
+# уже стоящего соседа (порядок от центра к краям); шов выходит ровно gap.
+c_left = sdf_subtract(i_left, sdf_displace(i_center, -gap))
+c_right = sdf_subtract(i_right, sdf_displace(i_center, -gap))
 c_far_left = sdf_subtract(i_far_left, sdf_displace(i_left, -gap))
 c_far_right = sdf_subtract(i_far_right, sdf_displace(i_right, -gap))
 
-m_center = stone_from_field(c_center, 3.0, r_moss_center)
+m_center = stone_from_field(i_center, 3.0, r_moss_center)
 m_left = stone_from_field(c_left, 2.2, r_moss_left)
 m_right = stone_from_field(c_right, 2.0, r_moss_right)
 m_far_left = stone_from_field(c_far_left, 1.2, r_moss_far_left)

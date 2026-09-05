@@ -562,4 +562,113 @@ TEST(SdfCorpus, ThreadCountInvariant) {
         EXPECT_EQ(f1->eval(p), f8->eval(p));
 }
 
+// --- 9. imprint carve geometry ---------------------------------------------------
+// The masonry corpus examples (stone_row, stone_arch) fit stones by carving
+// them with the NEIGHBOUR'S INFLATED field (sdf_subtract(A, sdf_displace(B,
+// -gap))). These tests pin the geometry of that operation: the carve stops
+// exactly at the neighbour's inflated surface (mechanism is exact), and the
+// MUTUAL carve of an overlapping pair produces a slit of width overlap + 2g
+// (the designed overlap is converted into visible seam), while the one-sided
+// carve yields a uniform g-wide seam regardless of overlap — which is why the
+// corpus carves only the newly placed stone of each pair.
+
+// Sign-change crossing of f along a ray from the origin (50 bisections,
+// ~1e-9). xa and xb must straddle the crossing (either order).
+float crossOnRay(const pgg::SdfPtr& f, glm::vec3 dir, float ta, float tb) {
+    float fa = f->eval(dir * ta);
+    float fb = f->eval(dir * tb);
+    EXPECT_LT(fa, 0.0f);
+    EXPECT_GT(fb, 0.0f);
+    for (int i = 0; i < 50; ++i) {
+        const float tm = 0.5f * (ta + tb);
+        if (f->eval(dir * tm) < 0.0f)
+            ta = tm;
+        else
+            tb = tm;
+    }
+    return 0.5f * (ta + tb);
+}
+
+TEST(SdfImprint, CarveBoundaryMatchesInflatedSurfaceExactly) {
+    // Unit spheres A at origin and B at (1.8, 0, 0) (overlap 0.2). Carving A
+    // by B inflated by g = 0.05 must cut A at B's inflated surface
+    // x = 1.8 - 1 - 0.05 = 0.75 — no deeper, no shallower.
+    pgg::RunResult r = pgg::run(
+        "a = sdf_sphere(r = 1.0)\n"
+        "anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "b = sdf_instance_on_points(anchor, source = sdf_sphere(r = 1.0))\n"
+        "carved = sdf_subtract(a, sdf_displace(b, -0.05))\n"
+        "output carved\n"
+        "output b\n");
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr carved = sdfOutput(r, "carved");
+    pgg::SdfPtr b = sdfOutput(r, "b");
+    ASSERT_TRUE(carved);
+    ASSERT_TRUE(b);
+    pggtest::expectF32Near(crossOnRay(carved, glm::vec3(1, 0, 0), 0.5f, 1.0f), 0.75f, 1e-4f);
+    pggtest::expectF32Near(crossOnRay(b, glm::vec3(1, 0, 0), 1.0f, 0.5f), 0.8f, 1e-5f);
+    // The mechanism is exact off-axis too (crossing circle of the two
+    // spheres: x = 0.9, |y| = sqrt(1 - 0.81) ~ 0.4359; carve depth along this
+    // ray = dist to B's surface + g).
+    const glm::vec3 dir = glm::normalize(glm::vec3(0.9f, 0.4359f, 0.0f));
+    const float t = crossOnRay(carved, dir, 0.5f, 1.0f);
+    pggtest::expectF32Near(b->eval(dir * t), 0.05f, 1e-4f);  // carve iso == B + g
+}
+
+TEST(SdfImprint, CarveSurfaceFollowsDisplacedNeighbour) {
+    // Same pair, but B's surface is fbm-roughened (pseudo-SDF, as in
+    // boulder_field). The carved iso of A must still BE the inflated iso of B
+    // wherever it cuts: b(carve point) == g on every probe ray.
+    const char* src =
+        "root_rng = rng_from_seed(11)\n"
+        "n_rng = split_rng(root_rng, key = \"n\")\n"
+        "a = sdf_sphere(r = 1.0)\n"
+        "anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "b = sdf_instance_on_points(anchor, source = sdf_displace(sdf_sphere(r = 1.0), amount = fbm(scale = 2.0, octaves = 3, rng = n_rng) * 0.04))\n"
+        "carved = sdf_subtract(a, sdf_displace(b, -0.05))\n"
+        "output carved\n"
+        "output b\n";
+    pgg::RunResult r = pgg::run(src);
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr carved = sdfOutput(r, "carved");
+    pgg::SdfPtr b = sdfOutput(r, "b");
+    ASSERT_TRUE(carved);
+    ASSERT_TRUE(b);
+    for (const glm::vec3 dir : {glm::normalize(glm::vec3(1, 0.3f, 0.1f)), glm::normalize(glm::vec3(1, -0.2f, 0.35f)),
+                                glm::normalize(glm::vec3(1, 0.1f, -0.3f))}) {
+        SCOPED_TRACE("ray " + std::to_string(dir.x) + " " + std::to_string(dir.y) + " " + std::to_string(dir.z));
+        const float t = crossOnRay(carved, dir, 0.4f, 1.05f);
+        pggtest::expectF32Near(b->eval(dir * t), 0.05f, 1e-4f);
+    }
+}
+
+TEST(SdfImprint, MutualCarveWidensSeamByOverlap) {
+    // Same pair (overlap 0.2, g = 0.05). MUTUAL carve: A' ends at 0.75 and
+    // B' starts at 1.05 → slit 0.30 = overlap + 2g. ONE-SIDED carve (only the
+    // new stone A is cut): slit 0.05 = g, hugging B's untouched surface.
+    pgg::RunResult r = pgg::run(
+        "a = sdf_sphere(r = 1.0)\n"
+        "anchor = transform(mesh_line(count = 1, length = 0.0), translate = (1.8, 0, 0))\n"
+        "b = sdf_instance_on_points(anchor, source = sdf_sphere(r = 1.0))\n"
+        "mut_a = sdf_subtract(a, sdf_displace(b, -0.05))\n"
+        "mut_b = sdf_subtract(b, sdf_displace(a, -0.05))\n"
+        "output mut_a\n"
+        "output mut_b\n"
+        "output b\n");
+    pggtest::expectNoErrors(r);
+    pgg::SdfPtr mutA = sdfOutput(r, "mut_a");
+    pgg::SdfPtr mutB = sdfOutput(r, "mut_b");
+    pgg::SdfPtr b = sdfOutput(r, "b");
+    ASSERT_TRUE(mutA);
+    ASSERT_TRUE(mutB);
+    ASSERT_TRUE(b);
+    const float aEnd = crossOnRay(mutA, glm::vec3(1, 0, 0), 0.5f, 1.0f);
+    const float mutBStart = crossOnRay(mutB, glm::vec3(1, 0, 0), 1.3f, 0.9f);
+    const float bStart = crossOnRay(b, glm::vec3(1, 0, 0), 1.0f, 0.5f);
+    pggtest::expectF32Near(aEnd, 0.75f, 1e-4f);
+    pggtest::expectF32Near(mutBStart, 1.05f, 1e-4f);
+    pggtest::expectF32Near(mutBStart - aEnd, 0.2f + 2.0f * 0.05f, 1e-3f);  // overlap + 2g
+    pggtest::expectF32Near(bStart - aEnd, 0.05f, 1e-4f);                  // one-sided: exactly g
+}
+
 }  // namespace
