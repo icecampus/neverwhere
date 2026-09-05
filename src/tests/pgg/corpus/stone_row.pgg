@@ -46,6 +46,10 @@ r_left = split_rng(world_rng, key = "left")
 r_right = split_rng(world_rng, key = "right")
 r_far_left = split_rng(world_rng, key = "far_left")
 r_far_right = split_rng(world_rng, key = "far_right")
+r_pebble = split_rng(world_rng, key = "pebble")
+r_scatter = split_rng(world_rng, key = "scatter")
+r_pscale = split_rng(world_rng, key = "pebble_scale")
+r_porient = split_rng(world_rng, key = "pebble_orient")
 
 # Композиция: центр крупный и высокий, боковые ниже и чуть придавлены,
 # крайние — камешки. Ось ряда — X, лёгкие сдвиги по Z и yaw, чтобы ряд
@@ -65,7 +69,17 @@ right_p = transform(right, translate = vec3(2.5, 0, -0.05), rotate = (0, -14, 4)
 far_left_p = transform(far_left, translate = vec3(-3.75, 0, 0.25), rotate = (0, 32, 6))
 far_right_p = transform(far_right, translate = vec3(3.7, 0, 0.55), rotate = (0, -26, -6))
 
+# Осыпь у подножия: один мелкий валун как источник, инстансы по узкой полосе
+# вдоль фронта ряда (ряд локально вдоль X, финальный поворот общий), с
+# разбросом масштаба и поворота.
+pebble0 = boulder(size = 0.35, aspect = (1.0, 0.65, 0.85), cracks = 1, rng = r_pebble)
+spots0 = point_cloud(count = 16, bounds = (8.5, 0, 1.6), rng = r_scatter)
+spots1 = transform(spots0, translate = (0, 0, 2.2))
+spots2 = set(spots1, "scale", random(lo = 0.5, hi = 1.4, rng = r_pscale))
+spots = set(spots2, "orient", orient_from_euler(random_vec(lo = (0, 0, 0), hi = (0, 360, 0), rng = r_porient)))
+pebbles = realize(instance_on_points(spots, source = pebble0))
+
 # Камера превью смотрит с азимута ~35° от +Z: поворачиваем весь ряд, чтобы
 # ось X легла поперёк кадра, а не вглубь.
-row = transform(merge(merge(center_p, left_p), merge(right_p, merge(far_left_p, far_right_p))), rotate = (0, 35, 0))
+row = transform(merge(merge(center_p, left_p), merge(right_p, merge(merge(far_left_p, far_right_p), pebbles))), rotate = (0, 35, 0))
 output row
