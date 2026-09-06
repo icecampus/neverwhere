@@ -370,6 +370,231 @@ Value opInset(const BoundCall& bound, RunContext& run) {
     return Value(std::make_shared<const Geo>(std::move(out)));
 }
 
+// --- bevel(geo, width, where, bevel_group) ---------------------------------------
+//
+// One-segment chamfer of every interior edge (Blender "bevel, segments = 1")
+// by face shrinking: each face gets its own copy of its corners pulled inward
+// by `width` along its beveled edges (mitred where two meet, clamped so the
+// face keeps its orientation); the gap along an edge becomes a quad, the gap
+// at a vertex an n-gon of the surrounding corners (a boundary vertex keeps
+// its original position as one extra corner). Edges with one face (open
+// boundary) or 3+ faces (non-manifold) are left sharp; `where` (faces) bevels
+// an edge only when both its faces are selected. Rounded edges = bevel +
+// subdivide(catmull_clark). The stored @N is dropped (the surface changed):
+// compute_normals after.
+Value opBevel(const BoundCall& bound, RunContext& run) {
+    const GeoPtr inPtr = asGeo(bound.values[0]);
+    const Geo& in = *inPtr;
+    if (!meshWithFaces(in)) {
+        if (in.kind != GeoKind::Mesh)
+            run.report("E204", bound.span, "bevel needs a geo<mesh> with faces",
+                       in.kind == GeoKind::Instances ? "realize() first" : "points have no edges to bevel");
+        return Value(inPtr);
+    }
+    const std::string bevelGroup = asString(bound.values[3]);
+    const size_t nf = in.faceCount();
+    const auto& width = std::get<F32Buf>(*convertBuffer(evalField(bound.fields[1], in, Domain::Faces, run), ScalarType::F32));
+    std::vector<uint8_t> sel(nf, 1);
+    if (bound.fields[2]) sel = std::get<BoolBuf>(*convertBuffer(evalField(bound.fields[2], in, Domain::Faces, run), ScalarType::Bool));
+    if (width.size() != nf || sel.size() != nf) return Value(inPtr);
+    if (std::find(sel.begin(), sel.end(), uint8_t(1)) == sel.end()) return Value(inPtr);
+
+    const auto& FO = *in.faceOffsets;
+    const auto& CV = *in.cornerVerts;
+    const auto& P = *in.positions;
+    const size_t np = P.size(), nc = CV.size();
+
+    // Edge -> incident (face, corner index of the edge start). An edge is
+    // beveled when exactly two selected faces share it.
+    struct EdgeUse { int32_t face, corner; };
+    std::unordered_map<uint64_t, std::vector<EdgeUse>> edges;
+    edges.reserve(nc);
+    for (size_t f = 0; f < nf; ++f)
+        for (int32_t c = FO[f]; c < FO[f + 1]; ++c) {
+            const int32_t cn = c + 1 < FO[f + 1] ? c + 1 : FO[f];
+            edges[edgeKey(CV[static_cast<size_t>(c)], CV[static_cast<size_t>(cn)])].push_back({static_cast<int32_t>(f), c});
+        }
+    auto nextCorner = [&](int32_t c) {
+        // Face of corner c is found by binary search on FO.
+        const auto it = std::upper_bound(FO.begin(), FO.end(), c);
+        const size_t f = static_cast<size_t>(it - FO.begin()) - 1;
+        return c + 1 < FO[f + 1] ? c + 1 : FO[f];
+    };
+    auto prevCorner = [&](int32_t c) {
+        const auto it = std::upper_bound(FO.begin(), FO.end(), c);
+        const size_t f = static_cast<size_t>(it - FO.begin()) - 1;
+        return c > FO[f] ? c - 1 : FO[f + 1] - 1;
+    };
+    auto beveled = [&](int32_t c) -> bool {  // the edge starting at corner c
+        const auto it = edges.find(edgeKey(CV[static_cast<size_t>(c)], CV[static_cast<size_t>(nextCorner(c))]));
+        if (it == edges.end() || it->second.size() != 2) return false;
+        return sel[static_cast<size_t>(it->second[0].face)] && sel[static_cast<size_t>(it->second[1].face)];
+    };
+    // The other face's corner at the same edge start vertex, across the edge
+    // starting at corner c (c's vertex -> next); -1 when not beveled.
+    auto acrossAtStart = [&](int32_t c) -> int32_t {
+        if (!beveled(c)) return -1;
+        const auto& uses = edges[edgeKey(CV[static_cast<size_t>(c)], CV[static_cast<size_t>(nextCorner(c))])];
+        const EdgeUse& o = uses[0].corner == c ? uses[1] : uses[0];
+        // In the other face the edge runs next -> c's vertex, so c's vertex is
+        // the corner after o.corner.
+        return nextCorner(o.corner);
+    };
+
+    {
+        size_t nBeveled = 0;
+        for (const auto& [key, uses] : edges) {
+            (void)key;
+            if (uses.size() == 2 && sel[static_cast<size_t>(uses[0].face)] && sel[static_cast<size_t>(uses[1].face)]) ++nBeveled;
+        }
+        if (nBeveled == 0) return Value(inPtr);  // nothing to chamfer: keep the welded input
+    }
+    // New point per corner: the corner pulled inward along its beveled edges.
+    MeshBuild b;
+    std::vector<int32_t> cornerPoint(nc, -1);
+    for (size_t f = 0; f < nf; ++f) {
+        const int32_t begin = FO[f], end = FO[f + 1], k = end - begin;
+        if (k < 3) {
+            for (int32_t c = begin; c < end; ++c)
+                cornerPoint[static_cast<size_t>(c)] = b.addPoint(RowBlend::copy(CV[static_cast<size_t>(c)]), P[static_cast<size_t>(CV[static_cast<size_t>(c)])]);
+            continue;
+        }
+        const glm::vec3 n = unitNormal(in, f);
+        glm::vec3 centroid(0.0f);
+        for (int32_t c = begin; c < end; ++c) centroid += P[static_cast<size_t>(CV[static_cast<size_t>(c)])];
+        centroid /= static_cast<float>(k);
+        std::vector<glm::vec3> inward(static_cast<size_t>(k), glm::vec3(0.0f));
+        std::vector<uint8_t> bev(static_cast<size_t>(k), 0);
+        float minEdgeDist = 1e30f;
+        for (int32_t j = 0; j < k; ++j) {
+            const glm::vec3& a = P[static_cast<size_t>(CV[static_cast<size_t>(begin + j)])];
+            const glm::vec3& c2 = P[static_cast<size_t>(CV[static_cast<size_t>(begin + (j + 1) % k)])];
+            const glm::vec3 e = c2 - a;
+            const float el = glm::length(e);
+            if (el > 1e-12f) {
+                inward[static_cast<size_t>(j)] = glm::cross(n, e / el);
+                minEdgeDist = std::min(minEdgeDist, std::abs(glm::dot(centroid - a, inward[static_cast<size_t>(j)])));
+            }
+            bev[static_cast<size_t>(j)] = beveled(begin + j) ? 1 : 0;
+        }
+        const float w = std::max(0.0f, std::min(width[f], minEdgeDist * 0.45f));
+        for (int32_t j = 0; j < k; ++j) {
+            const bool bp = bev[static_cast<size_t>((j + k - 1) % k)] != 0, bn = bev[static_cast<size_t>(j)] != 0;
+            const glm::vec3& nPrev = inward[static_cast<size_t>((j + k - 1) % k)];
+            const glm::vec3& nNext = inward[static_cast<size_t>(j)];
+            glm::vec3 offset(0.0f);
+            if (bp && bn) {
+                const float denom = 1.0f + glm::dot(nPrev, nNext);
+                offset = denom > 1e-4f ? (nPrev + nNext) / denom : nNext;
+            } else if (bp) {
+                offset = nPrev;
+            } else if (bn) {
+                offset = nNext;
+            }
+            const int32_t v = CV[static_cast<size_t>(begin + j)];
+            cornerPoint[static_cast<size_t>(begin + j)] = b.addPoint(RowBlend::copy(v), P[static_cast<size_t>(v)] + offset * w);
+        }
+    }
+    std::vector<uint8_t> isBevel;
+    auto emit = [&](RowSrc face, const std::vector<int32_t>& verts, const std::vector<RowBlend>& corners, bool bevelFace) {
+        b.addFace(face, verts, corners);
+        isBevel.push_back(bevelFace ? 1 : 0);
+    };
+    // Shrunk faces.
+    for (size_t f = 0; f < nf; ++f) {
+        const int32_t begin = FO[f], end = FO[f + 1];
+        std::vector<int32_t> verts;
+        std::vector<RowBlend> corners;
+        for (int32_t c = begin; c < end; ++c) {
+            verts.push_back(cornerPoint[static_cast<size_t>(c)]);
+            corners.push_back(RowBlend::copy(c));
+        }
+        emit(RowSrc::copy(static_cast<int32_t>(f)), verts, corners, false);
+    }
+    // Edge quads.
+    for (const auto& [key, uses] : edges) {
+        (void)key;
+        if (uses.size() != 2) continue;
+        if (!sel[static_cast<size_t>(uses[0].face)] || !sel[static_cast<size_t>(uses[1].face)]) continue;
+        const int32_t a1 = uses[0].corner, b1 = nextCorner(a1);       // face 1 runs a -> b
+        const int32_t b2 = uses[1].corner, a2 = nextCorner(b2);       // face 2 runs b -> a
+        emit(RowSrc::lerp(uses[0].face, uses[1].face, 0.5f),
+             {cornerPoint[static_cast<size_t>(b1)], cornerPoint[static_cast<size_t>(a1)], cornerPoint[static_cast<size_t>(a2)], cornerPoint[static_cast<size_t>(b2)]},
+             {RowBlend::copy(b1), RowBlend::copy(a1), RowBlend::copy(a2), RowBlend::copy(b2)}, true);
+    }
+    // Vertex polygons: walk the corners around each vertex across beveled edges.
+    std::vector<std::vector<int32_t>> cornersAt(np);
+    for (int32_t c = 0; c < static_cast<int32_t>(nc); ++c) cornersAt[static_cast<size_t>(CV[static_cast<size_t>(c)])].push_back(c);
+    std::vector<uint8_t> visited(nc, 0);
+    for (size_t v = 0; v < np; ++v) {
+        for (int32_t c0 : cornersAt[v]) {
+            if (visited[static_cast<size_t>(c0)]) continue;
+            // Walk backwards to a chain start: a corner whose incoming edge
+            // (prev -> v) is not beveled, or all the way round (closed fan).
+            int32_t start = c0;
+            {
+                int32_t c = c0;
+                for (size_t guard = 0; guard <= cornersAt[v].size(); ++guard) {
+                    // Incoming edge of c is the edge starting at prevCorner(c) (prev -> v).
+                    const int32_t pc = prevCorner(c);
+                    if (!beveled(pc)) { start = c; break; }
+                    // The face across that edge: its corner at v is acrossAtStart of... the
+                    // edge (v -> prev) seen from the other face starts at that face's corner at v.
+                    const auto& uses = edges[edgeKey(CV[static_cast<size_t>(pc)], CV[static_cast<size_t>(c)])];
+                    const EdgeUse& o = uses[0].corner == pc ? uses[1] : uses[0];
+                    c = o.corner;  // in the other face the edge runs v -> prev, starting at its corner at v
+                    if (c == c0) { start = c0; break; }
+                }
+            }
+            std::vector<int32_t> chain;
+            bool closed = false;
+            int32_t c = start;
+            for (size_t guard = 0; guard <= cornersAt[v].size(); ++guard) {
+                visited[static_cast<size_t>(c)] = 1;
+                chain.push_back(c);
+                const int32_t nxt = acrossAtStart(c);
+                if (nxt < 0) break;
+                if (nxt == start) { closed = true; break; }
+                c = nxt;
+            }
+            if (chain.size() < 2) continue;
+            if (!closed) {
+                // Open fan (boundary vertex): the original vertex closes the gap.
+                bool anyMoved = false;
+                for (int32_t cc : chain)
+                    if (glm::length(b.positions[static_cast<size_t>(cornerPoint[static_cast<size_t>(cc)])] - P[v]) > 1e-9f) anyMoved = true;
+                if (!anyMoved) continue;
+            }
+            std::vector<int32_t> verts;
+            std::vector<RowBlend> corners;
+            if (!closed) {
+                verts.push_back(b.addPoint(RowBlend::copy(static_cast<int32_t>(v)), P[v]));
+                corners.push_back(RowBlend::copy(chain.back()));
+            }
+            for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                verts.push_back(cornerPoint[static_cast<size_t>(*it)]);
+                corners.push_back(RowBlend::copy(*it));
+            }
+            if (verts.size() < 3) continue;
+            std::vector<int32_t> facesAround;
+            for (int32_t cc : chain) {
+                const auto it = std::upper_bound(FO.begin(), FO.end(), cc);
+                facesAround.push_back(static_cast<int32_t>(it - FO.begin()) - 1);
+            }
+            emit(RowSrc::copy(facesAround.front()), verts, corners, true);
+        }
+    }
+    Geo out = b.finish(in, nullptr, nullptr);
+    out.normals.reset();  // the surface changed; compute_normals rebuilds
+    if (out.cornerAttrs && out.cornerAttrs->find("N")) {
+        AttrSet ca = *out.cornerAttrs;
+        ca.columns.erase("N");
+        out.cornerAttrs = std::make_shared<const AttrSet>(std::move(ca));
+    }
+    out.faceGroups = withFaceGroup(out.faceGroups, bevelGroup, isBevel);
+    return Value(std::make_shared<const Geo>(std::move(out)));
+}
+
 // --- separate(geo, where, domain) -> (yes, no) ---------------------------------
 Value opSeparate(const BoundCall& bound, RunContext& run) {
     const GeoPtr inPtr = asGeo(bound.values[0]);
@@ -844,6 +1069,7 @@ Value evalTopologyOpsBuiltin(const BoundCall& bound, RunContext& run) {
     switch (bound.sig->id) {
         case BuiltinId::Extrude: return opExtrude(bound, run);
         case BuiltinId::Inset: return opInset(bound, run);
+        case BuiltinId::Bevel: return opBevel(bound, run);
         case BuiltinId::Separate: return opSeparate(bound, run);
         case BuiltinId::Triangulate: return opTriangulate(bound, run);
         case BuiltinId::Subdivide: return opSubdivide(bound, run);

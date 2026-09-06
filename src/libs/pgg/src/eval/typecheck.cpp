@@ -571,9 +571,9 @@ private:
             case BuiltinId::ComputeNormals: {
                 GeoSchema s = argSchema(byParam, 0);
                 if (!s.open) {
-                    if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit) && lit == "flat") {
-                        // flat mode writes faceted normals as a corner attribute
-                        // and leaves @N (points) untouched (§19 v0.8).
+                    if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit) && (lit == "flat" || lit == "auto")) {
+                        // flat / auto modes write per-corner normals as a corner
+                        // attribute and leave @N (points) untouched (§19 v0.8, v1.24).
                         s.attrs[domainIndex("corners")]["N"] = SchemaAttrType(ScalarType::Vec3, AttrTypeInfo::Normal);
                     } else {
                         s.hasN = true;
@@ -892,6 +892,25 @@ private:
                 storeSchema(&c, std::move(s));
                 break;
             }
+            case BuiltinId::Bevel: {
+                // Rows copy/blend; @N is dropped (surface changed); bevel_group on faces.
+                GeoSchema s = argSchema(byParam, 0);
+                checkFieldArgs(s, byParam, {1, 2});
+                if (!s.open) {
+                    s.hasN = false;
+                    s.nStale = false;
+                    s.attrs[domainIndex("corners")].erase("N");
+                    if (byParam.size() > 3 && byParam[3]) {
+                        if (literalString(byParam[3], lit)) {
+                            if (!lit.empty()) s.groups[domainIndex("faces")].insert(lit);
+                        } else {
+                            s = openSchema();
+                        }
+                    }
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::Subdivide: {
                 GeoSchema s = argSchema(byParam, 0);
                 // catmull_clark / loop move the original points: a stored @N is stale.
@@ -934,6 +953,24 @@ private:
             case BuiltinId::Circle:
                 storeSchema(&c, sourceSchema(GeoKind::Points, false));
                 break;
+            case BuiltinId::BakeAo: {
+                // Adds the f32 column on points or corners (auto: corners when a
+                // corner N exists, else points); non-literal name/domain opens.
+                GeoSchema s = argSchema(byParam, 0);
+                if (!s.open) {
+                    std::string dom = "auto", nm = "ao";
+                    const bool domLit = byParam.size() <= 4 || !byParam[4] || literalString(byParam[4], dom);
+                    const bool nmLit = byParam.size() <= 5 || !byParam[5] || literalString(byParam[5], nm);
+                    if (!domLit || !nmLit) {
+                        s = openSchema();
+                    } else {
+                        if (dom == "auto") dom = s.attrs[domainIndex("corners")].count("N") ? "corners" : "points";
+                        s.attrs[domainIndex(dom)][nm] = ScalarType::F32;
+                    }
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::BezierPoints: {
                 GeoSchema s = sourceSchema(GeoKind::Points, false);
                 s.attrs[domainIndex("points")]["t"] = ScalarType::F32;

@@ -24,11 +24,18 @@ param seed: int = 7
 # lamp (светящиеся корпуса фонарей), roof (настил), tile (черепица и конёк),
 # leaf (зелень), flower (цветы), grass (трава), smoke (дым). Цвет — `@Cd` на
 # faces по группам в блоке «окраска» внизу (превью: чекбокс «colors (@Cd)»).
+def cbox(size: vec3, k: f32) -> (out: geo<mesh>) {
+    """Box с фаской (v1.24): ребро скошено на k · min(размер) (клампится bevel'ом),
+    грани фаски — в группе "edge" (краевой износ: в окраске они светлее). Фасеточные
+    corner-N: сварной box несёт гладкие point-@N (диагонали углов, §8.1), и в превью
+    большая плоская грань шейдится «подушкой» — поэтому flat."""
+    w = min(min(dot(size, (1, 0, 0)), dot(size, (0, 1, 0))), dot(size, (0, 0, 1))) * k
+    out = compute_normals(bevel(box(size = size), width = w, bevel_group = "edge"), mode = flat)
+}
+
 def piece(size: vec3, pos: vec3, grp: string) -> (out: geo<mesh>) {
-    """Прямоугольный брус/блок: box размером size с центром в pos, все грани в группе grp.
-    Фасеточные corner-N: сварной box несёт гладкие point-@N (диагонали углов, §8.1),
-    и в превью большая плоская грань шейдится «подушкой»."""
-    b = compute_normals(box(size = size), mode = flat)
+    """Прямоугольный брус/блок с фаской: cbox размером size с центром в pos, все грани в группе grp."""
+    b = cbox(size = size, k = 0.12)
     placed = transform(b, translate = pos)
     out = mark(placed, grp, where = true, domain = faces)
 }
@@ -105,7 +112,7 @@ def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
     выступ по z (±0.006) и оттенок @tint (полутоновая полоса читается и при плоском
     свете, когда шов не виден). Доски — инстансы на mesh_line, один realize."""
     pitch = w / f32(n)
-    plank = compute_normals(box(size = vec3(pitch - 0.008, h, t)), mode = flat)
+    plank = cbox(size = vec3(pitch - 0.008, h, t), k = 0.18)
     pts0 = mesh_line(count = n, length = w - pitch, dir = (1, 0, 0))
     pts1 = transform(pts0, translate = vec3(0.0 - (w - pitch) * 0.5, 0, 0))
     pts2 = set_position(pts1, offset = random_vec(lo = vec3(0, 0, -0.006), hi = vec3(0, 0, 0.006), rng = split_rng(rng, key = "z")))
@@ -148,9 +155,9 @@ def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<me
     → блок с центром за краем не кладётся → @scale/@variant (три длины blk × 1 / 1.1 / 1.2 — не длиннее шага ряда, чтобы соседи не сливались в плиту)
     → почти серый @tint → джиттер → realize → подрезка торцов плоскостями x = ±len/2
     (`clip`, крышки срезов в группе `cut`). Ставится на место внешним transform."""
-    a0 = compute_normals(box(size = blk), mode = flat)
-    a1 = compute_normals(box(size = blk * vec3(1.1, 1, 1)), mode = flat)
-    a2 = compute_normals(box(size = blk * vec3(1.2, 1, 1)), mode = flat)
+    a0 = cbox(size = blk, k = 0.16)
+    a1 = cbox(size = blk * vec3(1.1, 1, 1), k = 0.16)
+    a2 = cbox(size = blk * vec3(1.2, 1, 1), k = 0.16)
     kept = delete(rows, where = abs(dot(@P, (1, 0, 0))) > len * 0.5 + 0.02)
     p1 = set(kept, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(rng, key = "scale")))
     p2 = set(p1, "variant", random_int(n = 3, rng = split_rng(rng, key = "var")))
@@ -245,12 +252,12 @@ veneer = mark(merge(wall_f, wall_b, wall_l, wall_r), "stone", where = true, doma
 # чередуется по рядам — перевязка углов, заодно прячет торцы рядов кладки.
 qx = width * 0.5 + 0.04
 qz = depth * 0.5 + 0.04
-q0a = compute_normals(box(size = vec3(0.62, 0.27, 0.4)), mode = flat)
+q0a = cbox(size = vec3(0.62, 0.27, 0.4), k = 0.12)
 q0 = mark(merge(transform(q0a, translate = vec3(qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(qx, course_h * 0.5, 0.0 - qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, 0.0 - qz))), "stone", where = true, domain = faces)
 quoins = repeat (q0, iterations = n_rows - 1) |acc| {
     k = f32(@iteration) + 1.0
     odd = k - 2.0 * floor(k * 0.5)
-    qb = compute_normals(box(size = vec3(0.62 - odd * 0.22, 0.27, 0.4 + odd * 0.22)), mode = flat)
+    qb = cbox(size = vec3(0.62 - odd * 0.22, 0.27, 0.4 + odd * 0.22), k = 0.12)
     qy = (k + 0.5) * course_h
     qa = transform(qb, translate = vec3(qx, qy, qz))
     qc = transform(qb, translate = vec3(0.0 - qx, qy, qz))
@@ -418,7 +425,7 @@ sd = uw
 roof_outer = gable_prism(ridge_y = ridge_y, drop = 0.0, w = rl, d = sd, floor_y = eave_y)
 roof_inner = gable_prism(ridge_y = ridge_y, drop = roof_t, w = rl - 0.02, d = sd - 0.02, floor_y = eave_y - 0.5)
 roof_shell = sdf_subtract(roof_outer, roof_inner)
-roof_mesh = compute_normals(mesh_from_sdf(roof_shell, voxel = 0.05))
+roof_mesh = compute_normals(mesh_from_sdf(roof_shell, voxel = 0.05), mode = auto, angle = 35)
 deck = mark(roof_mesh, "roof", where = true, domain = faces)
 
 # Сланец: плоские прямоугольные плитки рядами вразбежку вверх по скату, каждый
@@ -470,7 +477,7 @@ cap_pts = transform(cap_pts0, translate = vec3(0.0 - cap_len * 0.5, ridge_y + 0.
 ridge_caps = mark(realize(instance_on_points(cap_pts, source = cap)), "tile", where = true, domain = faces)
 # Фронтоны под кровлей (стеновой материал).
 gable_sdf = gable_prism(ridge_y = ridge_y, drop = roof_t + 0.01, w = ud, d = sd - 0.02, floor_y = wall_top - 0.05)
-gable_mesh = compute_normals(mesh_from_sdf(gable_sdf, voxel = 0.05))
+gable_mesh = compute_normals(mesh_from_sdf(gable_sdf, voxel = 0.05), mode = auto, angle = 35)
 gables = mark(gable_mesh, "wall", where = true, domain = faces)
 
 roof_local = merge(deck, slope_right, slope_left, ridge_caps, gables)
@@ -606,5 +613,12 @@ c8 = ingroup("leaf") ? leaf_col : c7
 c9 = ingroup("flower") ? @tint : c8
 c10 = ingroup("grass") ? vec3(0.07, 0.28, 0.04) : c9
 c11 = ingroup("smoke") ? vec3(0.55, 0.52, 0.55) : c10
-house = set(house_raw, "Cd", c11, domain = faces)
+# Краевой износ: грани фасок (группа "edge" из cbox) светлее и чуть теплее —
+# та самая светлая кромка, по которой глаз читает объём блока/бруса.
+edge_mul = ingroup("edge") ? vec3(1.45, 1.4, 1.3) : vec3(1.0)
+house_col = set(house_raw, "Cd", c11 * edge_mul, domain = faces)
+# Запечённая AO (v1.24): по точкам (у сварных боксов усреднённые нормали, hits
+# «изнутри» игнорируются), радиус 1.2 м — контактные тени под свесами, за
+# ставнями, между камнями. Превью и OBJ-экспорт умножают @Cd на @ao.
+house = bake_ao(house_col, rays = 16, distance = 1.2, rng = split_rng(root_rng, key = "ao"), domain = points)
 output house

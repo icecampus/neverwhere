@@ -97,6 +97,25 @@ glm::vec3 colorAt(const std::vector<glm::vec3>* col, size_t i) {
     return glm::clamp(c, glm::vec3(0.0f), glm::vec3(1.0f));
 }
 
+// Baked occlusion @ao (f32, any domain; spec v1.24) resampled onto `domain`;
+// nullptr when absent. Multiplied into the albedo like the OBJ exporter does.
+std::shared_ptr<const std::vector<float>> aoColumn(const pgg::Geo& g, pgg::Domain domain) {
+    bool present = false;
+    for (pgg::Domain d : {pgg::Domain::Points, pgg::Domain::Corners, pgg::Domain::Faces})
+        if (const pgg::AttrSet* a = g.attrs(d); a && a->find("ao")) present = true;
+    if (!present) return nullptr;
+    const std::optional<pgg::ColumnData> col = pgg::sampleAttrColumn(g, "ao", domain);
+    if (!col) return nullptr;
+    const auto* vec = std::get_if<std::shared_ptr<const std::vector<float>>>(&*col);
+    if (!vec || !*vec || (*vec)->size() != g.elementCount(domain)) return nullptr;
+    return *vec;
+}
+
+glm::vec3 shadedAt(const std::vector<glm::vec3>* col, const std::vector<float>* ao, size_t i) {
+    const glm::vec3 c = colorAt(col, i);
+    return ao ? c * std::clamp((*ao)[i], 0.0f, 1.0f) : c;
+}
+
 void extendBBox(PreviewGeometry& out) {
     if (out.vertices.empty()) return;
     out.bmin = out.bmax = out.vertices[0].pos;
@@ -170,6 +189,8 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
     // Colors sampled onto the domain the chosen path emits vertices on.
     const std::shared_ptr<const std::vector<glm::vec3>> Cd =
         cdDomain ? colorColumn(g, smooth ? pgg::Domain::Points : pgg::Domain::Corners) : nullptr;
+    const std::shared_ptr<const std::vector<float>> Ao =
+        useColor ? aoColumn(g, smooth ? pgg::Domain::Points : pgg::Domain::Corners) : nullptr;
     out.hasColor = Cd != nullptr;
 
     // Mask of a face for the unwelded (corner / flat) paths.
@@ -197,9 +218,9 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
             };
             for (int32_t c = begin + 1; c + 1 < end; ++c) {
                 const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-                out.vertices.push_back({P[CV[begin]], normalAt(begin), colorAt(Cd.get(), static_cast<size_t>(begin)), m});
-                out.vertices.push_back({P[CV[c]], normalAt(c), colorAt(Cd.get(), static_cast<size_t>(c)), m});
-                out.vertices.push_back({P[CV[c + 1]], normalAt(c + 1), colorAt(Cd.get(), static_cast<size_t>(c + 1)), m});
+                out.vertices.push_back({P[CV[begin]], normalAt(begin), shadedAt(Cd.get(), Ao.get(), static_cast<size_t>(begin)), m});
+                out.vertices.push_back({P[CV[c]], normalAt(c), shadedAt(Cd.get(), Ao.get(), static_cast<size_t>(c)), m});
+                out.vertices.push_back({P[CV[c + 1]], normalAt(c + 1), shadedAt(Cd.get(), Ao.get(), static_cast<size_t>(c + 1)), m});
                 out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
             }
         }
@@ -235,7 +256,7 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
         out.vertices.reserve(P.size());
         for (size_t i = 0; i < P.size(); ++i) {
             const float m = (mask && i < mask->size() && (*mask)[i]) ? 1.0f : 0.0f;
-            out.vertices.push_back({P[i], (*N)[i], colorAt(Cd.get(), i), m});
+            out.vertices.push_back({P[i], (*N)[i], shadedAt(Cd.get(), Ao.get(), i), m});
         }
         for (size_t f = 0; f < g.faceCount(); ++f) {
             const int32_t begin = FO[f], end = FO[f + 1];
@@ -256,9 +277,9 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
         const float m = faceMask(f, begin, end);
         for (int32_t c = begin + 1; c + 1 < end; ++c) {
             const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-            out.vertices.push_back({P[CV[begin]], n, colorAt(Cd.get(), static_cast<size_t>(begin)), m});
-            out.vertices.push_back({P[CV[c]], n, colorAt(Cd.get(), static_cast<size_t>(c)), m});
-            out.vertices.push_back({P[CV[c + 1]], n, colorAt(Cd.get(), static_cast<size_t>(c + 1)), m});
+            out.vertices.push_back({P[CV[begin]], n, shadedAt(Cd.get(), Ao.get(), static_cast<size_t>(begin)), m});
+            out.vertices.push_back({P[CV[c]], n, shadedAt(Cd.get(), Ao.get(), static_cast<size_t>(c)), m});
+            out.vertices.push_back({P[CV[c + 1]], n, shadedAt(Cd.get(), Ao.get(), static_cast<size_t>(c + 1)), m});
             out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
         }
     }

@@ -691,3 +691,114 @@ TEST(AttrTyping, UserVectorAttrsWorkInVectorFunctionsAndMismatchIsRuntimeE204) {
 }
 
 }  // namespace
+
+// --- v1.24: bevel / compute_normals auto / bake_ao -----------------------------
+
+TEST(Bevel, BoxChamferCountsGroupsAndDropsN) {
+    pgg::RunResult r = pgg::run(
+        "b = bevel(box(size = (1, 1, 1)), width = 0.1, bevel_group = \"bev\")\n"
+        "c = set(b, \"Cd\", ingroup(\"bev\") ? vec3(1, 1, 1) : vec3(0, 0, 0), domain = faces)\n"
+        "light = count(c, where = dot(@Cd, (1, 1, 1)) > 2.5, domain = faces)\n"
+        "output b\n"
+        "output light\n");
+    expectNoErrors(r);
+    pgg::GeoPtr b = geoOutput(r, "b");
+    ASSERT_TRUE(b);
+    // 6 shrunk faces + 12 edge quads + 8 vertex triangles; one point per corner.
+    EXPECT_EQ(b->faceCount(), 26u);
+    EXPECT_EQ(b->pointCount(), 24u);
+    EXPECT_EQ(groupCount(*b, "bev"), 20u);
+    EXPECT_FALSE(b->normals);  // the surface changed: compute_normals after
+    glm::vec3 mn, mx;
+    pgg::geoBBox(*b, mn, mx);
+    EXPECT_NEAR(mn.x, -0.5f, 1e-5f);  // chamfers stay inside the original box
+    EXPECT_NEAR(mx.y, 0.5f, 1e-5f);
+    expectOutward(*b, glm::vec3(0.0f));
+    for (const auto& o : r.outputs)
+        if (o.name == "light") EXPECT_EQ(pgg::asInt(o.value), 20);
+}
+
+TEST(Bevel, OpenBoundaryStaysSharpAndFaceSelectionNeedsBothSides) {
+    pgg::RunResult r = pgg::run(
+        "g = bevel(grid(size = (2, 2), res = 2), width = 0.1)\n"
+        "b = box(size = (1, 1, 1))\n"
+        "top = bevel(b, width = 0.1, where = dot(@N, (0, 1, 0)) > 0.5)\n"
+        "output g\n"
+        "output top\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "g"), top = geoOutput(r, "top");
+    ASSERT_TRUE(g && top);
+    // 4 faces + 4 interior-edge quads + 1 centre polygon + 4 boundary-vertex
+    // triangles (the boundary vertex itself closes the gap). Corner vertices of
+    // the grid have no interior edge and add nothing.
+    EXPECT_EQ(g->faceCount(), 13u);
+    glm::vec3 mn, mx;
+    pgg::geoBBox(*g, mn, mx);
+    EXPECT_NEAR(mn.x, -1.0f, 1e-5f);  // the outer boundary did not move
+    EXPECT_NEAR(mx.z, 1.0f, 1e-5f);
+    // Only the top face is selected -> no edge has both faces selected -> nothing changes.
+    EXPECT_EQ(top->faceCount(), 6u);
+}
+
+TEST(ComputeNormals, AutoSmoothsBelowAngleAndSplitsAbove) {
+    // A box (90-degree edges) and a gently bent pair of quads (mirror of a
+    // tilted grid): auto keeps the box faceted and smooths the bend.
+    pgg::RunResult r = pgg::run(
+        "b = compute_normals(box(size = (1, 1, 1)), mode = auto, angle = 30)\n"
+        "bent = compute_normals(box(size = (1, 1, 1)), mode = auto, angle = 100)\n"
+        "output b\n"
+        "output bent\n");
+    expectNoErrors(r);
+    pgg::GeoPtr b = geoOutput(r, "b"), bent = geoOutput(r, "bent");
+    ASSERT_TRUE(b && bent);
+    const std::vector<glm::vec3>* nb = vec3Attr(*b, pgg::Domain::Corners, "N");
+    const std::vector<glm::vec3>* nbent = vec3Attr(*bent, pgg::Domain::Corners, "N");
+    ASSERT_TRUE(nb && nbent);
+    ASSERT_EQ(nb->size(), b->cornerCount());
+    // 30 degrees: every corner normal equals its face normal (faceted).
+    for (size_t f = 0; f < b->faceCount(); ++f) {
+        const glm::vec3 fn = glm::normalize(pgg::faceNormal(*b, f));
+        for (int32_t c = (*b->faceOffsets)[f]; c < (*b->faceOffsets)[f + 1]; ++c)
+            EXPECT_NEAR(glm::dot((*nb)[static_cast<size_t>(c)], fn), 1.0f, 1e-4f);
+    }
+    // 100 degrees: the 90-degree edges smooth -> corner normals are the vertex diagonals.
+    bool anyDiagonal = false;
+    for (size_t f = 0; f < bent->faceCount(); ++f) {
+        const glm::vec3 fn = glm::normalize(pgg::faceNormal(*bent, f));
+        for (int32_t c = (*bent->faceOffsets)[f]; c < (*bent->faceOffsets)[f + 1]; ++c)
+            if (glm::dot((*nbent)[static_cast<size_t>(c)], fn) < 0.7f) anyDiagonal = true;
+    }
+    EXPECT_TRUE(anyDiagonal);
+}
+
+TEST(BakeAo, OpenSurfaceIsOneAndCoveredSurfaceIsDarker) {
+    pgg::RunResult r = pgg::run(
+        "floor = subdivide(grid(size = (2, 2), res = 2), level = 1, scheme = linear)\n"
+        "lid = transform(box(size = (2, 0.1, 2)), translate = (0, 0.3, 0))\n"
+        "sheet = transform(grid(size = (2, 2), res = 1), translate = (0, 0.3, 0))\n"
+        "open = bake_ao(floor, rays = 16, rng = rng_from_seed(1))\n"
+        "covered = bake_ao(merge(floor, lid), rays = 16, distance = 2.0, rng = rng_from_seed(1), domain = points)\n"
+        "open_min = min_of(@ao, on = open)\n"
+        "cov_min = min_of(@ao, on = covered)\n"
+        "cov_ok = count(covered, where = @ao >= 0.0 & @ao <= 1.0)\n"
+        "under_sheet = bake_ao(merge(floor, sheet), rays = 16, distance = 2.0, rng = rng_from_seed(1), domain = points)\n"
+        "sheet_min = min_of(@ao, on = under_sheet)\n"
+        "output open\n"
+        "output covered\n"
+        "output open_min\n"
+        "output cov_min\n"
+        "output cov_ok\n"
+        "output sheet_min\n");
+    expectNoErrors(r);
+    pgg::GeoPtr covered = geoOutput(r, "covered");
+    ASSERT_TRUE(covered);
+    ASSERT_TRUE(covered->attrs(pgg::Domain::Points) && covered->attrs(pgg::Domain::Points)->find("ao"));
+    for (const auto& o : r.outputs) {
+        if (o.name == "open_min") EXPECT_NEAR(pgg::asF32(o.value), 1.0f, 1e-6f);  // nothing above a lone floor
+        if (o.name == "cov_min") EXPECT_LT(pgg::asF32(o.value), 0.6f);            // the lid occludes the floor
+        if (o.name == "cov_ok") EXPECT_EQ(pgg::asInt(o.value), static_cast<int64_t>(covered->pointCount()));
+        // One-sided: a sheet seen from its back does not occlude (documented; it is
+        // what keeps welded convex corners from shadowing themselves).
+        if (o.name == "sheet_min") EXPECT_NEAR(pgg::asF32(o.value), 1.0f, 1e-6f);
+    }
+}

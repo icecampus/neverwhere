@@ -132,7 +132,7 @@ inline ScalarType knownAttrType(const std::string& name) {
     if (name == "orient") return ScalarType::Vec4;
     if (name == "uv" || name == "profile_scale") return ScalarType::Vec2;
     if (name == "index" || name == "variant" || name == "island_id") return ScalarType::Int;
-    if (name == "scale" || name == "twist" || name == "t") return ScalarType::F32;
+    if (name == "scale" || name == "twist" || name == "t" || name == "ao" || name == "roughness") return ScalarType::F32;
     return ScalarType::Any;
 }
 

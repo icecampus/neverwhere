@@ -563,6 +563,16 @@ ColumnData neutralColumnLike(const std::string& name, const AttrColumn& typeOf, 
         return std::make_shared<const std::vector<glm::vec4>>(count, glm::vec4(0, 0, 0, 1));
     if (name == "tint" && std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(typeOf.data))
         return std::make_shared<const std::vector<glm::vec3>>(count, glm::vec3(1.0f));
+    // Material neutrals (v1.24): an uncoloured operand merged next to a
+    // coloured one is the neutral grey, not black; open occlusion, matte-ish
+    // roughness — the same defaults the viewer/exporter assume when the column
+    // is absent altogether.
+    if ((name == "Cd" || name == "color") && std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(typeOf.data))
+        return std::make_shared<const std::vector<glm::vec3>>(count, glm::vec3(0.66f, 0.64f, 0.61f));
+    if (std::holds_alternative<std::shared_ptr<const std::vector<float>>>(typeOf.data)) {
+        if (name == "ao") return std::make_shared<const std::vector<float>>(count, 1.0f);
+        if (name == "roughness") return std::make_shared<const std::vector<float>>(count, 0.7f);
+    }
     if (typeOf.typeInfo == AttrTypeInfo::Normal &&
         std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(typeOf.data)) {
         if (auto n = derivedNormals(forGeo, domain); n && n->size() == count) return n;

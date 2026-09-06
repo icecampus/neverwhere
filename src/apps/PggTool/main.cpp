@@ -227,6 +227,19 @@ std::shared_ptr<const std::vector<glm::vec3>> vec3Column(const std::optional<pgg
     return *vec;
 }
 
+std::shared_ptr<const std::vector<float>> f32Column(const std::optional<pgg::ColumnData>& col, size_t count) {
+    if (!col) return nullptr;
+    const auto* vec = std::get_if<std::shared_ptr<const std::vector<float>>>(&*col);
+    if (!vec || !*vec || (*vec)->size() != count) return nullptr;
+    return *vec;
+}
+
+bool hasAttr(const pgg::Geo& g, const char* name) {
+    for (pgg::Domain d : {pgg::Domain::Points, pgg::Domain::Corners, pgg::Domain::Faces})
+        if (const pgg::AttrSet* a = g.attrs(d); a && a->find(name)) return true;
+    return false;
+}
+
 // Wavefront OBJ. Surface color @Cd (spec §4.3) goes out as the widely read
 // `v x y z r g b` extension (Blender, MeshLab, Houdini). @Cd on points writes
 // the welded mesh; on corners/faces/detail the mesh is unwelded (one vertex
@@ -241,8 +254,16 @@ bool writeObj(const std::string& path, const pgg::Geo& geo) {
     const pgg::Domain vdom = unweld ? pgg::Domain::Corners : pgg::Domain::Points;
     const size_t vcount = geo.elementCount(vdom);
     const std::shared_ptr<const std::vector<glm::vec3>> P = pgg::samplePositions(geo, vdom);
-    const std::shared_ptr<const std::vector<glm::vec3>> Cd =
+    std::shared_ptr<const std::vector<glm::vec3>> Cd =
         cdDomain ? vec3Column(pgg::sampleAttrColumn(geo, "Cd", vdom), vcount) : nullptr;
+    // Baked occlusion (@ao, v1.24) is multiplied into the exported color: OBJ
+    // has no separate AO channel, and the viewer applies it the same way.
+    if (const auto ao = hasAttr(geo, "ao") ? f32Column(pgg::sampleAttrColumn(geo, "ao", vdom), vcount) : nullptr) {
+        std::vector<glm::vec3> shaded(vcount);
+        for (size_t i = 0; i < vcount; ++i)
+            shaded[i] = (Cd ? (*Cd)[i] : glm::vec3(0.66f, 0.64f, 0.61f)) * std::clamp((*ao)[i], 0.0f, 1.0f);
+        Cd = std::make_shared<const std::vector<glm::vec3>>(std::move(shaded));
+    }
     std::shared_ptr<const std::vector<glm::vec3>> N;
     if (geo.kind == pgg::GeoKind::Mesh) {
         const pgg::AttrSet* cattrs = geo.attrs(pgg::Domain::Corners);
@@ -250,7 +271,8 @@ bool writeObj(const std::string& path, const pgg::Geo& geo) {
         if (cornerN && unweld) N = vec3Column(cornerN->data, vcount);
         if (!N && geo.normals) N = pgg::sampleNormals(geo, vdom);
     }
-    if (Cd) out << "# vertex colors: @Cd on " << pgg::domainName(*cdDomain) << (unweld ? " (unwelded)" : "") << "\n";
+    if (Cd) out << "# vertex colors: @Cd" << (cdDomain ? std::string(" on ") + pgg::domainName(*cdDomain) : std::string(" (neutral)"))
+                << (hasAttr(geo, "ao") ? " x @ao" : "") << (unweld ? " (unwelded)" : "") << "\n";
     for (size_t i = 0; i < vcount; ++i) {
         const glm::vec3& p = (*P)[i];
         out << "v " << p.x << " " << p.y << " " << p.z;

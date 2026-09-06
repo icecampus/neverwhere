@@ -139,8 +139,9 @@ const std::vector<BuiltinSig>& registry() {
         }
         {
             ParamSig mode = valDef("mode", ScalarType::String, Value(std::string("smooth")));
-            mode.enumValues = {"smooth", "flat", "by_angle"};
-            BuiltinSig s = sig(BuiltinId::ComputeNormals, "compute_normals", {geoArg("geo"), mode}, geoResult());
+            mode.enumValues = {"smooth", "flat", "by_angle", "auto"};
+            BuiltinSig s = sig(BuiltinId::ComputeNormals, "compute_normals",
+                               {geoArg("geo"), mode, valDef("angle", ScalarType::F32, Value(30.0f))}, geoResult());
             s.resultGeoKindOfFirstArg = true;
             r.push_back(s);
         }
@@ -382,6 +383,14 @@ const std::vector<BuiltinSig>& registry() {
                             Type{ScalarType::Geo, false, GeoKind::Mesh}));
         }
         {
+            // §8.3 bevel: one-segment chamfer of interior edges (v1.24).
+            r.push_back(sig(BuiltinId::Bevel, "bevel",
+                            {geoArg("geo", GeoKind::Mesh), fld("width", ScalarType::F32, true),
+                             fldDef("where", ScalarType::Bool, Value(true)),
+                             valDef("bevel_group", ScalarType::String, Value(std::string("")))},
+                            Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        }
+        {
             // §8.3 separate: (yes, no) halves by a mask, delete's cascade.
             ParamSig domain = valDef("domain", ScalarType::String, Value(std::string("faces")));
             domain.enumValues = {"points", "corners", "faces"};
@@ -426,6 +435,16 @@ const std::vector<BuiltinSig>& registry() {
                         {geoArg("path"), val("count", ScalarType::Int, true),
                          valDef("closed", ScalarType::Bool, Value(false))},
                         Type{ScalarType::Geo, false, GeoKind::Points}));
+        {
+            // §8.6 bake_ao: ray-cast ambient occlusion -> f32 attribute (v1.24).
+            ParamSig dom = valDef("domain", ScalarType::String, Value(std::string("auto")));
+            dom.enumValues = {"auto", "points", "corners"};
+            r.push_back(sig(BuiltinId::BakeAo, "bake_ao",
+                            {geoArg("geo", GeoKind::Mesh), valDef("rays", ScalarType::Int, Value(int64_t(32))),
+                             valDef("distance", ScalarType::F32, Value(0.0f)), val("rng", ScalarType::Rng, true), dom,
+                             valDef("name", ScalarType::String, Value(std::string("ao")))},
+                            Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        }
         r.push_back(sig(BuiltinId::Sweep, "sweep",
                         {geoArg("path"), geoArg("profile"), valDef("closed", ScalarType::Bool, Value(false)),
                          valDef("cap", ScalarType::Bool, Value(true)),
@@ -536,7 +555,6 @@ const std::vector<BuiltinSig>& registry() {
 
         // --- known but deferred past this stage ---------------------------------
         r.push_back(deferredSig("import_mesh", "deferred: no host asset contract yet, Q4"));
-        r.push_back(deferredSig("bevel", "deferred: edge bevel with mitres is post-MVP; inset() covers face borders"));
         for (const char* n : {"raycast", "transfer"})
             r.push_back(deferredSig(n, "sampling ops are a later stage (post-E4)"));
         return r;
@@ -684,6 +702,7 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
             return evalFractureBuiltin(bound, run);
         case BuiltinId::Extrude:
         case BuiltinId::Inset:
+        case BuiltinId::Bevel:
         case BuiltinId::Separate:
         case BuiltinId::Triangulate:
         case BuiltinId::Subdivide:
@@ -695,6 +714,8 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::BezierPoints:
         case BuiltinId::ResamplePoints:
             return evalSweepBuiltin(bound, run);
+        case BuiltinId::BakeAo:
+            return evalBakeBuiltin(bound, run);
         case BuiltinId::Delete:
         case BuiltinId::Clip:
             return evalTopologyBuiltin(bound, run);

@@ -222,6 +222,57 @@ Value opComputeNormals(const BoundCall& bound, RunContext& run) {
         for (size_t f = s; f < e; ++f) faceN[f] = faceNormal(in, f);
     });
 
+    if (mode == "auto") {
+        // Auto-smooth (v1.24): per-corner normals, smooth across edges whose
+        // dihedral angle is below `angle`, hard above it — one call for a
+        // mesh that mixes curved sheets (leaf, barrel, rounded bevel) with
+        // sharp architecture. A corner averages the normals of the faces
+        // meeting at its vertex whose normal lies within `angle` of its own
+        // face's normal (area-weighted through faceNormal's magnitude).
+        const float cosLimit = std::cos(glm::radians(std::clamp(asF32(bound.values[2]), 0.0f, 180.0f)));
+        const size_t nc = in.cornerCount();
+        std::vector<int32_t> faceOf(nc);
+        std::vector<int32_t> incidentBegin(count + 1, 0);
+        for (int32_t v : *in.cornerVerts) incidentBegin[static_cast<size_t>(v) + 1] += 1;
+        for (size_t v = 0; v < count; ++v) incidentBegin[v + 1] += incidentBegin[v];
+        std::vector<int32_t> incidentCorners(nc);
+        {
+            std::vector<int32_t> cursor(incidentBegin.begin(), incidentBegin.end() - 1);
+            for (size_t f = 0; f < in.faceCount(); ++f)
+                for (int32_t c = (*in.faceOffsets)[f]; c < (*in.faceOffsets)[f + 1]; ++c) {
+                    faceOf[static_cast<size_t>(c)] = static_cast<int32_t>(f);
+                    const int32_t v = (*in.cornerVerts)[static_cast<size_t>(c)];
+                    incidentCorners[static_cast<size_t>(cursor[static_cast<size_t>(v)]++)] = c;
+                }
+        }
+        std::vector<glm::vec3> unitN(in.faceCount());
+        for (size_t f = 0; f < in.faceCount(); ++f) {
+            const float len = glm::length(faceN[f]);
+            unitN[f] = len > 0.0f ? faceN[f] / len : glm::vec3(0, 1, 0);
+        }
+        std::vector<glm::vec3> cornerN(nc);
+        parallelFor(nc, threads, [&](size_t s, size_t e) {
+            for (size_t c = s; c < e; ++c) {
+                const int32_t f = faceOf[c];
+                const int32_t v = (*in.cornerVerts)[c];
+                glm::vec3 sum(0.0f);
+                for (int32_t k = incidentBegin[static_cast<size_t>(v)]; k < incidentBegin[static_cast<size_t>(v) + 1]; ++k) {
+                    const int32_t g = faceOf[static_cast<size_t>(incidentCorners[static_cast<size_t>(k)])];
+                    if (g == f || glm::dot(unitN[static_cast<size_t>(f)], unitN[static_cast<size_t>(g)]) >= cosLimit)
+                        sum += faceN[static_cast<size_t>(g)];
+                }
+                const float len = glm::length(sum);
+                cornerN[c] = len > 0.0f ? sum / len : unitN[static_cast<size_t>(f)];
+            }
+        });
+        Geo out = in;
+        AttrSet attrs = out.cornerAttrs ? *out.cornerAttrs : AttrSet{};
+        attrs.columns["N"] = AttrColumn{std::make_shared<const std::vector<glm::vec3>>(std::move(cornerN)),
+                                        AttrTypeInfo::Normal};
+        out.cornerAttrs = std::make_shared<const AttrSet>(std::move(attrs));
+        return Value(std::make_shared<const Geo>(std::move(out)));
+    }
+
     if (mode == "flat") {
         std::vector<glm::vec3> cornerN(in.cornerCount());
         parallelFor(in.faceCount(), threads, [&](size_t s, size_t e) {

@@ -64,6 +64,7 @@ nw_add_lib_sources(
         src/eval/builtins_topology.cpp
         src/eval/builtins_topology_ops.cpp
         src/eval/builtins_sweep.cpp
+        src/eval/builtins_bake.cpp
         src/eval/typecheck.h
         src/eval/typecheck.cpp
         src/eval/modules.h
