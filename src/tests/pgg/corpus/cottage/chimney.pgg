@@ -1,0 +1,47 @@
+# Каменная труба на скате с дымом: столб-сердцевина, кладка четырёх граней тем
+# же blockwork.stone_wall, что и стены дома, два венца и устье; дым — облако
+# перекрывающихся икосфер. Материалы: stone, smoke.
+
+import lib.parts
+import lib.blockwork
+
+def chimney(x: f32, z: f32, ridge_y: f32, rng: rng) -> (out: geo<mesh>) {
+    """Труба сечением 0.84 с центром (x, z), на правом скате (x > 0): низ утоплен в скат
+    (ridge_y − x − 0.9), верх на ridge_y + 1.25. Ряд грани — два блока с перевязкой
+    по чётности ряда, три длины через @variant, подрезка по рёбрам трубы `clip`
+    (на углах целый/половинка). Дым растёт вверх-вбок змейкой с боковыми клубами."""
+    chim_w = 0.84
+    chim_course = 0.24
+    chim_base = ridge_y - x - 0.9
+    chim_top = ridge_y + 1.25
+    chim_n = int((chim_top - chim_base) / chim_course)
+    chim_core = parts.piece(size = vec3(chim_w - 0.12, chim_top - chim_base, chim_w - 0.12), pos = vec3(x, (chim_base + chim_top) * 0.5, z), grp = "stone")
+    chim_rows = blockwork.bond_anchors(len = chim_w, cols = 2, n_rows = chim_n, course_h = chim_course, y0 = chim_base, z = chim_w * 0.5 - 0.03)
+    chim_blk = vec3(0.34, 0.21, 0.12)
+    chim_f0 = blockwork.stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(rng, key = 0))
+    chim_f1 = blockwork.stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(rng, key = 1))
+    chim_f2 = blockwork.stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(rng, key = 2))
+    chim_f3 = blockwork.stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(rng, key = 3))
+    chim_s0 = transform(chim_f0, translate = vec3(x, 0, z))
+    chim_s1 = transform(transform(chim_f1, rotate = vec3(0, 90, 0)), translate = vec3(x, 0, z))
+    chim_s2 = transform(transform(chim_f2, rotate = vec3(0, 180, 0)), translate = vec3(x, 0, z))
+    chim_s3 = transform(transform(chim_f3, rotate = vec3(0, 270, 0)), translate = vec3(x, 0, z))
+    chim_veneer = mark(merge(chim_s0, chim_s1, chim_s2, chim_s3), "stone", where = true, domain = faces)
+    chim_cap1 = parts.piece(size = vec3(chim_w + 0.2, 0.14, chim_w + 0.2), pos = vec3(x, chim_top + 0.07, z), grp = "stone")
+    chim_cap2 = parts.piece(size = vec3(chim_w - 0.1, 0.12, chim_w - 0.1), pos = vec3(x, chim_top + 0.2, z), grp = "stone")
+    chim_hole = parts.piece(size = vec3(chim_w - 0.4, 0.14, chim_w - 0.4), pos = vec3(x, chim_top + 0.28, z), grp = "smoke")
+    body = merge(chim_core, chim_veneer, chim_cap1, chim_cap2, chim_hole)
+    # Дым: перекрывающиеся клубы, растут и уходят вверх-вбок змейкой, с боковыми
+    # отростками — читается как облако, а не как столбик шариков.
+    smoke_y = chim_top + 0.3
+    puff1 = transform(ico_sphere(subdiv = 2, radius = 0.18), translate = vec3(x + 0.02, smoke_y + 0.12, z))
+    puff2 = transform(ico_sphere(subdiv = 2, radius = 0.24), translate = vec3(x - 0.14, smoke_y + 0.45, z + 0.1))
+    puff3 = transform(ico_sphere(subdiv = 2, radius = 0.29), translate = vec3(x + 0.14, smoke_y + 0.85, z - 0.08))
+    puff3b = transform(ico_sphere(subdiv = 2, radius = 0.19), translate = vec3(x - 0.24, smoke_y + 0.95, z + 0.22))
+    puff4 = transform(ico_sphere(subdiv = 2, radius = 0.34), translate = vec3(x - 0.1, smoke_y + 1.35, z + 0.12))
+    puff4b = transform(ico_sphere(subdiv = 2, radius = 0.22), translate = vec3(x + 0.4, smoke_y + 1.5, z - 0.2))
+    puff5 = transform(ico_sphere(subdiv = 2, radius = 0.40), translate = vec3(x + 0.24, smoke_y + 1.95, z - 0.05))
+    puff5b = transform(ico_sphere(subdiv = 2, radius = 0.26), translate = vec3(x - 0.3, smoke_y + 2.15, z + 0.3))
+    smoke = mark(merge(puff1, puff2, puff3, puff3b, puff4, puff4b, puff5, puff5b), "smoke", where = true, domain = faces)
+    out = merge(body, smoke)
+}

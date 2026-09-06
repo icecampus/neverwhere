@@ -1,0 +1,29 @@
+# Раскладка окон коттеджа: четыре окна каменного этажа (сидят в проёмах кладки,
+# ставни вынесены на 0.14 поверх выступающих камней) и четыре окна фахверкового
+# (фронтон, бока, тыл; ставни на 0.08). Сами окна — fixtures.shuttered_window.
+
+import lib.parts
+import lib.fixtures
+
+def windows(width: f32, depth: f32, stone_h: f32, jetty: f32, door_z: f32, win_x: f32, side_win_x: f32, rng: rng) -> (out: geo<mesh>) {
+    """Все восемь окон дома width×depth (второй этаж шире на jetty): фасад — окно в
+    win_x на высоте 1.45 (0.9×1.0) и большое окно фронтона (1.25×0.95) над клумбой;
+    тыл — окно в x = −0.9; бока — окна в ±side_win_x (0.75×0.85) и над ними по окну
+    второго этажа (0.85×0.9). Положения проёмов первого этажа согласованы с
+    cottage/ground_floor.pgg. rng — оттенки и выступы досок ставен."""
+    uw = width + 2.0 * jetty
+    ud = depth + 2.0 * jetty
+    tf_z = ud * 0.5
+    win_g_f = parts.place(fixtures.shuttered_window(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(rng, key = "gf")), yaw_deg = 0.0, at = vec3(win_x, 1.45, door_z + 0.1))
+    win_g_b = parts.place(fixtures.shuttered_window(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(rng, key = "gb")), yaw_deg = 180.0, at = vec3(0.0 - 0.9, 1.45, 0.0 - depth * 0.5 - 0.1))
+    win_g_l = parts.place(fixtures.shuttered_window(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(rng, key = "gl")), yaw_deg = 270.0, at = vec3(0.0 - width * 0.5 - 0.1, 1.55, side_win_x))
+    win_g_r = parts.place(fixtures.shuttered_window(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(rng, key = "gr")), yaw_deg = 90.0, at = vec3(width * 0.5 + 0.1, 1.55, 0.0 - side_win_x))
+    # Второй этаж: фронтон, бока и тыл.
+    win_u_c = parts.place(fixtures.shuttered_window(w = 1.25, h = 0.95, off = 0.08, rng = split_rng(rng, key = "uc")), yaw_deg = 0.0, at = vec3(0, stone_h + 1.58, tf_z + 0.06))
+    win_u_l = parts.place(fixtures.shuttered_window(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(rng, key = "ul")), yaw_deg = 270.0, at = vec3(0.0 - uw * 0.5 - 0.06, stone_h + 1.35, 0))
+    win_u_r = parts.place(fixtures.shuttered_window(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(rng, key = "ur")), yaw_deg = 90.0, at = vec3(uw * 0.5 + 0.06, stone_h + 1.35, 0))
+    win_u_b = parts.place(fixtures.shuttered_window(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(rng, key = "ub")), yaw_deg = 180.0, at = vec3(0, stone_h + 1.35, 0.0 - tf_z - 0.06))
+    windows_g = merge(win_g_f, win_g_b, win_g_l, win_g_r)
+    windows_u = merge(win_u_c, win_u_l, win_u_r, win_u_b)
+    out = merge(windows_g, windows_u)
+}

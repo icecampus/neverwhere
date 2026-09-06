@@ -1,0 +1,60 @@
+# Кладка из отдельных боксов-камней: якоря рядов вразбежку, стена с подрезкой
+# торцов `clip`, угловые квойны. Стена собирается в локальной системе (x вдоль
+# стены, центр в 0, z наружу) и ставится на место внешним transform; проёмы —
+# удалением якорей маской до вызова stone_wall. Группы: stone, cut (крышки срезов).
+
+import lib.parts
+
+def bond_anchors(len: f32, cols: int, n_rows: int, course_h: f32, y0: f32, z: f32) -> (out: geo<points>) {
+    """Якоря кладки вразбежку в локальной системе стены (x вдоль, центр в 0): модель
+    строк — точки-ряды (`mesh_line` по y), делегат — `foreach` по ним (§5.4): ряд
+    генерируется с запасом на блок за каждый край (шаг pitch = len / cols), нечётные ряды
+    сдвинуты на полшага (перевязка), номер ряда — `@piece_index`, высота ряда — из `@P` модели."""
+    pitch = len / f32(cols)
+    rows = mesh_line(count = n_rows, length = f32(n_rows - 1) * course_h, dir = (0, 1, 0))
+    out = foreach row in rows {
+        odd = f32(@piece_index % 2)
+        r0 = mesh_line(count = cols + 2, length = f32(cols + 1) * pitch, dir = (1, 0, 0))
+        row = transform(r0, translate = vec3(0.0 - len * 0.5 - pitch * 0.5 + odd * pitch * 0.5, y0 + course_h * 0.5 + dot(value(@P, on = row), (0, 1, 0)), z))
+    }
+}
+
+def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<mesh>) {
+    """Кладка одной стены в локальной системе (x вдоль стены, центр в 0): ряды якорей
+    → блок с центром за краем не кладётся → @scale/@variant (три длины blk × 1 / 1.1 / 1.2 — не длиннее шага ряда, чтобы соседи не сливались в плиту)
+    → почти серый @tint → джиттер → realize → подрезка торцов плоскостями x = ±len/2
+    (`clip`, крышки срезов в группе `cut`). Ставится на место внешним transform."""
+    a0 = parts.cbox(size = blk, k = 0.16)
+    a1 = parts.cbox(size = blk * vec3(1.1, 1, 1), k = 0.16)
+    a2 = parts.cbox(size = blk * vec3(1.2, 1, 1), k = 0.16)
+    kept = delete(rows, where = abs(dot(@P, (1, 0, 0))) > len * 0.5 + 0.02)
+    p1 = set(kept, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(rng, key = "scale")))
+    p2 = set(p1, "variant", random_int(n = 3, rng = split_rng(rng, key = "var")))
+    shade = random(lo = 0.7, hi = 1.25, rng = split_rng(rng, key = "tint"))
+    p3 = set(p2, "tint", vec3(shade * 1.04, shade, shade * 0.96))
+    p4 = set_position(p3, offset = random_vec(lo = vec3(-0.03, -0.01, -0.01), hi = vec3(0.03, 0.01, 0.07), rng = split_rng(rng, key = "jitter")))
+    m = realize(instance_on_points(p4, source = a0, variants = [a0, a1, a2]))
+    c1 = clip(m, origin = vec3(0.0 - len * 0.5, 0, 0), normal = vec3(1, 0, 0), cap_group = "cut")
+    out = clip(c1, origin = vec3(len * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
+}
+
+def quoin_stack(w: f32, d: f32, n_rows: int, course_h: f32) -> (out: geo<mesh>) {
+    """Угловые камни (квойны) дома w×d: крупные блоки столбиком на каждом из четырёх
+    углов, ориентация чередуется по рядам (перевязка углов, заодно прячет торцы
+    рядов кладки). Ряд 0 — длинной стороной вдоль X, нечётные — вдоль Z. Группа stone."""
+    qx = w * 0.5 + 0.04
+    qz = d * 0.5 + 0.04
+    q0a = parts.cbox(size = vec3(0.62, 0.27, 0.4), k = 0.12)
+    q0 = mark(merge(transform(q0a, translate = vec3(qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(qx, course_h * 0.5, 0.0 - qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, 0.0 - qz))), "stone", where = true, domain = faces)
+    out = repeat (q0, iterations = n_rows - 1) |acc| {
+        k = f32(@iteration) + 1.0
+        odd = k - 2.0 * floor(k * 0.5)
+        qb = parts.cbox(size = vec3(0.62 - odd * 0.22, 0.27, 0.4 + odd * 0.22), k = 0.12)
+        qy = (k + 0.5) * course_h
+        qa = transform(qb, translate = vec3(qx, qy, qz))
+        qc = transform(qb, translate = vec3(0.0 - qx, qy, qz))
+        qd = transform(qb, translate = vec3(qx, qy, 0.0 - qz))
+        qe = transform(qb, translate = vec3(0.0 - qx, qy, 0.0 - qz))
+        acc = merge(acc, mark(merge(qa, qc, qd, qe), "stone", where = true, domain = faces))
+    }
+}

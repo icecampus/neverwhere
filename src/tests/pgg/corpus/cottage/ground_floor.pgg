@@ -1,0 +1,34 @@
+# Каменный первый этаж коттеджа: сердцевина, цоколь, облицовка из блоков с
+# проёмами под дверь и окна, угловые квойны. Локальная система = мировая (дом
+# центрирован в 0, фасад в +Z).
+
+import lib.parts
+import lib.blockwork
+
+def ground_floor(width: f32, depth: f32, stone_h: f32, door_x: f32, win_x: f32, side_win_x: f32, rng: rng) -> (out: geo<mesh>) {
+    """Первый этаж width×depth высотой stone_h: сплошная сердцевина и цоколь (stone),
+    кладка четырёх стен (blockwork.stone_wall по якорям blockwork.bond_anchors: блоки
+    0.5/0.55/0.6 × 0.26 × 0.1, ряд 0.3, перевязка, джиттер, подрезка торцов `clip`)
+    и квойны по углам. Проёмы — удалением якорей в локальных координатах стены:
+    арка двери в door_x (фасад), окно фасада в win_x (0.9×1.0 на высоте 1.45),
+    окно тыла в x = 0.9 (то же), по окну на боках в side_win_x (0.75×0.85 на 1.55) —
+    размеры вырезов согласованы с cottage/windows.pgg (портал и рамы закрывают край)."""
+    core = parts.piece(size = vec3(width, stone_h, depth), pos = vec3(0, stone_h * 0.5, 0), grp = "stone")
+    plinth = parts.piece(size = vec3(width + 0.3, 0.32, depth + 0.3), pos = vec3(0, 0.16, 0), grp = "stone")
+    course_h = 0.3
+    n_rows = int(stone_h / course_h)
+    rows_f = blockwork.bond_anchors(len = width, cols = int(width / 0.55), n_rows = n_rows, course_h = course_h, y0 = 0.0, z = 0.03)
+    rows_s = blockwork.bond_anchors(len = depth, cols = int(depth / 0.55), n_rows = n_rows, course_h = course_h, y0 = 0.0, z = 0.03)
+    # фасад (+Z): вырезы под арку двери и окно со ставнями; тыл (−Z): окно; бока: по окну
+    rows_front = delete(rows_f, where = (abs(dot(@P, (1, 0, 0)) - door_x) < 0.86 & dot(@P, (0, 1, 0)) < 2.32) | (abs(dot(@P, (1, 0, 0)) - win_x) < 0.66 & abs(dot(@P, (0, 1, 0)) - 1.45) < 0.62))
+    rows_back = delete(rows_f, where = abs(dot(@P, (1, 0, 0)) - 0.9) < 0.66 & abs(dot(@P, (0, 1, 0)) - 1.45) < 0.62)
+    rows_side = delete(rows_s, where = abs(dot(@P, (1, 0, 0)) - side_win_x) < 0.58 & abs(dot(@P, (0, 1, 0)) - 1.55) < 0.56)
+    blk = vec3(0.5, 0.26, 0.1)
+    wall_f = transform(blockwork.stone_wall(rows_front, len = width, blk = blk, rng = split_rng(rng, key = "front")), translate = vec3(0, 0, depth * 0.5))
+    wall_b = transform(transform(blockwork.stone_wall(rows_back, len = width, blk = blk, rng = split_rng(rng, key = "back")), rotate = vec3(0, 180, 0)), translate = vec3(0, 0, 0.0 - depth * 0.5))
+    wall_l = transform(transform(blockwork.stone_wall(rows_side, len = depth, blk = blk, rng = split_rng(rng, key = "left")), rotate = vec3(0, 270, 0)), translate = vec3(0.0 - width * 0.5, 0, 0))
+    wall_r = transform(transform(blockwork.stone_wall(rows_side, len = depth, blk = blk, rng = split_rng(rng, key = "right")), rotate = vec3(0, 90, 0)), translate = vec3(width * 0.5, 0, 0))
+    veneer = mark(merge(wall_f, wall_b, wall_l, wall_r), "stone", where = true, domain = faces)
+    quoins = blockwork.quoin_stack(w = width, d = depth, n_rows = n_rows, course_h = course_h)
+    out = merge(core, plinth, veneer, quoins)
+}

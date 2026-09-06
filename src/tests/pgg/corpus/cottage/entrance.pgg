@@ -1,0 +1,29 @@
+# Вход: арочная дощатая дверь в каменном портале, оконце, ручка, ступень и два
+# кованых фонаря по бокам. Материалы: wood, stone, glass, iron, lamp.
+
+import lib.parts
+import lib.shapes
+import lib.fixtures
+
+def entrance(door_x: f32, door_z: f32, rng: rng) -> (out: geo<mesh>) {
+    """Вход на фасаде (стена — плоскость z = door_z, наружу +Z) с центром двери в door_x.
+    Полотно — щит из 7 вертикальных досок прямоугольником до высоты арки: верхние
+    углы прячутся за каменным кольцом портала (r_out 0.72 > диагональ угла 0.707),
+    так что скруглять доски не нужно; поперёк — две планки-обвязки. Портал —
+    SDF-кольцо из двух арочных плит (shapes.arch_sdf). Фонари — fixtures.lantern
+    на 1.05 по бокам, на высоте 1.72."""
+    leaf = transform(parts.plank_panel(w = 1.0, h = 1.95, t = 0.1, n = 7, rng = rng), translate = vec3(door_x, 0.16 + 1.95 * 0.5, door_z + 0.08))
+    ring_sdf = sdf_subtract(shapes.arch_sdf(w = 1.44, straight = 1.45, r = 0.72, t = 0.22), shapes.arch_sdf(w = 1.06, straight = 1.45, r = 0.53, t = 0.3))
+    ring_mesh = compute_normals(mesh_from_sdf(ring_sdf, voxel = 0.03))
+    ring_marked = mark(ring_mesh, "stone", where = true, domain = faces)
+    ring = transform(ring_marked, translate = vec3(door_x, 0.1, door_z + 0.15))
+    ledge1 = parts.piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 0.7, door_z + 0.15), grp = "wood")
+    ledge2 = parts.piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 1.4, door_z + 0.15), grp = "wood")
+    door_win = parts.piece(size = vec3(0.28, 0.28, 0.03), pos = vec3(door_x, 1.15, door_z + 0.15), grp = "glass")
+    door_win_f = parts.piece(size = vec3(0.34, 0.34, 0.02), pos = vec3(door_x, 1.15, door_z + 0.145), grp = "wood")
+    knob = parts.piece(size = vec3(0.07, 0.07, 0.09), pos = vec3(door_x + 0.35, 1.0, door_z + 0.17), grp = "wood")
+    step = parts.piece(size = vec3(1.8, 0.16, 0.6), pos = vec3(door_x, 0.08, door_z + 0.42), grp = "stone")
+    lamp_l = fixtures.lantern(at = vec3(door_x - 1.05, 1.72, door_z))
+    lamp_r = fixtures.lantern(at = vec3(door_x + 1.05, 1.72, door_z))
+    out = merge(leaf, ring, ledge1, ledge2, door_win_f, door_win, knob, step, lamp_l, lamp_r)
+}

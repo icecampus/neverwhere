@@ -1,5 +1,6 @@
-# Базовые детали для «боксовой» архитектуры: брус/блок с фаской. Общие для
-# cottage.pgg и lib/fixtures.pgg; все размеры в метрах, центр детали — в pos.
+# Базовые детали для «боксовой» архитектуры: брус/блок с фаской, щит из досок,
+# постановка меша (place). Общие для cottage/* и lib/fixtures.pgg; все размеры
+# в метрах, центр детали — в pos.
 
 def cbox(size: vec3, k: f32) -> (out: geo<mesh>) {
     """Box с фаской (v1.24): ребро скошено на k · min(размер) (клампится bevel'ом),
@@ -30,4 +31,10 @@ def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
     shade = random(lo = 0.78, hi = 1.22, rng = split_rng(rng, key = "tint"))
     pts3 = set(pts2, "tint", vec3(shade * 1.03, shade, shade * 0.95))
     out = mark(realize(instance_on_points(pts3, source = plank)), "wood", where = true, domain = faces)
+}
+
+def place(g: geo<mesh>, yaw_deg: f32, at: vec3) -> (out: geo<mesh>) {
+    """Поворот меша вокруг Y на yaw_deg (0 = смотрит в +Z) и перенос в at."""
+    r = transform(g, rotate = vec3(0, yaw_deg, 0))
+    out = transform(r, translate = at)
 }

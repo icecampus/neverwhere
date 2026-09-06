@@ -1,0 +1,51 @@
+# SDF-формы с позиционированием через одиночную точку (§8.4): бокс/сфера в точке,
+# скат-полупространство, двускатная призма крыши, арочная плита портала.
+
+def sdf_box_at(size: vec3, pos: vec3) -> (out: sdf) {
+    """SDF-бокс с центром в pos (через @P одиночной точки)."""
+    pt0 = mesh_line(count = 1, length = 0.0)
+    pt = transform(pt0, translate = pos)
+    out = sdf_instance_on_points(pt, source = sdf_box(size = size))
+}
+
+def sdf_sphere_at(r: f32, pos: vec3) -> (out: sdf) {
+    """SDF-сфера с центром в pos."""
+    pt0 = mesh_line(count = 1, length = 0.0)
+    pt = transform(pt0, translate = pos)
+    out = sdf_instance_on_points(pt, source = sdf_sphere(r = r))
+}
+
+def slab_at(ridge: vec3, tilt_deg: f32, span: f32) -> (out: sdf) {
+    """Полупространство-скат под 45°: бокс span×span×span, повёрнутый на tilt_deg
+    вокруг X, верхняя грань проходит через точку ridge (толщина бокса — вниз)."""
+    pt0 = mesh_line(count = 1, length = 0.0)
+    pt1 = set(pt0, "orient", orient_from_euler(vec3(tilt_deg, 0, 0)))
+    pt = transform(pt1, translate = ridge)
+    slab0 = sdf_box(size = vec3(span, span, span))
+    out = sdf_instance_on_points(pt, source = slab0)
+}
+
+def gable_prism(ridge_y: f32, drop: f32, w: f32, d: f32, floor_y: f32) -> (out: sdf) {
+    """Треугольная призма крыши 45°: конёк на высоте ridge_y − drop, длина конька w
+    (вдоль X), скаты до floor_y. drop — сдвиг плоскостей скатов вниз (толщина кровли)."""
+    span = (w + d) * 3.0
+    half = span * 0.5 * 0.70710678
+    right = slab_at(ridge = vec3(0, ridge_y - drop - half, half), tilt_deg = 45.0, span = span)
+    left = slab_at(ridge = vec3(0, ridge_y - drop - half, 0 - half), tilt_deg = 0.0 - 45.0, span = span)
+    top_y = ridge_y - drop
+    # Ограничивающий бокс — ПЕРВЫЙ операнд intersect: conservative bbox
+    # пересечения = bbox(a), и грид mesh_from_sdf берётся по нему, а не по
+    # гигантскому скату (иначе 600³ вокселей и минуты счёта).
+    bounds = sdf_box_at(size = vec3(w, top_y - floor_y, (top_y - floor_y) * 2.0 + 0.1), pos = vec3(0, (top_y + floor_y) * 0.5, 0))
+    out = sdf_intersect(bounds, sdf_intersect(right, left))
+}
+
+def arch_sdf(w: f32, straight: f32, r: f32, t: f32) -> (out: sdf) {
+    """Арочная плита: бокс w×straight×t (низ на y=0, центр по x/z в 0) плюс диск
+    радиуса r сверху — сфера, зажатая тонким боксом (толщина плиты t)."""
+    body = sdf_box_at(size = vec3(w, straight, t), pos = vec3(0, straight * 0.5, 0))
+    slab = sdf_box_at(size = vec3(r * 2.0, r * 2.0, t), pos = vec3(0, straight, 0))
+    ball = sdf_sphere_at(r = r, pos = vec3(0, straight, 0))
+    disc = sdf_intersect(slab, ball)
+    out = sdf_union(body, disc)
+}
