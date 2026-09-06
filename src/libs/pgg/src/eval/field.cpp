@@ -444,7 +444,7 @@ TypedValue compileAttrRef(const AttrRef* ref, RunContext& run) {
         // for defensive completeness (runtime E302 on evaluation).
         n->kind = FKind::AttrNamed;
         n->name = ref->name;
-        n->type = ScalarType::F32;
+        n->type = knownAttrType(ref->name);  // Any for user names: the column decides
     }
     return makeFieldResult(n);
 }

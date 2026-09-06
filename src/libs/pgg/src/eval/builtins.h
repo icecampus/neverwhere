@@ -39,7 +39,7 @@ enum class BuiltinId {
     // §8.3 topology (E2 subset + delete + clip)
     Merge, Delete, Clip,
     // §8.3 second wave (v1.21)
-    Extrude, Inset, Separate, Triangulate, Subdivide, MergeByDistance, Mirror, Circle, Sweep,
+    Extrude, Inset, Separate, Triangulate, Subdivide, MergeByDistance, Mirror, Circle, Sweep, BezierPoints, ResamplePoints,
     // §8.8 scatter and instancing
     DistributePoints, InstanceOnPoints, Realize,
     // §8.10 aggregators
@@ -94,7 +94,7 @@ const BuiltinSig* findBuiltin(const std::string& name);
 // (ico_sphere, box, grid) also write @N.
 GeoPtr genIcoSphere(int subdiv, float radius);
 GeoPtr genBox(glm::vec3 size, int res);
-GeoPtr genGrid(glm::vec2 size, int res);
+GeoPtr genGrid(glm::vec2 size, glm::vec2 res);
 GeoPtr genMeshLine(int count, float length, glm::vec3 dir);
 GeoPtr genPointCloud(int count, glm::vec3 bounds, Rng rng);
 

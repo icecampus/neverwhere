@@ -114,21 +114,26 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
         diags.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), false});
         return Type{ScalarType::F32, false, GeoKind::Any};
     };
-    auto numericOrVec = [](ScalarType t) { return isNumericBase(t) || isVectorBase(t); };
+    // Any = statically unknown (a user attribute read): accepted wherever a
+    // concrete type could fit; the runtime re-runs this check on the columns.
+    auto unknown = [](ScalarType t) { return t == ScalarType::Any; };
+    auto numericOrVec = [&](ScalarType t) { return isNumericBase(t) || isVectorBase(t) || unknown(t); };
     const ScalarType a = base(0), b = base(1), c = base(2);
     switch (id) {
         case BuiltinId::Dot:
+            if (unknown(a) || unknown(b)) return Type{ScalarType::F32, false, GeoKind::Any};
             if (isNumericBase(a) && isNumericBase(b)) return Type{ScalarType::F32, false, GeoKind::Any};
             if (isVectorBase(a) && a == b) return Type{ScalarType::F32, false, GeoKind::Any};
             return err("E204", "dot expects two scalars or two vectors of the same width");
         case BuiltinId::Cross:
-            if (a == ScalarType::Vec3 && b == ScalarType::Vec3) return Type{ScalarType::Vec3, false, GeoKind::Any};
+            if ((a == ScalarType::Vec3 || unknown(a)) && (b == ScalarType::Vec3 || unknown(b)))
+                return Type{ScalarType::Vec3, false, GeoKind::Any};
             return err("E204", "cross expects two vec3");
         case BuiltinId::Length:
             if (numericOrVec(a)) return Type{ScalarType::F32, false, GeoKind::Any};
             return err("E204", "length expects a numeric scalar or a vector");
         case BuiltinId::Normalize:
-            if (isVectorBase(a)) return Type{a, false, GeoKind::Any};
+            if (isVectorBase(a) || unknown(a)) return Type{a, false, GeoKind::Any};
             return err("E204", "normalize expects a vector");
         case BuiltinId::Clamp: {
             const ScalarType t = promoteN({a, b, c});
@@ -138,7 +143,7 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
         case BuiltinId::Smoothstep: {
             ScalarType t = promoteN({a, b, c});
             if (t == ScalarType::None) return err("E204", "smoothstep arguments have incompatible types");
-            if (!isVectorBase(t)) t = ScalarType::F32;  // integer edges still interpolate in f32
+            if (!isVectorBase(t) && !unknown(t)) t = ScalarType::F32;  // integer edges still interpolate in f32
             return Type{t, false, GeoKind::Any};
         }
         case BuiltinId::Mix: {
@@ -162,7 +167,7 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
         case BuiltinId::Pow: {
             ScalarType t = promoteBase(a, b);
             if (t == ScalarType::None) return err("E204", "pow operands have incompatible types");
-            if (!isVectorBase(t)) t = ScalarType::F32;
+            if (!isVectorBase(t) && !unknown(t)) t = ScalarType::F32;
             return Type{t, false, GeoKind::Any};
         }
         case BuiltinId::Sin: case BuiltinId::Cos: case BuiltinId::Tan:
@@ -172,14 +177,14 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
         case BuiltinId::Radians: case BuiltinId::Degrees: {
             if (a == ScalarType::Bool || !numericOrVec(a))
                 return err("E204", std::string(mathFuncName(id)) + " expects a numeric scalar or a vector");
-            return Type{isVectorBase(a) ? a : ScalarType::F32, false, GeoKind::Any};
+            return Type{isVectorBase(a) || unknown(a) ? a : ScalarType::F32, false, GeoKind::Any};
         }
         case BuiltinId::Atan2:
         case BuiltinId::Mod: {
             ScalarType t = promoteBase(a, b);
             if (t == ScalarType::None || t == ScalarType::Bool)
                 return err("E204", std::string(mathFuncName(id)) + " operands have incompatible types");
-            if (!isVectorBase(t)) t = ScalarType::F32;
+            if (!isVectorBase(t) && !unknown(t)) t = ScalarType::F32;
             return Type{t, false, GeoKind::Any};
         }
         case BuiltinId::Vec2:
@@ -195,28 +200,28 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
             for (size_t i = 0; i < args.size(); ++i) {
                 if (args[i].base == ScalarType::None) continue;
                 if (count == 0) first = args[i].base;
-                allNumeric = allNumeric && isNumericBase(args[i].base);
+                allNumeric = allNumeric && (isNumericBase(args[i].base) || unknown(args[i].base));
                 ++count;
             }
-            if (count == 1 && (isNumericBase(first) || first == vecT)) return Type{vecT, false, GeoKind::Any};
+            if (count == 1 && (isNumericBase(first) || first == vecT || unknown(first))) return Type{vecT, false, GeoKind::Any};
             if (count == n && allNumeric) return Type{vecT, false, GeoKind::Any};
             return err(count == n ? "E204" : "E202",
                        "vec" + std::to_string(n) + " takes 1 or " + std::to_string(n) + " numeric arguments");
         }
         case BuiltinId::CastInt:
-            if (isNumericBase(a)) return Type{ScalarType::Int, false, GeoKind::Any};
+            if (isNumericBase(a) || unknown(a)) return Type{ScalarType::Int, false, GeoKind::Any};
             return err("E204", "int() cast takes a numeric scalar");
         case BuiltinId::CastF32:
-            if (isNumericBase(a)) return Type{ScalarType::F32, false, GeoKind::Any};
+            if (isNumericBase(a) || unknown(a)) return Type{ScalarType::F32, false, GeoKind::Any};
             return err("E204", "f32() cast takes a numeric scalar");
         case BuiltinId::CastBool:
-            if (isNumericBase(a)) return Type{ScalarType::Bool, false, GeoKind::Any};
+            if (isNumericBase(a) || unknown(a)) return Type{ScalarType::Bool, false, GeoKind::Any};
             return err("E204", "bool() cast takes a numeric scalar");
         case BuiltinId::OrientFromEuler:
-            if (a == ScalarType::Vec3) return Type{ScalarType::Vec4, false, GeoKind::Any};
+            if (a == ScalarType::Vec3 || unknown(a)) return Type{ScalarType::Vec4, false, GeoKind::Any};
             return err("E204", "orient_from_euler expects vec3 (Euler angles, degrees)");
         case BuiltinId::Ramp: {
-            if (!isNumericBase(a)) return err("E204", "ramp x must be a numeric scalar");
+            if (!isNumericBase(a) && !unknown(a)) return err("E204", "ramp x must be a numeric scalar");
             const size_t pairs = args.size() - 1;
             if (pairs < 2 || pairs % 2 != 0)
                 return err("E202", "ramp needs (pos, value) pairs after x", "ramp(x, p0, v0, p1, v1, ...)");
@@ -875,8 +880,21 @@ ConstBufferPtr evalFieldCall(int callId, const FieldNode& node,
         case BuiltinId::CastF32:
         case BuiltinId::CastBool:
         case BuiltinId::OrientFromEuler:
-        case BuiltinId::Ramp:
+        case BuiltinId::Ramp: {
+            // Statically unknown argument types (user attribute reads) are
+            // checked here against the actual columns: the same rules, now
+            // strict.
+            std::vector<Type> actual;
+            actual.reserve(args.size());
+            for (const ConstBufferPtr& a : args) actual.push_back(Type{bufferType(*a), true, GeoKind::Any});
+            std::vector<Diagnostic> diags;
+            inferExprFuncType(id, actual, node.span, diags);
+            if (!diags.empty()) {
+                for (Diagnostic& d : diags) ctx.run.report(d.code, node.span, d.message + " (actual attribute types)", d.hint);
+                return std::make_shared<const Buffer>(F32Buf(ctx.elementCount, 0.0f));
+            }
             return evalExprFuncBuf(callId, args, node.params, ctx.elementCount, ctx.run.threads);
+        }
         default:
             return evalFieldGenBuf(callId, node, args, ctx);
     }

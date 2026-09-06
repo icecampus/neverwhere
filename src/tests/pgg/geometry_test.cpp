@@ -83,7 +83,7 @@ TEST(Geometry, BoxCountsBoundsNormals) {
 }
 
 TEST(Geometry, GridCountsBoundsNormals) {
-    pgg::GeoPtr g = pgg::genGrid(glm::vec2(10, 4), 5);
+    pgg::GeoPtr g = pgg::genGrid(glm::vec2(10, 4), glm::vec2(5, 5));
     EXPECT_EQ(g->pointCount(), 36u);
     EXPECT_EQ(g->faceCount(), 25u);
     EXPECT_EQ(g->cornerCount(), 100u);

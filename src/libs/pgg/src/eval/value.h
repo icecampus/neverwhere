@@ -114,17 +114,34 @@ inline int numericRank(ScalarType t) {
 // Base-level conversion test (widening + broadcast only).
 inline bool canConvertBase(ScalarType from, ScalarType to) {
     if (from == to) return true;
+    // Any as a *source* = statically unknown (a user attribute read, v1.23):
+    // accepted here, the runtime checks the actual column type.
+    if (from == ScalarType::Any) return true;
     if (to == ScalarType::Any) return isNumericBase(from) || isVectorBase(from);
     if (isNumericBase(from) && isNumericBase(to)) return numericRank(from) <= numericRank(to);
     if (isNumericBase(from) && isVectorBase(to)) return true;  // broadcast
     return false;
 }
 
+// Static type of an attribute read `@name` (v1.23): the built-ins and the
+// reserved / conventional names are known, everything else is Any (unknown
+// until the runtime sees the column; expression typing stays permissive for
+// Any and the runtime re-checks with the actual types).
+inline ScalarType knownAttrType(const std::string& name) {
+    if (name == "P" || name == "N" || name == "Cd" || name == "color" || name == "tint") return ScalarType::Vec3;
+    if (name == "orient") return ScalarType::Vec4;
+    if (name == "uv" || name == "profile_scale") return ScalarType::Vec2;
+    if (name == "index" || name == "variant" || name == "island_id") return ScalarType::Int;
+    if (name == "scale" || name == "twist" || name == "t") return ScalarType::F32;
+    return ScalarType::Any;
+}
+
 // Binary promotion (numpy-style): numeric rank, scalar broadcasts into
 // vector; two vectors must share their width. Returns None when incompatible.
 inline ScalarType promoteBase(ScalarType a, ScalarType b) {
-    if (a == ScalarType::Any) return b;
-    if (b == ScalarType::Any) return a;
+    // Unknown (Any) absorbs: the result of an expression over a statically
+    // untyped attribute is itself unknown until the runtime sees the column.
+    if (a == ScalarType::Any || b == ScalarType::Any) return ScalarType::Any;
     if (isVectorBase(a) && isVectorBase(b)) return a == b ? a : ScalarType::None;
     if (isVectorBase(a) && isNumericBase(b)) return a;
     if (isNumericBase(a) && isVectorBase(b)) return b;

@@ -156,24 +156,33 @@ GeoPtr genBox(glm::vec3 size, int res) {
     return std::make_shared<const Geo>(std::move(geo));
 }
 
-GeoPtr genGrid(glm::vec2 size, int res) {
-    res = std::max(res, 1);
+GeoPtr genGrid(glm::vec2 size, glm::vec2 resIn) {
+    // Anisotropic resolution (v1.23): res.x cells along X, res.y along Z; a
+    // scalar `res` broadcasts to both. Writes @uv (vec2, points): u along X,
+    // v along Z, both 0..1 — the parametric coordinates every strip / leaf /
+    // ribbon shape is written against.
+    const int rx = std::max(static_cast<int>(std::lround(resIn.x)), 1);
+    const int rz = std::max(static_cast<int>(std::lround(resIn.y)), 1);
     // Flat grid on the XZ plane (terrain base), +Y normals.
-    std::vector<glm::vec3> pos(static_cast<size_t>(res + 1) * (res + 1));
-    const float invR = 1.0f / static_cast<float>(res);
-    for (int j = 0; j <= res; ++j)
-        for (int i = 0; i <= res; ++i)
-            pos[static_cast<size_t>(j) * (res + 1) + i] =
-                glm::vec3(-size.x * 0.5f + size.x * (i * invR), 0.0f,
-                          -size.y * 0.5f + size.y * (j * invR));
+    std::vector<glm::vec3> pos(static_cast<size_t>(rx + 1) * (rz + 1));
+    std::vector<glm::vec2> uv(pos.size());
+    const float invX = 1.0f / static_cast<float>(rx);
+    const float invZ = 1.0f / static_cast<float>(rz);
+    for (int j = 0; j <= rz; ++j)
+        for (int i = 0; i <= rx; ++i) {
+            const size_t k = static_cast<size_t>(j) * (rx + 1) + i;
+            const float u = i * invX, v = j * invZ;
+            pos[k] = glm::vec3(-size.x * 0.5f + size.x * u, 0.0f, -size.y * 0.5f + size.y * v);
+            uv[k] = glm::vec2(u, v);
+        }
     std::vector<int32_t> corners;
     std::vector<int32_t> offsets{0};
-    for (int j = 0; j < res; ++j) {
-        for (int i = 0; i < res; ++i) {
-            const int32_t p00 = j * (res + 1) + i;
+    for (int j = 0; j < rz; ++j) {
+        for (int i = 0; i < rx; ++i) {
+            const int32_t p00 = j * (rx + 1) + i;
             const int32_t p10 = p00 + 1;
-            const int32_t p11 = p00 + (res + 1) + 1;
-            const int32_t p01 = p00 + (res + 1);
+            const int32_t p11 = p00 + (rx + 1) + 1;
+            const int32_t p01 = p00 + (rx + 1);
             // CCW seen from +Y.
             for (int32_t c : {p00, p01, p11, p10}) corners.push_back(c);
             offsets.push_back(static_cast<int32_t>(corners.size()));
@@ -186,6 +195,9 @@ GeoPtr genGrid(glm::vec2 size, int res) {
     geo.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(corners));
     geo.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(offsets));
     addNormals(geo, std::move(normals));
+    AttrSet attrs;
+    attrs.columns["uv"] = AttrColumn{std::make_shared<const std::vector<glm::vec2>>(std::move(uv)), AttrTypeInfo::None};
+    geo.pointAttrs = std::make_shared<const AttrSet>(std::move(attrs));
     return std::make_shared<const Geo>(std::move(geo));
 }
 

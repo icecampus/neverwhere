@@ -520,9 +520,14 @@ private:
         switch (sig.id) {
             case BuiltinId::IcoSphere:
             case BuiltinId::Box:
-            case BuiltinId::Grid:
                 storeSchema(&c, sourceSchema(GeoKind::Mesh, true));
                 break;
+            case BuiltinId::Grid: {
+                GeoSchema s = sourceSchema(GeoKind::Mesh, true);
+                s.attrs[domainIndex("points")]["uv"] = ScalarType::Vec2;  // v1.23
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::MeshLine:
             case BuiltinId::PointCloud:
                 storeSchema(&c, sourceSchema(GeoKind::Points, false));
@@ -622,7 +627,7 @@ private:
                     const bool nameLit = literalString(byParam.size() > 1 ? byParam[1] : nullptr, nm);
                     const bool tiGiven = byParam.size() > 4 && byParam[4];
                     const bool tiLit = tiGiven && literalString(byParam[4], ti);
-                    if (nameLit && st != ScalarType::None) {
+                    if (nameLit && st != ScalarType::None && st != ScalarType::Any) {
                         if (const char* need = reservedAttrTypeName(nm)) {
                             const bool fits = (nm == "orient" && st == ScalarType::Vec4) ||
                                               (nm == "tint" && st == ScalarType::Vec3) ||
@@ -929,6 +934,30 @@ private:
             case BuiltinId::Circle:
                 storeSchema(&c, sourceSchema(GeoKind::Points, false));
                 break;
+            case BuiltinId::BezierPoints: {
+                GeoSchema s = sourceSchema(GeoKind::Points, false);
+                s.attrs[domainIndex("points")]["t"] = ScalarType::F32;
+                storeSchema(&c, std::move(s));
+                break;
+            }
+            case BuiltinId::ResamplePoints: {
+                // Point columns/groups of the path lerp along it; @t is added.
+                const GeoSchema& path = argSchema(byParam, 0);
+                GeoSchema s = sourceSchema(GeoKind::Points, false);
+                if (path.open) {
+                    s = openSchema();
+                } else {
+                    if (path.kind == GeoKind::Instances)
+                        error("E204", c.span, "resample_points: path must be a point set", "realize() first or pass anchor points");
+                    s.attrs[domainIndex("points")] = path.attrs[domainIndex("points")];
+                    s.attrs[domainIndex("detail")] = path.attrs[domainIndex("detail")];
+                    s.groups[domainIndex("points")] = path.groups[domainIndex("points")];
+                    s.groups[domainIndex("detail")] = path.groups[domainIndex("detail")];
+                    s.attrs[domainIndex("points")]["t"] = ScalarType::F32;
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::Sweep: {
                 // Ring points inherit the path's point columns/groups; no @N.
                 const GeoSchema& path = argSchema(byParam, 0);
@@ -942,6 +971,21 @@ private:
                     s.attrs[domainIndex("detail")] = path.attrs[domainIndex("detail")];
                     s.groups[domainIndex("points")] = path.groups[domainIndex("points")];
                     s.groups[domainIndex("detail")] = path.groups[domainIndex("detail")];
+                    // @scale/@twist are consumed; the sheet gets @uv (v1.23).
+                    auto& pts = s.attrs[domainIndex("points")];
+                    pts.erase("scale");  // f32 by the E610 stamp contract
+                    if (auto it = pts.find("profile_scale"); it != pts.end()) {
+                        if (it->second.type != ScalarType::Vec2)
+                            error("E204", c.span, "sweep: @profile_scale on the path must be vec2",
+                                  "x scales the profile X (width), y its Y (depth)");
+                        pts.erase(it);
+                    }
+                    if (auto it = pts.find("twist"); it != pts.end()) {
+                        if (it->second.type != ScalarType::F32)
+                            error("E204", c.span, "sweep: @twist on the path must be f32 (degrees)");
+                        pts.erase(it);
+                    }
+                    pts["uv"] = ScalarType::Vec2;
                 }
                 storeSchema(&c, std::move(s));
                 break;
@@ -1260,10 +1304,12 @@ private:
                   "the zone provides it as an int constant (§5.4)");
             return scalar(ScalarType::Int);
         }
-        // Named user attributes: at an open schema a read gets a provisional
-        // f32 type and a missing attribute is a runtime E302; closed schemas
-        // are checked statically at the consuming node (§7.6).
-        return field(ScalarType::F32);
+        // Named attributes: reserved / conventional names have a known type,
+        // user names are Any (unknown until the runtime sees the column —
+        // expression typing is permissive for Any, the runtime re-checks with
+        // the actual types); a missing attribute is a runtime E302; closed
+        // schemas are checked statically at the consuming node (§7.6).
+        return field(knownAttrType(ref->name));
     }
 
     Type inferUnary(const Unary* u) {

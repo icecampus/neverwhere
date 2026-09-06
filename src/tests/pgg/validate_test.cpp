@@ -128,6 +128,27 @@ TEST(Validate, SharedRngWarns) {
     }
 }
 
+TEST(Validate, SameAliasNameInTwoZoneBodiesIsNotOneRng) {
+    // v1.23: the SSA alias table is zone-scoped — `r` in two foreach bodies
+    // are different generators (different split keys), no W003.
+    pgg::Document doc = pgg::parse(
+        "pts = mesh_line(count = 3, length = 1.0)\n"
+        "rng = rng_from_seed(1)\n"
+        "a = foreach p in pts {\n"
+        "    r = split_rng(rng, @piece_index)\n"
+        "    w = value(random(0.0, 1.0, rng = split_rng(r, 2)), on = p)\n"
+        "    p = transform(p, translate = vec3(w, 0, 0))\n"
+        "}\n"
+        "b = foreach p in pts {\n"
+        "    r = split_rng(rng, 100 + @piece_index)\n"
+        "    w = value(random(0.0, 1.0, rng = split_rng(r, 2)), on = p)\n"
+        "    p = transform(p, translate = vec3(0, w, 0))\n"
+        "}\n"
+        "output a\n"
+        "output b\n");
+    EXPECT_EQ(countCode(doc, "W003"), 0);
+}
+
 TEST(Validate, ThreeConsumersOneWarning) {
     pgg::Document doc = pgg::parse(
         "r = rng_from_seed(1)\n"

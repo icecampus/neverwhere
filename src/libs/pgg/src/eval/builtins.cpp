@@ -98,7 +98,7 @@ const std::vector<BuiltinSig>& registry() {
                         {val("size", ScalarType::Vec3, true), valDef("res", ScalarType::Int, Value(int64_t(1)))},
                         Type{ScalarType::Geo, false, GeoKind::Mesh}));
         r.push_back(sig(BuiltinId::Grid, "grid",
-                        {val("size", ScalarType::Vec2, true), val("res", ScalarType::Int, true)},
+                        {val("size", ScalarType::Vec2, true), val("res", ScalarType::Vec2, true)},
                         Type{ScalarType::Geo, false, GeoKind::Mesh}));
         r.push_back(sig(BuiltinId::MeshLine, "mesh_line",
                         {val("count", ScalarType::Int, true), val("length", ScalarType::F32, true),
@@ -417,9 +417,19 @@ const std::vector<BuiltinSig>& registry() {
         r.push_back(sig(BuiltinId::Circle, "circle",
                         {val("sides", ScalarType::Int, true), valDef("radius", ScalarType::F32, Value(1.0f))},
                         Type{ScalarType::Geo, false, GeoKind::Points}));
+        r.push_back(sig(BuiltinId::BezierPoints, "bezier_points",
+                        {val("p0", ScalarType::Vec3, true), val("p1", ScalarType::Vec3, true),
+                         val("p2", ScalarType::Vec3, true), val("p3", ScalarType::Vec3, true),
+                         val("count", ScalarType::Int, true)},
+                        Type{ScalarType::Geo, false, GeoKind::Points}));
+        r.push_back(sig(BuiltinId::ResamplePoints, "resample_points",
+                        {geoArg("path"), val("count", ScalarType::Int, true),
+                         valDef("closed", ScalarType::Bool, Value(false))},
+                        Type{ScalarType::Geo, false, GeoKind::Points}));
         r.push_back(sig(BuiltinId::Sweep, "sweep",
                         {geoArg("path"), geoArg("profile"), valDef("closed", ScalarType::Bool, Value(false)),
-                         valDef("cap", ScalarType::Bool, Value(true))},
+                         valDef("cap", ScalarType::Bool, Value(true)),
+                         valDef("profile_closed", ScalarType::Bool, Value(true))},
                         Type{ScalarType::Geo, false, GeoKind::Mesh}));
 
         // --- §8.8 scatter and instancing ----------------------------------------
@@ -614,7 +624,7 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Box:
             return Value(genBox(asVec3(v[0]), static_cast<int>(asInt(v[1]))));
         case BuiltinId::Grid:
-            return Value(genGrid(asVec2(v[0]), static_cast<int>(asInt(v[1]))));
+            return Value(genGrid(asVec2(v[0]), asVec2(v[1])));
         case BuiltinId::MeshLine:
             return Value(genMeshLine(static_cast<int>(asInt(v[0])), asF32(v[1]), asVec3(v[2])));
         case BuiltinId::PointCloud:
@@ -682,6 +692,8 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
             return evalTopologyOpsBuiltin(bound, run);
         case BuiltinId::Circle:
         case BuiltinId::Sweep:
+        case BuiltinId::BezierPoints:
+        case BuiltinId::ResamplePoints:
             return evalSweepBuiltin(bound, run);
         case BuiltinId::Delete:
         case BuiltinId::Clip:

@@ -532,7 +532,8 @@ TEST(Sweep, ClosedPathMakesATorusAndScaleAttrScalesTheProfile) {
     // transported phase, i.e. within [2 + 0.25 * cos(30deg), 2.25].
     EXPECT_GE(mx.x, 2.216f);
     EXPECT_LE(mx.x, 2.2501f);
-    EXPECT_NEAR(mx.y, 0.25f, 1e-2f);
+    EXPECT_GE(mx.y, 0.216f);
+    EXPECT_LE(mx.y, 0.2501f);
     // @scale 1 -> 3 along the path: top ring radius 0.3, bottom 0.1.
     bbox(*cone, mn, mx);
     EXPECT_NEAR(mx.x, 0.3f, 1e-4f);
@@ -545,6 +546,47 @@ TEST(Sweep, ClosedPathMakesATorusAndScaleAttrScalesTheProfile) {
     EXPECT_EQ(bottom, 4);
 }
 
+TEST(Sweep, OpenProfileMakesARibbonWithUvAndPerAxisScaleAndTwist) {
+    // v1.23: profile_closed = false -> a sheet (no caps, (nProf-1) quads per
+    // segment); @profile_scale (vec2) tapers the width, @twist (degrees) rolls
+    // the frame; @uv is written, @scale/@profile_scale/@twist are consumed.
+    pgg::RunResult r = pgg::run(
+        "path0 = mesh_line(count = 5, length = 2.0, dir = (0, 0, 1))\n"
+        "path1 = set(path0, \"profile_scale\", vec2(1.0 - 0.5 * dot(@P, (0, 0, 1)) / 2.0, 1.0), domain = points)\n"
+        "path = set(path1, \"twist\", 90.0 * dot(@P, (0, 0, 1)) / 2.0, domain = points)\n"
+        "prof = mesh_line(count = 3, length = 1.0, dir = (1, 0, 0))\n"
+        "rib = sweep(path, prof, profile_closed = false)\n"
+        "flat = sweep(path0, transform(prof, translate = (-0.5, 0, 0)), profile_closed = false)\n"
+        "vmax = count(rib, where = dot(@uv, (0, 1)) > 0.99)\n"
+        "output rib\n"
+        "output flat\n"
+        "output vmax\n");
+    expectNoErrors(r);
+    pgg::GeoPtr rib = geoOutput(r, "rib"), flat = geoOutput(r, "flat");
+    ASSERT_TRUE(rib && flat);
+    EXPECT_EQ(rib->pointCount(), 15u);
+    EXPECT_EQ(rib->faceCount(), 8u);  // 4 segments x 2 strips, no caps
+    // A flat ribbon along +Z lies in the XZ plane: profile X -> world X.
+    glm::vec3 mn, mx;
+    bbox(*flat, mn, mx);
+    EXPECT_NEAR(mn.x, -0.5f, 1e-5f);
+    EXPECT_NEAR(mx.x, 0.5f, 1e-5f);
+    EXPECT_NEAR(mn.y, 0.0f, 1e-5f);
+    EXPECT_NEAR(mx.y, 0.0f, 1e-5f);
+    // Twisted by 90 deg at the end: the last ring spans Y instead of X, and
+    // the taper halves its width (profile 0..1 -> width 0.5).
+    bbox(*rib, mn, mx);
+    EXPECT_GT(mx.y, 0.45f);
+    // Consumed / added columns.
+    const pgg::AttrSet* pa = rib->attrs(pgg::Domain::Points);
+    ASSERT_TRUE(pa);
+    EXPECT_FALSE(pa->find("profile_scale"));
+    EXPECT_FALSE(pa->find("twist"));
+    EXPECT_TRUE(pa->find("uv"));
+    for (const auto& o : r.outputs)
+        if (o.name == "vmax") EXPECT_EQ(pgg::asInt(o.value), 3);
+}
+
 TEST(Sweep, TooShortPathOrProfileIsE204) {
     pgg::RunResult p1 = pgg::run(
         "t = sweep(mesh_line(count = 1, length = 1.0), circle(sides = 6))\n"
@@ -554,6 +596,98 @@ TEST(Sweep, TooShortPathOrProfileIsE204) {
         "t = sweep(mesh_line(count = 4, length = 1.0), mesh_line(count = 2, length = 1.0))\n"
         "output t\n");
     EXPECT_EQ(countCode(pr, "E204"), 1);
+}
+
+}  // namespace
+
+namespace {
+
+// --- grid @uv / res vec2, bezier_points, resample_points (v1.23) ----------------
+
+TEST(Grid, AnisotropicResolutionAndUv) {
+    pgg::RunResult r = pgg::run(
+        "g = grid(size = (1.0, 4.0), res = (2, 8))\n"
+        "s = grid(size = (1.0, 1.0), res = 3)\n"
+        "far = count(g, where = dot(@uv, (0, 1)) > 0.99)\n"
+        "output g\n"
+        "output s\n"
+        "output far\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "g"), s = geoOutput(r, "s");
+    ASSERT_TRUE(g && s);
+    EXPECT_EQ(g->faceCount(), 16u);
+    EXPECT_EQ(g->pointCount(), 27u);
+    EXPECT_EQ(s->faceCount(), 9u);  // scalar res broadcasts
+    const std::vector<glm::vec3>* dummy = vec3Attr(*g, pgg::Domain::Points, "uv");
+    EXPECT_FALSE(dummy);  // uv is vec2, not vec3
+    ASSERT_TRUE(g->attrs(pgg::Domain::Points) && g->attrs(pgg::Domain::Points)->find("uv"));
+    for (const auto& o : r.outputs)
+        if (o.name == "far") EXPECT_EQ(pgg::asInt(o.value), 3);  // the last row of 3 points
+}
+
+TEST(BezierPoints, EndsAtControlPointsAndWritesT) {
+    pgg::RunResult r = pgg::run(
+        "b = bezier_points(p0 = (0, 0, 0), p1 = (0, 1, 0), p2 = (1, 1, 0), p3 = (1, 0, 0), count = 5)\n"
+        "mid = count(b, where = abs(@t - 0.5) < 0.01)\n"
+        "bad = bezier_points(p0 = (0, 0, 0), p1 = (0, 1, 0), p2 = (1, 1, 0), p3 = (1, 0, 0), count = 1)\n"
+        "output b\n"
+        "output mid\n"
+        "output bad\n");
+    EXPECT_EQ(countCode(r, "E204"), 1);
+    pgg::GeoPtr b = geoOutput(r, "b");
+    ASSERT_TRUE(b);
+    ASSERT_EQ(b->pointCount(), 5u);
+    EXPECT_NEAR(glm::length((*b->positions)[0]), 0.0f, 1e-6f);
+    EXPECT_NEAR(glm::length((*b->positions)[4] - glm::vec3(1, 0, 0)), 0.0f, 1e-6f);
+    EXPECT_NEAR((*b->positions)[2].x, 0.5f, 1e-6f);
+    EXPECT_NEAR((*b->positions)[2].y, 0.75f, 1e-6f);
+    for (const auto& o : r.outputs)
+        if (o.name == "mid") EXPECT_EQ(pgg::asInt(o.value), 1);
+}
+
+TEST(ResamplePoints, UniformArcLengthWithLerpedColumns) {
+    // Two segments of length 1 and 3: 5 samples at s = 0, 1, 2, 3, 4.
+    pgg::RunResult r = pgg::run(
+        "p0 = mesh_line(count = 3, length = 2.0, dir = (1, 0, 0))\n"
+        "p1 = set_position(p0, offset = vec3(dot(@P, (1, 0, 0)), 0, 0), where = dot(@P, (1, 0, 0)) > 1.5)\n"
+        "p = set(p1, \"h\", dot(@P, (1, 0, 0)), domain = points)\n"
+        "q = resample_points(p, count = 5)\n"
+        "ring = resample_points(circle(sides = 4, radius = 1.0), count = 8, closed = true)\n"
+        "hs = sum_of(@h, on = q)\n"
+        "output q\n"
+        "output ring\n"
+        "output hs\n");
+    expectNoErrors(r);
+    pgg::GeoPtr q = geoOutput(r, "q"), ring = geoOutput(r, "ring");
+    ASSERT_TRUE(q && ring);
+    ASSERT_EQ(q->pointCount(), 5u);
+    for (size_t i = 0; i < 5; ++i) EXPECT_NEAR((*q->positions)[i].x, static_cast<float>(i), 1e-5f) << i;
+    // h == x on the path, so the lerped column sums to 0+1+2+3+4.
+    for (const auto& o : r.outputs)
+        if (o.name == "hs") EXPECT_NEAR(pgg::asF32(o.value), 10.0f, 1e-4f);
+    // Closed: 8 samples around a square of perimeter 4*sqrt(2), none repeats the start.
+    EXPECT_EQ(ring->pointCount(), 8u);
+    EXPECT_GT(glm::length((*ring->positions)[7] - (*ring->positions)[0]), 0.1f);
+}
+
+TEST(AttrTyping, UserVectorAttrsWorkInVectorFunctionsAndMismatchIsRuntimeE204) {
+    // v1.23: @Cd / @uv / user names are typed by the column, not "provisional
+    // f32": dot(@Cd, ...) is legal; a real mismatch is still E204 (at runtime,
+    // with the actual types).
+    pgg::RunResult ok = pgg::run(
+        "g = set(grid(size = (1, 1), res = 2), \"Cd\", vec3(1, 0.5, 0), domain = points)\n"
+        "u = set(g, \"col2\", vec3(0, 1, 0), domain = points, typeinfo = none)\n"
+        "a = count(u, where = dot(@Cd, (0, 1, 0)) > 0.4)\n"
+        "b = count(u, where = length(cross(@col2, (1, 0, 0))) > 0.5)\n"
+        "output a\n"
+        "output b\n");
+    expectNoErrors(ok);
+    for (const auto& o : ok.outputs) EXPECT_EQ(pgg::asInt(o.value), 9) << o.name;
+    pgg::RunResult bad = pgg::run(
+        "g = set(grid(size = (1, 1), res = 2), \"w\", 2.0, domain = points)\n"
+        "a = count(g, where = length(cross(@w, (0, 1, 0))) > 0.5)\n"
+        "output a\n");
+    EXPECT_GE(countCode(bad, "E204"), 1);
 }
 
 }  // namespace

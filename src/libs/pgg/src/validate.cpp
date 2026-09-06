@@ -258,9 +258,11 @@ private:
                 for (size_t i = 0; i < b->targets.names.size(); ++i) {
                     Span ts = i < b->targets.spans.size() ? b->targets.spans[i] : s->span;
                     define(scope, b->targets.names[i], ts, /*warnIfUnused=*/true, /*isRuntimeValue=*/true);
-                    // SSA-alias table for the zone rng lint (W004/W005): names
-                    // are globally unique (E102), so one flat map is exact.
-                    aliases_[b->targets.names[i]] = b->value;
+                    // SSA-alias table for the rng lints (W003/W004/W005): a name
+                    // is unique within its scope, but two zone bodies may reuse
+                    // one (`r` in two foreach bodies), so the entry remembers
+                    // its enclosing zone (null = file / def level).
+                    aliases_[b->targets.names[i]].push_back({zoneStack_.empty() ? nullptr : zoneStack_.back(), b->value});
                 }
                 break;
             }
@@ -283,7 +285,9 @@ private:
                     Span ss = i < z->state.spans.size() ? z->state.spans[i] : s->span;
                     defineStatePort(body, z->state.names[i], ss);
                 }
+                zoneStack_.push_back(s);
                 stmts(z->body, body);
+                zoneStack_.pop_back();
                 reportUnused(body);
                 break;
             }
@@ -297,7 +301,9 @@ private:
                 // and bound exactly once in the body as the output piece — the
                 // spec example rebinds it (`piece = smooth(...)`).
                 defineStatePort(body, z->item, z->itemSpan);
+                zoneStack_.push_back(s);
                 stmts(z->body, body);
+                zoneStack_.pop_back();
                 reportUnused(body);
                 break;
             }
@@ -414,9 +420,9 @@ private:
                 return static_cast<const AttrRef*>(e)->name == zoneConst;
             case NodeKind::Ident: {
                 const std::string& n = static_cast<const Ident*>(e)->name;
-                auto it = aliases_.find(n);
-                if (it == aliases_.end() || !visiting.insert(n).second) return false;
-                const bool r = exprMentionsZoneConst(it->second, zoneConst, visiting);
+                const Expr* aliased = findAlias(n);
+                if (!aliased || !visiting.insert(n).second) return false;
+                const bool r = exprMentionsZoneConst(aliased, zoneConst, visiting);
                 visiting.erase(n);
                 return r;
             }
@@ -526,10 +532,14 @@ private:
                     lintExprCalls(static_cast<const Binding*>(s)->value, repDepth, feDepth);
                     break;
                 case NodeKind::RepeatZone:
+                    zoneStack_.push_back(s);
                     lintZoneStmts(static_cast<const RepeatZone*>(s)->body, repDepth + 1, feDepth);
+                    zoneStack_.pop_back();
                     break;
                 case NodeKind::ForeachZone:
+                    zoneStack_.push_back(s);
                     lintZoneStmts(static_cast<const ForeachZone*>(s)->body, repDepth, feDepth + 1);
+                    zoneStack_.pop_back();
                     break;
                 default:
                     break;  // tap: no calls
@@ -543,9 +553,13 @@ private:
             if (item->kind == NodeKind::Def) {
                 lintZoneStmts(static_cast<const Def*>(item)->body, 0, 0);
             } else if (item->kind == NodeKind::RepeatZone) {
+                zoneStack_.push_back(static_cast<const Stmt*>(item));
                 lintZoneStmts(static_cast<const RepeatZone*>(item)->body, 1, 0);
+                zoneStack_.pop_back();
             } else if (item->kind == NodeKind::ForeachZone) {
+                zoneStack_.push_back(static_cast<const Stmt*>(item));
                 lintZoneStmts(static_cast<const ForeachZone*>(item)->body, 0, 1);
+                zoneStack_.pop_back();
             }
         }
     }
@@ -584,10 +598,10 @@ private:
                 return resolveRngKey(static_cast<const Paren*>(e)->inner, scope, visiting);
             case NodeKind::Ident: {
                 const std::string& n = static_cast<const Ident*>(e)->name;
-                auto it = aliases_.find(n);
-                if (it == aliases_.end()) return "name:" + scope + n;
+                const Expr* aliased = findAlias(n);
+                if (!aliased) return "name:" + scope + n;
                 if (!visiting.insert(n).second) return std::nullopt;  // alias cycle (broken file)
-                std::optional<std::string> r = resolveRngKey(it->second, scope, visiting);
+                std::optional<std::string> r = resolveRngKey(aliased, scope, visiting);
                 visiting.erase(n);
                 return r;
             }
@@ -683,10 +697,14 @@ private:
                 break;
             }
             case NodeKind::RepeatZone:
+                zoneStack_.push_back(s);
                 for (const Stmt* st : static_cast<const RepeatZone*>(s)->body) collectRngStmt(st, scope);
+                zoneStack_.pop_back();
                 break;
             case NodeKind::ForeachZone:
+                zoneStack_.push_back(s);
                 for (const Stmt* st : static_cast<const ForeachZone*>(s)->body) collectRngStmt(st, scope);
+                zoneStack_.pop_back();
                 break;
             default:
                 break;  // tap: no calls
@@ -726,7 +744,22 @@ private:
         for (const Stmt* s : body) collectRngStmt(s, scope);
     }
 
-    std::unordered_map<std::string, const Expr*> aliases_;  // SSA name -> value expr (W003/W004/W005)
+    // SSA name -> (enclosing zone or null, value expr); see findAlias.
+    std::unordered_map<std::string, std::vector<std::pair<const Stmt*, const Expr*>>> aliases_;
+    std::vector<const Stmt*> zoneStack_;  // zones enclosing the statement being visited
+
+    // The alias of `name` visible from the current zone stack: the innermost
+    // enclosing zone that defines it, else the file / def level definition.
+    const Expr* findAlias(const std::string& name) const {
+        auto it = aliases_.find(name);
+        if (it == aliases_.end()) return nullptr;
+        for (auto z = zoneStack_.rbegin(); z != zoneStack_.rend(); ++z)
+            for (const auto& [zone, e] : it->second)
+                if (zone == *z) return e;
+        for (const auto& [zone, e] : it->second)
+            if (zone == nullptr) return e;
+        return nullptr;
+    }
     std::unordered_map<std::string, std::vector<RngConsumer>> rngConsumers_;  // generator key -> consumers
 };
 
