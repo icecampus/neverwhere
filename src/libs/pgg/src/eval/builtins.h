@@ -37,6 +37,8 @@ enum class BuiltinId {
     SetAttr, RemoveAttr, RenameAttr, Promote,
     // §8.3 topology (E2 subset + delete + clip)
     Merge, Delete, Clip,
+    // §8.3 second wave (v1.21)
+    Extrude, Inset, Separate, Triangulate, Subdivide, MergeByDistance, Mirror, Circle, Sweep,
     // §8.8 scatter and instancing
     DistributePoints, InstanceOnPoints, Realize,
     // §8.10 aggregators
@@ -154,8 +156,15 @@ Value evalSdfBuiltin(const BoundCall& bound, RunContext& run);
 // §8.3 islands and §8.11 fracture nodes, value level (builtins_fracture.cpp, E7).
 Value evalFractureBuiltin(const BoundCall& bound, RunContext& run);
 
-// §8.3 delete (element removal with cascade), value level (builtins_topology.cpp).
+// §8.3 delete (element removal with cascade) and clip, value level (builtins_topology.cpp).
 Value evalTopologyBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.3 extrude/inset/separate/triangulate/subdivide/merge_by_distance/mirror
+// (builtins_topology_ops.cpp, v1.21).
+Value evalTopologyOpsBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.3 circle (profile source) and sweep (builtins_sweep.cpp, v1.21).
+Value evalSweepBuiltin(const BoundCall& bound, RunContext& run);
 
 // Materializes geo<instances> into geo<mesh> (spec §8.8); host entry point
 // for tools that export instances without running the graph. nullptr when the

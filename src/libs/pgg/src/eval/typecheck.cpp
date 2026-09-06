@@ -863,6 +863,89 @@ private:
                 storeSchema(&c, std::move(s));
                 break;
             }
+            case BuiltinId::Extrude:
+            case BuiltinId::Inset: {
+                // Face rebuilds keep the schema (rows copy/blend); named side/
+                // top (inner/rim) groups are added on faces. Field args live on
+                // the faces domain of the input.
+                const bool ex = sig.id == BuiltinId::Extrude;
+                GeoSchema s = argSchema(byParam, 0);
+                if (ex) checkFieldArgs(s, byParam, {1, 2});
+                else checkFieldArgs(s, byParam, {1, 2, 3});
+                // Kind: the signature's geoArg(GeoKind::Mesh) already reports E204.
+                if (!s.open) {
+                    for (size_t gi : {size_t(4), size_t(5)}) {  // side/top or inner/rim group names
+                        if (byParam.size() <= gi || !byParam[gi]) continue;
+                        if (literalString(byParam[gi], lit)) {
+                            if (!lit.empty()) s.groups[domainIndex("faces")].insert(lit);
+                        } else {
+                            s = openSchema();
+                            break;
+                        }
+                    }
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
+            case BuiltinId::Subdivide: {
+                GeoSchema s = argSchema(byParam, 0);
+                // catmull_clark / loop move the original points: a stored @N is stale.
+                if (!s.open && s.hasN && !(byParam.size() > 2 && byParam[2] && literalString(byParam[2], lit) && lit == "linear"))
+                    s.nStale = true;
+                storeSchema(&c, std::move(s));
+                break;
+            }
+            case BuiltinId::Triangulate:
+            case BuiltinId::MergeByDistance:
+            case BuiltinId::Mirror: {
+                GeoSchema s = argSchema(byParam, 0);
+                if (!s.open && s.kind == GeoKind::Instances)
+                    error("E204", c.span, std::string(sig.name) + " on geo<instances> is not defined", "realize() first");
+                if (sig.id == BuiltinId::Mirror && byParam.size() > 2 && byParam[2] && byParam[2]->value) {
+                    Value nv;
+                    if (constEval(byParam[2]->value, nv) && valueBase(nv) == ScalarType::Vec3) {
+                        const glm::vec3 v = asVec3(nv);
+                        if (!(glm::length(v) > 1e-12f) || !std::isfinite(glm::length(v)))
+                            error("E612", c.span, "mirror: normal must be a non-zero finite vector",
+                                  "pass the plane normal, e.g. normal = (1, 0, 0)");
+                    }
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
+            case BuiltinId::Separate: {
+                const GeoSchema& in = argSchema(byParam, 0);
+                checkFieldArgs(in, byParam, {1});
+                if (!in.open && in.kind != GeoKind::Mesh && byParam.size() > 2 && byParam[2] &&
+                    literalString(byParam[2], lit) && lit != "points") {
+                    error("E204", c.span,
+                          "separate on " + lit + " needs a geo<mesh>; " + std::string(geoKindName(in.kind)) +
+                              " has only points",
+                          "use domain = points");
+                }
+                storeSchema(&c, in);  // both halves keep the input schema
+                break;
+            }
+            case BuiltinId::Circle:
+                storeSchema(&c, sourceSchema(GeoKind::Points, false));
+                break;
+            case BuiltinId::Sweep: {
+                // Ring points inherit the path's point columns/groups; no @N.
+                const GeoSchema& path = argSchema(byParam, 0);
+                GeoSchema s = sourceSchema(GeoKind::Mesh, false);
+                if (path.open) {
+                    s = openSchema();
+                } else {
+                    if (path.kind == GeoKind::Instances)
+                        error("E204", c.span, "sweep: path must be a point set", "realize() first or pass anchor points");
+                    s.attrs[domainIndex("points")] = path.attrs[domainIndex("points")];
+                    s.attrs[domainIndex("detail")] = path.attrs[domainIndex("detail")];
+                    s.groups[domainIndex("points")] = path.groups[domainIndex("points")];
+                    s.groups[domainIndex("detail")] = path.groups[domainIndex("detail")];
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::Delete: {
                 // Element removal keeps the schema (columns are gathered, never
                 // dropped); the mask is checked against the input schema.

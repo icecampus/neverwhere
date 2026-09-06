@@ -131,11 +131,6 @@ TEST(Typecheck, OutputRejectsFieldAndRng) {
 
 TEST(Typecheck, DeferredOperationsReportCleanly) {
     // Known catalog names past E4: precise "not supported" diagnostic, no crash.
-    pgg::RunResult m = runSrc(
-        "a = ico_sphere(subdiv = 1, radius = 1.0)\n"
-        "b = subdivide(a, level = 2)\n"
-        "output b\n");
-    EXPECT_EQ(countCode(m, "E201"), 1);
     pgg::RunResult im = runSrc("m = import_mesh(uri = \"rock.obj\")\noutput m\n");
     EXPECT_EQ(countCode(im, "E201"), 1);
     pgg::RunResult rc = runSrc(

@@ -348,6 +348,70 @@ const std::vector<BuiltinSig>& registry() {
             r.push_back(s);
         }
 
+        {
+            // §8.3 extrude (builtins_topology_ops.cpp): faces along their
+            // normals; region (one sheet, side walls on the selection boundary)
+            // or individual (per face). distance/where are face fields.
+            ParamSig mode = valDef("mode", ScalarType::String, Value(std::string("region")));
+            mode.enumValues = {"region", "individual"};
+            r.push_back(sig(BuiltinId::Extrude, "extrude",
+                            {geoArg("geo", GeoKind::Mesh), fld("distance", ScalarType::F32, true),
+                             fldDef("where", ScalarType::Bool, Value(true)), mode,
+                             valDef("side_group", ScalarType::String, Value(std::string(""))),
+                             valDef("top_group", ScalarType::String, Value(std::string("")))},
+                            Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        }
+        {
+            // §8.3 inset: per-face inner polygon (border width `amount`, pushed
+            // by `depth` along the normal) + rim quads.
+            r.push_back(sig(BuiltinId::Inset, "inset",
+                            {geoArg("geo", GeoKind::Mesh), fld("amount", ScalarType::F32, true),
+                             fldDef("depth", ScalarType::F32, Value(0.0f)), fldDef("where", ScalarType::Bool, Value(true)),
+                             valDef("inner_group", ScalarType::String, Value(std::string(""))),
+                             valDef("rim_group", ScalarType::String, Value(std::string("")))},
+                            Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        }
+        {
+            // §8.3 separate: (yes, no) halves by a mask, delete's cascade.
+            ParamSig domain = valDef("domain", ScalarType::String, Value(std::string("faces")));
+            domain.enumValues = {"points", "corners", "faces"};
+            BuiltinSig s = sig(BuiltinId::Separate, "separate",
+                               {geoArg("geo"), fld("where", ScalarType::Bool, true), domain}, Type{});
+            s.results = {geoResult(), geoResult()};
+            r.push_back(s);
+        }
+        r.push_back(sig(BuiltinId::Triangulate, "triangulate", {geoArg("geo", GeoKind::Mesh)},
+                        Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        {
+            ParamSig scheme = valDef("scheme", ScalarType::String, Value(std::string("catmull_clark")));
+            scheme.enumValues = {"catmull_clark", "linear", "loop"};
+            r.push_back(sig(BuiltinId::Subdivide, "subdivide",
+                            {geoArg("geo", GeoKind::Mesh), valDef("level", ScalarType::Int, Value(int64_t(1))), scheme},
+                            Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        }
+        {
+            BuiltinSig s = sig(BuiltinId::MergeByDistance, "merge_by_distance",
+                               {geoArg("geo"), val("dist", ScalarType::F32, true)}, geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        {
+            BuiltinSig s = sig(BuiltinId::Mirror, "mirror",
+                               {geoArg("geo"), valDef("origin", ScalarType::Vec3, Value(glm::vec3(0.0f))),
+                                valDef("normal", ScalarType::Vec3, Value(glm::vec3(1, 0, 0))),
+                                valDef("weld", ScalarType::F32, Value(0.0f))},
+                               geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
+        r.push_back(sig(BuiltinId::Circle, "circle",
+                        {val("sides", ScalarType::Int, true), valDef("radius", ScalarType::F32, Value(1.0f))},
+                        Type{ScalarType::Geo, false, GeoKind::Points}));
+        r.push_back(sig(BuiltinId::Sweep, "sweep",
+                        {geoArg("path"), geoArg("profile"), valDef("closed", ScalarType::Bool, Value(false)),
+                         valDef("cap", ScalarType::Bool, Value(true))},
+                        Type{ScalarType::Geo, false, GeoKind::Mesh}));
+
         // --- §8.8 scatter and instancing ----------------------------------------
         {
             ParamSig mode = valDef("mode", ScalarType::String, Value(std::string("poisson")));
@@ -452,10 +516,7 @@ const std::vector<BuiltinSig>& registry() {
 
         // --- known but deferred past this stage ---------------------------------
         r.push_back(deferredSig("import_mesh", "deferred: no host asset contract yet, Q4"));
-        r.push_back(deferredSig("subdivide", "topology ops are a later stage (post-E4)"));
-        r.push_back(deferredSig("triangulate", "topology ops are a later stage (post-E4)"));
-        r.push_back(deferredSig("merge_by_distance", "topology ops are a later stage (post-E4)"));
-        r.push_back(deferredSig("separate", "topology ops are a later stage (post-E4)"));
+        r.push_back(deferredSig("bevel", "deferred: edge bevel with mitres is post-MVP; inset() covers face borders"));
         for (const char* n : {"raycast", "transfer"})
             r.push_back(deferredSig(n, "sampling ops are a later stage (post-E4)"));
         return r;
@@ -601,6 +662,17 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Islands:
         case BuiltinId::Fracture:
             return evalFractureBuiltin(bound, run);
+        case BuiltinId::Extrude:
+        case BuiltinId::Inset:
+        case BuiltinId::Separate:
+        case BuiltinId::Triangulate:
+        case BuiltinId::Subdivide:
+        case BuiltinId::MergeByDistance:
+        case BuiltinId::Mirror:
+            return evalTopologyOpsBuiltin(bound, run);
+        case BuiltinId::Circle:
+        case BuiltinId::Sweep:
+            return evalSweepBuiltin(bound, run);
         case BuiltinId::Delete:
         case BuiltinId::Clip:
             return evalTopologyBuiltin(bound, run);

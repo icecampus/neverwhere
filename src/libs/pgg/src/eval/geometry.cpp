@@ -471,6 +471,30 @@ std::shared_ptr<const std::vector<glm::vec3>> samplePositions(const Geo& geo, Do
 }
 
 std::shared_ptr<const std::vector<glm::vec3>> sampleNormals(const Geo& geo, Domain domain) {
+    // A corner "N" column (compute_normals(mode = flat)) is the nearest source
+    // for corner and face reads: faceted @N on corners, the exact face
+    // direction on faces. Point reads keep the smooth point normals.
+    if (domain != Domain::Points && geo.cornerAttrs) {
+        if (const AttrColumn* cn = geo.cornerAttrs->find("N")) {
+            const auto* vec = std::get_if<std::shared_ptr<const std::vector<glm::vec3>>>(&cn->data);
+            if (vec && *vec) {
+                if (domain == Domain::Corners) return *vec;
+                DColumn dc;
+                dc.width = 3;
+                dc.vals.resize((*vec)->size(), glm::dvec4(0.0));
+                for (size_t i = 0; i < (*vec)->size(); ++i) {
+                    const glm::vec3& n = (**vec)[i];
+                    dc.vals[i] = glm::dvec4(n.x, n.y, n.z, 0.0);
+                }
+                dc.vals = interpolateDColumn(geo, Domain::Corners, dc.vals, domain, PromoteMode::Average);
+                std::vector<glm::vec3> out(dc.vals.size());
+                for (size_t i = 0; i < dc.vals.size(); ++i)
+                    out[i] = glm::vec3(static_cast<float>(dc.vals[i].x), static_cast<float>(dc.vals[i].y),
+                                       static_cast<float>(dc.vals[i].z));
+                return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
+            }
+        }
+    }
     if (!geo.normals) return derivedNormals(geo, domain);  // v1.14 read fallback
     if (domain == Domain::Points) return geo.normals;
     DColumn dc;

@@ -17,9 +17,10 @@
 #include <unordered_set>
 
 #include "builtins.h"
+#include "topology_util.h"
 
 namespace pgg {
-namespace {
+namespace topo {
 
 // Gathers every column of an AttrSet by `keep` (indices into the old domain).
 std::shared_ptr<const AttrSet> gatherAttrs(const AttrSet* src, const std::vector<int32_t>& keep) {
@@ -41,123 +42,6 @@ std::shared_ptr<const GroupSet> gatherGroups(const GroupSet* src, const std::vec
     }
     return std::make_shared<const GroupSet>(std::move(out));
 }
-
-std::vector<int32_t> keptIndices(const std::vector<uint8_t>& drop) {
-    std::vector<int32_t> keep;
-    keep.reserve(drop.size());
-    for (size_t i = 0; i < drop.size(); ++i)
-        if (!drop[i]) keep.push_back(static_cast<int32_t>(i));
-    return keep;
-}
-
-// Rebuilds the mesh part of `out` from the face-drop mask: kept faces keep all
-// their corners; corner indices are remapped through `pointRemap` (identity
-// when null). Points are left to the caller.
-void rebuildFaces(const Geo& in, Geo& out, const std::vector<uint8_t>& dropFace,
-                  const std::vector<int32_t>* pointRemap) {
-    const auto& offsets = *in.faceOffsets;
-    const auto& verts = *in.cornerVerts;
-    std::vector<int32_t> keepFace, keepCorner, newVerts, newOffsets;
-    newOffsets.push_back(0);
-    for (size_t f = 0; f + 1 < offsets.size(); ++f) {
-        if (dropFace[f]) continue;
-        keepFace.push_back(static_cast<int32_t>(f));
-        for (int32_t c = offsets[f]; c < offsets[f + 1]; ++c) {
-            keepCorner.push_back(c);
-            const int32_t v = verts[static_cast<size_t>(c)];
-            newVerts.push_back(pointRemap ? (*pointRemap)[static_cast<size_t>(v)] : v);
-        }
-        newOffsets.push_back(static_cast<int32_t>(newVerts.size()));
-    }
-    out.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(newVerts));
-    out.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(newOffsets));
-    out.cornerAttrs = gatherAttrs(in.cornerAttrs.get(), keepCorner);
-    out.cornerGroups = gatherGroups(in.cornerGroups.get(), keepCorner);
-    out.faceAttrs = gatherAttrs(in.faceAttrs.get(), keepFace);
-    out.faceGroups = gatherGroups(in.faceGroups.get(), keepFace);
-}
-
-Value opDelete(const BoundCall& bound, RunContext& run) {
-    const GeoPtr inPtr = asGeo(bound.values[0]);
-    const Geo& in = *inPtr;
-    const Domain domain = domainFromName(asString(bound.values[2]));
-    if (domain == Domain::Detail) {
-        run.report("E204", bound.span, "delete: detail is not a per-element domain",
-                   "mask points, corners or faces instead");
-        return Value(inPtr);
-    }
-    const bool hasFaces = in.kind == GeoKind::Mesh && in.faceOffsets && in.cornerVerts;
-    if (domain != Domain::Points && !hasFaces) {
-        run.report("E204", bound.span,
-                   std::string("delete on ") + domainName(domain) + " needs a geo<mesh>; " +
-                       geoKindName(in.kind) + " has only points",
-                   "use domain = points");
-        return Value(inPtr);
-    }
-
-    ConstBufferPtr where = convertBuffer(evalField(bound.fields[1], in, domain, run), ScalarType::Bool);
-    const std::vector<uint8_t>& drop = std::get<BoolBuf>(*where);
-    if (drop.size() != in.elementCount(domain)) return Value(inPtr);  // field error already reported
-    if (std::find(drop.begin(), drop.end(), uint8_t(1)) == drop.end()) return Value(inPtr);
-
-    Geo out = in;
-    if (domain == Domain::Points) {
-        const std::vector<int32_t> keep = keptIndices(drop);
-        std::vector<int32_t> remap(in.pointCount(), -1);
-        for (size_t i = 0; i < keep.size(); ++i) remap[static_cast<size_t>(keep[i])] = static_cast<int32_t>(i);
-        using Vec3Col = std::shared_ptr<const std::vector<glm::vec3>>;
-        out.positions = std::get<Vec3Col>(gatherColumn(ColumnData(in.positions), keep));
-        if (in.normals) out.normals = std::get<Vec3Col>(gatherColumn(ColumnData(in.normals), keep));
-        out.pointAttrs = gatherAttrs(in.pointAttrs.get(), keep);
-        out.pointGroups = gatherGroups(in.pointGroups.get(), keep);
-        if (hasFaces) {
-            // A face dies with any of its points.
-            const auto& offsets = *in.faceOffsets;
-            const auto& verts = *in.cornerVerts;
-            std::vector<uint8_t> dropFace(in.faceCount(), 0);
-            for (size_t f = 0; f + 1 < offsets.size(); ++f)
-                for (int32_t c = offsets[f]; c < offsets[f + 1] && !dropFace[f]; ++c)
-                    if (drop[static_cast<size_t>(verts[static_cast<size_t>(c)])]) dropFace[f] = 1;
-            rebuildFaces(in, out, dropFace, &remap);
-        }
-    } else if (domain == Domain::Faces) {
-        rebuildFaces(in, out, drop, nullptr);
-    } else {  // corners: a face dies with any of its corners
-        const auto& offsets = *in.faceOffsets;
-        std::vector<uint8_t> dropFace(in.faceCount(), 0);
-        for (size_t f = 0; f + 1 < offsets.size(); ++f)
-            for (int32_t c = offsets[f]; c < offsets[f + 1] && !dropFace[f]; ++c)
-                if (drop[static_cast<size_t>(c)]) dropFace[f] = 1;
-        rebuildFaces(in, out, dropFace, nullptr);
-    }
-    return Value(std::make_shared<const Geo>(std::move(out)));
-}
-
-// --- clip(geo, origin, normal, cap_group) -------------------------------------
-//
-// Half-space clip (spec §8.3, Houdini Clip / Blender Bisect): keeps the side
-// the normal points into (dot(P - origin, normal) >= 0), removes the rest and
-// seals every closed cut loop with a planar cap. Faces are clipped polygon by
-// polygon (Sutherland-Hodgman); a new point on a crossed edge is shared by both
-// faces of that edge (dedup by edge key), so the mesh stays welded. Point and
-// corner columns interpolate along the edge (numeric: lerp; int/bool/string:
-// nearer end; @N renormalized), face columns and groups are copied. Cap faces
-// inherit the face columns and groups of the first cut face of their loop
-// (the cut end of a brick is still brick) and additionally join `cap_group`
-// when it is given; cap corners get zero columns except corner N = -normal.
-// Open loops (open input surfaces) get no cap. geo<points>: keeps the points
-// in the half-space. geo<instances>: E204 (realize first).
-
-// Where a value of an output row comes from: copy of row `a` (a == b), lerp
-// between rows a and b with weight t, or a fresh row (a < 0) filled with a
-// default.
-struct RowSrc {
-    int32_t a = -1, b = -1;
-    float t = 0.0f;
-    static RowSrc copy(int32_t i) { return {i, i, 0.0f}; }
-    static RowSrc lerp(int32_t a, int32_t b, float t) { return {a, b, t}; }
-    static RowSrc fresh() { return {-1, -1, 0.0f}; }
-};
 
 template <class T>
 T lerpRow(const T& a, const T& b, float t) {
@@ -271,6 +155,205 @@ void earClip(const std::vector<glm::vec2>& pts, std::vector<std::array<int, 3>>&
         for (size_t i = 1; i + 1 < idx.size(); ++i) tris.push_back({idx[0], idx[i], idx[i + 1]});
     }
 }
+
+ColumnData buildColumnBlend(const ColumnData& src, const std::vector<RowBlend>& rows, const glm::vec3* freshVec3) {
+    return std::visit(
+        [&](const auto& ptr) -> ColumnData {
+            using VecT = std::decay_t<decltype(*ptr)>;
+            using ElemT = typename VecT::value_type;
+            VecT out;
+            out.reserve(rows.size());
+            const VecT& in = *ptr;
+            for (const RowBlend& r : rows) {
+                if (r.w.empty()) {
+                    if constexpr (std::is_same_v<ElemT, glm::vec3>) out.push_back(freshVec3 ? *freshVec3 : glm::vec3(0.0f));
+                    else out.push_back(ElemT{});
+                    continue;
+                }
+                if constexpr (std::is_same_v<ElemT, float> || std::is_same_v<ElemT, glm::vec2> ||
+                              std::is_same_v<ElemT, glm::vec3> || std::is_same_v<ElemT, glm::vec4>) {
+                    ElemT acc{};
+                    float total = 0.0f;
+                    for (const auto& [i, w] : r.w) {
+                        acc += in[static_cast<size_t>(i)] * w;
+                        total += w;
+                    }
+                    out.push_back(total > 0.0f ? acc / total : acc);
+                } else {
+                    size_t best = 0;
+                    for (size_t k = 1; k < r.w.size(); ++k)
+                        if (r.w[k].second > r.w[best].second) best = k;
+                    out.push_back(in[static_cast<size_t>(r.w[best].first)]);
+                }
+            }
+            return std::make_shared<const VecT>(std::move(out));
+        },
+        src);
+}
+
+std::shared_ptr<const AttrSet> buildAttrsBlend(const AttrSet* src, const std::vector<RowBlend>& rows,
+                                               const glm::vec3* freshNormal) {
+    if (!src) return nullptr;
+    AttrSet out;
+    for (const auto& [name, col] : src->columns) {
+        const bool isNormal = name == "N" && col.typeInfo == AttrTypeInfo::Normal;
+        ColumnData data = buildColumnBlend(col.data, rows, isNormal ? freshNormal : nullptr);
+        if (isNormal)
+            if (auto* v = std::get_if<std::shared_ptr<const std::vector<glm::vec3>>>(&data)) {
+                std::vector<glm::vec3> nn = **v;
+                for (glm::vec3& x : nn) {
+                    const float len = glm::length(x);
+                    if (len > 1e-12f) x /= len;
+                }
+                data = std::make_shared<const std::vector<glm::vec3>>(std::move(nn));
+            }
+        out.columns[name] = AttrColumn{std::move(data), col.typeInfo};
+    }
+    return std::make_shared<const AttrSet>(std::move(out));
+}
+
+std::shared_ptr<const GroupSet> buildGroupsBlend(const GroupSet* src, const std::vector<RowBlend>& rows) {
+    if (!src) return nullptr;
+    GroupSet out;
+    for (const auto& [name, col] : src->columns) {
+        BoolColumn g;
+        g.reserve(rows.size());
+        for (const RowBlend& r : rows) {
+            float v = 0.0f, total = 0.0f;
+            for (const auto& [i, w] : r.w) {
+                v += (*col)[static_cast<size_t>(i)] * w;
+                total += w;
+            }
+            g.push_back(total > 0.0f && v / total > 0.5f ? 1 : 0);
+        }
+        out.columns[name] = std::make_shared<const BoolColumn>(std::move(g));
+    }
+    return std::make_shared<const GroupSet>(std::move(out));
+}
+
+}  // namespace topo
+
+namespace {
+
+using namespace topo;
+
+std::vector<int32_t> keptIndices(const std::vector<uint8_t>& drop) {
+    std::vector<int32_t> keep;
+    keep.reserve(drop.size());
+    for (size_t i = 0; i < drop.size(); ++i)
+        if (!drop[i]) keep.push_back(static_cast<int32_t>(i));
+    return keep;
+}
+
+// Rebuilds the mesh part of `out` from the face-drop mask: kept faces keep all
+// their corners; corner indices are remapped through `pointRemap` (identity
+// when null). Points are left to the caller.
+void rebuildFaces(const Geo& in, Geo& out, const std::vector<uint8_t>& dropFace,
+                  const std::vector<int32_t>* pointRemap) {
+    const auto& offsets = *in.faceOffsets;
+    const auto& verts = *in.cornerVerts;
+    std::vector<int32_t> keepFace, keepCorner, newVerts, newOffsets;
+    newOffsets.push_back(0);
+    for (size_t f = 0; f + 1 < offsets.size(); ++f) {
+        if (dropFace[f]) continue;
+        keepFace.push_back(static_cast<int32_t>(f));
+        for (int32_t c = offsets[f]; c < offsets[f + 1]; ++c) {
+            keepCorner.push_back(c);
+            const int32_t v = verts[static_cast<size_t>(c)];
+            newVerts.push_back(pointRemap ? (*pointRemap)[static_cast<size_t>(v)] : v);
+        }
+        newOffsets.push_back(static_cast<int32_t>(newVerts.size()));
+    }
+    out.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(newVerts));
+    out.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(newOffsets));
+    out.cornerAttrs = gatherAttrs(in.cornerAttrs.get(), keepCorner);
+    out.cornerGroups = gatherGroups(in.cornerGroups.get(), keepCorner);
+    out.faceAttrs = gatherAttrs(in.faceAttrs.get(), keepFace);
+    out.faceGroups = gatherGroups(in.faceGroups.get(), keepFace);
+}
+
+Value opDelete(const BoundCall& bound, RunContext& run) {
+    const GeoPtr inPtr = asGeo(bound.values[0]);
+    const Geo& in = *inPtr;
+    const Domain domain = domainFromName(asString(bound.values[2]));
+    if (domain == Domain::Detail) {
+        run.report("E204", bound.span, "delete: detail is not a per-element domain",
+                   "mask points, corners or faces instead");
+        return Value(inPtr);
+    }
+    const bool hasFaces = in.kind == GeoKind::Mesh && in.faceOffsets && in.cornerVerts;
+    if (domain != Domain::Points && !hasFaces) {
+        run.report("E204", bound.span,
+                   std::string("delete on ") + domainName(domain) + " needs a geo<mesh>; " +
+                       geoKindName(in.kind) + " has only points",
+                   "use domain = points");
+        return Value(inPtr);
+    }
+
+    ConstBufferPtr where = convertBuffer(evalField(bound.fields[1], in, domain, run), ScalarType::Bool);
+    const std::vector<uint8_t>& drop = std::get<BoolBuf>(*where);
+    if (drop.size() != in.elementCount(domain)) return Value(inPtr);  // field error already reported
+    if (std::find(drop.begin(), drop.end(), uint8_t(1)) == drop.end()) return Value(inPtr);
+    return Value(deleteByMask(in, domain, drop));
+}
+
+}  // namespace
+
+namespace topo {
+
+GeoPtr deleteByMask(const Geo& in, Domain domain, const std::vector<uint8_t>& drop) {
+    const bool hasFaces = in.kind == GeoKind::Mesh && in.faceOffsets && in.cornerVerts;
+    Geo out = in;
+    if (domain == Domain::Points) {
+        const std::vector<int32_t> keep = keptIndices(drop);
+        std::vector<int32_t> remap(in.pointCount(), -1);
+        for (size_t i = 0; i < keep.size(); ++i) remap[static_cast<size_t>(keep[i])] = static_cast<int32_t>(i);
+        using Vec3Col = std::shared_ptr<const std::vector<glm::vec3>>;
+        out.positions = std::get<Vec3Col>(gatherColumn(ColumnData(in.positions), keep));
+        if (in.normals) out.normals = std::get<Vec3Col>(gatherColumn(ColumnData(in.normals), keep));
+        out.pointAttrs = gatherAttrs(in.pointAttrs.get(), keep);
+        out.pointGroups = gatherGroups(in.pointGroups.get(), keep);
+        if (hasFaces) {
+            // A face dies with any of its points.
+            const auto& offsets = *in.faceOffsets;
+            const auto& verts = *in.cornerVerts;
+            std::vector<uint8_t> dropFace(in.faceCount(), 0);
+            for (size_t f = 0; f + 1 < offsets.size(); ++f)
+                for (int32_t c = offsets[f]; c < offsets[f + 1] && !dropFace[f]; ++c)
+                    if (drop[static_cast<size_t>(verts[static_cast<size_t>(c)])]) dropFace[f] = 1;
+            rebuildFaces(in, out, dropFace, &remap);
+        }
+    } else if (domain == Domain::Faces) {
+        rebuildFaces(in, out, drop, nullptr);
+    } else {  // corners: a face dies with any of its corners
+        const auto& offsets = *in.faceOffsets;
+        std::vector<uint8_t> dropFace(in.faceCount(), 0);
+        for (size_t f = 0; f + 1 < offsets.size(); ++f)
+            for (int32_t c = offsets[f]; c < offsets[f + 1] && !dropFace[f]; ++c)
+                if (drop[static_cast<size_t>(c)]) dropFace[f] = 1;
+        rebuildFaces(in, out, dropFace, nullptr);
+    }
+    return std::make_shared<const Geo>(std::move(out));
+}
+
+}  // namespace topo
+
+namespace {
+
+// --- clip(geo, origin, normal, cap_group) -------------------------------------
+//
+// Half-space clip (spec §8.3, Houdini Clip / Blender Bisect): keeps the side
+// the normal points into (dot(P - origin, normal) >= 0), removes the rest and
+// seals every closed cut loop with a planar cap. Faces are clipped polygon by
+// polygon (Sutherland-Hodgman); a new point on a crossed edge is shared by both
+// faces of that edge (dedup by edge key), so the mesh stays welded. Point and
+// corner columns interpolate along the edge (numeric: lerp; int/bool/string:
+// nearer end; @N renormalized), face columns and groups are copied. Cap faces
+// inherit the face columns and groups of the first cut face of their loop
+// (the cut end of a brick is still brick) and additionally join `cap_group`
+// when it is given; cap corners get zero columns except corner N = -normal.
+// Open loops (open input surfaces) get no cap. geo<points>: keeps the points
+// in the half-space. geo<instances>: E204 (realize first).
 
 Value opClip(const BoundCall& bound, RunContext& run) {
     const GeoPtr inPtr = asGeo(bound.values[0]);
