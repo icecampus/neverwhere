@@ -1249,6 +1249,14 @@ private:
                     out.groups.push_back(
                         {static_cast<const StringLit*>(c->args[0].value)->value, c->span});
                 }
+                // Aggregators (§8.7: value/min_of/max_of/avg_of/sum_of) are VALUES
+                // in the enclosing field: their @attr/ingroup reads bind to the
+                // `on` geometry (checked by the aggregator's own schema check),
+                // not to the geometry this field is consumed on.
+                if (c->path.size() == 1 && (c->path[0] == "value" || c->path[0] == "min_of" ||
+                                            c->path[0] == "max_of" || c->path[0] == "avg_of" ||
+                                            c->path[0] == "sum_of"))
+                    break;
                 for (const CallArg& a : c->args) gatherInto(a.value, out);
                 break;
             }

@@ -1,5 +1,7 @@
-# Растительность: пучки травы и клумба с листвой/цветами/плетями. Всё —
-# инстансы простых форм на точках; группы grass, leaf, flower, wood (ящик).
+# Растительность: пучки травы и клумба с длинными листьями, цветами на стеблях и
+# свисающими плетями. Листья/лепестки/стебли — `sweep` открытого и замкнутого профиля по
+# `bezier_points` (v1.23), раскладка — `foreach` по точкам-модели с per-элементными
+# атрибутами; группы grass, leaf, flower, pollen, soil, wood (ящик).
 
 import lib.parts
 
@@ -16,47 +18,123 @@ def grass_clump(at: vec3, rng: rng) -> (out: geo<mesh>) {
     out = transform(g, translate = at)
 }
 
+def strap_leaf(len: f32, w: f32, bend: f32, twist_deg: f32) -> (out: geo<mesh>) {
+    """Длинный лист-полоса (v1.23): жилка — Безье от корня в 0 вверх и дугой в +Z
+    (bend — вынос кончика вперёд, кончик опускается до 0.55·len), профиль — открытая
+    ложбинка из 5 точек шириной w (Y профиля — вглубь, к +Z), сужение к кончику через
+    `@profile_scale` (максимум ширины на ~40 % длины), скрутка `@twist` = twist_deg·t.
+    Гладкие нормали; `@tint` — светлее к кончику (окраска умножает leaf_col на @tint)."""
+    path0 = bezier_points(p0 = vec3(0, 0, 0), p1 = vec3(0, len * 0.55, bend * 0.08), p2 = vec3(0, len * 1.05, bend * 0.45), p3 = vec3(0, len * 0.55, bend), count = 10)
+    s = 0.15 + 0.85 * @t
+    path1 = set(path0, "profile_scale", vec2(4.0 * s * (1.0 - s), 4.0 * s * (1.0 - s)))
+    path2 = set(path1, "twist", @t * twist_deg)
+    path = set(path2, "tint", vec3(0.75 + 0.7 * @t, 0.8 + 0.5 * @t, 0.75 + 0.35 * @t))
+    prof0 = mesh_line(count = 5, length = w, dir = (1, 0, 0))
+    u = dot(@P, (1, 0, 0)) / w * 2.0 - 1.0
+    prof = set_position(prof0, pos = vec3(dot(@P, (1, 0, 0)) - w * 0.5, 0.0 - w * 0.22 * (1.0 - u * u), 0))
+    out = mark(compute_normals(sweep(path, profile = prof, profile_closed = false, cap = false)), "leaf", where = true, domain = faces)
+}
+
+def flower_head(r: f32) -> (out: geo<mesh>) {
+    """Цветок: 6 лепестков-полосок (короткие strap_leaf, задранные вверх на 30°) по кругу
+    и жёлтая сердцевина-икосфера (группа pollen). Лепестки — группа flower (окраска
+    берёт @tint цветка с якоря через realize). Центр в 0, смотрит вверх."""
+    petal0 = strap_leaf(len = r * 1.6, w = r * 0.9, bend = r * 1.3, twist_deg = 0.0)
+    petal1 = mark(transform(petal0, rotate = vec3(-60, 0, 0)), "flower", where = true, domain = faces)
+    petal = mark(petal1, "leaf", where = false, domain = faces)
+    ring0 = transform(circle(sides = 6, radius = r * 0.25), rotate = vec3(-90, 0, 0))
+    ring = set(ring0, "orient", orient_from_euler(vec3(0, f32(@index) * 60.0 - 90.0, 0)))
+    petals = realize(instance_on_points(ring, source = petal))
+    core = mark(transform(ico_sphere(subdiv = 1, radius = r * 0.45), translate = vec3(0, r * 0.15, 0)), "pollen", where = true, domain = faces)
+    out = merge(petals, core)
+}
+
+def flower(stem_h: f32, lean: f32) -> (out: geo<mesh>) {
+    """Цветок на стебле: стебель — sweep пятиугольника r = 0.007 по Безье от 0 вверх
+    с наклоном lean в +Z (группа leaf), головка flower_head на конце."""
+    path = bezier_points(p0 = vec3(0, 0, 0), p1 = vec3(0, stem_h * 0.5, 0.01), p2 = vec3(0, stem_h * 0.9, lean * 0.5), p3 = vec3(0, stem_h, lean), count = 6)
+    stem = mark(compute_normals(sweep(path, profile = circle(sides = 5, radius = 0.007), cap = false)), "leaf", where = true, domain = faces)
+    head = transform(transform(flower_head(r = 0.05), rotate = vec3(25, 0, 0)), translate = vec3(0, stem_h, lean))
+    out = merge(stem, head)
+}
+
+def vine(len: f32, sway: f32, rng: rng) -> (out: geo<mesh>) {
+    """Свисающая плеть: стебель — sweep по Безье от 0 (край ящика) вперёд на 0.2 и вниз на
+    len с уводом вбок на sway; по стеблю `resample_points` 6 листьев на метр — мелкие
+    strap_leaf со случайным разворотом и убыванием размера к концу (по `@t`)."""
+    path = bezier_points(p0 = vec3(0, 0, 0), p1 = vec3(0, 0.05, 0.2), p2 = vec3(sway, 0.0 - len * 0.5, 0.22), p3 = vec3(sway * 0.6, 0.0 - len, 0.06), count = 12)
+    stem = mark(compute_normals(sweep(path, profile = circle(sides = 5, radius = 0.008), cap = false)), "leaf", where = true, domain = faces)
+    leaf = strap_leaf(len = 0.13, w = 0.06, bend = 0.06, twist_deg = 15.0)
+    n = int(len * 7.0) + 3
+    at0 = resample_points(path, count = n)
+    at1 = set(at0, "orient", orient_from_euler(random_vec(lo = vec3(-25, 0, 110), hi = vec3(25, 360, 160), rng = split_rng(rng, key = "orient"))))
+    at = set(at1, "scale", (1.15 - 0.5 * @t) * random(lo = 0.8, hi = 1.2, rng = split_rng(rng, key = "scale")))
+    leaves = realize(instance_on_points(at, source = leaf))
+    out = merge(stem, leaves)
+}
+
 def flower_box(w: f32, d: f32, h: f32, rng: rng) -> (out: geo<mesh>) {
-    """Деревянная клумба под окном с зеленью, в локальной системе: стена — z = 0,
-    ящик w×h×d выступает в +Z, центр ящика по y — 0. Три вертикальные накладки и
-    поясок спереди, два косых кронштейна снизу; над ящиком облако листвы (икосферы),
-    цветы четырёх оттенков (@tint по random_int), четыре свисающие плети-цепочки
-    у переднего края. Группы: wood, leaf, flower."""
-    fb_front = parts.piece(size = vec3(w, h, 0.06), pos = vec3(0, 0, d - 0.03), grp = "wood")
-    fb_left = parts.piece(size = vec3(0.06, h, d), pos = vec3(0.0 - w * 0.5 + 0.03, 0, d * 0.5), grp = "wood")
-    fb_right = parts.piece(size = vec3(0.06, h, d), pos = vec3(w * 0.5 - 0.03, 0, d * 0.5), grp = "wood")
-    fb_bottom = parts.piece(size = vec3(w, 0.06, d), pos = vec3(0, 0.0 - h * 0.5 + 0.03, d * 0.5), grp = "wood")
-    fb_band = parts.piece(size = vec3(w + 0.04, 0.07, 0.04), pos = vec3(0, 0.02, d + 0.01), grp = "wood")
-    fb_bat1 = parts.piece(size = vec3(0.08, h + 0.04, 0.08), pos = vec3(0.0 - w * 0.5 + 0.02, 0, d + 0.01), grp = "wood")
-    fb_bat2 = parts.piece(size = vec3(0.08, h + 0.04, 0.08), pos = vec3(w * 0.5 - 0.02, 0, d + 0.01), grp = "wood")
-    fb_bat3 = parts.piece(size = vec3(0.08, h + 0.04, 0.08), pos = vec3(0, 0, d + 0.01), grp = "wood")
-    fb_brk1 = transform(parts.piece(size = vec3(0.08, 0.5, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(45, 0, 0))
-    fb_brk_l = transform(fb_brk1, translate = vec3(0.0 - w * 0.5 + 0.1, 0.0 - h * 0.5 - 0.16, 0.18))
-    fb_brk_r = transform(fb_brk1, translate = vec3(w * 0.5 - 0.1, 0.0 - h * 0.5 - 0.16, 0.18))
-    box = merge(fb_front, fb_left, fb_right, fb_bottom, fb_band, fb_bat1, fb_bat2, fb_bat3, fb_brk_l, fb_brk_r)
-    # Зелень: облако листвы над ящиком, цветы — мелкие сферы поверх, плети — цепочки
-    # маленьких сфер, свисающие с переднего края.
-    leaf_src = ico_sphere(subdiv = 1, radius = 0.13)
-    leaf_pts0 = point_cloud(count = 70, bounds = vec3(w - 0.2, 0.22, d - 0.06), rng = split_rng(rng, key = "leaf_pos"))
-    leaf_pts1 = transform(leaf_pts0, translate = vec3(0, h * 0.5 + 0.1, d * 0.5 + 0.03))
-    leaf_pts = set(leaf_pts1, "scale", random(lo = 0.7, hi = 1.4, rng = split_rng(rng, key = "leaf_scale")))
-    leaves = mark(realize(instance_on_points(leaf_pts, source = leaf_src)), "leaf", where = true, domain = faces)
-    flower_src = ico_sphere(subdiv = 1, radius = 0.07)
-    flower_pts0 = point_cloud(count = 30, bounds = vec3(w - 0.3, 0.14, d - 0.1), rng = split_rng(rng, key = "flower_pos"))
-    flower_pts1 = transform(flower_pts0, translate = vec3(0, h * 0.5 + 0.3, d * 0.5 + 0.06))
-    flower_pts2 = set(flower_pts1, "scale", random(lo = 0.7, hi = 1.3, rng = split_rng(rng, key = "flower_scale")))
-    flower_pick = random_int(n = 4, rng = split_rng(rng, key = "flower_color"))
-    flower_col = flower_pick == 0 ? vec3(0.45, 0.12, 0.7) : (flower_pick == 1 ? vec3(0.95, 0.75, 0.1) : (flower_pick == 2 ? vec3(0.9, 0.25, 0.45) : vec3(0.2, 0.35, 0.95)))
-    flower_pts = set(flower_pts2, "tint", flower_col)
-    flowers = mark(realize(instance_on_points(flower_pts, source = flower_src)), "flower", where = true, domain = faces)
-    vine_src = ico_sphere(subdiv = 1, radius = 0.075)
-    vine_a = transform(mesh_line(count = 9, length = 0.85, dir = (0, -1, 0)), translate = vec3(0.0 - w * 0.365, 0.16, d + 0.06))
-    vine_b = transform(mesh_line(count = 7, length = 0.6, dir = (0, -1, 0)), translate = vec3(0.0 - w * 0.106, 0.16, d + 0.06))
-    vine_c = transform(mesh_line(count = 10, length = 1.0, dir = (0, -1, 0)), translate = vec3(w * 0.176, 0.16, d + 0.06))
-    vine_d = transform(mesh_line(count = 6, length = 0.5, dir = (0, -1, 0)), translate = vec3(w * 0.4, 0.16, d + 0.06))
-    vine_pts0 = merge(vine_a, vine_b, vine_c, vine_d)
-    vine_pts1 = set_position(vine_pts0, offset = random_vec(lo = vec3(-0.05, -0.02, -0.03), hi = vec3(0.05, 0.02, 0.03), rng = split_rng(rng, key = "vine_pos")))
-    vine_pts = set(vine_pts1, "scale", random(lo = 0.7, hi = 1.2, rng = split_rng(rng, key = "vine_scale")))
-    vines = mark(realize(instance_on_points(vine_pts, source = vine_src)), "leaf", where = true, domain = faces)
+    """Клумба под окном в локальной системе: стена — z = 0, ящик w×h×d выступает в +Z,
+    центр ящика по y — 0. Ящик — щиты из вертикальных досок (parts.plank_panel: перед и
+    бока), дно, поясок и три накладки, два косых кронштейна, земля (группа soil).
+    Растительность (v1.23-нодами): длинные листья strap_leaf веером из земли — `foreach`
+    по якорям-модели с per-leaf длиной/изгибом/скруткой/разворотом; цветы на стеблях
+    (flower, три высоты через variants, палитра @tint); плети vine с переднего края —
+    `foreach` по четырём точкам с per-vine длиной и уводом. Группы: wood, soil, leaf, flower, pollen."""
+    front = transform(parts.plank_panel(w = w, h = h, t = 0.06, n = int(w / 0.24) + 1, rng = split_rng(rng, key = "front")), translate = vec3(0, 0, d - 0.03))
+    side0 = parts.plank_panel(w = d - 0.06, h = h, t = 0.06, n = int(d / 0.14), rng = split_rng(rng, key = "side"))
+    left = transform(transform(side0, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - w * 0.5 + 0.03, 0, d * 0.5 - 0.03))
+    right = transform(transform(side0, rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5 - 0.03, 0, d * 0.5 - 0.03))
+    bottom = parts.piece(size = vec3(w, 0.06, d), pos = vec3(0, 0.0 - h * 0.5 + 0.03, d * 0.5), grp = "wood")
+    band = parts.piece(size = vec3(w + 0.04, 0.07, 0.04), pos = vec3(0, 0.02, d + 0.01), grp = "wood")
+    bat1 = parts.piece(size = vec3(0.08, h + 0.04, 0.08), pos = vec3(0.0 - w * 0.5 + 0.02, 0, d + 0.01), grp = "wood")
+    bat2 = parts.piece(size = vec3(0.08, h + 0.04, 0.08), pos = vec3(w * 0.5 - 0.02, 0, d + 0.01), grp = "wood")
+    bat3 = parts.piece(size = vec3(0.08, h + 0.04, 0.08), pos = vec3(0, 0, d + 0.01), grp = "wood")
+    brk0 = transform(parts.piece(size = vec3(0.08, 0.5, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(45, 0, 0))
+    brk_l = transform(brk0, translate = vec3(0.0 - w * 0.5 + 0.1, 0.0 - h * 0.5 - 0.16, 0.18))
+    brk_r = transform(brk0, translate = vec3(w * 0.5 - 0.1, 0.0 - h * 0.5 - 0.16, 0.18))
+    soil_y = h * 0.5 - 0.05
+    soil = parts.piece(size = vec3(w - 0.1, 0.04, d - 0.1), pos = vec3(0, soil_y, d * 0.5), grp = "soil")
+    box = merge(front, left, right, bottom, band, bat1, bat2, bat3, brk_l, brk_r, soil)
+
+    # Длинные листья: модель — якоря в земле с per-leaf параметрами, делегат — strap_leaf.
+    leaf_rng = split_rng(rng, key = "leaves")
+    la0 = point_cloud(count = 44, bounds = vec3(w - 0.3, 0.02, d - 0.2), rng = split_rng(leaf_rng, key = "pos"))
+    la1 = transform(la0, translate = vec3(0, soil_y, d * 0.5))
+    la2 = set(la1, "len", random(lo = 0.32, hi = 0.62, rng = split_rng(leaf_rng, key = "len")))
+    la3 = set(la2, "bend", random(lo = 0.22, hi = 0.48, rng = split_rng(leaf_rng, key = "bend")))
+    la4 = set(la3, "wid", random(lo = 0.05, hi = 0.085, rng = split_rng(leaf_rng, key = "w")))
+    la5 = set(la4, "tw", random(lo = -45.0, hi = 45.0, rng = split_rng(leaf_rng, key = "tw")))
+    la = set(la5, "yaw", random(lo = 0.0, hi = 360.0, rng = split_rng(leaf_rng, key = "yaw")))
+    leaves = foreach a in la {
+        blade = strap_leaf(len = value(@len, on = a), w = value(@wid, on = a), bend = value(@bend, on = a), twist_deg = value(@tw, on = a))
+        a = transform(transform(blade, rotate = vec3(0, value(@yaw, on = a), 0)), translate = value(@P, on = a))
+    }
+
+    # Цветы: три варианта высоты, наклон/разворот/масштаб и оттенок — на якорях.
+    fl_rng = split_rng(rng, key = "flowers")
+    f_a = flower(stem_h = 0.28, lean = 0.05)
+    f_b = flower(stem_h = 0.36, lean = 0.08)
+    f_c = flower(stem_h = 0.44, lean = 0.11)
+    fa0 = point_cloud(count = 22, bounds = vec3(w - 0.35, 0.02, d - 0.22), rng = split_rng(fl_rng, key = "pos"))
+    fa1 = transform(fa0, translate = vec3(0, soil_y, d * 0.5))
+    fa2 = set(fa1, "variant", random_int(n = 3, rng = split_rng(fl_rng, key = "var")))
+    fa3 = set(fa2, "scale", random(lo = 0.8, hi = 1.2, rng = split_rng(fl_rng, key = "scale")))
+    fa4 = set(fa3, "orient", orient_from_euler(random_vec(lo = vec3(-12, 0, -12), hi = vec3(12, 360, 12), rng = split_rng(fl_rng, key = "tilt"))))
+    pick = random_int(n = 4, rng = split_rng(fl_rng, key = "color"))
+    col = pick == 0 ? vec3(0.45, 0.12, 0.7) : (pick == 1 ? vec3(0.95, 0.75, 0.1) : (pick == 2 ? vec3(0.9, 0.25, 0.45) : vec3(0.2, 0.35, 0.95)))
+    fa = set(fa4, "tint", col)
+    flowers = realize(instance_on_points(fa, source = f_a, variants = [f_a, f_b, f_c]))
+
+    # Плети с переднего края: модель — четыре точки с длиной и уводом.
+    vine_rng = split_rng(rng, key = "vines")
+    va0 = mesh_line(count = 4, length = w * 0.76, dir = (1, 0, 0))
+    va1 = transform(va0, translate = vec3(0.0 - w * 0.38, soil_y + 0.02, d - 0.02))
+    va2 = set(va1, "len", random(lo = 0.5, hi = 1.05, rng = split_rng(vine_rng, key = "len")))
+    va = set(va2, "sway", random(lo = -0.12, hi = 0.12, rng = split_rng(vine_rng, key = "sway")))
+    vines = foreach v in va {
+        strand = vine(len = value(@len, on = v), sway = value(@sway, on = v), rng = split_rng(vine_rng, key = @piece_index))
+        v = transform(strand, translate = value(@P, on = v))
+    }
     out = merge(box, leaves, flowers, vines)
 }

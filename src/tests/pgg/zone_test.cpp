@@ -466,6 +466,28 @@ TEST(ZoneForeach, ValueAggregatorNeedsExactlyOnePoint) {
     EXPECT_EQ(pgg::asVec3(r.outputs[0].value), glm::vec3(1, 0, 0));
 }
 
+// An aggregator nested in a per-element field is a VALUE of that field: its
+// @attr binds to `on`, not to the geometry the field is consumed on — the
+// static E302 check must not look for `@wid` on the box (regression: the
+// attr leaked through def-argument inlining into set_position's field).
+TEST(ZoneForeach, ValueAggregatorInsideFieldBindsToOnGeometry) {
+    pgg::RunResult r = runSrc(
+        "def bx(w: f32) -> (out: geo<mesh>) {\n"
+        "    out = set_position(box(size = vec3(1, 1, 1)), offset = @P * w)\n"
+        "}\n"
+        "p0 = mesh_line(count = 1, length = 1.0)\n"
+        "p1 = set(p0, \"wid\", 0.5)\n"
+        "k = value(@wid, on = p1)\n"
+        "a = set_position(box(size = vec3(1, 1, 1)), offset = @P * k)\n"
+        "b = bx(w = value(@wid, on = p1))\n"
+        "c = set_position(box(size = vec3(1, 1, 1)), offset = @P * value(@missing, on = p1))\n"
+        "output a\n"
+        "output b\n"
+        "output c\n");
+    // Only `c` fails: @missing really is absent on p1 (reported once, by value()'s own check).
+    EXPECT_EQ(countCode(r, "E302"), 1);
+}
+
 TEST(ZoneForeach, PieceIndexOutsideZoneIsE302) {
     pgg::RunResult r = runSrc(
         "x = @piece_index + 1\n"
