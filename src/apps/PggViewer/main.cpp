@@ -731,6 +731,14 @@ void init() {
 
     if (!g_noUi) {
         simgui_desc_t imgui_desc = {};
+        // The canvas draws every node box and bezier wire of the graph each
+        // frame; a ~370-node corpus file (cottage.pgg) already exceeds the
+        // simgui default of 65536 vertices — on overflow simgui silently
+        // drops the remaining ImGui command lists (side panel and graph
+        // vanished, only the preview pane survived). 1M vertices = 20 MB
+        // vertex + 6 MB index staging, plenty for any corpus graph.
+        imgui_desc.max_vertices = 1 << 20;
+        imgui_desc.logger.func = slog_func;  // surfaces BUFFER_OVERFLOW instead of hiding it
         simgui_setup(&imgui_desc);
         g_state.imguiOk = true;
         g_preview.init();
