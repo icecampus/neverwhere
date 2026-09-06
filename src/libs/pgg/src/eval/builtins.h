@@ -30,6 +30,7 @@ enum class BuiltinId {
     Fbm, Vnoise, Random, RandomVec, RandomInt, DistanceTo, Position, Normal, Index,
     // §6.3 expression functions (field-polymorphic)
     Dot, Cross, Length, Normalize, Clamp, Smoothstep, Mix, Abs, Min, Max, Floor, Pow,
+    Sin, Cos, Tan, Asin, Acos, Atan, Sqrt, Exp, Log, Ceil, Round, Fract, Radians, Degrees, Atan2, Mod,
     Vec2, Vec3, Vec4, CastInt, CastF32, CastBool, OrientFromEuler, Ramp,
     // §8.6 groups
     Mark, Unmark, Ingroup,

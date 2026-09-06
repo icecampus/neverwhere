@@ -84,6 +84,29 @@ void rampFill(const Buffer& xbuf, const std::vector<Value>& params, size_t pairs
 
 }  // namespace
 
+// Names of the v1.22 math functions for diagnostics.
+const char* mathFuncName(BuiltinId id) {
+    switch (id) {
+        case BuiltinId::Sin: return "sin";
+        case BuiltinId::Cos: return "cos";
+        case BuiltinId::Tan: return "tan";
+        case BuiltinId::Asin: return "asin";
+        case BuiltinId::Acos: return "acos";
+        case BuiltinId::Atan: return "atan";
+        case BuiltinId::Sqrt: return "sqrt";
+        case BuiltinId::Exp: return "exp";
+        case BuiltinId::Log: return "log";
+        case BuiltinId::Ceil: return "ceil";
+        case BuiltinId::Round: return "round";
+        case BuiltinId::Fract: return "fract";
+        case BuiltinId::Radians: return "radians";
+        case BuiltinId::Degrees: return "degrees";
+        case BuiltinId::Atan2: return "atan2";
+        case BuiltinId::Mod: return "mod";
+        default: return "math";
+    }
+}
+
 Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
                        std::vector<Diagnostic>& diags) {
     auto base = [&](size_t i) { return i < args.size() ? args[i].base : ScalarType::None; };
@@ -139,6 +162,23 @@ Type inferExprFuncType(BuiltinId id, const std::vector<Type>& args, Span span,
         case BuiltinId::Pow: {
             ScalarType t = promoteBase(a, b);
             if (t == ScalarType::None) return err("E204", "pow operands have incompatible types");
+            if (!isVectorBase(t)) t = ScalarType::F32;
+            return Type{t, false, GeoKind::Any};
+        }
+        case BuiltinId::Sin: case BuiltinId::Cos: case BuiltinId::Tan:
+        case BuiltinId::Asin: case BuiltinId::Acos: case BuiltinId::Atan:
+        case BuiltinId::Sqrt: case BuiltinId::Exp: case BuiltinId::Log:
+        case BuiltinId::Ceil: case BuiltinId::Round: case BuiltinId::Fract:
+        case BuiltinId::Radians: case BuiltinId::Degrees: {
+            if (a == ScalarType::Bool || !numericOrVec(a))
+                return err("E204", std::string(mathFuncName(id)) + " expects a numeric scalar or a vector");
+            return Type{isVectorBase(a) ? a : ScalarType::F32, false, GeoKind::Any};
+        }
+        case BuiltinId::Atan2:
+        case BuiltinId::Mod: {
+            ScalarType t = promoteBase(a, b);
+            if (t == ScalarType::None || t == ScalarType::Bool)
+                return err("E204", std::string(mathFuncName(id)) + " operands have incompatible types");
             if (!isVectorBase(t)) t = ScalarType::F32;
             return Type{t, false, GeoKind::Any};
         }
@@ -442,6 +482,90 @@ ConstBufferPtr evalExprFuncBuf(int callId, const std::vector<ConstBufferPtr>& ar
                 },
                 *pa));
         }
+        case BuiltinId::Sin: case BuiltinId::Cos: case BuiltinId::Tan:
+        case BuiltinId::Asin: case BuiltinId::Acos: case BuiltinId::Atan:
+        case BuiltinId::Sqrt: case BuiltinId::Exp: case BuiltinId::Log:
+        case BuiltinId::Ceil: case BuiltinId::Round: case BuiltinId::Fract:
+        case BuiltinId::Radians: case BuiltinId::Degrees: {
+            const ScalarType t0 = bufferType(*args[0]);
+            ConstBufferPtr pa = convertBuffer(args[0], isVectorBase(t0) ? t0 : ScalarType::F32);
+            return out1(std::visit(
+                [&](const auto& va) -> Buffer {
+                    using VecT = std::decay_t<decltype(va)>;
+                    using ElemT = typename VecT::value_type;
+                    if constexpr (!std::is_same_v<ElemT, float> && !isVectorBaseElem<ElemT>()) {
+                        return va;  // unreachable post-typecheck
+                    } else {
+                        VecT out(va.size());
+                        auto f = [&](float x) -> float {
+                            switch (id) {
+                                case BuiltinId::Sin: return std::sin(x);
+                                case BuiltinId::Cos: return std::cos(x);
+                                case BuiltinId::Tan: return std::tan(x);
+                                case BuiltinId::Asin: return std::asin(x);
+                                case BuiltinId::Acos: return std::acos(x);
+                                case BuiltinId::Atan: return std::atan(x);
+                                case BuiltinId::Sqrt: return std::sqrt(x);
+                                case BuiltinId::Exp: return std::exp(x);
+                                case BuiltinId::Log: return std::log(x);
+                                case BuiltinId::Ceil: return std::ceil(x);
+                                case BuiltinId::Round: return std::round(x);
+                                case BuiltinId::Fract: return x - std::floor(x);
+                                case BuiltinId::Radians: return x * 0.017453292519943295f;
+                                default: return x * 57.29577951308232f;  // Degrees
+                            }
+                        };
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) {
+                                if constexpr (std::is_same_v<ElemT, float>) {
+                                    out[i] = f(va[i]);
+                                } else {
+                                    ElemT v = va[i];
+                                    for (int k = 0; k < ElemT::length(); ++k) v[k] = f(va[i][k]);
+                                    out[i] = v;
+                                }
+                            }
+                        });
+                        return out;
+                    }
+                },
+                *pa));
+        }
+        case BuiltinId::Atan2:
+        case BuiltinId::Mod: {
+            ScalarType t = promoteBase(bufferType(*args[0]), bufferType(*args[1]));
+            if (!isVectorBase(t)) t = ScalarType::F32;
+            ConstBufferPtr pa = convertBuffer(args[0], t);
+            ConstBufferPtr pb = convertBuffer(args[1], t);
+            return out1(std::visit(
+                [&](const auto& va) -> Buffer {
+                    using VecT = std::decay_t<decltype(va)>;
+                    using ElemT = typename VecT::value_type;
+                    if constexpr (!std::is_same_v<ElemT, float> && !isVectorBaseElem<ElemT>()) {
+                        return va;  // unreachable post-typecheck
+                    } else {
+                        const auto& vb = std::get<VecT>(*pb);
+                        VecT out(va.size());
+                        // GLSL mod: a - b * floor(a / b) (result has the sign of b).
+                        auto f = [&](float y, float x) -> float {
+                            return id == BuiltinId::Atan2 ? std::atan2(y, x) : y - x * std::floor(y / x);
+                        };
+                        parallelFor(va.size(), threads, [&](size_t s, size_t e) {
+                            for (size_t i = s; i < e; ++i) {
+                                if constexpr (std::is_same_v<ElemT, float>) {
+                                    out[i] = f(va[i], vb[i]);
+                                } else {
+                                    ElemT v = va[i];
+                                    for (int k = 0; k < ElemT::length(); ++k) v[k] = f(va[i][k], vb[i][k]);
+                                    out[i] = v;
+                                }
+                            }
+                        });
+                        return out;
+                    }
+                },
+                *pa));
+        }
         case BuiltinId::Pow: {
             ScalarType t = promoteBase(bufferType(*args[0]), bufferType(*args[1]));
             if (!isVectorBase(t)) t = ScalarType::F32;
@@ -739,6 +863,11 @@ ConstBufferPtr evalFieldCall(int callId, const FieldNode& node,
         case BuiltinId::Max:
         case BuiltinId::Floor:
         case BuiltinId::Pow:
+        case BuiltinId::Sin: case BuiltinId::Cos: case BuiltinId::Tan:
+        case BuiltinId::Asin: case BuiltinId::Acos: case BuiltinId::Atan:
+        case BuiltinId::Sqrt: case BuiltinId::Exp: case BuiltinId::Log:
+        case BuiltinId::Ceil: case BuiltinId::Round: case BuiltinId::Fract:
+        case BuiltinId::Radians: case BuiltinId::Degrees: case BuiltinId::Atan2: case BuiltinId::Mod:
         case BuiltinId::Vec2:
         case BuiltinId::Vec3:
         case BuiltinId::Vec4:

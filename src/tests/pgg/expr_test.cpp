@@ -126,6 +126,44 @@ TEST(Expr, BuiltinFunctions) {
     EXPECT_EQ(pgg::asVec2(evalExpr("pow((2, 3), (2, 2))")), glm::vec2(4, 9));
 }
 
+TEST(Expr, TrigAndRealMath) {
+    // v1.22: ints promote to f32, vectors go componentwise, bool is E204.
+    EXPECT_NEAR(evalF32("sin(0)"), 0.0f, 1e-6f);
+    EXPECT_NEAR(evalF32("cos(0)"), 1.0f, 1e-6f);
+    EXPECT_NEAR(evalF32("sin(radians(90))"), 1.0f, 1e-6f);
+    EXPECT_NEAR(evalF32("degrees(atan2(1.0, 1.0))"), 45.0f, 1e-4f);
+    EXPECT_NEAR(evalF32("degrees(atan2(1.0, -1.0))"), 135.0f, 1e-4f);
+    EXPECT_NEAR(evalF32("tan(radians(45))"), 1.0f, 1e-5f);
+    EXPECT_NEAR(evalF32("degrees(asin(1.0))"), 90.0f, 1e-4f);
+    EXPECT_NEAR(evalF32("degrees(acos(0.0))"), 90.0f, 1e-4f);
+    EXPECT_NEAR(evalF32("degrees(atan(1.0))"), 45.0f, 1e-4f);
+    EXPECT_NEAR(evalF32("sqrt(2)"), 1.41421356f, 1e-6f);
+    EXPECT_NEAR(evalF32("exp(1)"), 2.7182818f, 1e-6f);
+    EXPECT_NEAR(evalF32("log(exp(2.0))"), 2.0f, 1e-6f);
+    EXPECT_FLOAT_EQ(evalF32("ceil(2.1)"), 3.0f);
+    EXPECT_FLOAT_EQ(evalF32("round(2.5)"), 3.0f);
+    EXPECT_FLOAT_EQ(evalF32("round(-2.5)"), -3.0f);
+    EXPECT_NEAR(evalF32("fract(-0.25)"), 0.75f, 1e-6f);
+    // GLSL mod: sign follows the divisor; ints stay ints only via %.
+    EXPECT_FLOAT_EQ(evalF32("mod(-1.0, 3.0)"), 2.0f);
+    EXPECT_FLOAT_EQ(evalF32("mod(7, 3)"), 1.0f);
+    const glm::vec3 v = evalVec3("sin(vec3(0, radians(90), radians(180)))");
+    EXPECT_NEAR(v.x, 0.0f, 1e-6f);
+    EXPECT_NEAR(v.y, 1.0f, 1e-6f);
+    EXPECT_NEAR(v.z, 0.0f, 1e-6f);
+    EXPECT_EQ(pgg::asVec2(evalExpr("mod((5, -5), (3, 3))")), glm::vec2(2, 1));
+    pgg::RunResult bad = pgg::run("x = sin(true)\noutput x\n");
+    EXPECT_TRUE(bad.hasErrors());
+    // Field-polymorphic: the same functions run per element.
+    pgg::RunResult f = pgg::run(
+        "p = mesh_line(count = 5, length = 4.0, dir = (1, 0, 0))\n"
+        "q = set_position(p, offset = vec3(0, sin(dot(@P, (1, 0, 0)) * 3.14159265 / 2.0), 0))\n"
+        "top = count(q, where = dot(@P, (0, 1, 0)) > 0.99)\n"
+        "output top\n");
+    ASSERT_FALSE(f.hasErrors());
+    EXPECT_EQ(pgg::asInt(outValue(f, "top")), 1);  // x = 1 -> sin(pi/2)
+}
+
 TEST(Expr, OrientFromEuler) {
     const glm::vec4 identity = pgg::asVec4(evalExpr("orient_from_euler((0, 0, 0))"));
     EXPECT_NEAR(identity.x, 0.0f, 1e-6f);

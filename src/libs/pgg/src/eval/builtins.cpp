@@ -217,6 +217,16 @@ const std::vector<BuiltinSig>& registry() {
         r.push_back(exprSig(BuiltinId::Max, "max", {anyEither("a"), anyEither("b")}));
         r.push_back(exprSig(BuiltinId::Floor, "floor", {anyEither("x")}));
         r.push_back(exprSig(BuiltinId::Pow, "pow", {anyEither("x"), anyEither("y")}));
+        // v1.22: trig / real-valued math (ints promote to f32, vectors componentwise).
+        for (const auto& [id, name] : std::initializer_list<std::pair<BuiltinId, const char*>>{
+                 {BuiltinId::Sin, "sin"}, {BuiltinId::Cos, "cos"}, {BuiltinId::Tan, "tan"},
+                 {BuiltinId::Asin, "asin"}, {BuiltinId::Acos, "acos"}, {BuiltinId::Atan, "atan"},
+                 {BuiltinId::Sqrt, "sqrt"}, {BuiltinId::Exp, "exp"}, {BuiltinId::Log, "log"},
+                 {BuiltinId::Ceil, "ceil"}, {BuiltinId::Round, "round"}, {BuiltinId::Fract, "fract"},
+                 {BuiltinId::Radians, "radians"}, {BuiltinId::Degrees, "degrees"}})
+            r.push_back(exprSig(id, name, {anyEither("x")}));
+        r.push_back(exprSig(BuiltinId::Atan2, "atan2", {anyEither("y"), anyEither("x")}));
+        r.push_back(exprSig(BuiltinId::Mod, "mod", {anyEither("a"), anyEither("b")}));
         {
             ParamSig x = anyEither("x");
             ParamSig y = anyEither("y");
