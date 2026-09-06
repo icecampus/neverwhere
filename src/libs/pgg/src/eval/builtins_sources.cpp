@@ -190,7 +190,10 @@ GeoPtr genGrid(glm::vec2 size, int res) {
 }
 
 GeoPtr genMeshLine(int count, float length, glm::vec3 dir) {
-    count = std::max(count, 1);
+    // count <= 0 -> empty geo<points> (a legal empty seed for repeat
+    // accumulators; a silent 1-point fallback used to leave a stray anchor at
+    // the origin). count == 1 -> the single point at the origin.
+    count = std::max(count, 0);
     glm::vec3 d(0, 0, 1);
     if (glm::dot(dir, dir) > 1e-12f) d = glm::normalize(dir);
     std::vector<glm::vec3> pos(static_cast<size_t>(count));

@@ -35,8 +35,8 @@ enum class BuiltinId {
     Mark, Unmark, Ingroup,
     // §8.7 attributes
     SetAttr, RemoveAttr, RenameAttr, Promote,
-    // §8.3 topology (E2 subset + delete)
-    Merge, Delete,
+    // §8.3 topology (E2 subset + delete + clip)
+    Merge, Delete, Clip,
     // §8.8 scatter and instancing
     DistributePoints, InstanceOnPoints, Realize,
     // §8.10 aggregators

@@ -123,6 +123,26 @@ def lantern(at: vec3) -> (out: geo<mesh>) {
     out = transform(l0, translate = at)
 }
 
+def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<mesh>) {
+    """Кладка одной стены в локальной системе (x вдоль стены, центр в 0): ряды якорей
+    → блок с центром за краем не кладётся → @scale/@variant (три длины blk × 1 / 1.1 / 1.2 — не длиннее шага ряда, чтобы соседи не сливались в плиту)
+    → почти серый @tint → джиттер → realize → подрезка торцов плоскостями x = ±len/2
+    (`clip`, крышки срезов в группе `cut`). Ставится на место внешним transform."""
+    a0 = compute_normals(box(size = blk), mode = flat)
+    a1 = compute_normals(box(size = blk * vec3(1.1, 1, 1)), mode = flat)
+    a2 = compute_normals(box(size = blk * vec3(1.2, 1, 1)), mode = flat)
+    kept = delete(rows, where = abs(dot(@P, (1, 0, 0))) > len * 0.5 + 0.02)
+    p1 = set(kept, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(rng, key = "scale")))
+    p2 = set(p1, "variant", random_int(n = 3, rng = split_rng(rng, key = "var")))
+    shade = random(lo = 0.7, hi = 1.25, rng = split_rng(rng, key = "tint"))
+    p3 = set(p2, "tint", vec3(shade * 1.04, shade, shade * 0.96))
+    p4 = set_position(p3, offset = random_vec(lo = vec3(-0.03, -0.01, -0.01), hi = vec3(0.03, 0.01, 0.07), rng = split_rng(rng, key = "jitter")))
+    m = realize(instance_on_points(p4, source = a0, variants = [a0, a1, a2]))
+    c1 = clip(m, origin = vec3(0.0 - len * 0.5, 0, 0), normal = vec3(1, 0, 0), cap_group = "cut")
+    out = clip(c1, origin = vec3(len * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
+}
+
+
 def grass_clump(at: vec3, rng: rng) -> (out: geo<mesh>) {
     """Пучок травы: 7 тонких вытянутых пирамидок с разбросом позиции, наклона и масштаба."""
     blade0 = compute_normals(box(size = vec3(0.05, 0.3, 0.05)), mode = flat)
@@ -158,70 +178,49 @@ tile_rng = split_rng(root_rng, key = "tiles")
 core = piece(size = vec3(width, stone_h, depth), pos = vec3(0, stone_h * 0.5, 0), grp = "stone")
 plinth = piece(size = vec3(width + 0.3, 0.32, depth + 0.3), pos = vec3(0, 0.16, 0), grp = "stone")
 
-# Кладка: блоки трёх длин (0.5/0.6/0.72 × 0.26 × 0.1, выбор через @variant) по
-# рядам вразбежку (шаг 0.58, ряд 0.3), per-point джиттер позиции/выступа и
-# масштаба — соседние блоки то смыкаются, то оставляют шов; выступ до 0.07
-# даёт рельеф рёбер при любом шейдинге. Все четыре стены и все ряды
-# собираются как ОДНО облако якорей (с @orient по стене) и материализуются
-# одним realize.
+# Кладка: блоки трёх длин (0.5/0.55/0.6 × 0.26 × 0.1, выбор через @variant) по
+# рядам вразбежку (шаг ≈0.55 подогнан под стену, ряд 0.3), per-point джиттер позиции/выступа и масштаба —
+# соседние блоки то смыкаются, то оставляют шов; выступ до 0.07 даёт рельеф
+# рёбер при любом шейдинге. Края — системно, через `clip` (§8.3): шаг ряда
+# подогнан под длину стены (pitch = L / n), ряд генерируется с запасом на блок
+# за каждый край, блоки с центром за краем не кладутся (политика «без щепок»),
+# остальное подрезается плоскостями торцов — чётные ряды кончаются целым
+# блоком, нечётные половинкой, как в настоящей перевязке (сдвиг 1/3 дал бы
+# трети — та же схема). Стена собирается в локальной системе (x вдоль стены,
+# центр в 0, z = 0.03 наружу), режется и только потом ставится на место
+# (def `stone_wall`); ряды якорей — repeat-зоны (зона в def — E201).
 # Проёмы: якоря под дверью, окном фасада и боковыми окнами удаляются по маске в
 # локальных координатах стены — портал и рамы закрывают рваный край.
 course_h = 0.3
-pitch = 0.58
 n_rows = int(stone_h / course_h)
-cols_f = int(width / pitch)
-row_len_f = f32(cols_f - 1) * pitch
-cols_s = int(depth / pitch)
-row_len_s = f32(cols_s - 1) * pitch
-stone_a = compute_normals(box(size = vec3(0.5, 0.26, 0.1)), mode = flat)
-stone_b = compute_normals(box(size = vec3(0.6, 0.26, 0.1)), mode = flat)
-stone_c = compute_normals(box(size = vec3(0.72, 0.26, 0.1)), mode = flat)
+cols_f = int(width / 0.55)
+pitch_f = width / f32(cols_f)
+cols_s = int(depth / 0.55)
+pitch_s = depth / f32(cols_s)
 side_win_x = 0.3
 
 anchors0 = mesh_line(count = 0, length = 0.0)
-anchors = repeat (anchors0, iterations = n_rows) |acc| {
-    k = f32(@iteration)
-    odd = k - 2.0 * floor(k * 0.5)
-    y = (k + 0.5) * course_h
-    shift = odd * pitch * 0.5
-    rr = split_rng(veneer_rng, key = @iteration)
-    # Локальные ряды (x вдоль стены, центр в 0, z = 0.03 наружу) с per-point
-    # масштабом; вызовы def внутри зон не поддерживаются (E201), поэтому инлайн.
-    lf0 = mesh_line(count = cols_f, length = row_len_f, dir = (1, 0, 0))
-    lf1 = transform(lf0, translate = vec3(shift - row_len_f * 0.5, y, 0.03))
-    lf2 = set(lf1, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(rr, key = "scale_f")))
-    lf = set(lf2, "variant", random_int(n = 3, rng = split_rng(rr, key = "var_f")))
-    ls0 = mesh_line(count = cols_s, length = row_len_s, dir = (1, 0, 0))
-    ls1 = transform(ls0, translate = vec3(shift - row_len_s * 0.5, y, 0.03))
-    ls2 = set(ls1, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(rr, key = "scale_s")))
-    ls = set(ls2, "variant", random_int(n = 3, rng = split_rng(rr, key = "var_s")))
-    # фасад (+Z): вырезы под арку двери и окно со ставнями
-    f1 = delete(lf, where = (abs(dot(@P, (1, 0, 0)) - door_x) < 0.86 & dot(@P, (0, 1, 0)) < 2.32) | (abs(dot(@P, (1, 0, 0)) - win_x) < 0.66 & abs(dot(@P, (0, 1, 0)) - 1.45) < 0.62))
-    f2 = set_position(f1, offset = random_vec(lo = vec3(-0.03, -0.01, -0.01), hi = vec3(0.03, 0.01, 0.07), rng = split_rng(rr, key = "front")))
-    f3 = transform(f2, translate = vec3(0, 0, depth * 0.5))
-    f = set(f3, "orient", orient_from_euler(vec3(0, 0, 0)), domain = points)
-    # тыл (−Z): окно
-    b1 = delete(lf, where = abs(dot(@P, (1, 0, 0)) - 0.9) < 0.66 & abs(dot(@P, (0, 1, 0)) - 1.45) < 0.62)
-    b2 = set_position(b1, offset = random_vec(lo = vec3(-0.03, -0.01, -0.01), hi = vec3(0.03, 0.01, 0.07), rng = split_rng(rr, key = "back")))
-    b3 = transform(transform(b2, rotate = vec3(0, 180, 0)), translate = vec3(0, 0, 0.0 - depth * 0.5))
-    b = set(b3, "orient", orient_from_euler(vec3(0, 180, 0)), domain = points)
-    # левая (−X) и правая (+X) стены: по маленькому окну
-    l1 = delete(ls, where = abs(dot(@P, (1, 0, 0)) - side_win_x) < 0.58 & abs(dot(@P, (0, 1, 0)) - 1.55) < 0.56)
-    l2 = set_position(l1, offset = random_vec(lo = vec3(-0.03, -0.01, -0.01), hi = vec3(0.03, 0.01, 0.07), rng = split_rng(rr, key = "left")))
-    l3 = transform(transform(l2, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - width * 0.5, 0, 0))
-    l = set(l3, "orient", orient_from_euler(vec3(0, 270, 0)), domain = points)
-    r1 = delete(ls, where = abs(dot(@P, (1, 0, 0)) - side_win_x) < 0.58 & abs(dot(@P, (0, 1, 0)) - 1.55) < 0.56)
-    r2 = set_position(r1, offset = random_vec(lo = vec3(-0.03, -0.01, -0.01), hi = vec3(0.03, 0.01, 0.07), rng = split_rng(rr, key = "right")))
-    r3 = transform(transform(r2, rotate = vec3(0, 90, 0)), translate = vec3(width * 0.5, 0, 0))
-    r = set(r3, "orient", orient_from_euler(vec3(0, 90, 0)), domain = points)
-    acc = merge(acc, merge(merge(f, b), merge(l, r)))
+rows_f = repeat (anchors0, iterations = n_rows) |acc| {
+    kf = f32(@iteration)
+    odd_f = kf - 2.0 * floor(kf * 0.5)
+    rf0 = mesh_line(count = cols_f + 2, length = f32(cols_f + 1) * pitch_f, dir = (1, 0, 0))
+    acc = merge(acc, transform(rf0, translate = vec3(0.0 - width * 0.5 - pitch_f * 0.5 + odd_f * pitch_f * 0.5, (kf + 0.5) * course_h, 0.03)))
 }
-# Per-block shade: скалярный random → почти серый @tint на якорях (независимый
-# random_vec по компонентам давал цветные блоки); realize материализует его на
-# точках блока, merge с нетонированной геометрией дозаполняет @tint белым.
-stone_shade = random(lo = 0.7, hi = 1.25, rng = split_rng(veneer_rng, key = "tint"))
-anchors_t = set(anchors, "tint", vec3(stone_shade * 1.04, stone_shade, stone_shade * 0.96))
-veneer = mark(realize(instance_on_points(anchors_t, source = stone_a, variants = [stone_a, stone_b, stone_c])), "stone", where = true, domain = faces)
+rows_s = repeat (anchors0, iterations = n_rows) |acc| {
+    ks = f32(@iteration)
+    odd_s = ks - 2.0 * floor(ks * 0.5)
+    rs0 = mesh_line(count = cols_s + 2, length = f32(cols_s + 1) * pitch_s, dir = (1, 0, 0))
+    acc = merge(acc, transform(rs0, translate = vec3(0.0 - depth * 0.5 - pitch_s * 0.5 + odd_s * pitch_s * 0.5, (ks + 0.5) * course_h, 0.03)))
+}
+# фасад (+Z): вырезы под арку двери и окно со ставнями; тыл (−Z): окно; бока: по окну
+rows_front = delete(rows_f, where = (abs(dot(@P, (1, 0, 0)) - door_x) < 0.86 & dot(@P, (0, 1, 0)) < 2.32) | (abs(dot(@P, (1, 0, 0)) - win_x) < 0.66 & abs(dot(@P, (0, 1, 0)) - 1.45) < 0.62))
+rows_back = delete(rows_f, where = abs(dot(@P, (1, 0, 0)) - 0.9) < 0.66 & abs(dot(@P, (0, 1, 0)) - 1.45) < 0.62)
+rows_side = delete(rows_s, where = abs(dot(@P, (1, 0, 0)) - side_win_x) < 0.58 & abs(dot(@P, (0, 1, 0)) - 1.55) < 0.56)
+wall_f = transform(stone_wall(rows_front, len = width, blk = vec3(0.5, 0.26, 0.1), rng = split_rng(veneer_rng, key = "front")), translate = vec3(0, 0, depth * 0.5))
+wall_b = transform(transform(stone_wall(rows_back, len = width, blk = vec3(0.5, 0.26, 0.1), rng = split_rng(veneer_rng, key = "back")), rotate = vec3(0, 180, 0)), translate = vec3(0, 0, 0.0 - depth * 0.5))
+wall_l = transform(transform(stone_wall(rows_side, len = depth, blk = vec3(0.5, 0.26, 0.1), rng = split_rng(veneer_rng, key = "left")), rotate = vec3(0, 270, 0)), translate = vec3(0.0 - width * 0.5, 0, 0))
+wall_r = transform(transform(stone_wall(rows_side, len = depth, blk = vec3(0.5, 0.26, 0.1), rng = split_rng(veneer_rng, key = "right")), rotate = vec3(0, 90, 0)), translate = vec3(width * 0.5, 0, 0))
+veneer = mark(merge(merge(wall_f, wall_b), merge(wall_l, wall_r)), "stone", where = true, domain = faces)
 
 # Угловые камни (квойны): крупные блоки столбиком на каждом углу, ориентация
 # чередуется по рядам — перевязка углов, заодно прячет торцы рядов кладки.
@@ -413,22 +412,32 @@ col_pitch = 0.32
 row_pitch = 0.28
 tile = compute_normals(box(size = vec3(tile_w, tile_th, tile_len)), mode = flat)
 
+# Края ската — как у кладки: шаг колонок подогнан под длину конька (tpitch =
+# rl / n), ряд с запасом на плитку за каждым фронтоном, плитки с центром за
+# краем не кладутся, остальное подрезается `clip` по фронтонам (x = ±rl/2) и
+# под коньком (z = −slope_len + 0.03, конёк накрывают колпаки); у карниза
+# плитка свисает намеренно.
 slope_len = (sd * 0.5 + overhang) * 1.4142136
 n_trows = int(slope_len / row_pitch) + 1
-n_tcols = int(rl / col_pitch) + 1
-trow_len = f32(n_tcols - 1) * col_pitch
+n_tcols = int(rl / col_pitch)
+tpitch = rl / f32(n_tcols)
 tanchors0 = mesh_line(count = 0, length = 0.0)
 tanchors = repeat (tanchors0, iterations = n_trows) |acc| {
-    k = f32(@iteration)
-    odd = k - 2.0 * floor(k * 0.5)
-    row_pts0 = mesh_line(count = n_tcols, length = trow_len, dir = (1, 0, 0))
-    row_pts = transform(row_pts0, translate = vec3(0.0 - trow_len * 0.5 + odd * col_pitch * 0.5, tile_th + k * 0.012, 0.0 - k * row_pitch))
+    kt = f32(@iteration)
+    odd_t = kt - 2.0 * floor(kt * 0.5)
+    row_pts0 = mesh_line(count = n_tcols + 2, length = f32(n_tcols + 1) * tpitch, dir = (1, 0, 0))
+    row_pts = transform(row_pts0, translate = vec3(0.0 - rl * 0.5 - tpitch * 0.5 + odd_t * tpitch * 0.5, tile_th + kt * 0.012, 0.0 - kt * row_pitch))
     acc = merge(acc, row_pts)
 }
-tanchors_j = set_position(tanchors, offset = random_vec(lo = vec3(-0.004, -0.003, -0.004), hi = vec3(0.004, 0.003, 0.004), rng = split_rng(tile_rng, key = "jit")))
+tanchors_k = delete(tanchors, where = abs(dot(@P, (1, 0, 0))) > rl * 0.5 + 0.01)
+tanchors_j = set_position(tanchors_k, offset = random_vec(lo = vec3(-0.004, -0.003, -0.004), hi = vec3(0.004, 0.003, 0.004), rng = split_rng(tile_rng, key = "jit")))
 tile_shade = random(lo = 0.75, hi = 1.35, rng = split_rng(tile_rng, key = "tint"))
 tanchors_t = set(tanchors_j, "tint", vec3(tile_shade * 0.97, tile_shade, tile_shade * 1.06))
-slope_local = mark(realize(instance_on_points(tanchors_t, source = tile)), "tile", where = true, domain = faces)
+slope_raw = realize(instance_on_points(tanchors_t, source = tile))
+slope_c1 = clip(slope_raw, origin = vec3(0.0 - rl * 0.5, 0, 0), normal = vec3(1, 0, 0), cap_group = "cut")
+slope_c2 = clip(slope_c1, origin = vec3(rl * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
+slope_c3 = clip(slope_c2, origin = vec3(0, 0, 0.03 - slope_len), normal = vec3(0, 0, 1), cap_group = "cut")
+slope_local = mark(slope_c3, "tile", where = true, domain = faces)
 eave_z = sd * 0.5 + overhang
 slope_right = transform(transform(slope_local, rotate = vec3(45, 0, 0)), translate = vec3(0, eave_y + 0.02, eave_z - 0.02))
 slope_left = transform(transform(transform(slope_local, rotate = vec3(0, 180, 0)), rotate = vec3(0.0 - 45, 0, 0)), translate = vec3(0, eave_y + 0.02, 0.02 - eave_z))
@@ -465,9 +474,9 @@ fin_b = piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, 0.0 - 
 barge = merge(merge(barg_rf, barg_rb), merge(merge(barg_lf, barg_lb), merge(fin_f, fin_b)))
 
 # --- труба: каменные блоки с перевязкой на правом скате ------------------------
-# Сердцевина-столб плюс кладка: на каждой из четырёх граней в ряду два блока
-# разной длины (перевязка меняется по чётности ряда), якоря с @orient по грани,
-# блоки трёх длин через @variant — один realize на всю трубу, как у стен.
+# Сердцевина-столб плюс кладка тем же def `stone_wall`, что и стены: ряд грани
+# (шаг chim_w/2, перевязка по чётности ряда) с запасом, блоки трёх длин через
+# @variant, подрезка по рёбрам трубы `clip` — на углах целый/половинка.
 chim_x = 1.35
 chim_z = 0.0 - 0.9
 chim_w = 0.84
@@ -477,29 +486,23 @@ chim_top = ridge_y + 1.25
 chim_n = int((chim_top - chim_base) / chim_course)
 chim_core = piece(size = vec3(chim_w - 0.12, chim_top - chim_base, chim_w - 0.12), pos = vec3(chim_x, (chim_base + chim_top) * 0.5, chim_z), grp = "stone")
 chim_rng = split_rng(root_rng, key = "chimney")
-cstone_a = compute_normals(box(size = vec3(0.34, 0.21, 0.12)), mode = flat)
-cstone_b = compute_normals(box(size = vec3(0.44, 0.21, 0.12)), mode = flat)
-cstone_c = compute_normals(box(size = vec3(0.26, 0.21, 0.12)), mode = flat)
-chim_anchors0 = mesh_line(count = 0, length = 0.0)
-chim_anchors = repeat (chim_anchors0, iterations = chim_n) |acc| {
-    k = f32(@iteration)
-    odd = k - 2.0 * floor(k * 0.5)
-    cy = chim_base + (k + 0.5) * chim_course
-    cr = split_rng(chim_rng, key = @iteration)
-    # локальный ряд грани: два якоря, смещённые от центра на ±0.2 с перевязкой
-    row0 = mesh_line(count = 2, length = 0.4, dir = (1, 0, 0))
-    row1 = transform(row0, translate = vec3(odd * 0.08 - 0.24, cy, chim_w * 0.5 - 0.03))
-    row2 = set(row1, "variant", random_int(n = 3, rng = split_rng(cr, key = "var")))
-    row = set(row2, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(cr, key = "scale")))
-    s0 = set(transform(row, translate = vec3(chim_x, 0, chim_z)), "orient", orient_from_euler(vec3(0, 0, 0)), domain = points)
-    s1 = set(transform(transform(row, rotate = vec3(0, 90, 0)), translate = vec3(chim_x, 0, chim_z)), "orient", orient_from_euler(vec3(0, 90, 0)), domain = points)
-    s2 = set(transform(transform(row, rotate = vec3(0, 180, 0)), translate = vec3(chim_x, 0, chim_z)), "orient", orient_from_euler(vec3(0, 180, 0)), domain = points)
-    s3 = set(transform(transform(row, rotate = vec3(0, 270, 0)), translate = vec3(chim_x, 0, chim_z)), "orient", orient_from_euler(vec3(0, 270, 0)), domain = points)
-    acc = merge(acc, merge(merge(s0, s1), merge(s2, s3)))
+chim_rows0 = mesh_line(count = 0, length = 0.0)
+chim_rows = repeat (chim_rows0, iterations = chim_n) |acc| {
+    kc = f32(@iteration)
+    odd_c = kc - 2.0 * floor(kc * 0.5)
+    cr0 = mesh_line(count = 4, length = 3.0 * chim_w * 0.5, dir = (1, 0, 0))
+    acc = merge(acc, transform(cr0, translate = vec3(0.0 - chim_w * 0.75 + odd_c * chim_w * 0.25, chim_base + (kc + 0.5) * chim_course, chim_w * 0.5 - 0.03)))
 }
-chim_shade = random(lo = 0.7, hi = 1.25, rng = split_rng(chim_rng, key = "tint"))
-chim_anchors_t = set(chim_anchors, "tint", vec3(chim_shade * 1.04, chim_shade, chim_shade * 0.96))
-chim_veneer = mark(realize(instance_on_points(chim_anchors_t, source = cstone_a, variants = [cstone_a, cstone_b, cstone_c])), "stone", where = true, domain = faces)
+chim_blk = vec3(0.34, 0.21, 0.12)
+chim_f0 = stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(chim_rng, key = 0))
+chim_f1 = stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(chim_rng, key = 1))
+chim_f2 = stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(chim_rng, key = 2))
+chim_f3 = stone_wall(chim_rows, len = chim_w, blk = chim_blk, rng = split_rng(chim_rng, key = 3))
+chim_s0 = transform(chim_f0, translate = vec3(chim_x, 0, chim_z))
+chim_s1 = transform(transform(chim_f1, rotate = vec3(0, 90, 0)), translate = vec3(chim_x, 0, chim_z))
+chim_s2 = transform(transform(chim_f2, rotate = vec3(0, 180, 0)), translate = vec3(chim_x, 0, chim_z))
+chim_s3 = transform(transform(chim_f3, rotate = vec3(0, 270, 0)), translate = vec3(chim_x, 0, chim_z))
+chim_veneer = mark(merge(merge(chim_s0, chim_s1), merge(chim_s2, chim_s3)), "stone", where = true, domain = faces)
 chim_cap1 = piece(size = vec3(chim_w + 0.2, 0.14, chim_w + 0.2), pos = vec3(chim_x, chim_top + 0.07, chim_z), grp = "stone")
 chim_cap2 = piece(size = vec3(chim_w - 0.1, 0.12, chim_w - 0.1), pos = vec3(chim_x, chim_top + 0.2, chim_z), grp = "stone")
 chim_hole = piece(size = vec3(chim_w - 0.4, 0.14, chim_w - 0.4), pos = vec3(chim_x, chim_top + 0.28, chim_z), grp = "smoke")

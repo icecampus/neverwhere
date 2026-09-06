@@ -811,6 +811,34 @@ private:
                 storeSchema(&c, std::move(s));
                 break;
             }
+            case BuiltinId::Clip: {
+                // Half-space clip keeps the schema (columns interpolate, never
+                // drop) and may add the cap group on faces. Static mirrors of the
+                // runtime checks: instances -> E204, constant zero normal -> E612.
+                GeoSchema s = argSchema(byParam, 0);
+                if (!s.open && s.kind == GeoKind::Instances)
+                    error("E204", c.span, "clip on geo<instances> is not defined", "realize() first, then clip");
+                // Point @N on the cut edge is interpolated, not recomputed (W006 on read).
+                if (!s.open && s.hasN) s.nStale = true;
+                if (byParam.size() > 2 && byParam[2] && byParam[2]->value) {
+                    Value nv;
+                    if (constEval(byParam[2]->value, nv) && valueBase(nv) == ScalarType::Vec3) {
+                        const glm::vec3 v = asVec3(nv);
+                        if (!(glm::length(v) > 1e-12f) || !std::isfinite(glm::length(v)))
+                            error("E612", c.span, "clip: normal must be a non-zero finite vector",
+                                  "pass the plane normal, e.g. normal = (1, 0, 0)");
+                    }
+                }
+                if (!s.open && byParam.size() > 3 && byParam[3]) {
+                    if (literalString(byParam[3], lit)) {
+                        if (!lit.empty()) s.groups[domainIndex("faces")].insert(lit);
+                    } else {
+                        s = openSchema();
+                    }
+                }
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::Delete: {
                 // Element removal keeps the schema (columns are gathered, never
                 // dropped); the mask is checked against the input schema.

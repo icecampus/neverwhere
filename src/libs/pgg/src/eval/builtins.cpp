@@ -334,6 +334,17 @@ const std::vector<BuiltinSig>& registry() {
             s.resultGeoKindOfFirstArg = true;
             r.push_back(s);
         }
+        {
+            // §8.3 clip: half-space clip with capped cut loops (builtins_topology.cpp).
+            // Keeps dot(P - origin, normal) >= 0; zero normal -> E612, instances -> E204.
+            BuiltinSig s = sig(BuiltinId::Clip, "clip",
+                               {geoArg("geo"), val("origin", ScalarType::Vec3, true),
+                                val("normal", ScalarType::Vec3, true),
+                                valDef("cap_group", ScalarType::String, Value(std::string("")))},
+                               geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
 
         // --- §8.8 scatter and instancing ----------------------------------------
         {
@@ -579,6 +590,7 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Fracture:
             return evalFractureBuiltin(bound, run);
         case BuiltinId::Delete:
+        case BuiltinId::Clip:
             return evalTopologyBuiltin(bound, run);
         default:
             break;
