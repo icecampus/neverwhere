@@ -1,7 +1,7 @@
 // PggViewer: read-only node-graph projection of .pgg files (spec §10, stage E8).
 //   PggViewer [file.pgg] [--shot=out.png] [--shot-delay=S] [--zoom=Z] [--center=X,Y] [--no-ui]
 //             [--dive=<ipath>] [--preview=<pull path>] [--preview-highlight=<domain>:<group>]
-//             [--preview-shading=auto|smooth|flat] [--preview-size=W,H]
+//             [--preview-shading=auto|smooth|flat] [--preview-colors=on|off] [--preview-size=W,H]
 //             [--preview-orbit=yaw_deg,pitch_deg[,zoom]] [--param=name=value]...
 //   PggViewer --smoke
 // The graph is derived from the text (no separate storage): names are nodes,
@@ -109,6 +109,7 @@ pgg::Value g_previewValue;           // last pulled value (rebuilt on highlight/
 bool g_previewHasValue = false;
 PreviewBuildOptions g_previewOpts;
 std::vector<std::string> g_previewGroups;
+bool g_previewHasColor = false;      // the last build found a vec3 @Cd
 int g_previewLastSelected = -2;      // (selected index, scope) the auto-preview last ran for
 std::string g_previewLastScope;
 std::string g_cliPreview;            // --preview=<path>: pull + show at startup
@@ -304,6 +305,7 @@ void rebuildPreviewGeometry(bool refit) {
     if (!g_previewHasValue) return;
     PreviewGeometry geo = buildPreviewGeometry(g_previewValue, g_previewOpts);
     g_previewGroups = geo.groups;
+    g_previewHasColor = geo.hasColor;
     // Drop a highlight that the new value no longer carries.
     if (!g_previewOpts.highlightGroup.empty() &&
         std::find(geo.groups.begin(), geo.groups.end(), g_previewOpts.highlightGroup) == geo.groups.end())
@@ -506,6 +508,15 @@ void drawPanel(int w, int h) {
                 ImGui::SetTooltip("auto: corner N (compute_normals flat) > point @N > face normals\n"
                                   "smooth: point @N > face normals\n"
                                   "flat: face normals only (faceted look for welded boxes)");
+        }
+        // Surface color from the @Cd attribute.
+        if (ImGui::Checkbox("colors (@Cd)", &g_previewOpts.vertexColors)) rebuildPreviewGeometry(false);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Albedo from the vec3 attribute @Cd (points/corners/faces/detail; face colors unweld the mesh).\n"
+                              "Off or absent: neutral grey.");
+        if (g_previewOpts.vertexColors && g_previewHasValue && !g_previewHasColor) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(no @Cd on the previewed geometry)");
         }
         // sdf meshing resolution (only matters for sdf values).
         if (ImGui::SliderInt("sdf voxels", &g_previewOpts.sdfResolution, 16, 256)) {
@@ -866,6 +877,8 @@ int main(int argc, char* argv[]) {
             g_previewOpts.shading = v == "flat"     ? PreviewShading::Flat
                                     : v == "smooth" ? PreviewShading::Smooth
                                                     : PreviewShading::Auto;
+        } else if (arg.rfind("--preview-colors=", 0) == 0) {
+            g_previewOpts.vertexColors = arg.substr(17) != "off";
         } else if (arg.rfind("--preview-orbit=", 0) == 0) {
             float yaw = 0.0f, pitch = 0.0f, zoom = 1.0f;
             const int n = std::sscanf(arg.c_str() + 16, "%f,%f,%f", &yaw, &pitch, &zoom);

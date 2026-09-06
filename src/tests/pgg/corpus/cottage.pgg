@@ -20,9 +20,10 @@ param seed: int = 7
 # 
 # Материалы — группы faces (в PggViewer: highlight = faces:<имя>):
 # stone (кладка, цоколь, портал, ступень, труба), wall (штукатурка + фронтоны),
-# wood (балки, рамы, ставни, дверь, клумба, ветровые доски), glass (стёкла и
-# фонари), roof (настил), tile (черепица и конёк), leaf (зелень), flower (цветы),
-# grass (трава), smoke (дым).
+# wood (балки, рамы, ставни, дверь, клумба, ветровые доски), glass (стёкла),
+# lamp (светящиеся корпуса фонарей), roof (настил), tile (черепица и конёк),
+# leaf (зелень), flower (цветы), grass (трава), smoke (дым). Цвет — `@Cd` на
+# faces по группам в блоке «окраска» внизу (превью: чекбокс «colors (@Cd)»).
 def piece(size: vec3, pos: vec3, grp: string) -> (out: geo<mesh>) {
     """Прямоугольный брус/блок: box размером size с центром в pos, все грани в группе grp.
     Фасеточные corner-N: сварной box несёт гладкие point-@N (диагонали углов, §8.1),
@@ -115,7 +116,7 @@ def lantern(at: vec3) -> (out: geo<mesh>) {
     """Настенный фонарь: кронштейн из стены (−Z → +Z), стеклянный корпус на крюке, крышка."""
     arm = piece(size = vec3(0.06, 0.06, 0.34), pos = vec3(0, 0.28, 0.17), grp = "wood")
     hook = piece(size = vec3(0.04, 0.12, 0.04), pos = vec3(0, 0.2, 0.32), grp = "wood")
-    body = piece(size = vec3(0.2, 0.26, 0.2), pos = vec3(0, 0.0, 0.32), grp = "glass")
+    body = piece(size = vec3(0.2, 0.26, 0.2), pos = vec3(0, 0.0, 0.32), grp = "lamp")
     cap = piece(size = vec3(0.26, 0.05, 0.26), pos = vec3(0, 0.155, 0.32), grp = "wood")
     base = piece(size = vec3(0.22, 0.04, 0.22), pos = vec3(0, 0.0 - 0.15, 0.32), grp = "wood")
     l0 = merge(merge(arm, hook), merge(merge(body, cap), base))
@@ -215,7 +216,12 @@ anchors = repeat (anchors0, iterations = n_rows) |acc| {
     r = set(r3, "orient", orient_from_euler(vec3(0, 90, 0)), domain = points)
     acc = merge(acc, merge(merge(f, b), merge(l, r)))
 }
-veneer = mark(realize(instance_on_points(anchors, source = stone_a, variants = [stone_a, stone_b, stone_c])), "stone", where = true, domain = faces)
+# Per-block shade: скалярный random → почти серый @tint на якорях (независимый
+# random_vec по компонентам давал цветные блоки); realize материализует его на
+# точках блока, merge с нетонированной геометрией дозаполняет @tint белым.
+stone_shade = random(lo = 0.7, hi = 1.25, rng = split_rng(veneer_rng, key = "tint"))
+anchors_t = set(anchors, "tint", vec3(stone_shade * 1.04, stone_shade, stone_shade * 0.96))
+veneer = mark(realize(instance_on_points(anchors_t, source = stone_a, variants = [stone_a, stone_b, stone_c])), "stone", where = true, domain = faces)
 
 # Угловые камни (квойны): крупные блоки столбиком на каждом углу, ориентация
 # чередуется по рядам — перевязка углов, заодно прячет торцы рядов кладки.
@@ -367,7 +373,11 @@ leaves = mark(realize(instance_on_points(leaf_pts, source = leaf_src)), "leaf", 
 flower_src = ico_sphere(subdiv = 1, radius = 0.07)
 flower_pts0 = point_cloud(count = 30, bounds = vec3(box_w - 0.3, 0.14, box_d - 0.1), rng = split_rng(green_rng, key = "flower_pos"))
 flower_pts1 = transform(flower_pts0, translate = vec3(0, box_y + box_h * 0.5 + 0.3, tf_z + box_d * 0.5 + 0.06))
-flower_pts = set(flower_pts1, "scale", random(lo = 0.7, hi = 1.3, rng = split_rng(green_rng, key = "flower_scale")))
+flower_pts2 = set(flower_pts1, "scale", random(lo = 0.7, hi = 1.3, rng = split_rng(green_rng, key = "flower_scale")))
+# Палитра цветов — @tint по random_int (фиолетовый / жёлтый / розовый / синий), realize кладёт его на точки.
+flower_pick = random_int(n = 4, rng = split_rng(green_rng, key = "flower_color"))
+flower_col = flower_pick == 0 ? vec3(0.45, 0.12, 0.7) : (flower_pick == 1 ? vec3(0.95, 0.75, 0.1) : (flower_pick == 2 ? vec3(0.9, 0.25, 0.45) : vec3(0.2, 0.35, 0.95)))
+flower_pts = set(flower_pts2, "tint", flower_col)
 flowers = mark(realize(instance_on_points(flower_pts, source = flower_src)), "flower", where = true, domain = faces)
 vine_src = ico_sphere(subdiv = 1, radius = 0.075)
 vine_a0 = mesh_line(count = 9, length = 0.85, dir = (0, -1, 0))
@@ -416,7 +426,9 @@ tanchors = repeat (tanchors0, iterations = n_trows) |acc| {
     acc = merge(acc, row_pts)
 }
 tanchors_j = set_position(tanchors, offset = random_vec(lo = vec3(-0.004, -0.003, -0.004), hi = vec3(0.004, 0.003, 0.004), rng = split_rng(tile_rng, key = "jit")))
-slope_local = mark(realize(instance_on_points(tanchors_j, source = tile)), "tile", where = true, domain = faces)
+tile_shade = random(lo = 0.75, hi = 1.35, rng = split_rng(tile_rng, key = "tint"))
+tanchors_t = set(tanchors_j, "tint", vec3(tile_shade * 0.97, tile_shade, tile_shade * 1.06))
+slope_local = mark(realize(instance_on_points(tanchors_t, source = tile)), "tile", where = true, domain = faces)
 eave_z = sd * 0.5 + overhang
 slope_right = transform(transform(slope_local, rotate = vec3(45, 0, 0)), translate = vec3(0, eave_y + 0.02, eave_z - 0.02))
 slope_left = transform(transform(transform(slope_local, rotate = vec3(0, 180, 0)), rotate = vec3(0.0 - 45, 0, 0)), translate = vec3(0, eave_y + 0.02, 0.02 - eave_z))
@@ -485,7 +497,9 @@ chim_anchors = repeat (chim_anchors0, iterations = chim_n) |acc| {
     s3 = set(transform(transform(row, rotate = vec3(0, 270, 0)), translate = vec3(chim_x, 0, chim_z)), "orient", orient_from_euler(vec3(0, 270, 0)), domain = points)
     acc = merge(acc, merge(merge(s0, s1), merge(s2, s3)))
 }
-chim_veneer = mark(realize(instance_on_points(chim_anchors, source = cstone_a, variants = [cstone_a, cstone_b, cstone_c])), "stone", where = true, domain = faces)
+chim_shade = random(lo = 0.7, hi = 1.25, rng = split_rng(chim_rng, key = "tint"))
+chim_anchors_t = set(chim_anchors, "tint", vec3(chim_shade * 1.04, chim_shade, chim_shade * 0.96))
+chim_veneer = mark(realize(instance_on_points(chim_anchors_t, source = cstone_a, variants = [cstone_a, cstone_b, cstone_c])), "stone", where = true, domain = faces)
 chim_cap1 = piece(size = vec3(chim_w + 0.2, 0.14, chim_w + 0.2), pos = vec3(chim_x, chim_top + 0.07, chim_z), grp = "stone")
 chim_cap2 = piece(size = vec3(chim_w - 0.1, 0.12, chim_w - 0.1), pos = vec3(chim_x, chim_top + 0.2, chim_z), grp = "stone")
 chim_hole = piece(size = vec3(chim_w - 0.4, 0.14, chim_w - 0.4), pos = vec3(chim_x, chim_top + 0.28, chim_z), grp = "smoke")
@@ -552,5 +566,28 @@ grass = merge(merge(tuft1, tuft2), merge(merge(tuft3, tuft4), merge(tuft5, tuft6
 # --- сборка ----------------------------------------------------------------------
 body = merge(masonry, merge(upper_floor, planter))
 top = merge(merge(roof, barge), merge(chimney_all, smoke))
-house = merge(merge(body, top), merge(merge(door, windows), grass))
+house_raw = merge(merge(body, top), merge(merge(door, windows), grass))
+
+# --- окраска: @Cd по группам-материалам (faces) ---------------------------------
+# Цвета линейные (превью применяет гамму на выходе). Камень/черепица — базовый
+# цвет × per-block @tint (см. якоря) + низкочастотный fbm по мировому @P;
+# цветы — @tint напрямую (палитра на якорях). Грань вне всех групп — пурпур:
+# это маркер «не покрашено», а не материал.
+paint_rng = split_rng(root_rng, key = "paint")
+stone_col = mix(vec3(0.21, 0.18, 0.16), vec3(0.10, 0.09, 0.09), fbm(scale = 2.2, octaves = 3, rng = split_rng(paint_rng, key = "stone"))) * @tint
+wall_col = mix(vec3(0.74, 0.57, 0.35), vec3(0.58, 0.44, 0.26), fbm(scale = 3.0, octaves = 3, rng = split_rng(paint_rng, key = "wall")))
+tile_col = vec3(0.045, 0.05, 0.075) * @tint
+leaf_col = mix(vec3(0.03, 0.17, 0.025), vec3(0.09, 0.36, 0.05), fbm(scale = 6.0, octaves = 2, rng = split_rng(paint_rng, key = "leaf")))
+c1 = ingroup("stone") ? stone_col : vec3(1.0, 0.0, 1.0)
+c2 = ingroup("wall") ? wall_col : c1
+c3 = ingroup("wood") ? vec3(0.11, 0.055, 0.022) : c2
+c4 = ingroup("glass") ? vec3(0.16, 0.22, 0.30) : c3
+c5 = ingroup("lamp") ? vec3(1.0, 0.55, 0.15) : c4
+c6 = ingroup("roof") ? vec3(0.035, 0.035, 0.045) : c5
+c7 = ingroup("tile") ? tile_col : c6
+c8 = ingroup("leaf") ? leaf_col : c7
+c9 = ingroup("flower") ? @tint : c8
+c10 = ingroup("grass") ? vec3(0.07, 0.28, 0.04) : c9
+c11 = ingroup("smoke") ? vec3(0.55, 0.52, 0.55) : c10
+house = set(house_raw, "Cd", c11, domain = faces)
 output house

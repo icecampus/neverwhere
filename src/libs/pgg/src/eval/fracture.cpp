@@ -241,7 +241,7 @@ GeoPtr mergeMeshPieces(const std::vector<GeoPtr>& pieces) {
                 const AttrSet* s = p->attrs(d);
                 const AttrColumn* c = s ? s->find(n) : nullptr;
                 ColumnData part = c ? convertColumn(c->data, exemplar->data)
-                                    : neutralColumnLike(*exemplar, *p, d, p->elementCount(d));
+                                    : neutralColumnLike(n, *exemplar, *p, d, p->elementCount(d));
                 acc = have ? concatColumns(acc, part) : part;
                 have = true;
             }

@@ -65,6 +65,38 @@ pgg::ConstBoolColumnPtr groupColumn(const pgg::Geo& g, const std::string& key, p
     return set ? set->find(name) : nullptr;
 }
 
+constexpr glm::vec3 kBaseColor(0.66f, 0.64f, 0.61f);
+
+// Domain the vec3 @Cd column is stored on (spec §4.3 read order points ->
+// corners -> faces -> detail); nullopt when absent or not vec3.
+std::optional<pgg::Domain> colorDomain(const pgg::Geo& g) {
+    for (pgg::Domain d : {pgg::Domain::Points, pgg::Domain::Corners, pgg::Domain::Faces, pgg::Domain::Detail}) {
+        const pgg::AttrSet* attrs = g.attrs(d);
+        const pgg::AttrColumn* col = attrs ? attrs->find("Cd") : nullptr;
+        if (!col) continue;
+        return std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(col->data)
+                   ? std::optional<pgg::Domain>(d)
+                   : std::nullopt;
+    }
+    return std::nullopt;
+}
+
+// @Cd resampled onto `domain` (§4.3 interpolation matrix); nullptr when absent.
+std::shared_ptr<const std::vector<glm::vec3>> colorColumn(const pgg::Geo& g, pgg::Domain domain) {
+    if (!colorDomain(g)) return nullptr;
+    const std::optional<pgg::ColumnData> col = pgg::sampleAttrColumn(g, "Cd", domain);
+    if (!col) return nullptr;
+    const auto* vec = std::get_if<std::shared_ptr<const std::vector<glm::vec3>>>(&*col);
+    if (!vec || !*vec || (*vec)->size() != g.elementCount(domain)) return nullptr;
+    return *vec;
+}
+
+glm::vec3 colorAt(const std::vector<glm::vec3>* col, size_t i) {
+    if (!col) return kBaseColor;
+    const glm::vec3 c = (*col)[i];
+    return glm::clamp(c, glm::vec3(0.0f), glm::vec3(1.0f));
+}
+
 void extendBBox(PreviewGeometry& out) {
     if (out.vertices.empty()) return;
     out.bmin = out.bmax = out.vertices[0].pos;
@@ -75,7 +107,9 @@ void extendBBox(PreviewGeometry& out) {
 }
 
 // Points as small octahedra (backend-agnostic: no point-size support on D3D11).
-void appendPoints(const pgg::Geo& g, const pgg::ConstBoolColumnPtr& mask, PreviewGeometry& out) {
+void appendPoints(const pgg::Geo& g, const pgg::ConstBoolColumnPtr& mask, bool useColor, PreviewGeometry& out) {
+    const std::shared_ptr<const std::vector<glm::vec3>> Cd = useColor ? colorColumn(g, pgg::Domain::Points) : nullptr;
+    out.hasColor = Cd != nullptr;
     glm::vec3 mn, mx;
     pgg::geoBBox(g, mn, mx);
     const float diag = glm::length(mx - mn);
@@ -89,15 +123,16 @@ void appendPoints(const pgg::Geo& g, const pgg::ConstBoolColumnPtr& mask, Previe
     out.indices.reserve(out.indices.size() + P.size() * 24);
     for (size_t i = 0; i < P.size(); ++i) {
         const float m = (mask && i < mask->size() && (*mask)[i]) ? 1.0f : 0.0f;
+        const glm::vec3 col = colorAt(Cd.get(), i);
         for (const auto& f : faces) {
             const glm::vec3 a = P[i] + axes[f[0]] * r;
             const glm::vec3 b = P[i] + axes[f[1]] * r;
             const glm::vec3 c = P[i] + axes[f[2]] * r;
             const glm::vec3 n = glm::normalize(glm::cross(b - a, c - a));
             const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-            out.vertices.push_back({a, n, m});
-            out.vertices.push_back({b, n, m});
-            out.vertices.push_back({c, n, m});
+            out.vertices.push_back({a, n, col, m});
+            out.vertices.push_back({b, n, col, m});
+            out.vertices.push_back({c, n, col, m});
             out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
         }
     }
@@ -114,7 +149,7 @@ const std::vector<glm::vec3>* cornerNormals(const pgg::Geo& g) {
     return vec->get();
 }
 
-void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading shading,
+void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading shading, bool useColor,
                 PreviewGeometry& out) {
     pgg::Domain maskDomain = pgg::Domain::Points;
     const pgg::ConstBoolColumnPtr mask = groupColumn(g, highlight, maskDomain);
@@ -122,11 +157,20 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
     const std::vector<int32_t>& CV = *g.cornerVerts;
     const std::vector<int32_t>& FO = *g.faceOffsets;
 
+    // @Cd on faces/corners (or detail) forces the unwelded paths: averaging a
+    // face color into shared points would bleed it across neighbours.
+    const std::optional<pgg::Domain> cdDomain = useColor ? colorDomain(g) : std::nullopt;
+    const bool perPointColor = cdDomain && *cdDomain == pgg::Domain::Points;
+
     const std::vector<glm::vec3>* cornerN =
         shading == PreviewShading::Auto ? cornerNormals(g) : nullptr;
     const bool smooth = !cornerN && shading != PreviewShading::Flat && g.normals &&
                         g.normals->size() == g.pointCount() &&
-                        !(mask && maskDomain == pgg::Domain::Faces);
+                        !(mask && maskDomain == pgg::Domain::Faces) && (!cdDomain || perPointColor);
+    // Colors sampled onto the domain the chosen path emits vertices on.
+    const std::shared_ptr<const std::vector<glm::vec3>> Cd =
+        cdDomain ? colorColumn(g, smooth ? pgg::Domain::Points : pgg::Domain::Corners) : nullptr;
+    out.hasColor = Cd != nullptr;
 
     // Mask of a face for the unwelded (corner / flat) paths.
     auto faceMask = [&](size_t f, int32_t begin, int32_t end) -> float {
@@ -153,9 +197,9 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
             };
             for (int32_t c = begin + 1; c + 1 < end; ++c) {
                 const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-                out.vertices.push_back({P[CV[begin]], normalAt(begin), m});
-                out.vertices.push_back({P[CV[c]], normalAt(c), m});
-                out.vertices.push_back({P[CV[c + 1]], normalAt(c + 1), m});
+                out.vertices.push_back({P[CV[begin]], normalAt(begin), colorAt(Cd.get(), static_cast<size_t>(begin)), m});
+                out.vertices.push_back({P[CV[c]], normalAt(c), colorAt(Cd.get(), static_cast<size_t>(c)), m});
+                out.vertices.push_back({P[CV[c + 1]], normalAt(c + 1), colorAt(Cd.get(), static_cast<size_t>(c + 1)), m});
                 out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
             }
         }
@@ -191,7 +235,7 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
         out.vertices.reserve(P.size());
         for (size_t i = 0; i < P.size(); ++i) {
             const float m = (mask && i < mask->size() && (*mask)[i]) ? 1.0f : 0.0f;
-            out.vertices.push_back({P[i], (*N)[i], m});
+            out.vertices.push_back({P[i], (*N)[i], colorAt(Cd.get(), i), m});
         }
         for (size_t f = 0; f < g.faceCount(); ++f) {
             const int32_t begin = FO[f], end = FO[f + 1];
@@ -212,9 +256,9 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading 
         const float m = faceMask(f, begin, end);
         for (int32_t c = begin + 1; c + 1 < end; ++c) {
             const uint32_t base = static_cast<uint32_t>(out.vertices.size());
-            out.vertices.push_back({P[CV[begin]], n, m});
-            out.vertices.push_back({P[CV[c]], n, m});
-            out.vertices.push_back({P[CV[c + 1]], n, m});
+            out.vertices.push_back({P[CV[begin]], n, colorAt(Cd.get(), static_cast<size_t>(begin)), m});
+            out.vertices.push_back({P[CV[c]], n, colorAt(Cd.get(), static_cast<size_t>(c)), m});
+            out.vertices.push_back({P[CV[c + 1]], n, colorAt(Cd.get(), static_cast<size_t>(c + 1)), m});
             out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
         }
     }
@@ -265,9 +309,9 @@ PreviewGeometry buildPreviewGeometry(const pgg::Value& value, const PreviewBuild
     collectGroups(*geo, out.groups);
     if (geo->kind == pgg::GeoKind::Points || geo->faceCount() == 0) {
         pgg::Domain dom = pgg::Domain::Points;
-        appendPoints(*geo, groupColumn(*geo, opts.highlightGroup, dom), out);
+        appendPoints(*geo, groupColumn(*geo, opts.highlightGroup, dom), opts.vertexColors, out);
     } else {
-        appendMesh(*geo, opts.highlightGroup, opts.shading, out);
+        appendMesh(*geo, opts.highlightGroup, opts.shading, opts.vertexColors, out);
     }
     extendBBox(out);
     out.summary = prefix + countsLabel(*geo);
@@ -285,12 +329,15 @@ const char* kVsGlsl = R"(
 uniform mat4 mvp;
 layout(location=0) in vec3 pos;
 layout(location=1) in vec3 normal;
-layout(location=2) in float mask;
+layout(location=2) in vec3 color;
+layout(location=3) in float mask;
 out vec3 v_n;
+out vec3 v_col;
 out float v_mask;
 void main() {
     gl_Position = mvp * vec4(pos, 1.0);
     v_n = normal;
+    v_col = color;
     v_mask = mask;
 }
 )";
@@ -299,8 +346,8 @@ const char* kFsGlsl = R"(
 #version 330
 uniform vec4 light_dir;
 uniform vec4 highlight;
-uniform vec4 base_color;
 in vec3 v_n;
+in vec3 v_col;
 in float v_mask;
 out vec4 frag_color;
 void main() {
@@ -309,7 +356,7 @@ void main() {
     vec3 l = normalize(light_dir.xyz);
     float dif = clamp(dot(n, l), 0.0, 1.0);
     float sky = 0.55 + 0.45 * n.y;
-    vec3 albedo = mix(base_color.rgb, highlight.rgb, v_mask * highlight.a);
+    vec3 albedo = mix(v_col, highlight.rgb, v_mask * highlight.a);
     vec3 col = albedo * (0.22 * sky + 0.85 * dif) + vec3(0.06) * pow(dif, 16.0);
     frag_color = vec4(pow(col, vec3(0.4545)), 1.0);
 }
@@ -317,27 +364,28 @@ void main() {
 
 const char* kVsHlsl = R"(
 cbuffer vs_params: register(b0) { float4x4 mvp; };
-struct VSIn { float3 pos: TEXCOORD0; float3 normal: TEXCOORD1; float mask: TEXCOORD2; };
-struct VSOut { float4 pos: SV_Position; float3 n: TEXCOORD0; float mask: TEXCOORD1; };
+struct VSIn { float3 pos: TEXCOORD0; float3 normal: TEXCOORD1; float3 color: TEXCOORD2; float mask: TEXCOORD3; };
+struct VSOut { float4 pos: SV_Position; float3 n: TEXCOORD0; float3 col: TEXCOORD1; float mask: TEXCOORD2; };
 VSOut main(VSIn inp) {
     VSOut o;
     o.pos = mul(mvp, float4(inp.pos, 1.0));
     o.n = inp.normal;
+    o.col = inp.color;
     o.mask = inp.mask;
     return o;
 }
 )";
 
 const char* kFsHlsl = R"(
-cbuffer fs_params: register(b0) { float4 light_dir; float4 highlight; float4 base_color; };
-struct PSIn { float4 pos: SV_Position; float3 n: TEXCOORD0; float mask: TEXCOORD1; bool front: SV_IsFrontFace; };
+cbuffer fs_params: register(b0) { float4 light_dir; float4 highlight; };
+struct PSIn { float4 pos: SV_Position; float3 n: TEXCOORD0; float3 col: TEXCOORD1; float mask: TEXCOORD2; bool front: SV_IsFrontFace; };
 float4 main(PSIn inp): SV_Target {
     float3 n = normalize(inp.n);
     if (!inp.front) n = -n;
     float3 l = normalize(light_dir.xyz);
     float dif = saturate(dot(n, l));
     float sky = 0.55 + 0.45 * n.y;
-    float3 albedo = lerp(base_color.rgb, highlight.rgb, inp.mask * highlight.a);
+    float3 albedo = lerp(inp.col, highlight.rgb, inp.mask * highlight.a);
     float3 col = albedo * (0.22 * sky + 0.85 * dif) + 0.06 * pow(dif, 16.0);
     return float4(pow(col, 0.4545), 1.0);
 }
@@ -347,12 +395,13 @@ const char* kVsMsl = R"(
 #include <metal_stdlib>
 using namespace metal;
 struct VsParams { float4x4 mvp; };
-struct VSIn { float3 pos [[attribute(0)]]; float3 normal [[attribute(1)]]; float mask [[attribute(2)]]; };
-struct VSOut { float4 pos [[position]]; float3 n; float mask; };
+struct VSIn { float3 pos [[attribute(0)]]; float3 normal [[attribute(1)]]; float3 color [[attribute(2)]]; float mask [[attribute(3)]]; };
+struct VSOut { float4 pos [[position]]; float3 n; float3 col; float mask; };
 vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& p [[buffer(0)]]) {
     VSOut o;
     o.pos = p.mvp * float4(in.pos, 1.0);
     o.n = in.normal;
+    o.col = in.color;
     o.mask = in.mask;
     return o;
 }
@@ -361,15 +410,15 @@ vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& p [[buffer(0)]]) {
 const char* kFsMsl = R"(
 #include <metal_stdlib>
 using namespace metal;
-struct FsParams { float4 light_dir; float4 highlight; float4 base_color; };
-struct PSIn { float4 pos [[position]]; float3 n; float mask; };
+struct FsParams { float4 light_dir; float4 highlight; };
+struct PSIn { float4 pos [[position]]; float3 n; float3 col; float mask; };
 fragment float4 _main(PSIn in [[stage_in]], constant FsParams& p [[buffer(0)]], bool front [[front_facing]]) {
     float3 n = normalize(in.n);
     if (!front) n = -n;
     float3 l = normalize(p.light_dir.xyz);
     float dif = saturate(dot(n, l));
     float sky = 0.55 + 0.45 * n.y;
-    float3 albedo = mix(p.base_color.rgb, p.highlight.rgb, in.mask * p.highlight.a);
+    float3 albedo = mix(in.col, p.highlight.rgb, in.mask * p.highlight.a);
     float3 col = albedo * (0.22 * sky + 0.85 * dif) + 0.06 * pow(dif, 16.0);
     return float4(pow(col, 0.4545), 1.0);
 }
@@ -384,7 +433,7 @@ constexpr sg_pixel_format kDepthFormat = SG_PIXELFORMAT_DEPTH;
 // --- GeometryPreview -------------------------------------------------------------
 
 void GeometryPreview::init() {
-    static_assert(sizeof(FsParams) == 48, "3 x vec4 std140 block");
+    static_assert(sizeof(FsParams) == 32, "2 x vec4 std140 block");
     sg_shader_desc shd = {};
     const sg_backend backend = sg_query_backend();
     if (backend == SG_BACKEND_D3D11) {
@@ -396,6 +445,8 @@ void GeometryPreview::init() {
         shd.attrs[1].hlsl_sem_index = 1;
         shd.attrs[2].hlsl_sem_name = "TEXCOORD";
         shd.attrs[2].hlsl_sem_index = 2;
+        shd.attrs[3].hlsl_sem_name = "TEXCOORD";
+        shd.attrs[3].hlsl_sem_index = 3;
     } else if (backend == SG_BACKEND_METAL_MACOS || backend == SG_BACKEND_METAL_IOS ||
                backend == SG_BACKEND_METAL_SIMULATOR) {
         shd.vertex_func.source = kVsMsl;
@@ -417,8 +468,8 @@ void GeometryPreview::init() {
     shd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_STD140;
     shd.uniform_blocks[1].hlsl_register_b_n = 0;
     shd.uniform_blocks[1].msl_buffer_n = 0;
-    const char* fsNames[3] = {"light_dir", "highlight", "base_color"};
-    for (int i = 0; i < 3; ++i) {
+    const char* fsNames[2] = {"light_dir", "highlight"};
+    for (int i = 0; i < 2; ++i) {
         shd.uniform_blocks[1].glsl_uniforms[i].glsl_name = fsNames[i];
         shd.uniform_blocks[1].glsl_uniforms[i].type = SG_UNIFORMTYPE_FLOAT4;
         shd.uniform_blocks[1].glsl_uniforms[i].array_count = 1;
@@ -430,7 +481,8 @@ void GeometryPreview::init() {
     pip.shader = m_shader;
     pip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
     pip.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3;
-    pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT;
+    pip.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT3;
+    pip.layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT;
     pip.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pip.index_type = SG_INDEXTYPE_UINT32;
     pip.cull_mode = SG_CULLMODE_NONE;  // open meshes / arbitrary winding still read
@@ -681,10 +733,6 @@ void GeometryPreview::render() {
         fs.highlight[1] = 0.55f;
         fs.highlight[2] = 0.15f;
         fs.highlight[3] = 1.0f;
-        fs.base[0] = 0.66f;
-        fs.base[1] = 0.64f;
-        fs.base[2] = 0.61f;
-        fs.base[3] = 0.0f;
 
         sg_apply_pipeline(m_pip);
         sg_bindings bind = {};

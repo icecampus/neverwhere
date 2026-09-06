@@ -70,14 +70,14 @@ void mergeAttrDomain(const Geo& a, const Geo& b, Domain d, AttrSet& out) {
         for (const auto& [n, c] : as->columns) {
             const AttrColumn* cb = bs ? bs->find(n) : nullptr;
             out.columns[n] = AttrColumn{cb ? concatColumns(c.data, cb->data)
-                                           : concatColumns(c.data, neutralColumnLike(c, b, d, bCount)),
+                                           : concatColumns(c.data, neutralColumnLike(n, c, b, d, bCount)),
                                         c.typeInfo};
         }
     }
     if (bs) {
         for (const auto& [n, c] : bs->columns) {
             if (as && as->find(n)) continue;  // handled above
-            out.columns[n] = AttrColumn{concatColumns(neutralColumnLike(c, a, d, aCount), c.data), c.typeInfo};
+            out.columns[n] = AttrColumn{concatColumns(neutralColumnLike(n, c, a, d, aCount), c.data), c.typeInfo};
         }
     }
 }
@@ -863,7 +863,7 @@ GeoPtr realizeInstances(const Geo& inst, unsigned threads) {
                         writeConverted(plan.attrOut[a], db, &moved, ex.data, count);
                     } else {
                         // Variant lacks the column: typed neutral fill.
-                        ColumnData fill = neutralColumnLike(ex, src, plan.domain, count);
+                        ColumnData fill = neutralColumnLike(plan.attrSchema[a].first, ex, src, plan.domain, count);
                         if (ex.typeInfo != AttrTypeInfo::None)
                             fill = transformColumn(AttrColumn{fill, ex.typeInfo}, q, glm::vec3(sc), anchor);
                         writeConverted(plan.attrOut[a], db, &fill, ex.data, count);

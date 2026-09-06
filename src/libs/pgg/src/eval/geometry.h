@@ -162,8 +162,11 @@ std::shared_ptr<const std::vector<glm::vec3>> derivedNormals(const Geo& geo, Dom
 
 // Neutral fill for a missing column in a union (merge/realize/fracture): the
 // identity quaternion for Quaternion, derived normals for Normal on a mesh
-// domain that has them, zeros otherwise.
-ColumnData neutralColumnLike(const AttrColumn& typeOf, const Geo& forGeo, Domain domain, size_t count);
+// domain that has them, white for the reserved multiplicative `tint` (vec3;
+// realize's own default, so a tinted realized mesh merges with plain geometry
+// without going black), zeros otherwise.
+ColumnData neutralColumnLike(const std::string& name, const AttrColumn& typeOf, const Geo& forGeo,
+                             Domain domain, size_t count);
 
 // Applies p' = rot * (p * scale) + translate to a column by its typeinfo
 // (vector: no translation; normal: inverse-transpose + renormalize; point:

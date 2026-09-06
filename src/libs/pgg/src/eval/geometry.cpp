@@ -532,10 +532,13 @@ std::shared_ptr<const std::vector<glm::vec3>> derivedNormals(const Geo& geo, Dom
     return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
 }
 
-ColumnData neutralColumnLike(const AttrColumn& typeOf, const Geo& forGeo, Domain domain, size_t count) {
+ColumnData neutralColumnLike(const std::string& name, const AttrColumn& typeOf, const Geo& forGeo,
+                             Domain domain, size_t count) {
     if (typeOf.typeInfo == AttrTypeInfo::Quaternion &&
         std::holds_alternative<std::shared_ptr<const std::vector<glm::vec4>>>(typeOf.data))
         return std::make_shared<const std::vector<glm::vec4>>(count, glm::vec4(0, 0, 0, 1));
+    if (name == "tint" && std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(typeOf.data))
+        return std::make_shared<const std::vector<glm::vec3>>(count, glm::vec3(1.0f));
     if (typeOf.typeInfo == AttrTypeInfo::Normal &&
         std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(typeOf.data)) {
         if (auto n = derivedNormals(forGeo, domain); n && n->size() == count) return n;

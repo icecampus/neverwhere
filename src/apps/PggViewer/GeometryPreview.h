@@ -23,7 +23,8 @@
 struct PreviewVertex {
     glm::vec3 pos;
     glm::vec3 normal;
-    float mask;  // 1 = in the highlighted group
+    glm::vec3 color;  // albedo: @Cd (linear rgb) or the neutral base grey
+    float mask;       // 1 = in the highlighted group
 };
 
 struct PreviewGeometry {
@@ -32,6 +33,7 @@ struct PreviewGeometry {
     glm::vec3 bmin{0.0f}, bmax{0.0f};
     std::string summary;                 // "mesh 12508 pts, 25004 tri" / "sdf -> mesh ..." / error text
     std::vector<std::string> groups;     // highlightable group names ("<domain>:<name>")
+    bool hasColor = false;               // a vec3 @Cd column was found and baked into the vertices
     bool ok = false;
 };
 
@@ -46,6 +48,9 @@ enum class PreviewShading { Auto, Smooth, Flat };
 struct PreviewBuildOptions {
     std::string highlightGroup;  // "<domain>:<name>" from PreviewGeometry::groups, "" = none
     PreviewShading shading = PreviewShading::Auto;
+    // Albedo from the vec3 attribute @Cd (spec §4.3: surface color, any domain;
+    // faces/corners unweld the mesh so face colors stay crisp). false = neutral grey.
+    bool vertexColors = true;
     int sdfResolution = 64;      // longest bbox axis in voxels for sdf values
     unsigned threads = 0;
 };
@@ -84,8 +89,7 @@ private:
     };
     struct FsParams {
         float lightDir[4];
-        float highlight[4];  // rgb + strength
-        float base[4];       // rgb + flat-shade flag
+        float highlight[4];  // rgb + strength (albedo itself is a vertex attribute)
     };
 
     void ensureTarget(int w, int h);
