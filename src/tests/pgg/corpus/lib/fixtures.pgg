@@ -1,15 +1,81 @@
 # Навесное оборудование дома: фонари и прочая «фурнитура» фасада. Детали — из
-# lib/parts.pgg (брус с фаской); группы материалов: wood, lamp (светящийся корпус).
+# lib/parts.pgg (брус с фаской); группы материалов: iron (кованый металл),
+# lamp (светящееся стекло). Локальная система фонаря: стена — плоскость z = 0,
+# наружу +Z, вверх +Y; `at` — точка крепления пластины на стене.
 
 import lib.parts
 
+def rod(p0: vec3, p1: vec3, p2: vec3, p3: vec3, r: f32, n: int) -> (out: geo<mesh>) {
+    """Кованый прут: кубическая Безье по четырём точкам, протянутая круглым профилем
+    радиуса r (n сегментов вдоль). Крышки на концах, нормали auto — прут читается
+    круглым, торцы жёсткие. Группа iron."""
+    path = bezier_points(p0 = p0, p1 = p1, p2 = p2, p3 = p3, count = n)
+    tube = sweep(path, profile = circle(sides = 8, radius = r))
+    out = mark(compute_normals(tube, mode = auto, angle = 50), "iron", where = true, domain = faces)
+}
+
+def ring(center: vec3, radius: f32, r: f32, yaw_deg: f32) -> (out: geo<mesh>) {
+    """Кольцо (тор): окружность радиуса radius в плоскости XY (смотрит вдоль Z),
+    повёрнутая на yaw_deg вокруг Y, профиль радиуса r. Звено цепи, подвес, ушко."""
+    loop = circle(sides = 14, radius = radius)
+    torus = sweep(loop, profile = circle(sides = 6, radius = r), closed = true)
+    placed = transform(compute_normals(torus, mode = auto, angle = 50), rotate = vec3(0, yaw_deg, 0), translate = center)
+    out = mark(placed, "iron", where = true, domain = faces)
+}
+
+def pyramid_cap(base: vec3, half: f32, h: f32, tip: f32) -> (out: geo<mesh>) {
+    """Четырёхскатная крышка: квадрат полустороны half в основании base сводится к
+    квадрату полустороны tip на высоте h (sweep квадратного профиля вверх с
+    @profile_scale). Профиль — circle(4) повёрнут на 45°, чтобы стороны шли по осям."""
+    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
+    path = set(transform(path0, translate = base), "profile_scale", @index == 0 ? vec2(1, 1) : vec2(tip / half, tip / half))
+    sq = transform(circle(sides = 4, radius = half * 1.41421), rotate = vec3(0, 0, 45))
+    cap = sweep(path, profile = sq)
+    out = mark(compute_normals(cap, mode = flat), "iron", where = true, domain = faces)
+}
+
 def lantern(at: vec3) -> (out: geo<mesh>) {
-    """Настенный фонарь: кронштейн из стены (−Z → +Z), стеклянный корпус на крюке, крышка."""
-    arm = parts.piece(size = vec3(0.06, 0.06, 0.34), pos = vec3(0, 0.28, 0.17), grp = "wood")
-    hook = parts.piece(size = vec3(0.04, 0.12, 0.04), pos = vec3(0, 0.2, 0.32), grp = "wood")
-    body = parts.piece(size = vec3(0.2, 0.26, 0.2), pos = vec3(0, 0.0, 0.32), grp = "lamp")
-    cap = parts.piece(size = vec3(0.26, 0.05, 0.26), pos = vec3(0, 0.155, 0.32), grp = "wood")
-    base = parts.piece(size = vec3(0.22, 0.04, 0.22), pos = vec3(0, 0.0 - 0.15, 0.32), grp = "wood")
-    l0 = merge(arm, hook, body, cap, base)
+    """Настенный кованый фонарь: пластина на стене, гнутый кронштейн с подкосом-завитком,
+    два звена цепи, четырёхскатная крышка с шишкой, каркас из стоек и обвязок с
+    четырьмя стёклами (группа lamp — светится) и средниками, донце с капелькой.
+    Корпус висит на оси z = 0.32 от стены, стекло — от y = −0.14 до y = 0.14."""
+    plate = parts.piece(size = vec3(0.10, 0.18, 0.02), pos = vec3(0, 0.30, 0.01), grp = "iron")
+    arm = rod(p0 = vec3(0, 0.30, 0.02), p1 = vec3(0, 0.38, 0.14), p2 = vec3(0, 0.38, 0.30), p3 = vec3(0, 0.32, 0.32), r = 0.013, n = 12)
+    brace = rod(p0 = vec3(0, 0.22, 0.02), p1 = vec3(0, 0.24, 0.16), p2 = vec3(0, 0.30, 0.24), p3 = vec3(0, 0.355, 0.235), r = 0.009, n = 12)
+    curl = rod(p0 = vec3(0, 0.355, 0.235), p1 = vec3(0, 0.37, 0.20), p2 = vec3(0, 0.33, 0.18), p3 = vec3(0, 0.325, 0.21), r = 0.008, n = 10)
+    link1 = ring(center = vec3(0, 0.29, 0.32), radius = 0.028, r = 0.005, yaw_deg = 0)
+    link2 = ring(center = vec3(0, 0.25, 0.32), radius = 0.024, r = 0.005, yaw_deg = 90)
+    finial = mark(transform(ico_sphere(subdiv = 1, radius = 0.018), translate = vec3(0, 0.225, 0.32)), "iron", where = true, domain = faces)
+    cap = pyramid_cap(base = vec3(0, 0.155, 0.32), half = 0.13, h = 0.07, tip = 0.02)
+    rim = parts.piece(size = vec3(0.26, 0.015, 0.26), pos = vec3(0, 0.1475, 0.32), grp = "iron")
+    # Каркас: четыре стойки и две квадратные обвязки (верх/низ).
+    post_a = parts.piece(size = vec3(0.016, 0.29, 0.016), pos = vec3(0.10, 0.0, 0.42), grp = "iron")
+    post_b = parts.piece(size = vec3(0.016, 0.29, 0.016), pos = vec3(-0.10, 0.0, 0.42), grp = "iron")
+    post_c = parts.piece(size = vec3(0.016, 0.29, 0.016), pos = vec3(0.10, 0.0, 0.22), grp = "iron")
+    post_d = parts.piece(size = vec3(0.016, 0.29, 0.016), pos = vec3(-0.10, 0.0, 0.22), grp = "iron")
+    rail_tf = parts.piece(size = vec3(0.216, 0.016, 0.016), pos = vec3(0, 0.137, 0.42), grp = "iron")
+    rail_tb = parts.piece(size = vec3(0.216, 0.016, 0.016), pos = vec3(0, 0.137, 0.22), grp = "iron")
+    rail_tl = parts.piece(size = vec3(0.016, 0.016, 0.216), pos = vec3(-0.10, 0.137, 0.32), grp = "iron")
+    rail_tr = parts.piece(size = vec3(0.016, 0.016, 0.216), pos = vec3(0.10, 0.137, 0.32), grp = "iron")
+    rail_bf = parts.piece(size = vec3(0.216, 0.016, 0.016), pos = vec3(0, -0.137, 0.42), grp = "iron")
+    rail_bb = parts.piece(size = vec3(0.216, 0.016, 0.016), pos = vec3(0, -0.137, 0.22), grp = "iron")
+    rail_bl = parts.piece(size = vec3(0.016, 0.016, 0.216), pos = vec3(-0.10, -0.137, 0.32), grp = "iron")
+    rail_br = parts.piece(size = vec3(0.016, 0.016, 0.216), pos = vec3(0.10, -0.137, 0.32), grp = "iron")
+    # Стёкла — утоплены на 4 мм от плоскости стоек, средник — по середине каждого.
+    glass_f = parts.piece(size = vec3(0.19, 0.27, 0.006), pos = vec3(0, 0.0, 0.414), grp = "lamp")
+    glass_b = parts.piece(size = vec3(0.19, 0.27, 0.006), pos = vec3(0, 0.0, 0.226), grp = "lamp")
+    glass_l = parts.piece(size = vec3(0.006, 0.27, 0.19), pos = vec3(-0.094, 0.0, 0.32), grp = "lamp")
+    glass_r = parts.piece(size = vec3(0.006, 0.27, 0.19), pos = vec3(0.094, 0.0, 0.32), grp = "lamp")
+    mull_f = parts.piece(size = vec3(0.19, 0.012, 0.012), pos = vec3(0, 0.0, 0.42), grp = "iron")
+    mull_b = parts.piece(size = vec3(0.19, 0.012, 0.012), pos = vec3(0, 0.0, 0.22), grp = "iron")
+    mull_l = parts.piece(size = vec3(0.012, 0.012, 0.19), pos = vec3(-0.10, 0.0, 0.32), grp = "iron")
+    mull_r = parts.piece(size = vec3(0.012, 0.012, 0.19), pos = vec3(0.10, 0.0, 0.32), grp = "iron")
+    # Донце с капелькой.
+    base = parts.piece(size = vec3(0.24, 0.02, 0.24), pos = vec3(0, -0.155, 0.32), grp = "iron")
+    drop = pyramid_cap(base = vec3(0, -0.165, 0.32), half = 0.06, h = -0.05, tip = 0.008)
+    frame = merge(post_a, post_b, post_c, post_d, rail_tf, rail_tb, rail_tl, rail_tr, rail_bf, rail_bb, rail_bl, rail_br)
+    glass = merge(glass_f, glass_b, glass_l, glass_r, mull_f, mull_b, mull_l, mull_r)
+    hang = merge(plate, arm, brace, curl, link1, link2, finial)
+    l0 = merge(hang, cap, rim, frame, glass, base, drop)
     out = transform(l0, translate = at)
 }

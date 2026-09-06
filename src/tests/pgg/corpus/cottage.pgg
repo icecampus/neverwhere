@@ -24,7 +24,7 @@ import lib.fixtures
 # Материалы — группы faces (в PggViewer: highlight = faces:<имя>):
 # stone (кладка, цоколь, портал, ступень, труба), wall (штукатурка + фронтоны),
 # wood (балки, рамы, ставни, дверь, клумба, ветровые доски), glass (стёкла),
-# lamp (светящиеся корпуса фонарей), roof (настил), tile (черепица и конёк),
+# lamp (светящиеся стёкла фонарей), iron (ковка фонарей, lib/fixtures.pgg), roof (настил), tile (черепица и конёк),
 # leaf (зелень), flower (цветы), grass (трава), smoke (дым). Цвет — `@Cd` на
 # faces по группам в блоке «окраска» внизу (превью: чекбокс «colors (@Cd)»).
 def place(g: geo<mesh>, yaw_deg: f32, at: vec3) -> (out: geo<mesh>) {
@@ -589,10 +589,11 @@ c8 = ingroup("leaf") ? leaf_col : c7
 c9 = ingroup("flower") ? @tint : c8
 c10 = ingroup("grass") ? vec3(0.07, 0.28, 0.04) : c9
 c11 = ingroup("smoke") ? vec3(0.55, 0.52, 0.55) : c10
+c12 = ingroup("iron") ? vec3(0.025, 0.025, 0.03) : c11
 # Краевой износ: грани фасок (группа "edge" из cbox) светлее и чуть теплее —
 # та самая светлая кромка, по которой глаз читает объём блока/бруса.
 edge_mul = ingroup("edge") ? vec3(1.45, 1.4, 1.3) : vec3(1.0)
-house_col = set(house_raw, "Cd", c11 * edge_mul, domain = faces)
+house_col = set(house_raw, "Cd", c12 * edge_mul, domain = faces)
 # Запечённая AO (v1.24): по точкам (у сварных боксов усреднённые нормали, hits
 # «изнутри» игнорируются), радиус 1.2 м — контактные тени под свесами, за
 # ставнями, между камнями. Превью и OBJ-экспорт умножают @Cd на @ao.
