@@ -4,6 +4,7 @@
 // pointer, 10^5 instances without realize, and merge/E204.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 
 #include "pgg/eval.h"
@@ -238,13 +239,59 @@ TEST(Merge, InstancesMergeIsStageError) {
     EXPECT_EQ(countCode(r, "E201"), 1);
 }
 
+TEST(Merge, DetailConflictIsE609) {
+    // Different per-anchor constants on detail: merging would silently keep
+    // the left one (the stone_arch band trap) — now a hard error.
+    pgg::RunResult r = pgg::run(
+        "s1 = set(mesh_line(count = 1, length = 0.0), \"scale\", 2.0)\n"
+        "s2 = set(mesh_line(count = 1, length = 0.0), \"scale\", 3.0)\n"
+        "pts = merge(s1, s2)\n"
+        "output pts\n");
+    EXPECT_EQ(countCode(r, "E609"), 1);
+}
+
+TEST(Merge, EqualDetailValuesAreNotAConflict) {
+    pgg::RunResult r = pgg::run(
+        "s1 = set(mesh_line(count = 2, length = 1.0), \"scale\", 2.0)\n"
+        "s2 = set(mesh_line(count = 3, length = 2.0), \"scale\", 2.0)\n"
+        "pts = merge(s1, s2)\n"
+        "total = sum_of(@scale, on = pts)\n"
+        "output total\n");
+    expectNoErrors(r);
+    EXPECT_NEAR(pgg::asF32(r.outputs[0].value), 10.0f, 1e-6f);  // 2.0 over 5 points
+}
+
+TEST(Merge, MixedDomainsAreE609) {
+    // Same value but different domains: the merge would zero-fill the detail
+    // side's points and the fresh column would shadow its value on reads.
+    pgg::RunResult r = pgg::run(
+        "s1 = set(mesh_line(count = 1, length = 0.0), \"scale\", 2.0, domain = points)\n"
+        "s2 = set(mesh_line(count = 1, length = 0.0), \"scale\", 2.0)\n"
+        "pts = merge(s1, s2)\n"
+        "output pts\n");
+    EXPECT_EQ(countCode(r, "E609"), 1);
+}
+
+TEST(Merge, DetailGroupConflictIsE609) {
+    pgg::RunResult r = pgg::run(
+        "a = mark(box(size = (1, 1, 1)), \"tag\", where = true, domain = detail)\n"
+        "b = mark(box(size = (1, 1, 1)), \"tag\", where = false, domain = detail)\n"
+        "m = merge(a, b)\n"
+        "output m\n");
+    EXPECT_EQ(countCode(r, "E609"), 1);
+}
+
 TEST(Merge, PreservesStampsThroughInstancePipeline) {
-    // merge of two scattered point clouds keeps their attrs for instancing.
+    // merge of two point clouds keeps their per-anchor stamps for instancing.
+    // Constants meant per point are written with domain = points — E609
+    // refuses the silent detail left-wins this test used to unknowingly
+    // exercise (every anchor was actually stamped x2, and the count-only
+    // assertion could not see it).
     pgg::RunResult r = pgg::run(
         "l1 = mesh_line(count = 2, length = 1.0)\n"
         "l2 = mesh_line(count = 2, length = 1.0)\n"
-        "s1 = set(l1, \"scale\", 2.0)\n"
-        "s2 = set(l2, \"scale\", 3.0)\n"
+        "s1 = set(l1, \"scale\", 2.0, domain = points)\n"
+        "s2 = set(l2, \"scale\", 3.0, domain = points)\n"
         "pts = merge(s1, s2)\n"
         "src = box(size = (1, 1, 1))\n"
         "real = realize(instance_on_points(pts, src))\n"
@@ -252,8 +299,15 @@ TEST(Merge, PreservesStampsThroughInstancePipeline) {
     expectNoErrors(r);
     pgg::GeoPtr g = geoOutput(r, "real");
     ASSERT_TRUE(g);
-    // 4 instances of a unit box: 2 scaled x2, 2 scaled x3 -> 32 verts.
+    // 4 instances of a unit box: 2 scaled x2, 2 scaled x3 -> 32 verts, and the
+    // realized union is 3 units tall (silent detail merge would give 2).
     EXPECT_EQ(g->pointCount(), 32u);
+    float lo = 1e9f, hi = -1e9f;
+    for (const glm::vec3& p : *g->positions) {
+        lo = std::min(lo, p.y);
+        hi = std::max(hi, p.y);
+    }
+    EXPECT_NEAR(hi - lo, 3.0f, 1e-5f);
 }
 
 }  // namespace

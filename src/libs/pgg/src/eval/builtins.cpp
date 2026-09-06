@@ -279,9 +279,11 @@ const std::vector<BuiltinSig>& registry() {
 
         // --- §8.7 attributes --------------------------------------------------
         {
+            ParamSig domain = valDef("domain", ScalarType::String, Value(std::string("auto")));
+            domain.enumValues = {"auto", "points", "corners", "faces", "detail"};
             BuiltinSig s = sig(BuiltinId::SetAttr, "set",
                                {geoArg("geo"), val("name", ScalarType::String, true),
-                                fld("value", ScalarType::Any, true)},
+                                fld("value", ScalarType::Any, true), domain},
                                geoResult());
             s.resultGeoKindOfFirstArg = true;
             r.push_back(s);

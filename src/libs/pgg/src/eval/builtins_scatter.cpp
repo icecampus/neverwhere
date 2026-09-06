@@ -4,8 +4,10 @@
 //
 // merge<K>: mesh (index shift) and points concatenation, no welding. Columns
 // and groups unite by name with zero-fill for the side that lacks them
-// (detail: single element, a wins). Instances-merge is a clean stage error;
-// a kind mismatch is E204.
+// (detail: single element, a wins). A name carried by BOTH operands must sit
+// on the same domain set and compare equal on detail — otherwise E609 (silent
+// zero-fill / shadowing / left-wins data loss is refused). Instances-merge is
+// a clean stage error; a kind mismatch is E204.
 //
 // distribute_points: deterministic priority scheme (spec §19):
 //   1. per-face candidates K_f = ceil(area_f * dMax_f * kOversample),
@@ -38,6 +40,8 @@
 // source point attributes (union across variants, zero-filled).
 
 #include <glm/gtc/quaternion.hpp>
+
+#include <set>
 
 #include "builtins.h"
 #include "parallel.h"
@@ -130,6 +134,48 @@ std::shared_ptr<const std::vector<glm::vec3>> mergedNormals(const Geo& a, const 
     return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
 }
 
+// --- E609 merge conflicts (§8.3, §19 v1.12) ------------------------------------
+// A name carried by BOTH operands must live on the same domain set, and a
+// detail column must compare equal element-wise: merge concatenates the
+// per-element domains and keeps the LEFT detail value, so a mismatch would
+// silently zero-fill one side (the fresh column then shadows it on the read
+// path) or destroy one side's global value. One-sided names stay the
+// documented zero-fill/union case and are not conflicts.
+
+unsigned attrDomainMask(const Geo& g, const std::string& name) {
+    unsigned m = 0;
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const AttrSet* as = g.attrs(d);
+        if (as && as->find(name)) m |= 1u << static_cast<unsigned>(d);
+    }
+    return m;
+}
+
+unsigned groupDomainMask(const Geo& g, const std::string& name) {
+    unsigned m = 0;
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const GroupSet* gs = g.groups(d);
+        if (gs && gs->find(name)) m |= 1u << static_cast<unsigned>(d);
+    }
+    return m;
+}
+
+std::string domainMaskString(unsigned mask) {
+    std::string out;
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        if (!(mask & (1u << static_cast<unsigned>(d)))) continue;
+        if (!out.empty()) out += "+";
+        out += domainName(d);
+    }
+    return out;
+}
+
+bool attrColumnsEqual(const ColumnData& a, const ColumnData& b) {
+    if (a.index() != b.index()) return false;
+    return std::visit([&](const auto& x) { return *x == *std::get<std::decay_t<decltype(x)>>(b); },
+                      a);
+}
+
 Value opMerge(const BoundCall& bound, RunContext& run) {
     const Geo& a = *asGeo(bound.values[0]);
     const Geo& b = *asGeo(bound.values[1]);
@@ -144,6 +190,53 @@ Value opMerge(const BoundCall& bound, RunContext& run) {
                        std::string(geoKindName(a.kind)) + "> and geo<" + std::string(geoKindName(b.kind)) + ">");
         return Value(asGeo(bound.values[0]));
     }
+
+    // E609: report every conflicting shared name, then recover on the left.
+    bool conflict = false;
+    auto checkSharedName = [&](const std::string& name, bool isGroup) {
+        const unsigned ma = isGroup ? groupDomainMask(a, name) : attrDomainMask(a, name);
+        const unsigned mb = isGroup ? groupDomainMask(b, name) : attrDomainMask(b, name);
+        if (!ma || !mb) return;
+        const char* what = isGroup ? "group" : "attribute";
+        if (ma != mb) {
+            run.report("E609", bound.span,
+                       std::string("merge: ") + what + " '@" + name +
+                           "' sits on different domains in the two operands (" + domainMaskString(ma) + " vs " +
+                           domainMaskString(mb) + ") — one side would be zero-filled and shadow the other",
+                       isGroup ? "mark it on the same domain on both sides, or unmark one side"
+                               : "promote it to the same domain on both sides (promote(g, \"" + name +
+                                     "\", from = detail, to = points)), or remove_attr/rename_attr one side");
+            conflict = true;
+            return;
+        }
+        if (!(ma & (1u << static_cast<unsigned>(Domain::Detail)))) return;
+        if (!isGroup) {
+            if (!attrColumnsEqual(a.detailAttrs->find(name)->data, b.detailAttrs->find(name)->data)) {
+                run.report("E609", bound.span,
+                           "merge: detail attribute '@" + name +
+                               "' differs between the operands — the left value would silently win",
+                           "for per-element data write it per point (set(..., domain = points) or promote to "
+                           "points) before merging; remove_attr disposable metadata");
+                conflict = true;
+            }
+        } else if (*a.detailGroups->find(name) != *b.detailGroups->find(name)) {
+            run.report("E609", bound.span,
+                       "merge: detail group '@" + name +
+                           "' differs between the operands — the left value would silently win",
+                       "mark it per element (domain = points/faces) before merging, or unmark one side");
+            conflict = true;
+        }
+    };
+    std::set<std::string> attrNames, groupNames;
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        if (const AttrSet* as = a.attrs(d))
+            for (const auto& [n, c] : as->columns) attrNames.insert(n);
+        if (const GroupSet* gs = a.groups(d))
+            for (const auto& [n, c] : gs->columns) groupNames.insert(n);
+    }
+    for (const std::string& n : attrNames) checkSharedName(n, false);
+    for (const std::string& n : groupNames) checkSharedName(n, true);
+    if (conflict) return Value(asGeo(bound.values[0]));
 
     Geo out;
     out.kind = a.kind;

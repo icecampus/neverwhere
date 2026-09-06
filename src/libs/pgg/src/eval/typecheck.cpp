@@ -505,14 +505,28 @@ private:
                 if (!s.open) {
                     if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit) &&
                         lit != "P" && lit != "N" && lit != "index") {
-                        // Domain inference mirrors the runtime rule: constant
-                        // field -> detail, otherwise points (§19 v0.9). The
-                        // name is global (§8.7): other domains drop the column.
+                        // The explicit domain argument wins (§8.7 v1.12);
+                        // otherwise inference mirrors the runtime rule:
+                        // constant field -> detail, otherwise points (§19
+                        // v0.9). The name is global: other domains drop the
+                        // column.
                         const Type vt = byParam.size() > 2 && byParam[2] ? argTypes[2] : Type{};
-                        const size_t dom = vt.isField ? domainIndex("points") : domainIndex("detail");
-                        for (size_t d2 = 0; d2 < s.attrs.size(); ++d2)
-                            if (d2 != dom) s.attrs[d2].erase(lit);
-                        s.attrs[dom][lit] = vt.base == ScalarType::None ? ScalarType::F32 : vt.base;
+                        size_t dom = vt.isField ? domainIndex("points") : domainIndex("detail");
+                        bool domOpen = false;
+                        if (byParam.size() > 3 && byParam[3]) {
+                            if (literalString(byParam[3], lit3)) {
+                                if (lit3 != "auto") dom = domainIndex(lit3);
+                            } else {
+                                domOpen = true;  // non-literal domain argument
+                            }
+                        }
+                        if (domOpen) {
+                            s = openSchema();
+                        } else {
+                            for (size_t d2 = 0; d2 < s.attrs.size(); ++d2)
+                                if (d2 != dom) s.attrs[d2].erase(lit);
+                            s.attrs[dom][lit] = vt.base == ScalarType::None ? ScalarType::F32 : vt.base;
+                        }
                     } else {
                         s = openSchema();
                     }
@@ -578,6 +592,34 @@ private:
                 const GeoSchema& a = argSchema(byParam, 0);
                 const GeoSchema& bb = argSchema(byParam, 1);
                 if (a.open || bb.open) break;
+                // Static mirror of the runtime E609 check: a name present in
+                // both operands must sit on the same domain set (detail-value
+                // equality is only decidable at runtime).
+                auto maskOf = [](const auto& perDomain, const std::string& n) -> unsigned {
+                    unsigned m = 0;
+                    for (size_t d = 0; d < 4; ++d)
+                        if (perDomain[d].count(n)) m |= 1u << d;
+                    return m;
+                };
+                for (size_t d = 0; d < 4; ++d) {
+                    for (const auto& [n, t] : a.attrs[d]) {
+                        const unsigned ma = maskOf(a.attrs, n), mb = maskOf(bb.attrs, n);
+                        if (ma && mb && ma != mb)
+                            error("E609", c.span,
+                                  "merge: attribute '@" + n +
+                                      "' sits on different domains in the two operands (static schema)",
+                                  "promote it to the same domain on both sides, or remove_attr/rename_attr "
+                                  "one side");
+                    }
+                    for (const std::string& n : a.groups[d]) {
+                        const unsigned ma = maskOf(a.groups, n), mb = maskOf(bb.groups, n);
+                        if (ma && mb && ma != mb)
+                            error("E609", c.span,
+                                  "merge: group '@" + n +
+                                      "' sits on different domains in the two operands (static schema)",
+                                  "mark it on the same domain on both sides, or unmark one side");
+                    }
+                }
                 GeoSchema s = a;
                 s.kind = a.kind == bb.kind ? a.kind : GeoKind::Any;
                 s.hasN = a.hasN || bb.hasN;

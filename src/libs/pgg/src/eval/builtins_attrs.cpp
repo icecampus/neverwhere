@@ -75,8 +75,10 @@ Value opUnmark(const BoundCall& bound) {
     return Value(std::make_shared<const Geo>(std::move(out)));
 }
 
-// set(geo, name, value): materialize a field into a named attribute column.
-// Domain inference: constant field -> detail, otherwise points (§8.7, §19).
+// set(geo, name, value, domain = auto): materialize a field into a named
+// attribute column. The target domain is the explicit `domain` argument when
+// given, otherwise inferred: constant field -> detail, anything else -> points
+// (§8.7, §19).
 Value opSet(const BoundCall& bound, RunContext& run) {
     const Geo& in = *asGeo(bound.values[0]);
     const std::string& name = asString(bound.values[1]);
@@ -88,7 +90,10 @@ Value opSet(const BoundCall& bound, RunContext& run) {
     if (!bound.fields[2]) return Value(asGeo(bound.values[0]));  // static E202 already reported
 
     const FieldNode* field = bound.fields[2];
-    const Domain domain = field->kind == FKind::Const ? Domain::Detail : Domain::Points;
+    const std::string& domArg = asString(bound.values[3]);
+    const Domain domain = domArg == "auto"
+                              ? (field->kind == FKind::Const ? Domain::Detail : Domain::Points)
+                              : domainFromName(domArg);
     ConstBufferPtr buf = evalField(field, in, domain, run);
 
     // The name is global: drop any same-named column from every domain (the

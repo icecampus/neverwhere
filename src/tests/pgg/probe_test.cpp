@@ -314,13 +314,16 @@ TEST(Probe, AggregateStats) {
 
 // --- 7. taps ----------------------------------------------------------------------
 
+// The per-instance constant `size` is written per point (domain = points) —
+// the merge-safe idiom: on detail it would differ between the two instances
+// and the merge would be an E609 (silent left-wins before v1.12).
 const std::string kTaps =
     "def make_rock(size: f32) -> (out: geo) {\n"
     "    \"\"\"Rock stub.\"\"\"\n"
     "    line = mesh_line(count = 3, length = size)\n"
     "    tagged = set(line, \"ord\", index())\n"
     "    tap tagged\n"
-    "    out = set(tagged, \"size\", size)\n"
+    "    out = set(tagged, \"size\", size, domain = points)\n"
     "}\n"
     "a = make_rock(2.0)\n"
     "b = make_rock(4.0)\n"
@@ -347,7 +350,9 @@ TEST(Probe, TapsFireWhenDebugOn) {
     EXPECT_EQ(r.probes[0].origin, "tap");
     EXPECT_EQ(r.probes[0].path, "merged");
     EXPECT_EQ(r.probes[0].inspector, "stats");
-    EXPECT_EQ(r.probes[0].text, "ord: mean 1, p50 1, p90 2, min 0, max 2 (6 pts)");
+    EXPECT_EQ(r.probes[0].text,
+              "ord: mean 1, p50 1, p90 2, min 0, max 2 (6 pts)\n"
+              "size: mean 3, p50 2, p90 4, min 2, max 4 (6 pts)");
 
     // `tap tagged` inside the def fires on every instance with the default
     // schema+stats pair (§9.3/§9.4).

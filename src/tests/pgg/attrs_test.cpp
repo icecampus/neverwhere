@@ -305,4 +305,55 @@ TEST(Attrs, ConstantScaleOnAnchorIsHonoredByInstancer) {
     EXPECT_NEAR((mx - mn).x, 2.0f, 1e-4f);
 }
 
+TEST(Attrs, SetExplicitDomainPoints) {
+    // domain = points writes a constant per point (v1.12): the column lands on
+    // points and the global-name rule keeps the other domains clean — the
+    // merge-safe way to carry per-anchor constants (E609).
+    pgg::RunResult r = pgg::run(
+        "l = mesh_line(count = 2, length = 1.0)\n"
+        "s = set(l, \"k\", 7.5, domain = points)\n"
+        "output s\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "s");
+    ASSERT_TRUE(g);
+    EXPECT_FALSE(g->detailAttrs && g->detailAttrs->find("k"));
+    auto pts = columnOf<float>(*g, pgg::Domain::Points, "k");
+    ASSERT_TRUE(pts);
+    ASSERT_EQ(pts->size(), 2u);
+    EXPECT_FLOAT_EQ((*pts)[0], 7.5f);
+    EXPECT_FLOAT_EQ((*pts)[1], 7.5f);
+}
+
+TEST(Attrs, SetExplicitDomainFaces) {
+    // An explicit faces domain evaluates the field per face (@index is the
+    // face index there).
+    pgg::RunResult r = pgg::run(
+        "b = box(size = (1, 1, 1))\n"
+        "s = set(b, \"fid\", f32(@index), domain = faces)\n"
+        "output s\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "s");
+    ASSERT_TRUE(g);
+    EXPECT_FALSE(g->pointAttrs && g->pointAttrs->find("fid"));
+    auto f = columnOf<float>(*g, pgg::Domain::Faces, "fid");
+    ASSERT_TRUE(f);
+    ASSERT_EQ(f->size(), g->faceCount());
+    EXPECT_FLOAT_EQ(f->back(), static_cast<float>(g->faceCount() - 1));
+}
+
+TEST(Attrs, SetDomainAutoKeepsInference) {
+    // Explicit domain = auto is the documented default: constant -> detail,
+    // varying -> points.
+    pgg::RunResult r = pgg::run(
+        "b = box(size = (1, 1, 1))\n"
+        "s1 = set(b, \"c\", 2.0, domain = auto)\n"
+        "s2 = set(s1, \"v\", dot(@P, (1, 0, 0)), domain = auto)\n"
+        "output s2\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "s2");
+    ASSERT_TRUE(g);
+    EXPECT_TRUE(g->detailAttrs && g->detailAttrs->find("c"));
+    EXPECT_TRUE(g->pointAttrs && g->pointAttrs->find("v"));
+}
+
 }  // namespace

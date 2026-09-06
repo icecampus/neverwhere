@@ -204,23 +204,23 @@ i_vr0f = sdf_intersect(i_vr0, cut_slab_r)
 # Растворный бандаж дуги: те же клинья, но реже/уже/ниже (утоплен ~3–5 см) и с
 # полушириной 8.4° (куски перекрываются — бандаж непрерывный). Якоря ТОЧНЫЕ
 # (без джиттера), один вызов instance на слитых точках = union кусков.
-# Грабля merge: константный orient от set() живёт на detail-домене (одно значение
-# на всю геометрию), а merge detail-колонки не конкатенирует — побеждает левый
-# операнд, и все 11 якорей схлопнулись бы в roll первого (b_vl0): клинья бандажа
-# вылезали из кладки плитами. Поэтому перед слиянием каждый якорь продвигает
-# orient detail→points (promote копирует константу на точку), а points-колонки
-# merge конкатенирует честно.
-b_vl0 = promote(set(transform(ring_c, translate = (-1.732, 0.249, 0)), "orient", orient_from_euler((0, 0, 81.82))), "orient", from = detail, to = points)
-b_vl1 = promote(set(transform(ring_c, translate = (-1.592, 0.727, 0)), "orient", orient_from_euler((0, 0, 65.45))), "orient", from = detail, to = points)
-b_vl2 = promote(set(transform(ring_c, translate = (-1.323, 1.146, 0)), "orient", orient_from_euler((0, 0, 49.09))), "orient", from = detail, to = points)
-b_vl3 = promote(set(transform(ring_c, translate = (-0.946, 1.472, 0)), "orient", orient_from_euler((0, 0, 32.73))), "orient", from = detail, to = points)
-b_vl4 = promote(set(transform(ring_c, translate = (-0.493, 1.679, 0)), "orient", orient_from_euler((0, 0, 16.36))), "orient", from = detail, to = points)
-b_key = promote(set(transform(ring_c, translate = (0, 1.75, 0)), "orient", orient_from_euler((0, 0, 0))), "orient", from = detail, to = points)
-b_vr4 = promote(set(transform(ring_c, translate = (0.493, 1.679, 0)), "orient", orient_from_euler((0, 0, -16.36))), "orient", from = detail, to = points)
-b_vr3 = promote(set(transform(ring_c, translate = (0.946, 1.472, 0)), "orient", orient_from_euler((0, 0, -32.73))), "orient", from = detail, to = points)
-b_vr2 = promote(set(transform(ring_c, translate = (1.323, 1.146, 0)), "orient", orient_from_euler((0, 0, -49.09))), "orient", from = detail, to = points)
-b_vr1 = promote(set(transform(ring_c, translate = (1.592, 0.727, 0)), "orient", orient_from_euler((0, 0, -65.45))), "orient", from = detail, to = points)
-b_vr0 = promote(set(transform(ring_c, translate = (1.732, 0.249, 0)), "orient", orient_from_euler((0, 0, -81.82))), "orient", from = detail, to = points)
+# Правило E609 (PGG v1.12): одноимённый атрибут обоих операндов merge обязан
+# жить на одном домене, а detail-значения — совпадать (detail — одно значение
+# на геометрию; различающиеся константы кренов при слиянии схлопнулись бы в roll
+# первого якоря — клинья бандажа вылезали из кладки плитами). Поэтому orient
+# пишется сразу по-точечно: set(..., domain = points) — points-колонки merge
+# конкатенирует честно.
+b_vl0 = set(transform(ring_c, translate = (-1.732, 0.249, 0)), "orient", orient_from_euler((0, 0, 81.82)), domain = points)
+b_vl1 = set(transform(ring_c, translate = (-1.592, 0.727, 0)), "orient", orient_from_euler((0, 0, 65.45)), domain = points)
+b_vl2 = set(transform(ring_c, translate = (-1.323, 1.146, 0)), "orient", orient_from_euler((0, 0, 49.09)), domain = points)
+b_vl3 = set(transform(ring_c, translate = (-0.946, 1.472, 0)), "orient", orient_from_euler((0, 0, 32.73)), domain = points)
+b_vl4 = set(transform(ring_c, translate = (-0.493, 1.679, 0)), "orient", orient_from_euler((0, 0, 16.36)), domain = points)
+b_key = set(transform(ring_c, translate = (0, 1.75, 0)), "orient", orient_from_euler((0, 0, 0)), domain = points)
+b_vr4 = set(transform(ring_c, translate = (0.493, 1.679, 0)), "orient", orient_from_euler((0, 0, -16.36)), domain = points)
+b_vr3 = set(transform(ring_c, translate = (0.946, 1.472, 0)), "orient", orient_from_euler((0, 0, -32.73)), domain = points)
+b_vr2 = set(transform(ring_c, translate = (1.323, 1.146, 0)), "orient", orient_from_euler((0, 0, -49.09)), domain = points)
+b_vr1 = set(transform(ring_c, translate = (1.592, 0.727, 0)), "orient", orient_from_euler((0, 0, -65.45)), domain = points)
+b_vr0 = set(transform(ring_c, translate = (1.732, 0.249, 0)), "orient", orient_from_euler((0, 0, -81.82)), domain = points)
 band_pts = merge(merge(merge(b_vl0, b_vl1), merge(b_vl2, b_vl3)), merge(merge(merge(b_vl4, b_key), merge(b_vr4, b_vr3)), merge(merge(b_vr2, b_vr1), b_vr0)))
 f_band = masonry.voussoir_field(radius = 1.75, height = 0.76, depth = 0.75, half_deg = 8.4, rng = split_rng(r_band, key = "field"))
 m_band = mark(masonry.stone_from_field(sdf_instance_on_points(band_pts, source = f_band), 0.85, split_rng(r_band, key = "moss")), "mortar", where = true, domain = faces)

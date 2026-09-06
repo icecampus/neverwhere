@@ -160,4 +160,27 @@ TEST(Schema, SetDomainInferenceMirrorsRuntime) {
     pggtest::expectNoErrors(r);
 }
 
+TEST(Schema, MergeDomainMismatchIsStaticE609) {
+    // Closed schemas: a name on points in one operand and detail in the other
+    // is caught before any execution (mirror of the runtime E609; detail-value
+    // equality itself is only decidable at runtime).
+    pgg::RunResult r = runSrc(
+        "a = set(mesh_line(count = 1, length = 0.0), \"scale\", 2.0, domain = points)\n"
+        "b = set(mesh_line(count = 1, length = 0.0), \"scale\", 2.0)\n"
+        "m = merge(a, b)\n"
+        "output m\n");
+    EXPECT_EQ(countCode(r, "E609"), 1);
+    EXPECT_TRUE(hasMessage(r, "E609", "static schema"));
+}
+
+TEST(Schema, MergeSameDomainSameNameIsClean) {
+    // Both operands carry the name on points — honest concatenation, no E609.
+    pgg::RunResult r = runSrc(
+        "a = set(mesh_line(count = 1, length = 0.0), \"scale\", 2.0, domain = points)\n"
+        "b = set(mesh_line(count = 1, length = 0.0), \"scale\", 3.0, domain = points)\n"
+        "m = merge(a, b)\n"
+        "output m\n");
+    pggtest::expectNoErrors(r);
+}
+
 }  // namespace
