@@ -320,8 +320,10 @@ const std::vector<BuiltinSig>& registry() {
 
         // --- §8.3 merge (E2 subset of topology) ---------------------------------
         {
+            // Variadic: merge(a, b, c, ...) folds left (§8.3, v1.19).
             BuiltinSig s = sig(BuiltinId::Merge, "merge", {geoArg("a"), geoArg("b")}, geoResult());
             s.resultGeoKindOfFirstArg = true;
+            s.variadic = true;
             r.push_back(s);
         }
         {

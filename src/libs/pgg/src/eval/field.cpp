@@ -666,7 +666,14 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
         if (!tv) continue;
         if (tv.field) {
             run.report("E205", arg->value->span,
-                       "ramp points must be values, got " + typeName(tv.type));
+                       (sig->id == BuiltinId::Merge ? "merge operands must be geometries, got "
+                                                    : "ramp points must be values, got ") +
+                           typeName(tv.type));
+            continue;
+        }
+        if (sig->id == BuiltinId::Merge && valueBase(tv.value) != ScalarType::Geo) {
+            run.report("E204", arg->value->span,
+                       "merge operands must be geometries, got " + typeName(tv.type));
             continue;
         }
         variadic.push_back(tv.value);
@@ -764,6 +771,9 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
             bound.fields.push_back(nullptr);  // optional without argument
         }
     }
+
+    // Variadic geo tail (merge): appended after the declared params.
+    if (sig->variadic && !sig->exprFunc) bound.values.insert(bound.values.end(), variadic.begin(), variadic.end());
 
     if (sig->result.isField) {
         // §8.5 field generator. position()/normal()/index() map straight onto

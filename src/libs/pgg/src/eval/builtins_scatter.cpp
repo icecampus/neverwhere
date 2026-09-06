@@ -184,19 +184,20 @@ bool attrColumnsEqual(const ColumnData& a, const ColumnData& b) {
                       a);
 }
 
-Value opMerge(const BoundCall& bound, RunContext& run) {
-    const Geo& a = *asGeo(bound.values[0]);
-    const Geo& b = *asGeo(bound.values[1]);
+// One binary merge step; on a conflict reports and returns `aPtr` (left wins).
+GeoPtr mergeTwo(const GeoPtr& aPtr, const GeoPtr& bPtr, const BoundCall& bound, RunContext& run) {
+    const Geo& a = *aPtr;
+    const Geo& b = *bPtr;
     if (a.kind == GeoKind::Instances || b.kind == GeoKind::Instances) {
         run.report("E201", bound.span, "merge of geo<instances> is not supported at stage E4",
                    "realize the instances first, then merge meshes");
-        return Value(asGeo(bound.values[0]));
+        return aPtr;
     }
     if (a.kind != b.kind) {
         run.report("E204", bound.span,
-                   "merge<K> needs two geometries of the same kind, got geo<" +
+                   "merge<K> needs geometries of the same kind, got geo<" +
                        std::string(geoKindName(a.kind)) + "> and geo<" + std::string(geoKindName(b.kind)) + ">");
-        return Value(asGeo(bound.values[0]));
+        return aPtr;
     }
 
     // E609: report every conflicting shared name, then recover on the left.
@@ -262,7 +263,7 @@ Value opMerge(const BoundCall& bound, RunContext& run) {
     }
     for (const std::string& n : attrNames) checkSharedName(n, false);
     for (const std::string& n : groupNames) checkSharedName(n, true);
-    if (conflict) return Value(asGeo(bound.values[0]));
+    if (conflict) return aPtr;
 
     Geo out;
     out.kind = a.kind;
@@ -295,7 +296,19 @@ Value opMerge(const BoundCall& bound, RunContext& run) {
     out.cornerGroups = mergedGroups(a, b, Domain::Corners);
     out.faceGroups = mergedGroups(a, b, Domain::Faces);
     out.detailGroups = mergedGroups(a, b, Domain::Detail);
-    return Value(std::make_shared<const Geo>(std::move(out)));
+    return std::make_shared<const Geo>(std::move(out));
+}
+
+// merge(a, b, ...): left fold of binary merges (spec §8.3, variadic since v1.19).
+// Order of points/faces = argument order, so `merge(a, b, c)` ==
+// `merge(merge(a, b), c)` bit for bit.
+Value opMerge(const BoundCall& bound, RunContext& run) {
+    GeoPtr acc = asGeo(bound.values[0]);
+    for (size_t i = 1; i < bound.values.size(); ++i) {
+        if (valueBase(bound.values[i]) != ScalarType::Geo) continue;  // typecheck already reported
+        acc = mergeTwo(acc, asGeo(bound.values[i]), bound, run);
+    }
+    return Value(acc);
 }
 
 // ------------------------------------------------------- distribute_points ----

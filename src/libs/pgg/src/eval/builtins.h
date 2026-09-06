@@ -78,7 +78,7 @@ struct BuiltinSig {
     std::vector<ParamSig> params;
     Type result;
     std::vector<Type> results;               // non-empty -> multi-output node (destructured)
-    bool variadic = false;                   // ramp: trailing values after declared params
+    bool variadic = false;                   // trailing positional args: ramp (values), merge (geos)
     bool resultGeoKindOfFirstArg = false;    // geo<K> of the first geo argument is kept
     bool exprFunc = false;                   // §6.3 expression function (field-polymorphic)
     const char* deferredStage = nullptr;     // non-null -> known, but not supported at this stage

@@ -446,8 +446,59 @@ private:
 
     void storeSchema(const Expr* call, GeoSchema s) { callSchemas_[call] = std::move(s); }
 
+    // Static mirror of the runtime E609 check for one binary merge step: a
+    // name present in both operands must sit on the same domain set with the
+    // same typeinfo (detail-value equality is only decidable at runtime).
+    // Returns the merged schema (open if either side is open).
+    GeoSchema mergeSchemas(const GeoSchema& a, const GeoSchema& bb, const Span& span) {
+        if (a.open || bb.open) return openSchema();
+        auto maskOf = [](const auto& perDomain, const std::string& n) -> unsigned {
+            unsigned m = 0;
+            for (size_t d = 0; d < 4; ++d)
+                if (perDomain[d].count(n)) m |= 1u << d;
+            return m;
+        };
+        for (size_t d = 0; d < 4; ++d) {
+            for (const auto& [n, t] : a.attrs[d]) {
+                const unsigned ma = maskOf(a.attrs, n), mb = maskOf(bb.attrs, n);
+                if (ma && mb && ma != mb) {
+                    error("E609", span,
+                          "merge: attribute '@" + n +
+                              "' sits on different domains in the operands (static schema)",
+                          "promote it to the same domain on all sides, or remove_attr/rename_attr one side");
+                } else if (ma && mb) {
+                    const auto itB = bb.attrs[d].find(n);
+                    if (itB != bb.attrs[d].end() && itB->second.info != t.info)
+                        error("E609", span,
+                              "merge: attribute '@" + n + "' has typeinfo " +
+                                  std::string(attrTypeInfoName(t.info)) + " on the left and " +
+                                  std::string(attrTypeInfoName(itB->second.info)) + " on the right (static schema)",
+                              "write both sides with the same set(..., typeinfo = ...)");
+                }
+            }
+            for (const std::string& n : a.groups[d]) {
+                const unsigned ma = maskOf(a.groups, n), mb = maskOf(bb.groups, n);
+                if (ma && mb && ma != mb)
+                    error("E609", span,
+                          "merge: group '@" + n + "' sits on different domains in the operands (static schema)",
+                          "mark it on the same domain on all sides, or unmark one side");
+            }
+        }
+        GeoSchema s = a;
+        s.kind = a.kind == bb.kind ? a.kind : GeoKind::Any;
+        s.hasN = a.hasN || bb.hasN;
+        s.nStale = a.nStale || bb.nStale;
+        for (size_t d = 0; d < 4; ++d) {
+            for (const auto& [n, t] : bb.attrs[d]) s.attrs[d].emplace(n, t);
+            for (const std::string& n : bb.groups[d]) s.groups[d].insert(n);
+        }
+        s.instanceSource = nullptr;
+        return s;
+    }
+
     void computeCallSchema(const BuiltinSig& sig, const Call& c,
-                           const std::vector<const CallArg*>& byParam, const std::vector<Type>& argTypes) {
+                           const std::vector<const CallArg*>& byParam, const std::vector<Type>& argTypes,
+                           const std::vector<const CallArg*>& variadicArgs = {}) {
         std::string lit, lit2, lit3;
         switch (sig.id) {
             case BuiltinId::IcoSphere:
@@ -708,57 +759,13 @@ private:
                 break;
             }
             case BuiltinId::Merge: {
-                const GeoSchema& a = argSchema(byParam, 0);
-                const GeoSchema& bb = argSchema(byParam, 1);
-                if (a.open || bb.open) break;
-                // Static mirror of the runtime E609 check: a name present in
-                // both operands must sit on the same domain set (detail-value
-                // equality is only decidable at runtime).
-                auto maskOf = [](const auto& perDomain, const std::string& n) -> unsigned {
-                    unsigned m = 0;
-                    for (size_t d = 0; d < 4; ++d)
-                        if (perDomain[d].count(n)) m |= 1u << d;
-                    return m;
-                };
-                for (size_t d = 0; d < 4; ++d) {
-                    for (const auto& [n, t] : a.attrs[d]) {
-                        const unsigned ma = maskOf(a.attrs, n), mb = maskOf(bb.attrs, n);
-                        if (ma && mb && ma != mb) {
-                            error("E609", c.span,
-                                  "merge: attribute '@" + n +
-                                      "' sits on different domains in the two operands (static schema)",
-                                  "promote it to the same domain on both sides, or remove_attr/rename_attr "
-                                  "one side");
-                        } else if (ma && mb) {
-                            const auto itB = bb.attrs[d].find(n);
-                            if (itB != bb.attrs[d].end() && itB->second.info != t.info)
-                                error("E609", c.span,
-                                      "merge: attribute '@" + n + "' has typeinfo " +
-                                          std::string(attrTypeInfoName(t.info)) + " on the left and " +
-                                          std::string(attrTypeInfoName(itB->second.info)) +
-                                          " on the right (static schema)",
-                                      "write both sides with the same set(..., typeinfo = ...)");
-                        }
-                    }
-                    for (const std::string& n : a.groups[d]) {
-                        const unsigned ma = maskOf(a.groups, n), mb = maskOf(bb.groups, n);
-                        if (ma && mb && ma != mb)
-                            error("E609", c.span,
-                                  "merge: group '@" + n +
-                                      "' sits on different domains in the two operands (static schema)",
-                                  "mark it on the same domain on both sides, or unmark one side");
-                    }
+                // Left fold over all operands (variadic tail included).
+                GeoSchema s = mergeSchemas(argSchema(byParam, 0), argSchema(byParam, 1), c.span);
+                for (const CallArg* arg : variadicArgs) {
+                    if (s.open) break;
+                    s = mergeSchemas(s, arg ? schemaOfExpr(arg->value) : openSchema(), c.span);
                 }
-                GeoSchema s = a;
-                s.kind = a.kind == bb.kind ? a.kind : GeoKind::Any;
-                s.hasN = a.hasN || bb.hasN;
-                s.nStale = a.nStale || bb.nStale;
-                for (size_t d = 0; d < 4; ++d) {
-                    for (const auto& [n, t] : bb.attrs[d]) s.attrs[d].emplace(n, t);
-                    for (const std::string& n : bb.groups[d]) s.groups[d].insert(n);
-                }
-                s.instanceSource = nullptr;
-                storeSchema(&c, std::move(s));
+                if (!s.open) storeSchema(&c, std::move(s));
                 break;
             }
             case BuiltinId::DistributePoints: {
@@ -1291,7 +1298,10 @@ private:
         }
         for (const CallArg* arg : variadicArgs) {
             Type t = infer(arg->value);
-            if (t.isField) {
+            if (sig->id == BuiltinId::Merge) {
+                if (t.base != ScalarType::None && (t.isField || t.base != ScalarType::Geo))
+                    error("E204", arg->value->span, "merge operands must be geometries, got " + typeName(t));
+            } else if (t.isField) {
                 error("E205", arg->value->span, "ramp points must be values, got " + typeName(t));
             }
             argTypes.push_back(t);
@@ -1303,7 +1313,7 @@ private:
             lastSig_ = sig;  // after arg inference: the root call's sig wins
             return rt;
         }
-        computeCallSchema(*sig, *c, byParam, argTypes);
+        computeCallSchema(*sig, *c, byParam, argTypes, variadicArgs);
         Type rt = sig->result;
         if (sig->resultGeoKindOfFirstArg && np > 0 && argTypes[0].base == ScalarType::Geo)
             rt.geoKind = argTypes[0].geoKind;
