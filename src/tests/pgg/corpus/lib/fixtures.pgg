@@ -1,0 +1,15 @@
+# Навесное оборудование дома: фонари и прочая «фурнитура» фасада. Детали — из
+# lib/parts.pgg (брус с фаской); группы материалов: wood, lamp (светящийся корпус).
+
+import lib.parts
+
+def lantern(at: vec3) -> (out: geo<mesh>) {
+    """Настенный фонарь: кронштейн из стены (−Z → +Z), стеклянный корпус на крюке, крышка."""
+    arm = parts.piece(size = vec3(0.06, 0.06, 0.34), pos = vec3(0, 0.28, 0.17), grp = "wood")
+    hook = parts.piece(size = vec3(0.04, 0.12, 0.04), pos = vec3(0, 0.2, 0.32), grp = "wood")
+    body = parts.piece(size = vec3(0.2, 0.26, 0.2), pos = vec3(0, 0.0, 0.32), grp = "lamp")
+    cap = parts.piece(size = vec3(0.26, 0.05, 0.26), pos = vec3(0, 0.155, 0.32), grp = "wood")
+    base = parts.piece(size = vec3(0.22, 0.04, 0.22), pos = vec3(0, 0.0 - 0.15, 0.32), grp = "wood")
+    l0 = merge(arm, hook, body, cap, base)
+    out = transform(l0, translate = at)
+}

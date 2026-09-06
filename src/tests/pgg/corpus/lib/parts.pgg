@@ -1,0 +1,18 @@
+# Базовые детали для «боксовой» архитектуры: брус/блок с фаской. Общие для
+# cottage.pgg и lib/fixtures.pgg; все размеры в метрах, центр детали — в pos.
+
+def cbox(size: vec3, k: f32) -> (out: geo<mesh>) {
+    """Box с фаской (v1.24): ребро скошено на k · min(размер) (клампится bevel'ом),
+    грани фаски — в группе "edge" (краевой износ: в окраске они светлее). Фасеточные
+    corner-N: сварной box несёт гладкие point-@N (диагонали углов, §8.1), и в превью
+    большая плоская грань шейдится «подушкой» — поэтому flat."""
+    w = min(min(dot(size, (1, 0, 0)), dot(size, (0, 1, 0))), dot(size, (0, 0, 1))) * k
+    out = compute_normals(bevel(box(size = size), width = w, bevel_group = "edge"), mode = flat)
+}
+
+def piece(size: vec3, pos: vec3, grp: string) -> (out: geo<mesh>) {
+    """Прямоугольный брус/блок с фаской: cbox размером size с центром в pos, все грани в группе grp."""
+    b = cbox(size = size, k = 0.12)
+    placed = transform(b, translate = pos)
+    out = mark(placed, grp, where = true, domain = faces)
+}

@@ -6,6 +6,9 @@ param jetty: f32 = 0.18
 param overhang: f32 = 0.45
 param seed: int = 7
 
+import lib.parts
+import lib.fixtures
+
 # Стилизованный фахверковый коттедж по референсу (grok-image-905a2b41): узкий
 # высокий дом — каменный первый этаж из отдельных блоков (с настоящими проёмами
 # под дверь и окна), фахверковый второй этаж со свесом (jetty) и торцами балок,
@@ -24,22 +27,6 @@ param seed: int = 7
 # lamp (светящиеся корпуса фонарей), roof (настил), tile (черепица и конёк),
 # leaf (зелень), flower (цветы), grass (трава), smoke (дым). Цвет — `@Cd` на
 # faces по группам в блоке «окраска» внизу (превью: чекбокс «colors (@Cd)»).
-def cbox(size: vec3, k: f32) -> (out: geo<mesh>) {
-    """Box с фаской (v1.24): ребро скошено на k · min(размер) (клампится bevel'ом),
-    грани фаски — в группе "edge" (краевой износ: в окраске они светлее). Фасеточные
-    corner-N: сварной box несёт гладкие point-@N (диагонали углов, §8.1), и в превью
-    большая плоская грань шейдится «подушкой» — поэтому flat."""
-    w = min(min(dot(size, (1, 0, 0)), dot(size, (0, 1, 0))), dot(size, (0, 0, 1))) * k
-    out = compute_normals(bevel(box(size = size), width = w, bevel_group = "edge"), mode = flat)
-}
-
-def piece(size: vec3, pos: vec3, grp: string) -> (out: geo<mesh>) {
-    """Прямоугольный брус/блок с фаской: cbox размером size с центром в pos, все грани в группе grp."""
-    b = cbox(size = size, k = 0.12)
-    placed = transform(b, translate = pos)
-    out = mark(placed, grp, where = true, domain = faces)
-}
-
 def place(g: geo<mesh>, yaw_deg: f32, at: vec3) -> (out: geo<mesh>) {
     """Поворот меша вокруг Y на yaw_deg (0 = смотрит в +Z) и перенос в at."""
     r = transform(g, rotate = vec3(0, yaw_deg, 0))
@@ -98,11 +85,11 @@ def arch_sdf(w: f32, straight: f32, r: f32, t: f32) -> (out: sdf) {
 def window(w: f32, h: f32) -> (out: geo<mesh>) {
     """Окно в начале координат, смотрит в +Z: рама w×h с крестовиной (2×2 стекла),
     стекло чуть утоплено, подоконник. Задняя плоскость рамы — z = −0.06."""
-    frame = piece(size = vec3(w, h, 0.12), pos = (0, 0, 0), grp = "wood")
-    glass = piece(size = vec3(w - 0.2, h - 0.2, 0.13), pos = (0, 0, 0), grp = "glass")
-    bar_v = piece(size = vec3(0.07, h - 0.2, 0.16), pos = (0, 0, 0), grp = "wood")
-    bar_h = piece(size = vec3(w - 0.2, 0.07, 0.16), pos = (0, 0, 0), grp = "wood")
-    sill = piece(size = vec3(w + 0.24, 0.09, 0.26), pos = vec3(0, 0.0 - h * 0.5 - 0.02, 0.05), grp = "wood")
+    frame = parts.piece(size = vec3(w, h, 0.12), pos = (0, 0, 0), grp = "wood")
+    glass = parts.piece(size = vec3(w - 0.2, h - 0.2, 0.13), pos = (0, 0, 0), grp = "glass")
+    bar_v = parts.piece(size = vec3(0.07, h - 0.2, 0.16), pos = (0, 0, 0), grp = "wood")
+    bar_h = parts.piece(size = vec3(w - 0.2, 0.07, 0.16), pos = (0, 0, 0), grp = "wood")
+    sill = parts.piece(size = vec3(w + 0.24, 0.09, 0.26), pos = vec3(0, 0.0 - h * 0.5 - 0.02, 0.05), grp = "wood")
     out = merge(frame, glass, bar_v, bar_h, sill)
 }
 
@@ -112,7 +99,7 @@ def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
     выступ по z (±0.006) и оттенок @tint (полутоновая полоса читается и при плоском
     свете, когда шов не виден). Доски — инстансы на mesh_line, один realize."""
     pitch = w / f32(n)
-    plank = cbox(size = vec3(pitch - 0.008, h, t), k = 0.18)
+    plank = parts.cbox(size = vec3(pitch - 0.008, h, t), k = 0.18)
     pts0 = mesh_line(count = n, length = w - pitch, dir = (1, 0, 0))
     pts1 = transform(pts0, translate = vec3(0.0 - (w - pitch) * 0.5, 0, 0))
     pts2 = set_position(pts1, offset = random_vec(lo = vec3(0, 0, -0.006), hi = vec3(0, 0, 0.006), rng = split_rng(rng, key = "z")))
@@ -124,8 +111,8 @@ def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
 def shutter(sw: f32, h: f32, rng: rng) -> (out: geo<mesh>) {
     """Ставня: щит из трёх вертикальных досок плюс две поперечные планки; центр в 0, лицо в +Z."""
     panel = plank_panel(w = sw, h = h, t = 0.05, n = 3, rng = rng)
-    b1 = piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, h * 0.3, 0.04), grp = "wood")
-    b2 = piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, 0.0 - h * 0.3, 0.04), grp = "wood")
+    b1 = parts.piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, h * 0.3, 0.04), grp = "wood")
+    b2 = parts.piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, 0.0 - h * 0.3, 0.04), grp = "wood")
     out = merge(panel, b1, b2)
 }
 
@@ -139,25 +126,14 @@ def window_sh(w: f32, h: f32, off: f32, rng: rng) -> (out: geo<mesh>) {
     out = merge(win, sh_l, sh_r)
 }
 
-def lantern(at: vec3) -> (out: geo<mesh>) {
-    """Настенный фонарь: кронштейн из стены (−Z → +Z), стеклянный корпус на крюке, крышка."""
-    arm = piece(size = vec3(0.06, 0.06, 0.34), pos = vec3(0, 0.28, 0.17), grp = "wood")
-    hook = piece(size = vec3(0.04, 0.12, 0.04), pos = vec3(0, 0.2, 0.32), grp = "wood")
-    body = piece(size = vec3(0.2, 0.26, 0.2), pos = vec3(0, 0.0, 0.32), grp = "lamp")
-    cap = piece(size = vec3(0.26, 0.05, 0.26), pos = vec3(0, 0.155, 0.32), grp = "wood")
-    base = piece(size = vec3(0.22, 0.04, 0.22), pos = vec3(0, 0.0 - 0.15, 0.32), grp = "wood")
-    l0 = merge(arm, hook, body, cap, base)
-    out = transform(l0, translate = at)
-}
-
 def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<mesh>) {
     """Кладка одной стены в локальной системе (x вдоль стены, центр в 0): ряды якорей
     → блок с центром за краем не кладётся → @scale/@variant (три длины blk × 1 / 1.1 / 1.2 — не длиннее шага ряда, чтобы соседи не сливались в плиту)
     → почти серый @tint → джиттер → realize → подрезка торцов плоскостями x = ±len/2
     (`clip`, крышки срезов в группе `cut`). Ставится на место внешним transform."""
-    a0 = cbox(size = blk, k = 0.16)
-    a1 = cbox(size = blk * vec3(1.1, 1, 1), k = 0.16)
-    a2 = cbox(size = blk * vec3(1.2, 1, 1), k = 0.16)
+    a0 = parts.cbox(size = blk, k = 0.16)
+    a1 = parts.cbox(size = blk * vec3(1.1, 1, 1), k = 0.16)
+    a2 = parts.cbox(size = blk * vec3(1.2, 1, 1), k = 0.16)
     kept = delete(rows, where = abs(dot(@P, (1, 0, 0))) > len * 0.5 + 0.02)
     p1 = set(kept, "scale", random(lo = 0.92, hi = 1.08, rng = split_rng(rng, key = "scale")))
     p2 = set(p1, "variant", random_int(n = 3, rng = split_rng(rng, key = "var")))
@@ -215,8 +191,8 @@ grass_rng = split_rng(root_rng, key = "grass")
 tile_rng = split_rng(root_rng, key = "tiles")
 
 # --- каменный первый этаж: сердцевина + кладка --------------------------------
-core = piece(size = vec3(width, stone_h, depth), pos = vec3(0, stone_h * 0.5, 0), grp = "stone")
-plinth = piece(size = vec3(width + 0.3, 0.32, depth + 0.3), pos = vec3(0, 0.16, 0), grp = "stone")
+core = parts.piece(size = vec3(width, stone_h, depth), pos = vec3(0, stone_h * 0.5, 0), grp = "stone")
+plinth = parts.piece(size = vec3(width + 0.3, 0.32, depth + 0.3), pos = vec3(0, 0.16, 0), grp = "stone")
 
 # Кладка: блоки трёх длин (0.5/0.55/0.6 × 0.26 × 0.1, выбор через @variant) по
 # рядам вразбежку (шаг ≈0.55 подогнан под стену, ряд 0.3), per-point джиттер позиции/выступа и масштаба —
@@ -252,12 +228,12 @@ veneer = mark(merge(wall_f, wall_b, wall_l, wall_r), "stone", where = true, doma
 # чередуется по рядам — перевязка углов, заодно прячет торцы рядов кладки.
 qx = width * 0.5 + 0.04
 qz = depth * 0.5 + 0.04
-q0a = cbox(size = vec3(0.62, 0.27, 0.4), k = 0.12)
+q0a = parts.cbox(size = vec3(0.62, 0.27, 0.4), k = 0.12)
 q0 = mark(merge(transform(q0a, translate = vec3(qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(qx, course_h * 0.5, 0.0 - qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, 0.0 - qz))), "stone", where = true, domain = faces)
 quoins = repeat (q0, iterations = n_rows - 1) |acc| {
     k = f32(@iteration) + 1.0
     odd = k - 2.0 * floor(k * 0.5)
-    qb = cbox(size = vec3(0.62 - odd * 0.22, 0.27, 0.4 + odd * 0.22), k = 0.12)
+    qb = parts.cbox(size = vec3(0.62 - odd * 0.22, 0.27, 0.4 + odd * 0.22), k = 0.12)
     qy = (k + 0.5) * course_h
     qa = transform(qb, translate = vec3(qx, qy, qz))
     qc = transform(qb, translate = vec3(0.0 - qx, qy, qz))
@@ -269,26 +245,26 @@ quoins = repeat (q0, iterations = n_rows - 1) |acc| {
 masonry = merge(core, plinth, veneer, quoins)
 
 # --- второй этаж: штукатурка + фахверк ----------------------------------------
-upper = piece(size = vec3(uw, upper_h, ud), pos = vec3(0, stone_h + upper_h * 0.5, 0), grp = "wall")
+upper = parts.piece(size = vec3(uw, upper_h, ud), pos = vec3(0, stone_h + upper_h * 0.5, 0), grp = "wall")
 
 mid_y = stone_h + upper_h * 0.5
 rail_y = stone_h + upper_h * 0.5
 # угловые столбы
-post_fl = piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(0.0 - uw * 0.5 + 0.1, mid_y, tf_z - 0.1), grp = "wood")
-post_fr = piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(uw * 0.5 - 0.1, mid_y, tf_z - 0.1), grp = "wood")
-post_bl = piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(0.0 - uw * 0.5 + 0.1, mid_y, 0.0 - tf_z + 0.1), grp = "wood")
-post_br = piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(uw * 0.5 - 0.1, mid_y, 0.0 - tf_z + 0.1), grp = "wood")
+post_fl = parts.piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(0.0 - uw * 0.5 + 0.1, mid_y, tf_z - 0.1), grp = "wood")
+post_fr = parts.piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(uw * 0.5 - 0.1, mid_y, tf_z - 0.1), grp = "wood")
+post_bl = parts.piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(0.0 - uw * 0.5 + 0.1, mid_y, 0.0 - tf_z + 0.1), grp = "wood")
+post_br = parts.piece(size = vec3(0.22, upper_h, 0.22), pos = vec3(uw * 0.5 - 0.1, mid_y, 0.0 - tf_z + 0.1), grp = "wood")
 # нижние обвязки (по свесу; перекрывают верх кладки) и верхние плиты
-sill_f = piece(size = vec3(uw + 0.18, 0.26, 0.28), pos = vec3(0, stone_h + 0.02, tf_z), grp = "wood")
-sill_b = piece(size = vec3(uw + 0.18, 0.26, 0.28), pos = vec3(0, stone_h + 0.02, 0.0 - tf_z), grp = "wood")
-sill_l = piece(size = vec3(0.28, 0.26, ud + 0.18), pos = vec3(0.0 - uw * 0.5, stone_h + 0.02, 0), grp = "wood")
-sill_r = piece(size = vec3(0.28, 0.26, ud + 0.18), pos = vec3(uw * 0.5, stone_h + 0.02, 0), grp = "wood")
-plate_f = piece(size = vec3(uw + 0.18, 0.2, 0.24), pos = vec3(0, wall_top - 0.1, tf_z), grp = "wood")
-plate_b = piece(size = vec3(uw + 0.18, 0.2, 0.24), pos = vec3(0, wall_top - 0.1, 0.0 - tf_z), grp = "wood")
-plate_l = piece(size = vec3(0.24, 0.2, ud + 0.18), pos = vec3(0.0 - uw * 0.5, wall_top - 0.1, 0), grp = "wood")
-plate_r = piece(size = vec3(0.24, 0.2, ud + 0.18), pos = vec3(uw * 0.5, wall_top - 0.1, 0), grp = "wood")
+sill_f = parts.piece(size = vec3(uw + 0.18, 0.26, 0.28), pos = vec3(0, stone_h + 0.02, tf_z), grp = "wood")
+sill_b = parts.piece(size = vec3(uw + 0.18, 0.26, 0.28), pos = vec3(0, stone_h + 0.02, 0.0 - tf_z), grp = "wood")
+sill_l = parts.piece(size = vec3(0.28, 0.26, ud + 0.18), pos = vec3(0.0 - uw * 0.5, stone_h + 0.02, 0), grp = "wood")
+sill_r = parts.piece(size = vec3(0.28, 0.26, ud + 0.18), pos = vec3(uw * 0.5, stone_h + 0.02, 0), grp = "wood")
+plate_f = parts.piece(size = vec3(uw + 0.18, 0.2, 0.24), pos = vec3(0, wall_top - 0.1, tf_z), grp = "wood")
+plate_b = parts.piece(size = vec3(uw + 0.18, 0.2, 0.24), pos = vec3(0, wall_top - 0.1, 0.0 - tf_z), grp = "wood")
+plate_l = parts.piece(size = vec3(0.24, 0.2, ud + 0.18), pos = vec3(0.0 - uw * 0.5, wall_top - 0.1, 0), grp = "wood")
+plate_r = parts.piece(size = vec3(0.24, 0.2, ud + 0.18), pos = vec3(uw * 0.5, wall_top - 0.1, 0), grp = "wood")
 # торцы балок перекрытия под свесом (фасад и тыл)
-joist = piece(size = vec3(0.16, 0.16, 0.5), pos = vec3(0, 0, 0), grp = "wood")
+joist = parts.piece(size = vec3(0.16, 0.16, 0.5), pos = vec3(0, 0, 0), grp = "wood")
 n_joists = int(width / 0.62)
 joist_len = f32(n_joists - 1) * 0.62
 joist_pts0 = mesh_line(count = n_joists, length = joist_len, dir = (1, 0, 0))
@@ -296,37 +272,37 @@ joist_pts_f = transform(joist_pts0, translate = vec3(0.0 - joist_len * 0.5, ston
 joist_pts_b = transform(joist_pts0, translate = vec3(0.0 - joist_len * 0.5, stone_h - 0.19, 0.0 - depth * 0.5 - 0.12))
 joists = mark(realize(instance_on_points(merge(joist_pts_f, joist_pts_b), source = joist)), "wood", where = true, domain = faces)
 # фасад: стойки по бокам большого окна, средние рельсы и раскосы в крайних панелях
-stud_f1 = piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(0.0 - 0.85, mid_y, tf_z), grp = "wood")
-stud_f2 = piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(0.85, mid_y, tf_z), grp = "wood")
+stud_f1 = parts.piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(0.0 - 0.85, mid_y, tf_z), grp = "wood")
+stud_f2 = parts.piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(0.85, mid_y, tf_z), grp = "wood")
 bay = uw * 0.5 - 0.2 - 0.93
 bay_c = 0.93 + bay * 0.5
-rail_fl = piece(size = vec3(bay, 0.14, 0.18), pos = vec3(0.0 - bay_c, rail_y, tf_z), grp = "wood")
-rail_fr = piece(size = vec3(bay, 0.14, 0.18), pos = vec3(bay_c, rail_y, tf_z), grp = "wood")
+rail_fl = parts.piece(size = vec3(bay, 0.14, 0.18), pos = vec3(0.0 - bay_c, rail_y, tf_z), grp = "wood")
+rail_fr = parts.piece(size = vec3(bay, 0.14, 0.18), pos = vec3(bay_c, rail_y, tf_z), grp = "wood")
 brace_len = 1.05 * 1.35
-brace_fl0 = transform(piece(size = vec3(0.14, brace_len, 0.17), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 0.0 - 42))
+brace_fl0 = transform(parts.piece(size = vec3(0.14, brace_len, 0.17), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 0.0 - 42))
 brace_fl = transform(brace_fl0, translate = vec3(0.0 - bay_c, stone_h + upper_h * 0.25 + 0.05, tf_z))
-brace_fr0 = transform(piece(size = vec3(0.14, brace_len, 0.17), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 42))
+brace_fr0 = transform(parts.piece(size = vec3(0.14, brace_len, 0.17), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 42))
 brace_fr = transform(brace_fr0, translate = vec3(bay_c, stone_h + upper_h * 0.25 + 0.05, tf_z))
 brace_fl1 = transform(brace_fr0, translate = vec3(0.0 - bay_c, stone_h + upper_h * 0.75 - 0.05, tf_z))
 brace_fr1 = transform(brace_fl0, translate = vec3(bay_c, stone_h + upper_h * 0.75 - 0.05, tf_z))
 # тыл: стойки, рельс, раскосы
-stud_b1 = piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(0.0 - 1.5, mid_y, 0.0 - tf_z), grp = "wood")
-stud_b2 = piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(1.5, mid_y, 0.0 - tf_z), grp = "wood")
-rail_b = piece(size = vec3(uw - 0.3, 0.14, 0.18), pos = vec3(0, rail_y, 0.0 - tf_z), grp = "wood")
+stud_b1 = parts.piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(0.0 - 1.5, mid_y, 0.0 - tf_z), grp = "wood")
+stud_b2 = parts.piece(size = vec3(0.16, upper_h - 0.4, 0.18), pos = vec3(1.5, mid_y, 0.0 - tf_z), grp = "wood")
+rail_b = parts.piece(size = vec3(uw - 0.3, 0.14, 0.18), pos = vec3(0, rail_y, 0.0 - tf_z), grp = "wood")
 brace_bl = transform(brace_fl0, translate = vec3(0.0 - bay_c - 0.2, stone_h + upper_h * 0.25 + 0.05, 0.0 - tf_z))
 brace_br = transform(brace_fr0, translate = vec3(bay_c + 0.2, stone_h + upper_h * 0.25 + 0.05, 0.0 - tf_z))
 # боковые стены: стойка у окна, рельс, раскосы (в плоскости YZ — поворот вокруг X)
-rail_l = piece(size = vec3(0.18, 0.14, ud - 0.3), pos = vec3(0.0 - uw * 0.5, rail_y, 0), grp = "wood")
-rail_r = piece(size = vec3(0.18, 0.14, ud - 0.3), pos = vec3(uw * 0.5, rail_y, 0), grp = "wood")
-stud_l1 = piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(0.0 - uw * 0.5, mid_y, 0.62), grp = "wood")
-stud_l2 = piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(0.0 - uw * 0.5, mid_y, 0.0 - 0.62), grp = "wood")
-stud_r1 = piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(uw * 0.5, mid_y, 0.62), grp = "wood")
-stud_r2 = piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(uw * 0.5, mid_y, 0.0 - 0.62), grp = "wood")
+rail_l = parts.piece(size = vec3(0.18, 0.14, ud - 0.3), pos = vec3(0.0 - uw * 0.5, rail_y, 0), grp = "wood")
+rail_r = parts.piece(size = vec3(0.18, 0.14, ud - 0.3), pos = vec3(uw * 0.5, rail_y, 0), grp = "wood")
+stud_l1 = parts.piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(0.0 - uw * 0.5, mid_y, 0.62), grp = "wood")
+stud_l2 = parts.piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(0.0 - uw * 0.5, mid_y, 0.0 - 0.62), grp = "wood")
+stud_r1 = parts.piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(uw * 0.5, mid_y, 0.62), grp = "wood")
+stud_r2 = parts.piece(size = vec3(0.18, upper_h - 0.4, 0.16), pos = vec3(uw * 0.5, mid_y, 0.0 - 0.62), grp = "wood")
 sbay = ud * 0.5 - 0.2 - 0.7
 sbay_c = 0.7 + sbay * 0.5
 sbrace_len = 1.05 * 1.25
-sbrace_a0 = transform(piece(size = vec3(0.17, sbrace_len, 0.14), pos = (0, 0, 0), grp = "wood"), rotate = vec3(40, 0, 0))
-sbrace_b0 = transform(piece(size = vec3(0.17, sbrace_len, 0.14), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0.0 - 40, 0, 0))
+sbrace_a0 = transform(parts.piece(size = vec3(0.17, sbrace_len, 0.14), pos = (0, 0, 0), grp = "wood"), rotate = vec3(40, 0, 0))
+sbrace_b0 = transform(parts.piece(size = vec3(0.17, sbrace_len, 0.14), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0.0 - 40, 0, 0))
 brace_l1 = transform(sbrace_b0, translate = vec3(0.0 - uw * 0.5, stone_h + upper_h * 0.25 + 0.05, sbay_c))
 brace_l2 = transform(sbrace_a0, translate = vec3(0.0 - uw * 0.5, stone_h + upper_h * 0.25 + 0.05, 0.0 - sbay_c))
 brace_r1 = transform(sbrace_b0, translate = vec3(uw * 0.5, stone_h + upper_h * 0.25 + 0.05, sbay_c))
@@ -345,11 +321,11 @@ apex_y = ridge_y - roof_t - 0.01
 gable_z = tf_z + 0.05
 gable_h = apex_y - wall_top
 collar_y = wall_top + gable_h * 0.42
-king = piece(size = vec3(0.18, gable_h - 0.12, 0.18), pos = vec3(0, (wall_top + apex_y) * 0.5 - 0.06, gable_z), grp = "wood")
+king = parts.piece(size = vec3(0.18, gable_h - 0.12, 0.18), pos = vec3(0, (wall_top + apex_y) * 0.5 - 0.06, gable_z), grp = "wood")
 collar_w = (apex_y - collar_y) * 2.0 - 0.3
-collar = piece(size = vec3(collar_w, 0.16, 0.17), pos = vec3(0, collar_y, gable_z), grp = "wood")
-gstud_l = piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(0.0 - collar_w * 0.5 + 0.35, (wall_top + collar_y) * 0.5, gable_z), grp = "wood")
-gstud_r = piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(collar_w * 0.5 - 0.35, (wall_top + collar_y) * 0.5, gable_z), grp = "wood")
+collar = parts.piece(size = vec3(collar_w, 0.16, 0.17), pos = vec3(0, collar_y, gable_z), grp = "wood")
+gstud_l = parts.piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(0.0 - collar_w * 0.5 + 0.35, (wall_top + collar_y) * 0.5, gable_z), grp = "wood")
+gstud_r = parts.piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(collar_w * 0.5 - 0.35, (wall_top + collar_y) * 0.5, gable_z), grp = "wood")
 # Раскосы: от воротной балки вверх-внутрь к королевской стойке (40° от вертикали);
 # нижний конец на балке, верхний — под коньком у стойки, целиком под скатом.
 gstrut_dy = apex_y - 0.55 - collar_y - 0.08
@@ -357,16 +333,16 @@ gstrut_len = gstrut_dy / 0.76604444
 gstrut_dx = gstrut_len * 0.64278761
 gstrut_cx = 0.12 + gstrut_dx * 0.5
 gstrut_cy = collar_y + 0.08 + gstrut_dy * 0.5
-gstrut_l0 = transform(piece(size = vec3(0.13, gstrut_len, 0.15), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 0.0 - 40))
+gstrut_l0 = transform(parts.piece(size = vec3(0.13, gstrut_len, 0.15), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 0.0 - 40))
 gstrut_l = transform(gstrut_l0, translate = vec3(0.0 - gstrut_cx, gstrut_cy, gable_z))
-gstrut_r0 = transform(piece(size = vec3(0.13, gstrut_len, 0.15), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 40))
+gstrut_r0 = transform(parts.piece(size = vec3(0.13, gstrut_len, 0.15), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 40))
 gstrut_r = transform(gstrut_r0, translate = vec3(gstrut_cx, gstrut_cy, gable_z))
 gable_timber_f = merge(king, collar, gstud_l, gstud_r, gstrut_l, gstrut_r)
 # Тыльный фронтон — королевская стойка, балка и две стойки.
-king_b = piece(size = vec3(0.18, gable_h - 0.12, 0.18), pos = vec3(0, (wall_top + apex_y) * 0.5 - 0.06, 0.0 - gable_z), grp = "wood")
-collar_b = piece(size = vec3(collar_w, 0.16, 0.17), pos = vec3(0, collar_y, 0.0 - gable_z), grp = "wood")
-gstud_bl = piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(0.0 - collar_w * 0.5 + 0.35, (wall_top + collar_y) * 0.5, 0.0 - gable_z), grp = "wood")
-gstud_br = piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(collar_w * 0.5 - 0.35, (wall_top + collar_y) * 0.5, 0.0 - gable_z), grp = "wood")
+king_b = parts.piece(size = vec3(0.18, gable_h - 0.12, 0.18), pos = vec3(0, (wall_top + apex_y) * 0.5 - 0.06, 0.0 - gable_z), grp = "wood")
+collar_b = parts.piece(size = vec3(collar_w, 0.16, 0.17), pos = vec3(0, collar_y, 0.0 - gable_z), grp = "wood")
+gstud_bl = parts.piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(0.0 - collar_w * 0.5 + 0.35, (wall_top + collar_y) * 0.5, 0.0 - gable_z), grp = "wood")
+gstud_br = parts.piece(size = vec3(0.14, collar_y - wall_top - 0.1, 0.16), pos = vec3(collar_w * 0.5 - 0.35, (wall_top + collar_y) * 0.5, 0.0 - gable_z), grp = "wood")
 gable_timber = merge(gable_timber_f, king_b, collar_b, gstud_bl, gstud_br)
 
 upper_floor = merge(upper, timber, gable_timber)
@@ -376,15 +352,15 @@ box_y = stone_h + 0.92
 box_w = 1.7
 box_d = 0.42
 box_h = 0.36
-fb_front = piece(size = vec3(box_w, box_h, 0.06), pos = vec3(0, box_y, tf_z + box_d - 0.03), grp = "wood")
-fb_left = piece(size = vec3(0.06, box_h, box_d), pos = vec3(0.0 - box_w * 0.5 + 0.03, box_y, tf_z + box_d * 0.5), grp = "wood")
-fb_right = piece(size = vec3(0.06, box_h, box_d), pos = vec3(box_w * 0.5 - 0.03, box_y, tf_z + box_d * 0.5), grp = "wood")
-fb_bottom = piece(size = vec3(box_w, 0.06, box_d), pos = vec3(0, box_y - box_h * 0.5 + 0.03, tf_z + box_d * 0.5), grp = "wood")
-fb_band = piece(size = vec3(box_w + 0.04, 0.07, 0.04), pos = vec3(0, box_y + 0.02, tf_z + box_d + 0.01), grp = "wood")
-fb_bat1 = piece(size = vec3(0.08, box_h + 0.04, 0.08), pos = vec3(0.0 - box_w * 0.5 + 0.02, box_y, tf_z + box_d + 0.01), grp = "wood")
-fb_bat2 = piece(size = vec3(0.08, box_h + 0.04, 0.08), pos = vec3(box_w * 0.5 - 0.02, box_y, tf_z + box_d + 0.01), grp = "wood")
-fb_bat3 = piece(size = vec3(0.08, box_h + 0.04, 0.08), pos = vec3(0, box_y, tf_z + box_d + 0.01), grp = "wood")
-fb_brk1 = transform(piece(size = vec3(0.08, 0.5, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(45, 0, 0))
+fb_front = parts.piece(size = vec3(box_w, box_h, 0.06), pos = vec3(0, box_y, tf_z + box_d - 0.03), grp = "wood")
+fb_left = parts.piece(size = vec3(0.06, box_h, box_d), pos = vec3(0.0 - box_w * 0.5 + 0.03, box_y, tf_z + box_d * 0.5), grp = "wood")
+fb_right = parts.piece(size = vec3(0.06, box_h, box_d), pos = vec3(box_w * 0.5 - 0.03, box_y, tf_z + box_d * 0.5), grp = "wood")
+fb_bottom = parts.piece(size = vec3(box_w, 0.06, box_d), pos = vec3(0, box_y - box_h * 0.5 + 0.03, tf_z + box_d * 0.5), grp = "wood")
+fb_band = parts.piece(size = vec3(box_w + 0.04, 0.07, 0.04), pos = vec3(0, box_y + 0.02, tf_z + box_d + 0.01), grp = "wood")
+fb_bat1 = parts.piece(size = vec3(0.08, box_h + 0.04, 0.08), pos = vec3(0.0 - box_w * 0.5 + 0.02, box_y, tf_z + box_d + 0.01), grp = "wood")
+fb_bat2 = parts.piece(size = vec3(0.08, box_h + 0.04, 0.08), pos = vec3(box_w * 0.5 - 0.02, box_y, tf_z + box_d + 0.01), grp = "wood")
+fb_bat3 = parts.piece(size = vec3(0.08, box_h + 0.04, 0.08), pos = vec3(0, box_y, tf_z + box_d + 0.01), grp = "wood")
+fb_brk1 = transform(parts.piece(size = vec3(0.08, 0.5, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(45, 0, 0))
 fb_brk_l = transform(fb_brk1, translate = vec3(0.0 - box_w * 0.5 + 0.1, box_y - box_h * 0.5 - 0.16, tf_z + 0.18))
 fb_brk_r = transform(fb_brk1, translate = vec3(box_w * 0.5 - 0.1, box_y - box_h * 0.5 - 0.16, tf_z + 0.18))
 flower_box = merge(fb_front, fb_left, fb_right, fb_bottom, fb_band, fb_bat1, fb_bat2, fb_bat3, fb_brk_l, fb_brk_r)
@@ -468,7 +444,7 @@ eave_z = sd * 0.5 + overhang
 slope_right = transform(transform(slope_local, rotate = vec3(45, 0, 0)), translate = vec3(0, eave_y + 0.02, eave_z - 0.02))
 slope_left = transform(transform(transform(slope_local, rotate = vec3(0, 180, 0)), rotate = vec3(0.0 - 45, 0, 0)), translate = vec3(0, eave_y + 0.02, 0.02 - eave_z))
 # Конёк: ряд плоских колпаков-уголков.
-cap_src = piece(size = vec3(0.3, 0.26, 0.26), pos = (0, 0, 0), grp = "tile")
+cap_src = parts.piece(size = vec3(0.3, 0.26, 0.26), pos = (0, 0, 0), grp = "tile")
 cap = transform(cap_src, rotate = vec3(45, 0, 0))
 n_caps = int(rl / 0.3)
 cap_len = f32(n_caps - 1) * 0.3
@@ -489,14 +465,14 @@ roof = transform(roof_local, rotate = vec3(0, 90, 0))
 barg_len = slope_len + 0.2
 barg_cx = eave_z * 0.5 - 0.07
 barg_cy = (eave_y + ridge_y) * 0.5 + 0.07 + 0.1
-barg_r0 = transform(piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 135))
+barg_r0 = transform(parts.piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 135))
 barg_rf = transform(barg_r0, translate = vec3(barg_cx, barg_cy, rl * 0.5 + 0.02))
 barg_rb = transform(barg_r0, translate = vec3(barg_cx, barg_cy, 0.0 - rl * 0.5 - 0.02))
-barg_l0 = transform(piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 45))
+barg_l0 = transform(parts.piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 45))
 barg_lf = transform(barg_l0, translate = vec3(0.0 - barg_cx, barg_cy, rl * 0.5 + 0.02))
 barg_lb = transform(barg_l0, translate = vec3(0.0 - barg_cx, barg_cy, 0.0 - rl * 0.5 - 0.02))
-fin_f = piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, rl * 0.5 - 0.05), grp = "wood")
-fin_b = piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, 0.0 - rl * 0.5 + 0.05), grp = "wood")
+fin_f = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, rl * 0.5 - 0.05), grp = "wood")
+fin_b = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, 0.0 - rl * 0.5 + 0.05), grp = "wood")
 barge = merge(barg_rf, barg_rb, barg_lf, barg_lb, fin_f, fin_b)
 
 # --- труба: каменные блоки с перевязкой на правом скате ------------------------
@@ -510,7 +486,7 @@ chim_course = 0.24
 chim_base = ridge_y - chim_x - 0.9
 chim_top = ridge_y + 1.25
 chim_n = int((chim_top - chim_base) / chim_course)
-chim_core = piece(size = vec3(chim_w - 0.12, chim_top - chim_base, chim_w - 0.12), pos = vec3(chim_x, (chim_base + chim_top) * 0.5, chim_z), grp = "stone")
+chim_core = parts.piece(size = vec3(chim_w - 0.12, chim_top - chim_base, chim_w - 0.12), pos = vec3(chim_x, (chim_base + chim_top) * 0.5, chim_z), grp = "stone")
 chim_rng = split_rng(root_rng, key = "chimney")
 chim_rows = bond_anchors(len = chim_w, cols = 2, n_rows = chim_n, course_h = chim_course, y0 = chim_base, z = chim_w * 0.5 - 0.03)
 chim_blk = vec3(0.34, 0.21, 0.12)
@@ -523,9 +499,9 @@ chim_s1 = transform(transform(chim_f1, rotate = vec3(0, 90, 0)), translate = vec
 chim_s2 = transform(transform(chim_f2, rotate = vec3(0, 180, 0)), translate = vec3(chim_x, 0, chim_z))
 chim_s3 = transform(transform(chim_f3, rotate = vec3(0, 270, 0)), translate = vec3(chim_x, 0, chim_z))
 chim_veneer = mark(merge(chim_s0, chim_s1, chim_s2, chim_s3), "stone", where = true, domain = faces)
-chim_cap1 = piece(size = vec3(chim_w + 0.2, 0.14, chim_w + 0.2), pos = vec3(chim_x, chim_top + 0.07, chim_z), grp = "stone")
-chim_cap2 = piece(size = vec3(chim_w - 0.1, 0.12, chim_w - 0.1), pos = vec3(chim_x, chim_top + 0.2, chim_z), grp = "stone")
-chim_hole = piece(size = vec3(chim_w - 0.4, 0.14, chim_w - 0.4), pos = vec3(chim_x, chim_top + 0.28, chim_z), grp = "smoke")
+chim_cap1 = parts.piece(size = vec3(chim_w + 0.2, 0.14, chim_w + 0.2), pos = vec3(chim_x, chim_top + 0.07, chim_z), grp = "stone")
+chim_cap2 = parts.piece(size = vec3(chim_w - 0.1, 0.12, chim_w - 0.1), pos = vec3(chim_x, chim_top + 0.2, chim_z), grp = "stone")
+chim_hole = parts.piece(size = vec3(chim_w - 0.4, 0.14, chim_w - 0.4), pos = vec3(chim_x, chim_top + 0.28, chim_z), grp = "smoke")
 chimney_all = merge(chim_core, chim_veneer, chim_cap1, chim_cap2, chim_hole)
 # Дым: перекрывающиеся клубы, растут и уходят вверх-вбок змейкой, с боковыми
 # отростками — читается как облако, а не как столбик шариков.
@@ -550,14 +526,14 @@ ring_sdf = sdf_subtract(arch_sdf(w = 1.44, straight = 1.45, r = 0.72, t = 0.22),
 ring_mesh = compute_normals(mesh_from_sdf(ring_sdf, voxel = 0.03))
 ring_marked = mark(ring_mesh, "stone", where = true, domain = faces)
 ring = transform(ring_marked, translate = vec3(door_x, 0.1, door_z + 0.15))
-ledge1 = piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 0.7, door_z + 0.15), grp = "wood")
-ledge2 = piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 1.4, door_z + 0.15), grp = "wood")
-door_win = piece(size = vec3(0.28, 0.28, 0.03), pos = vec3(door_x, 1.15, door_z + 0.15), grp = "glass")
-door_win_f = piece(size = vec3(0.34, 0.34, 0.02), pos = vec3(door_x, 1.15, door_z + 0.145), grp = "wood")
-knob = piece(size = vec3(0.07, 0.07, 0.09), pos = vec3(door_x + 0.35, 1.0, door_z + 0.17), grp = "wood")
-step = piece(size = vec3(1.8, 0.16, 0.6), pos = vec3(door_x, 0.08, door_z + 0.42), grp = "stone")
-lamp_l = lantern(at = vec3(door_x - 1.05, 1.72, door_z))
-lamp_r = lantern(at = vec3(door_x + 1.05, 1.72, door_z))
+ledge1 = parts.piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 0.7, door_z + 0.15), grp = "wood")
+ledge2 = parts.piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 1.4, door_z + 0.15), grp = "wood")
+door_win = parts.piece(size = vec3(0.28, 0.28, 0.03), pos = vec3(door_x, 1.15, door_z + 0.15), grp = "glass")
+door_win_f = parts.piece(size = vec3(0.34, 0.34, 0.02), pos = vec3(door_x, 1.15, door_z + 0.145), grp = "wood")
+knob = parts.piece(size = vec3(0.07, 0.07, 0.09), pos = vec3(door_x + 0.35, 1.0, door_z + 0.17), grp = "wood")
+step = parts.piece(size = vec3(1.8, 0.16, 0.6), pos = vec3(door_x, 0.08, door_z + 0.42), grp = "stone")
+lamp_l = fixtures.lantern(at = vec3(door_x - 1.05, 1.72, door_z))
+lamp_r = fixtures.lantern(at = vec3(door_x + 1.05, 1.72, door_z))
 door = merge(leaf, ring, ledge1, ledge2, door_win_f, door_win, knob, step, lamp_l, lamp_r)
 
 # --- окна ----------------------------------------------------------------------
