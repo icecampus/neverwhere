@@ -1,6 +1,6 @@
 #pragma once
 
-// PGG abstract syntax tree (spec docs/geometry_generation_language.md §13).
+// PGG abstract syntax tree (spec docs/pgg/geometry_generation_language.md §13).
 // Nodes are owned by the arena in pgg::Document; all pointers are non-owning.
 // Every node carries a source Span for diagnostics, provenance and the
 // formatter. Structural comparison (astEqual) ignores spans — it backs the

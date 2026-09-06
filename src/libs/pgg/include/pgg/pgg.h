@@ -1,7 +1,7 @@
 #pragma once
 
 // PGG public API (stage E0): parse source text into AST + diagnostics.
-// Spec: docs/geometry_generation_language.md
+// Spec: docs/pgg/geometry_generation_language.md
 
 #include <memory>
 #include <string>

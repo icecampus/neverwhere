@@ -1,4 +1,4 @@
-// PGG language grammar (spec docs/geometry_generation_language.md §13).
+// PGG language grammar (spec docs/pgg/geometry_generation_language.md §13).
 // Rules carry no logic — only one-call triggers into the grammar compositor
 // (spec §13.2): fixed-arity constructs return semantic values, open bodies
 // (file/def/zones) accumulate in gc frames between begin/end triggers.
