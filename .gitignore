@@ -1,6 +1,7 @@
 _intermidiate_64
 build
 _int_linux
+_int_linux_release
 cmake-build-debug
 .idea
 CMakeLists.txt.user

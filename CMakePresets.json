@@ -105,6 +105,15 @@
         "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg_overlays/ports",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux (Ninja, x64-linux, Release)",
+      "inherits": "linux",
+      "binaryDir": "${sourceDir}/_int_linux_release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -115,6 +124,7 @@
     { "name": "macos-debug", "configurePreset": "macos", "configuration": "Debug" },
     { "name": "macos-release", "configurePreset": "macos", "configuration": "Release" },
     { "name": "macos-clion-debug", "configurePreset": "macos-clion" },
-    { "name": "linux-debug", "configurePreset": "linux" }
+    { "name": "linux-debug", "configurePreset": "linux" },
+    { "name": "linux-release", "configurePreset": "linux-release" }
   ]
 }
