@@ -82,50 +82,6 @@ def arch_sdf(w: f32, straight: f32, r: f32, t: f32) -> (out: sdf) {
     out = sdf_union(body, disc)
 }
 
-def window(w: f32, h: f32) -> (out: geo<mesh>) {
-    """Окно в начале координат, смотрит в +Z: рама w×h с крестовиной (2×2 стекла),
-    стекло чуть утоплено, подоконник. Задняя плоскость рамы — z = −0.06."""
-    frame = parts.piece(size = vec3(w, h, 0.12), pos = (0, 0, 0), grp = "wood")
-    glass = parts.piece(size = vec3(w - 0.2, h - 0.2, 0.13), pos = (0, 0, 0), grp = "glass")
-    bar_v = parts.piece(size = vec3(0.07, h - 0.2, 0.16), pos = (0, 0, 0), grp = "wood")
-    bar_h = parts.piece(size = vec3(w - 0.2, 0.07, 0.16), pos = (0, 0, 0), grp = "wood")
-    sill = parts.piece(size = vec3(w + 0.24, 0.09, 0.26), pos = vec3(0, 0.0 - h * 0.5 - 0.02, 0.05), grp = "wood")
-    out = merge(frame, glass, bar_v, bar_h, sill)
-}
-
-def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
-    """Щит из n вертикальных досок общей ширины w, высоты h, толщины t; центр в 0,
-    лицо в +Z. Доска = box шириной (шаг − 0.008): шов-зазор, плюс на доску свой
-    выступ по z (±0.006) и оттенок @tint (полутоновая полоса читается и при плоском
-    свете, когда шов не виден). Доски — инстансы на mesh_line, один realize."""
-    pitch = w / f32(n)
-    plank = parts.cbox(size = vec3(pitch - 0.008, h, t), k = 0.18)
-    pts0 = mesh_line(count = n, length = w - pitch, dir = (1, 0, 0))
-    pts1 = transform(pts0, translate = vec3(0.0 - (w - pitch) * 0.5, 0, 0))
-    pts2 = set_position(pts1, offset = random_vec(lo = vec3(0, 0, -0.006), hi = vec3(0, 0, 0.006), rng = split_rng(rng, key = "z")))
-    shade = random(lo = 0.78, hi = 1.22, rng = split_rng(rng, key = "tint"))
-    pts3 = set(pts2, "tint", vec3(shade * 1.03, shade, shade * 0.95))
-    out = mark(realize(instance_on_points(pts3, source = plank)), "wood", where = true, domain = faces)
-}
-
-def shutter(sw: f32, h: f32, rng: rng) -> (out: geo<mesh>) {
-    """Ставня: щит из трёх вертикальных досок плюс две поперечные планки; центр в 0, лицо в +Z."""
-    panel = plank_panel(w = sw, h = h, t = 0.05, n = 3, rng = rng)
-    b1 = parts.piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, h * 0.3, 0.04), grp = "wood")
-    b2 = parts.piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, 0.0 - h * 0.3, 0.04), grp = "wood")
-    out = merge(panel, b1, b2)
-}
-
-def window_sh(w: f32, h: f32, off: f32, rng: rng) -> (out: geo<mesh>) {
-    """Окно с двумя распахнутыми ставнями плашмя к стене по бокам рамы; off — z центра
-    ставен относительно окна (у каменного этажа больше: кладка выступает до 0.2)."""
-    win = window(w = w, h = h)
-    sw = w * 0.48
-    sh_l = transform(shutter(sw = sw, h = h * 0.96, rng = split_rng(rng, key = "l")), translate = vec3(0.0 - w * 0.5 - sw * 0.5 - 0.03, 0, off))
-    sh_r = transform(shutter(sw = sw, h = h * 0.96, rng = split_rng(rng, key = "r")), translate = vec3(w * 0.5 + sw * 0.5 + 0.03, 0, off))
-    out = merge(win, sh_l, sh_r)
-}
-
 def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<mesh>) {
     """Кладка одной стены в локальной системе (x вдоль стены, центр в 0): ряды якорей
     → блок с центром за краем не кладётся → @scale/@variant (три длины blk × 1 / 1.1 / 1.2 — не длиннее шага ряда, чтобы соседи не сливались в плиту)
@@ -521,7 +477,7 @@ smoke = mark(merge(puff1, puff2, puff3, puff3b, puff4, puff4b, puff5, puff5b), "
 # углы прячутся за каменным кольцом портала (r_out 0.72 > диагональ угла 0.707),
 # так что скруглять доски не нужно; поперёк — две планки-обвязки.
 door_rng = split_rng(root_rng, key = "door")
-leaf = transform(plank_panel(w = 1.0, h = 1.95, t = 0.1, n = 7, rng = door_rng), translate = vec3(door_x, 0.16 + 1.95 * 0.5, door_z + 0.08))
+leaf = transform(parts.plank_panel(w = 1.0, h = 1.95, t = 0.1, n = 7, rng = door_rng), translate = vec3(door_x, 0.16 + 1.95 * 0.5, door_z + 0.08))
 ring_sdf = sdf_subtract(arch_sdf(w = 1.44, straight = 1.45, r = 0.72, t = 0.22), arch_sdf(w = 1.06, straight = 1.45, r = 0.53, t = 0.3))
 ring_mesh = compute_normals(mesh_from_sdf(ring_sdf, voxel = 0.03))
 ring_marked = mark(ring_mesh, "stone", where = true, domain = faces)
@@ -537,19 +493,19 @@ lamp_r = fixtures.lantern(at = vec3(door_x + 1.05, 1.72, door_z))
 door = merge(leaf, ring, ledge1, ledge2, door_win_f, door_win, knob, step, lamp_l, lamp_r)
 
 # --- окна ----------------------------------------------------------------------
-# Все окна со ставнями из досок (def shutter/plank_panel); первый этаж сидит в
+# Все окна со ставнями из досок (fixtures.shuttered_window, lib/fixtures.pgg); первый этаж сидит в
 # проёмах кладки (локальный x стены → мир по повороту yaw), ставни вынесены
 # вперёд (off = 0.14) поверх выступающих камней.
 win_rng = split_rng(root_rng, key = "windows")
-win_g_f = place(window_sh(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(win_rng, key = "gf")), yaw_deg = 0.0, at = vec3(win_x, 1.45, door_z + 0.1))
-win_g_b = place(window_sh(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(win_rng, key = "gb")), yaw_deg = 180.0, at = vec3(0.0 - 0.9, 1.45, 0.0 - depth * 0.5 - 0.1))
-win_g_l = place(window_sh(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(win_rng, key = "gl")), yaw_deg = 270.0, at = vec3(0.0 - width * 0.5 - 0.1, 1.55, side_win_x))
-win_g_r = place(window_sh(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(win_rng, key = "gr")), yaw_deg = 90.0, at = vec3(width * 0.5 + 0.1, 1.55, 0.0 - side_win_x))
+win_g_f = place(fixtures.shuttered_window(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(win_rng, key = "gf")), yaw_deg = 0.0, at = vec3(win_x, 1.45, door_z + 0.1))
+win_g_b = place(fixtures.shuttered_window(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(win_rng, key = "gb")), yaw_deg = 180.0, at = vec3(0.0 - 0.9, 1.45, 0.0 - depth * 0.5 - 0.1))
+win_g_l = place(fixtures.shuttered_window(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(win_rng, key = "gl")), yaw_deg = 270.0, at = vec3(0.0 - width * 0.5 - 0.1, 1.55, side_win_x))
+win_g_r = place(fixtures.shuttered_window(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(win_rng, key = "gr")), yaw_deg = 90.0, at = vec3(width * 0.5 + 0.1, 1.55, 0.0 - side_win_x))
 # Второй этаж: фронтон, бока и тыл.
-win_u_c = place(window_sh(w = 1.25, h = 0.95, off = 0.08, rng = split_rng(win_rng, key = "uc")), yaw_deg = 0.0, at = vec3(0, stone_h + 1.58, tf_z + 0.06))
-win_u_l = place(window_sh(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ul")), yaw_deg = 270.0, at = vec3(0.0 - uw * 0.5 - 0.06, stone_h + 1.35, 0))
-win_u_r = place(window_sh(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ur")), yaw_deg = 90.0, at = vec3(uw * 0.5 + 0.06, stone_h + 1.35, 0))
-win_u_b = place(window_sh(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ub")), yaw_deg = 180.0, at = vec3(0, stone_h + 1.35, 0.0 - tf_z - 0.06))
+win_u_c = place(fixtures.shuttered_window(w = 1.25, h = 0.95, off = 0.08, rng = split_rng(win_rng, key = "uc")), yaw_deg = 0.0, at = vec3(0, stone_h + 1.58, tf_z + 0.06))
+win_u_l = place(fixtures.shuttered_window(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ul")), yaw_deg = 270.0, at = vec3(0.0 - uw * 0.5 - 0.06, stone_h + 1.35, 0))
+win_u_r = place(fixtures.shuttered_window(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ur")), yaw_deg = 90.0, at = vec3(uw * 0.5 + 0.06, stone_h + 1.35, 0))
+win_u_b = place(fixtures.shuttered_window(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ub")), yaw_deg = 180.0, at = vec3(0, stone_h + 1.35, 0.0 - tf_z - 0.06))
 windows_g = merge(win_g_f, win_g_b, win_g_l, win_g_r)
 windows_u = merge(win_u_c, win_u_l, win_u_r, win_u_b)
 windows = merge(windows_g, windows_u)

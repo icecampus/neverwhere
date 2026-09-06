@@ -1,6 +1,6 @@
-# Навесное оборудование дома: фонари и прочая «фурнитура» фасада. Детали — из
+# Навесное оборудование дома: окна (рама, переплёт, ставни) и фонари. Детали — из
 # lib/parts.pgg (брус с фаской); группы материалов: iron (кованый металл),
-# lamp (светящееся стекло). Локальная система фонаря: стена — плоскость z = 0,
+# lamp (светящееся стекло), wood (рамы и ставни), glass. Локальная система фонаря: стена — плоскость z = 0,
 # наружу +Z, вверх +Y; `at` — точка крепления пластины на стене.
 
 import lib.parts
@@ -78,4 +78,45 @@ def lantern(at: vec3) -> (out: geo<mesh>) {
     hang = merge(plate, arm, brace, curl, link1, link2, finial)
     l0 = merge(hang, cap, rim, frame, glass, base, drop)
     out = transform(l0, translate = at)
+}
+
+def window(w: f32, h: f32, cols: int = 2, rows: int = 2) -> (out: geo<mesh>) {
+    """Окно в начале координат, смотрит в +Z: рама w×h, стекло чуть утоплено,
+    переплёт cols×rows (стойки и перекладины — инстансы на mesh_line; 1×1 — без
+    переплёта), подоконник. Задняя плоскость рамы — z = −0.06."""
+    expect w > 0.3 & h > 0.3: "рама 0.1 с каждой стороны — окно меньше 0.3 м не имеет стекла"
+    expect cols >= 1 & rows >= 1: "переплёт: не меньше одного стекла по каждой оси"
+    gw = w - 0.2
+    gh = h - 0.2
+    frame = parts.piece(size = vec3(w, h, 0.12), pos = (0, 0, 0), grp = "wood")
+    glass = parts.piece(size = vec3(gw, gh, 0.13), pos = (0, 0, 0), grp = "glass")
+    bar_v = parts.piece(size = vec3(0.07, gh, 0.16), pos = (0, 0, 0), grp = "wood")
+    bar_h = parts.piece(size = vec3(gw, 0.07, 0.16), pos = (0, 0, 0), grp = "wood")
+    vx0 = mesh_line(count = cols - 1, length = gw * f32(cols - 2) / f32(cols), dir = (1, 0, 0))
+    vx = transform(vx0, translate = vec3(0.0 - gw * 0.5 + gw / f32(cols), 0, 0))
+    hy0 = mesh_line(count = rows - 1, length = gh * f32(rows - 2) / f32(rows), dir = (0, 1, 0))
+    hy = transform(hy0, translate = vec3(0, 0.0 - gh * 0.5 + gh / f32(rows), 0))
+    bars_v = realize(instance_on_points(vx, source = bar_v))
+    bars_h = realize(instance_on_points(hy, source = bar_h))
+    sill = parts.piece(size = vec3(w + 0.24, 0.09, 0.26), pos = vec3(0, 0.0 - h * 0.5 - 0.02, 0.05), grp = "wood")
+    out = merge(frame, glass, bars_v, bars_h, sill)
+}
+
+def shutter(sw: f32, h: f32, rng: rng) -> (out: geo<mesh>) {
+    """Ставня: щит из трёх вертикальных досок плюс две поперечные планки; центр в 0, лицо в +Z."""
+    panel = parts.plank_panel(w = sw, h = h, t = 0.05, n = 3, rng = rng)
+    b1 = parts.piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, h * 0.3, 0.04), grp = "wood")
+    b2 = parts.piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, 0.0 - h * 0.3, 0.04), grp = "wood")
+    out = merge(panel, b1, b2)
+}
+
+def shuttered_window(w: f32, h: f32, off: f32, rng: rng, cols: int = 2, rows: int = 2) -> (out: geo<mesh>) {
+    """Окно `window(w, h, cols, rows)` с двумя распахнутыми ставнями плашмя к стене по
+    бокам рамы (ставня — 0.48 w, из трёх досок); off — z центра ставен относительно
+    окна (у каменного этажа больше: кладка выступает до 0.2). rng — оттенки и выступы досок."""
+    win = window(w = w, h = h, cols = cols, rows = rows)
+    sw = w * 0.48
+    sh_l = transform(shutter(sw = sw, h = h * 0.96, rng = split_rng(rng, key = "l")), translate = vec3(0.0 - w * 0.5 - sw * 0.5 - 0.03, 0, off))
+    sh_r = transform(shutter(sw = sw, h = h * 0.96, rng = split_rng(rng, key = "r")), translate = vec3(w * 0.5 + sw * 0.5 + 0.03, 0, off))
+    out = merge(win, sh_l, sh_r)
 }

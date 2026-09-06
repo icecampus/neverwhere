@@ -16,3 +16,18 @@ def piece(size: vec3, pos: vec3, grp: string) -> (out: geo<mesh>) {
     placed = transform(b, translate = pos)
     out = mark(placed, grp, where = true, domain = faces)
 }
+
+def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
+    """Щит из n вертикальных досок общей ширины w, высоты h, толщины t; центр в 0,
+    лицо в +Z. Доска = box шириной (шаг − 0.008): шов-зазор, плюс на доску свой
+    выступ по z (±0.006) и оттенок @tint (полутоновая полоса читается и при плоском
+    свете, когда шов не виден). Доски — инстансы на mesh_line, один realize."""
+    pitch = w / f32(n)
+    plank = cbox(size = vec3(pitch - 0.008, h, t), k = 0.18)
+    pts0 = mesh_line(count = n, length = w - pitch, dir = (1, 0, 0))
+    pts1 = transform(pts0, translate = vec3(0.0 - (w - pitch) * 0.5, 0, 0))
+    pts2 = set_position(pts1, offset = random_vec(lo = vec3(0, 0, -0.006), hi = vec3(0, 0, 0.006), rng = split_rng(rng, key = "z")))
+    shade = random(lo = 0.78, hi = 1.22, rng = split_rng(rng, key = "tint"))
+    pts3 = set(pts2, "tint", vec3(shade * 1.03, shade, shade * 0.95))
+    out = mark(realize(instance_on_points(pts3, source = plank)), "wood", where = true, domain = faces)
+}
