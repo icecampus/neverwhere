@@ -558,10 +558,14 @@ void GeometryPreview::ensureTarget(int w, int h) {
     m_targetH = h;
 }
 
-glm::mat4 GeometryPreview::viewProj(float aspect) const {
+glm::mat4 GeometryPreview::viewMatrix() const {
     const glm::vec3 dir(std::cos(m_pitch) * std::sin(m_yaw), std::sin(m_pitch), std::cos(m_pitch) * std::cos(m_yaw));
     const glm::vec3 eye = m_center + dir * m_distance;
-    const glm::mat4 view = glm::lookAt(eye, m_center, glm::vec3(0.0f, 1.0f, 0.0f));
+    return glm::lookAt(eye, m_center, glm::vec3(0.0f, 1.0f, 0.0f));
+}
+
+glm::mat4 GeometryPreview::viewProj(float aspect) const {
+    const glm::mat4 view = viewMatrix();
     const float nearZ = std::max(1e-3f, m_distance * 0.01f);
     const float farZ = m_distance + m_radius * 4.0f + 1.0f;
     const sg_backend backend = sg_query_backend();
@@ -659,11 +663,16 @@ void GeometryPreview::render() {
         const glm::mat4 mvp = viewProj(aspect);
         VsParams vs = {};
         std::memcpy(vs.mvp, glm::value_ptr(mvp), sizeof(vs.mvp));
-        // Key light from the camera's upper-left so silhouettes read regardless of orbit.
-        const glm::vec3 dir(std::cos(m_pitch) * std::sin(m_yaw), std::sin(m_pitch),
-                            std::cos(m_pitch) * std::cos(m_yaw));
-        const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0, 1, 0), dir));
-        const glm::vec3 light = glm::normalize(dir * 0.7f - right * 0.5f + glm::vec3(0, 0.6f, 0));
+        // Key light from the camera's upper-left, expressed in the *camera* frame so
+        // it stays a headlight at every orbit. Mixing in world-up here is wrong: at
+        // pitch -> -90 deg (looking up from below) it cancels the view direction and
+        // the light turns grazing; and cross(worldUp, dir) degenerates at the poles.
+        // The camera basis comes from the view matrix (lookAt already handles that).
+        const glm::mat4 view = viewMatrix();
+        const glm::vec3 camRight(view[0][0], view[1][0], view[2][0]);
+        const glm::vec3 camUp(view[0][1], view[1][1], view[2][1]);
+        const glm::vec3 camBack(view[0][2], view[1][2], view[2][2]);  // towards the eye
+        const glm::vec3 light = glm::normalize(camBack * 0.7f - camRight * 0.5f + camUp * 0.6f);
         FsParams fs = {};
         fs.lightDir[0] = light.x;
         fs.lightDir[1] = light.y;

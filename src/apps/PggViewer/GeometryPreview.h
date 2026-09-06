@@ -90,6 +90,7 @@ private:
 
     void ensureTarget(int w, int h);
     void destroyTarget();
+    glm::mat4 viewMatrix() const;
     glm::mat4 viewProj(float aspect) const;
 
     sg_shader m_shader{};
