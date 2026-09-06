@@ -818,6 +818,8 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
         tv.type.isField = false;
         if (sig->resultGeoKindOfFirstArg && !sig->params.empty() && argTV[0])
             tv.type.geoKind = argTV[0].type.geoKind;
+        // value(field, on) is typed by its payload (the field's own type, §8.10).
+        if (sig->id == BuiltinId::ValueOf && valueBase(v) != ScalarType::None) tv.type.base = valueBase(v);
     }
     return tv;
 }

@@ -55,8 +55,19 @@ struct CalleeWalk {
 
     void stmt(const Stmt* s) {
         if (!s) return;
-        if (s->kind == NodeKind::Binding) expr(static_cast<const Binding*>(s)->value);
-        // zones in def bodies are E201 (checkDefGraph); tap carries no calls
+        if (s->kind == NodeKind::Binding) {
+            expr(static_cast<const Binding*>(s)->value);
+        } else if (s->kind == NodeKind::RepeatZone) {
+            const auto* z = static_cast<const RepeatZone*>(s);
+            expr(z->value);
+            expr(z->iterations);
+            for (const Stmt* b : z->body) stmt(b);
+        } else if (s->kind == NodeKind::ForeachZone) {
+            const auto* z = static_cast<const ForeachZone*>(s);
+            expr(z->collection);
+            for (const Stmt* b : z->body) stmt(b);
+        }
+        // tap carries no calls
     }
 
     void contract(const ContractStmt* c) {
@@ -191,11 +202,13 @@ public:
                     break;
                 case NodeKind::RepeatZone:
                 case NodeKind::ForeachZone:
-                    // Zones pass through as-is, but a def call inside a zone
-                    // body cannot be expanded (the body runs per iteration/
-                    // piece) — reject it cleanly instead of "unknown operation".
-                    checkZoneForDefCalls(static_cast<const Stmt*>(item), mainScope_);
-                    items.push_back(const_cast<Node*>(item));
+                    // Zone bodies are expanded in place (v1.20): def calls in
+                    // the body become flat instance bindings *inside* the body
+                    // (one static instance per call site, executed per
+                    // iteration/piece), header def calls lift into the outer
+                    // sink.
+                    items.push_back(expandZone(static_cast<const Stmt*>(item), kNoRename, mainScope_, "", items,
+                                               kNoInstance, ""));
                     break;
                 default:
                     items.push_back(const_cast<Node*>(item));  // param/output/tap: shared as-is
@@ -308,17 +321,6 @@ private:
                       "add `rng: rng` to the signature and wire it to the stochastic nodes (§7.3)");
             }
         }
-
-        // E7 deferral: a zone inside a def body cannot be expanded (its body
-        // would need per-iteration instantiation) — reject it cleanly instead
-        // of silently dropping it (the pre-E7 behaviour).
-        for (const Def* def : allDefs_)
-            for (const Stmt* s : def->body)
-                if (s && (s->kind == NodeKind::RepeatZone || s->kind == NodeKind::ForeachZone)) {
-                    error("E201", s->span, "zones inside def bodies are not supported at stage E7",
-                          "hoist the zone to the top level and feed its inputs through the def "
-                          "signature");
-                }
     }
 
     // --- call resolution --------------------------------------------------------
@@ -560,106 +562,97 @@ private:
         registerTargets(nb);
     }
 
-    // --- zone checks (E7 deferral: no def calls inside zone bodies) -------------
+    // --- zone expansion (v1.20: def calls in bodies, zones in def bodies) ------
 
-    // Silent def resolution (no E505 side effects — unknown names take the
-    // usual expansion/typecheck paths).
-    const Def* findDefSilently(const Call& c, const FileScope& scope) const {
-        if (c.path.size() == 1) {
-            if (auto it = scope.localDefs.find(c.path[0]); it != scope.localDefs.end()) return it->second;
-            return nullptr;
-        }
-        if (c.path.size() == 2) {
-            if (auto ns = scope.namespaces.find(c.path[0]); ns != scope.namespaces.end())
-                if (auto d = ns->second->defs.find(c.path[1]); d != ns->second->defs.end())
-                    return d->second;
-        }
-        return nullptr;
-    }
-
-    void scanZoneExprForDefCalls(const Expr* e, const FileScope& scope) {
-        if (!e) return;
-        switch (e->kind) {
-            case NodeKind::Paren:
-                scanZoneExprForDefCalls(static_cast<const Paren*>(e)->inner, scope);
-                return;
-            case NodeKind::Unary:
-                scanZoneExprForDefCalls(static_cast<const Unary*>(e)->operand, scope);
-                return;
-            case NodeKind::Binary: {
-                const auto* b = static_cast<const Binary*>(e);
-                scanZoneExprForDefCalls(b->lhs, scope);
-                scanZoneExprForDefCalls(b->rhs, scope);
-                return;
-            }
-            case NodeKind::Ternary: {
-                const auto* t = static_cast<const Ternary*>(e);
-                scanZoneExprForDefCalls(t->cond, scope);
-                scanZoneExprForDefCalls(t->thenExpr, scope);
-                scanZoneExprForDefCalls(t->elseExpr, scope);
-                return;
-            }
-            case NodeKind::VecLit:
-                for (const Expr* el : static_cast<const VecLit*>(e)->elems) scanZoneExprForDefCalls(el, scope);
-                return;
-            case NodeKind::ListLit:
-                for (const Expr* el : static_cast<const ListLit*>(e)->elems) scanZoneExprForDefCalls(el, scope);
-                return;
-            case NodeKind::Call: {
-                const auto* c = static_cast<const Call*>(e);
-                if (findDefSilently(*c, scope)) {
-                    error("E201", c->span,
-                          "def call '" + qualified(c->path) + "' inside a zone body is not supported at "
-                          "stage E7",
-                          "hoist the call out of the zone and feed its result through a zone input");
+    // Names a zone body defines (bindings, nested zone targets and ports):
+    // inside a def instance they are renamed under the instance prefix so the
+    // flat program keeps global uniqueness.
+    static void collectZoneDefinedNames(const Stmt* z, std::vector<std::string>& out) {
+        auto body = [&](const std::vector<Stmt*>& stmts) {
+            for (const Stmt* s : stmts) {
+                if (!s) continue;
+                if (s->kind == NodeKind::Binding) {
+                    for (const std::string& n : static_cast<const Binding*>(s)->targets.names) out.push_back(n);
+                } else if (s->kind == NodeKind::RepeatZone || s->kind == NodeKind::ForeachZone) {
+                    collectZoneDefinedNames(s, out);
                 }
-                for (const CallArg& a : c->args) scanZoneExprForDefCalls(a.value, scope);
-                return;
             }
-            default:
-                return;  // idents, attr refs, literals
-        }
-    }
-
-    void checkZoneBodyForDefCalls(const std::vector<Stmt*>& body, const FileScope& scope) {
-        for (const Stmt* s : body) {
-            if (!s) continue;
-            switch (s->kind) {
-                case NodeKind::Binding:
-                    scanZoneExprForDefCalls(static_cast<const Binding*>(s)->value, scope);
-                    break;
-                case NodeKind::RepeatZone: {
-                    const auto* z = static_cast<const RepeatZone*>(s);
-                    scanZoneExprForDefCalls(z->value, scope);
-                    scanZoneExprForDefCalls(z->iterations, scope);
-                    checkZoneBodyForDefCalls(z->body, scope);
-                    break;
-                }
-                case NodeKind::ForeachZone: {
-                    const auto* z = static_cast<const ForeachZone*>(s);
-                    scanZoneExprForDefCalls(z->collection, scope);
-                    checkZoneBodyForDefCalls(z->body, scope);
-                    break;
-                }
-                default:
-                    break;  // tap
-            }
-        }
-    }
-
-    void checkZoneForDefCalls(const Stmt* zoneStmt, const FileScope& scope) {
-        // The header expressions are covered too: they evaluate once outside
-        // the body, but expansion has no machinery for them either.
-        if (zoneStmt->kind == NodeKind::RepeatZone) {
-            const auto* z = static_cast<const RepeatZone*>(zoneStmt);
-            scanZoneExprForDefCalls(z->value, scope);
-            scanZoneExprForDefCalls(z->iterations, scope);
-            checkZoneBodyForDefCalls(z->body, scope);
+        };
+        if (z->kind == NodeKind::RepeatZone) {
+            const auto* r = static_cast<const RepeatZone*>(z);
+            for (const std::string& n : r->targets.names) out.push_back(n);
+            for (const std::string& n : r->state.names) out.push_back(n);
+            body(r->body);
         } else {
-            const auto* z = static_cast<const ForeachZone*>(zoneStmt);
-            scanZoneExprForDefCalls(z->collection, scope);
-            checkZoneBodyForDefCalls(z->body, scope);
+            const auto* f = static_cast<const ForeachZone*>(z);
+            out.push_back(f->target);
+            out.push_back(f->item);
+            body(f->body);
         }
+    }
+
+    // Clones a zone with its header expanded in the outer context (def calls
+    // in `value`/`iterations`/`collection` lift into `outerSink`) and its body
+    // expanded into a fresh statement list (def calls in the body become flat
+    // instance bindings inside the body; nested zones recurse). `prefix` is the
+    // def instance name ("" at top level): zone-defined names are renamed
+    // `prefix.name` so they stay globally unique across instances.
+    Stmt* expandZone(const Stmt* z, const RenameMap& renames, const FileScope& scope, const std::string& chain,
+                     std::vector<Node*>& outerSink, size_t ownerInstance, const std::string& prefix) {
+        RenameMap inner = renames;
+        if (!prefix.empty()) {
+            std::vector<std::string> defined;
+            collectZoneDefinedNames(z, defined);
+            for (const std::string& n : defined) inner[n] = prefix + "." + n;
+        }
+        auto renamed = [&](const std::string& n) -> std::string {
+            if (auto it = inner.find(n); it != inner.end()) return it->second;
+            return n;
+        };
+        auto expandBody = [&](const std::vector<Stmt*>& body, std::vector<Stmt*>& out) {
+            std::vector<Node*> bodySink;
+            for (const Stmt* s : body) {
+                if (!s) continue;
+                if (s->kind == NodeKind::Binding) {
+                    processBinding(static_cast<const Binding*>(s), inner, scope, chain, bodySink, ownerInstance);
+                } else if (s->kind == NodeKind::RepeatZone || s->kind == NodeKind::ForeachZone) {
+                    bodySink.push_back(expandZone(s, inner, scope, chain, bodySink, ownerInstance, prefix));
+                } else {
+                    bodySink.push_back(const_cast<Stmt*>(s));  // tap: ignored inside bodies (v0)
+                }
+            }
+            out.reserve(bodySink.size());
+            for (Node* n : bodySink) out.push_back(static_cast<Stmt*>(n));
+        };
+        bool changed = false;
+        if (z->kind == NodeKind::RepeatZone) {
+            const auto* r = static_cast<const RepeatZone*>(z);
+            RepeatZone* n = make<RepeatZone>(r->span);
+            for (size_t i = 0; i < r->targets.names.size(); ++i) {
+                n->targets.names.push_back(renamed(r->targets.names[i]));
+                n->targets.spans.push_back(i < r->targets.spans.size() ? r->targets.spans[i] : r->span);
+            }
+            for (size_t i = 0; i < r->state.names.size(); ++i) {
+                n->state.names.push_back(renamed(r->state.names[i]));
+                n->state.spans.push_back(i < r->state.spans.size() ? r->state.spans[i] : r->span);
+            }
+            n->value = expandExpr(r->value, renames, scope, chain, outerSink, changed);
+            n->iterations = expandExpr(r->iterations, renames, scope, chain, outerSink, changed);
+            expandBody(r->body, n->body);
+            if (ownerInstance != kNoInstance)
+                for (const std::string& t : n->targets.names) out_.instanceOfBinding[t] = ownerInstance;
+            return n;
+        }
+        const auto* f = static_cast<const ForeachZone*>(z);
+        ForeachZone* n = make<ForeachZone>(f->span);
+        n->target = renamed(f->target);
+        n->targetSpan = f->targetSpan;
+        n->item = renamed(f->item);
+        n->itemSpan = f->itemSpan;
+        n->collection = expandExpr(f->collection, renames, scope, chain, outerSink, changed);
+        expandBody(f->body, n->body);
+        if (ownerInstance != kNoInstance) out_.instanceOfBinding[n->target] = ownerInstance;
+        return n;
     }
 
     // --- instantiation -------------------------------------------------------------
@@ -680,9 +673,17 @@ private:
         RenameMap renames;
         for (const DefParam& p : def->params) renames[p.name] = iname + "." + p.name;
         for (const Stmt* s : def->body) {
-            if (s->kind != NodeKind::Binding) continue;
-            for (const std::string& n : static_cast<const Binding*>(s)->targets.names)
-                renames[n] = iname + "." + n;
+            if (s->kind == NodeKind::Binding) {
+                for (const std::string& n : static_cast<const Binding*>(s)->targets.names)
+                    renames[n] = iname + "." + n;
+            } else if (s->kind == NodeKind::RepeatZone || s->kind == NodeKind::ForeachZone) {
+                // Zone targets are def-body names too (read by later
+                // statements of the body); ports/body names rename in
+                // expandZone.
+                std::vector<std::string> defined;
+                collectZoneDefinedNames(s, defined);
+                for (const std::string& n : defined) renames[n] = iname + "." + n;
+            }
         }
 
         // Argument binding: positional-then-keyword with defaults (mirror of
@@ -755,7 +756,13 @@ private:
                 ft.path = renamedTapPath(t->path, renames);
                 out_.taps.push_back(std::move(ft));
             }
-            // zones in def bodies: rejected with E201 by checkDefGraph (E7)
+            else if (s->kind == NodeKind::RepeatZone || s->kind == NodeKind::ForeachZone) {
+                // Zone inside a def body (v1.20): cloned per instance with every
+                // zone-defined name (targets, ports, body bindings) renamed
+                // under the instance prefix; the body is expanded like the
+                // def body itself.
+                sink.push_back(expandZone(static_cast<const Stmt*>(s), renames, origin, ipath, sink, instIdx, iname));
+            }
         }
         for (const ContractStmt* c : def->ensures) addContract(c, true, renames, origin, ipath, instIdx, sink);
 

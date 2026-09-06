@@ -166,9 +166,34 @@ std::vector<GeoPtr> splitMeshPieces(const Geo& mesh) {
     return pieces;
 }
 
+std::vector<GeoPtr> splitPointPieces(const Geo& points) {
+    std::vector<GeoPtr> pieces;
+    if (!points.positions) return pieces;
+    const size_t n = points.positions->size();
+    pieces.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        const std::vector<int32_t> idx{static_cast<int32_t>(i)};
+        Geo out;
+        out.kind = GeoKind::Points;
+        out.positions = std::get<std::shared_ptr<const std::vector<glm::vec3>>>(
+            gatherColumn(ColumnData(points.positions), idx));
+        if (points.normals && points.normals->size() == n)
+            out.normals = std::get<std::shared_ptr<const std::vector<glm::vec3>>>(
+                gatherColumn(ColumnData(points.normals), idx));
+        out.pointAttrs = gatheredAttrs(points, Domain::Points, idx);
+        out.pointGroups = gatheredGroups(points, Domain::Points, idx);
+        out.detailAttrs = points.detailAttrs;  // shared by pointer (§5.4)
+        out.detailGroups = points.detailGroups;
+        pieces.push_back(std::make_shared<const Geo>(std::move(out)));
+    }
+    return pieces;
+}
+
 GeoPtr mergeMeshPieces(const std::vector<GeoPtr>& pieces) {
     Geo out;
-    out.kind = GeoKind::Mesh;
+    bool allPoints = !pieces.empty();
+    for (const GeoPtr& p : pieces) allPoints = allPoints && p->kind == GeoKind::Points;
+    out.kind = allPoints ? GeoKind::Points : GeoKind::Mesh;
     {
         std::vector<glm::vec3> pos;
         std::vector<int32_t> corners;
@@ -184,8 +209,10 @@ GeoPtr mergeMeshPieces(const std::vector<GeoPtr>& pieces) {
                     offsets.push_back((*p->faceOffsets)[i] + cornerBase);
         }
         out.positions = std::make_shared<const std::vector<glm::vec3>>(std::move(pos));
-        out.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(corners));
-        out.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(offsets));
+        if (!allPoints) {
+            out.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(corners));
+            out.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(offsets));
+        }
     }
     // Normals: concat when any piece has them (zero-fill the rest).
     {

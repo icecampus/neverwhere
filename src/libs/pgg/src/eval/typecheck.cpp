@@ -3,6 +3,7 @@
 #include "typecheck.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 #include "builtins.h"
 #include "schema.h"
@@ -68,6 +69,7 @@ private:
     const std::vector<std::string>& boundParams_;
     std::vector<Diagnostic>& diags_;
     std::vector<size_t>& runtimeContracts_;
+    std::unordered_set<size_t> zoneInstances_;  // def instances expanded inside zone bodies
     std::unordered_map<std::string, Type> env_;
     std::unordered_map<std::string, GeoSchema> schemas_;
     std::unordered_map<const Expr*, GeoSchema> callSchemas_;
@@ -304,23 +306,30 @@ private:
                     closures_[z->targets.names[i]] = cit->second;
             }
         }
+        zoneBodyContracts(bodyDefs);
         zoneStack_.pop_back();
         eraseBodyNames(bodyDefs);
     }
 
     void foreachZone(const ForeachZone* z) {
+        // Collection: geo<mesh> (connected pieces) or geo<points> (one piece
+        // per point — the row model, §5.4 v1.20); instances -> E204.
         const Type collT = infer(z->collection);
-        if (collT.base == ScalarType::Geo && collT.geoKind != GeoKind::Any &&
-            collT.geoKind != GeoKind::Mesh) {
+        if (collT.base != ScalarType::None && collT.base != ScalarType::Geo) {
             error("E204", z->collection ? z->collection->span : z->span,
-                  "foreach over geo<" + std::string(geoKindName(collT.geoKind)) +
-                      "> is not supported at stage E7",
-                  "v0 iterates connected pieces of a geo<mesh> (§5.4)");
+                  "foreach collection must be a geometry, got " + typeName(collT));
+        } else if (collT.base == ScalarType::Geo && collT.geoKind == GeoKind::Instances) {
+            error("E204", z->collection ? z->collection->span : z->span,
+                  "foreach over geo<instances> is not defined",
+                  "realize() first (pieces of the mesh) or iterate the anchor points instead");
         }
-        static const Type kMesh{ScalarType::Geo, false, GeoKind::Mesh};
+        const GeoKind itemKind = collT.base == ScalarType::Geo && collT.geoKind != GeoKind::Instances
+                                     ? collT.geoKind
+                                     : GeoKind::Any;
+        const Type kItem{ScalarType::Geo, false, itemKind};
         zoneStack_.push_back(false);
         std::vector<std::string> bodyDefs{z->item};
-        define(z->item, kMesh);
+        define(z->item, kItem);
         schemas_[z->item] = schemaOfExpr(z->collection);
         closures_[z->item] = gather(z->collection);
         for (const Stmt* s : z->body) {
@@ -328,17 +337,25 @@ private:
             stmt(s);
         }
         checkPortsBound({z->item}, {z->itemSpan}, portBindCounts(z->body), "foreach");
-        if (auto it = env_.find(z->item); it != env_.end() && it->second.base != ScalarType::None &&
-            !canConvert(it->second, kMesh)) {
-            error("E204", z->span,
-                  "item port '" + z->item + "' of the foreach zone must stay a geo<mesh>, got " +
-                      typeName(it->second),
-                  "the piece channel keeps one type — introduce a fresh name for other data");
+        // The body may rebuild the piece as any mesh/points geometry (a point
+        // row may become a mesh); the target takes the body's kind.
+        Type outT = kItem;
+        if (auto it = env_.find(z->item); it != env_.end() && it->second.base != ScalarType::None) {
+            if (it->second.base != ScalarType::Geo || it->second.isField ||
+                it->second.geoKind == GeoKind::Instances) {
+                error("E204", z->span,
+                      "item port '" + z->item + "' of the foreach zone must end as a geo<mesh> or geo<points>, got " +
+                          typeName(it->second),
+                      "the piece channel carries geometry — introduce a fresh name for other data; realize() "
+                      "instances");
+            } else {
+                outT = it->second;
+            }
         }
-        // Target: geo<mesh>, schema of the output piece.
-        define(z->target, kMesh);
+        define(z->target, outT);
         if (auto sit = schemas_.find(z->item); sit != schemas_.end()) schemas_[z->target] = sit->second;
         if (auto cit = closures_.find(z->item); cit != closures_.end()) closures_[z->target] = cit->second;
+        zoneBodyContracts(bodyDefs);
         zoneStack_.pop_back();
         eraseBodyNames(bodyDefs);
     }
@@ -875,6 +892,7 @@ private:
             case BuiltinId::MaxOf:
             case BuiltinId::AvgOf:
             case BuiltinId::SumOf:
+            case BuiltinId::ValueOf:
                 checkFieldArgs(argSchema(byParam, 1), byParam, {0, 2});  // field, where (on `on`)
                 break;
             default:
@@ -885,35 +903,55 @@ private:
     // --- contracts (static half; the rest goes to the engine) ---------------------
 
     void contracts() {
-        for (size_t i = 0; i < flat_.contracts.size(); ++i) {
+        for (size_t i = 0; i < flat_.contracts.size(); ++i)
+            if (!zoneInstances_.count(flat_.contracts[i].instance)) contract(i);
+    }
+
+    // Contracts of def instances expanded into a zone body are checked while
+    // the body names are still in scope (called by the zone walkers before
+    // eraseBodyNames); the instances are then skipped by contracts().
+    void zoneBodyContracts(const std::vector<std::string>& bodyDefs) {
+        std::unordered_set<size_t> insts;
+        for (const std::string& n : bodyDefs)
+            if (auto it = flat_.instanceOfBinding.find(n); it != flat_.instanceOfBinding.end())
+                insts.insert(it->second);
+        if (insts.empty()) return;
+        for (size_t i = 0; i < flat_.contracts.size(); ++i)
+            if (insts.count(flat_.contracts[i].instance) && !zoneInstances_.count(flat_.contracts[i].instance))
+                contract(i);
+        zoneInstances_.insert(insts.begin(), insts.end());
+    }
+
+    void contract(size_t i) {
+        {
             const FlatContract& c = flat_.contracts[i];
             if (c.attrForm) {
                 if (env_.find(c.ident) == env_.end()) {
                     error("E103", c.span, "'" + c.ident + "' is not defined");
-                    continue;
+                    return;
                 }
                 auto sit = schemas_.find(c.ident);
                 if (sit == schemas_.end() || sit->second.open) {
                     runtimeContracts_.push_back(i);  // open schema: runtime column check
-                    continue;
+                    return;
                 }
                 const GeoSchema& gs = sit->second;
                 const bool present = c.attrName == "P" || c.attrName == "index" ||
                                      (c.attrName == "N" ? gs.hasN || gs.hasAttr("N") || gs.kind == GeoKind::Mesh
                                                         : gs.hasAttr(c.attrName));
                 if (!present) contractError(c);
-                continue;
+                return;
             }
             const Type t = infer(c.cond);
-            if (t.base == ScalarType::None) continue;  // already reported
+            if (t.base == ScalarType::None) return;  // already reported
             if (t.isField || t.base != ScalarType::Bool) {
                 error("E204", c.span, "expect/ensure condition must be a value bool, got " + typeName(t));
-                continue;
+                return;
             }
             Value v;
             if (constEval(c.cond, v)) {
                 if (valueBase(v) == ScalarType::Bool && !asBool(v)) contractError(c);
-                continue;  // constant-true: satisfied statically
+                return;  // constant-true: satisfied statically
             }
             runtimeContracts_.push_back(i);
         }
@@ -1315,6 +1353,22 @@ private:
         }
         computeCallSchema(*sig, *c, byParam, argTypes, variadicArgs);
         Type rt = sig->result;
+        // value(field, on): the result has the field's own type (§8.10). A bare
+        // attribute read is provisionally f32 in inferAttr; when `on` has a
+        // closed schema the column's real type is known and wins.
+        if (sig->id == BuiltinId::ValueOf && np > 0 && argTypes[0].base != ScalarType::None) {
+            rt.base = argTypes[0].base;
+            if (byParam[0] && byParam[0]->value && byParam[0]->value->kind == NodeKind::AttrRef) {
+                const std::string& an = static_cast<const AttrRef*>(byParam[0]->value)->name;
+                const GeoSchema& on = argSchema(byParam, 1);
+                if (!on.open)
+                    for (size_t d = 0; d < 4; ++d)
+                        if (auto it = on.attrs[d].find(an); it != on.attrs[d].end()) {
+                            rt.base = it->second.type;
+                            break;
+                        }
+            }
+        }
         if (sig->resultGeoKindOfFirstArg && np > 0 && argTypes[0].base == ScalarType::Geo)
             rt.geoKind = argTypes[0].geoKind;
         lastSig_ = sig;

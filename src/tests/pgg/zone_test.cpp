@@ -4,6 +4,8 @@
 // probe integration on zone targets.
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "pgg/eval.h"
 #include "pgg/pgg.h"
 #include "pgg/src/eval/fracture.h"
@@ -384,14 +386,84 @@ TEST(ZoneForeach, ItemUnboundIsE204) {
     EXPECT_EQ(countCode(r, "E204"), 1);
 }
 
-TEST(ZoneForeach, OverPointsIsE204) {
+// --- foreach over points: the row model (v1.20) -------------------------------
+
+TEST(ZoneForeach, OverPointsIteratesOnePiecePerPointInIndexOrder) {
+    // Each row builds a line whose length is a per-row attribute; the merged
+    // output keeps piece order (row 0 first) and takes the body's kind.
     pgg::RunResult r = runSrc(
+        "rows0 = mesh_line(count = 3, length = 2.0, dir = (0, 1, 0))\n"
+        "rows = set(rows0, \"n\", 2 + @index, domain = points)\n"
+        "pts = foreach row in rows {\n"
+        "    n = value(@n, on = row)\n"
+        "    line = mesh_line(count = n, length = f32(n - 1), dir = (1, 0, 0))\n"
+        "    row = transform(line, translate = value(@P, on = row))\n"
+        "}\n"
+        "output pts\n");
+    expectNoErrors(r);
+    ASSERT_EQ(r.outputs.size(), 1u);
+    pgg::GeoPtr g = pgg::asGeo(r.outputs[0].value);
+    EXPECT_EQ(g->kind, pgg::GeoKind::Points);
+    ASSERT_EQ(g->pointCount(), 2u + 3u + 4u);
+    EXPECT_EQ((*g->positions)[0], glm::vec3(0, 0, 0));
+    EXPECT_EQ((*g->positions)[1], glm::vec3(1, 0, 0));
+    EXPECT_EQ((*g->positions)[2], glm::vec3(0, 1, 0));
+    EXPECT_EQ((*g->positions)[8], glm::vec3(3, 2, 0));
+}
+
+TEST(ZoneForeach, PointRowMayBecomeAMeshAndPieceIndexIsTheRowNumber) {
+    // A row of points becomes a mesh (kind follows the body); @piece_index is
+    // the row number while @index inside a one-point piece is always 0.
+    pgg::RunResult r = runSrc(
+        "rows = mesh_line(count = 3, length = 2.0, dir = (0, 1, 0))\n"
+        "m = foreach row in rows {\n"
+        "    b = box(size = vec3(1.0 + f32(@piece_index), 0.5, 0.5))\n"
+        "    row = transform(b, translate = value(@P, on = row))\n"
+        "}\n"
+        "output m\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = pgg::asGeo(r.outputs[0].value);
+    EXPECT_EQ(g->kind, pgg::GeoKind::Mesh);
+    EXPECT_EQ(g->faceCount(), 18u);
+    EXPECT_EQ(g->pointCount(), 24u);
+    // Third row: box of width 3 centred at y = 2 -> x spans [-1.5, 1.5].
+    float maxX = -1e9f;
+    for (const glm::vec3& p : *g->positions) maxX = std::max(maxX, p.x);
+    EXPECT_NEAR(maxX, 1.5f, 1e-5f);
+}
+
+TEST(ZoneForeach, OverInstancesIsE204AndMixedKindsAreE607) {
+    pgg::RunResult a = runSrc(
         "pc = point_cloud(count = 3, bounds = (1, 1, 1), rng = rng_from_seed(1))\n"
-        "f = foreach piece in pc {\n"
+        "inst = instance_on_points(pc, box(size = (1, 1, 1)))\n"
+        "f = foreach piece in inst {\n"
         "    piece = piece\n"
         "}\n"
         "output f\n");
-    EXPECT_EQ(countCode(r, "E204"), 1);
+    EXPECT_EQ(countCode(a, "E204"), 1);
+    // The item port must end as mesh/points: a non-geo rebind is E204.
+    pgg::RunResult b = runSrc(
+        "pc = point_cloud(count = 3, bounds = (1, 1, 1), rng = rng_from_seed(1))\n"
+        "f = foreach piece in pc {\n"
+        "    piece = 1.0\n"
+        "}\n"
+        "output f\n");
+    EXPECT_EQ(countCode(b, "E204"), 1);
+}
+
+TEST(ZoneForeach, ValueAggregatorNeedsExactlyOnePoint) {
+    pgg::RunResult r = runSrc(
+        "pts = mesh_line(count = 3, length = 2.0, dir = (1, 0, 0))\n"
+        "a = value(@P, on = pts, where = @index == 1)\n"
+        "b = value(@P, on = pts)\n"
+        "c = value(@P, on = pts, where = @index > 5)\n"
+        "output a\n"
+        "output b\n"
+        "output c\n");
+    EXPECT_EQ(countCode(r, "E601"), 2);
+    ASSERT_GE(r.outputs.size(), 1u);
+    EXPECT_EQ(pgg::valueBase(r.outputs[0].value), pgg::ScalarType::Vec3);
+    EXPECT_EQ(pgg::asVec3(r.outputs[0].value), glm::vec3(1, 0, 0));
 }
 
 TEST(ZoneForeach, PieceIndexOutsideZoneIsE302) {
@@ -419,34 +491,104 @@ TEST(ZoneForeach, ProbeOnZoneTarget) {
     EXPECT_NE(r.probes[0].text.find("mesh"), std::string::npos);
 }
 
-// --- expansion deferrals (E7) --------------------------------------------------
+// --- defs x zones (v1.20: def calls in bodies, zones in def bodies) -----------
 
-TEST(ZoneExpand, DefCallInZoneBodyIsE201) {
+TEST(ZoneExpand, DefCallInZoneBodyIsInlinedPerIteration) {
     pgg::RunResult r = runSrc(
-        "def mk(s: f32) -> (out: geo) {\n"
+        "def mk(s: f32) -> (out: geo<mesh>) {\n"
         "    \"\"\"make a box\"\"\"\n"
         "    out = box(size = vec3(s, s, s))\n"
         "}\n"
         "r = repeat (mk(1.0), iterations = 2) |cur| {\n"
-        "    cur = cur\n"
+        "    cur = merge(cur, mk(0.5 + f32(@iteration)))\n"
         "}\n"
         "output r\n");
-    EXPECT_EQ(countCode(r, "E201"), 1);
+    expectNoErrors(r);
+    pgg::GeoPtr g = pgg::asGeo(r.outputs[0].value);
+    EXPECT_EQ(g->faceCount(), 18u);  // seed box + one box per iteration
 }
 
-TEST(ZoneExpand, ZoneInDefBodyIsE201) {
+TEST(ZoneExpand, ZoneInDefBodyIsClonedPerInstance) {
+    // Two instances of a def with a repeat zone inside: each gets its own
+    // zone (renamed under the instance), results differ by the argument.
     pgg::RunResult r = runSrc(
-        "def settle(g: geo) -> (out: geo) {\n"
-        "    \"\"\"settle it\"\"\"\n"
-        "    r = repeat (g, iterations = 2) |cur| {\n"
-        "        cur = cur\n"
+        "def stack(g: geo<mesh>, n: int) -> (out: geo<mesh>) {\n"
+        "    \"\"\"n copies of g, shifted up\"\"\"\n"
+        "    r = repeat (g, iterations = n) |cur| {\n"
+        "        cur = merge(cur, transform(g, translate = vec3(0, 1.0 + f32(@iteration), 0)))\n"
         "    }\n"
         "    out = r\n"
         "}\n"
         "b = box(size = (1, 1, 1))\n"
-        "x = settle(b)\n"
-        "output x\n");
-    EXPECT_EQ(countCode(r, "E201"), 1);
+        "x = stack(b, n = 2)\n"
+        "y = stack(b, n = 4)\n"
+        "output x\n"
+        "output y\n");
+    expectNoErrors(r);
+    ASSERT_EQ(r.outputs.size(), 2u);
+    EXPECT_EQ(pgg::asGeo(r.outputs[0].value)->faceCount(), 18u);
+    EXPECT_EQ(pgg::asGeo(r.outputs[1].value)->faceCount(), 30u);
+}
+
+TEST(ZoneExpand, DefWithForeachInsideDefCalledInsideForeach) {
+    // Row model end to end: the outer foreach walks the rows, the def owns a
+    // foreach over the row's anchor points and calls another def per point.
+    pgg::RunResult r = runSrc(
+        "def brick(at: vec3, w: f32) -> (b: geo<mesh>) {\n"
+        "    \"\"\"one brick\"\"\"\n"
+        "    expect w > 0.0\n"
+        "    b = transform(box(size = vec3(w, 0.2, 0.2)), translate = at)\n"
+        "}\n"
+        "def course(n: int, y: f32) -> (row: geo<mesh>) {\n"
+        "    \"\"\"a row of n bricks\"\"\"\n"
+        "    pts = mesh_line(count = n, length = f32(n - 1) * 0.5, dir = (1, 0, 0))\n"
+        "    row = foreach p in pts {\n"
+        "        p = brick(at = centroid(p) + vec3(0, y, 0), w = 0.45)\n"
+        "    }\n"
+        "}\n"
+        "rows = mesh_line(count = 3, length = 2.0, dir = (0, 1, 0))\n"
+        "wall = foreach r in rows {\n"
+        "    r = course(n = 2 + @piece_index, y = f32(@piece_index))\n"
+        "}\n"
+        "output wall\n");
+    expectNoErrors(r);
+    EXPECT_EQ(pgg::asGeo(r.outputs[0].value)->faceCount(), (2u + 3u + 4u) * 6u);
+    // Same result at any lane count (N1).
+    pgg::RunResult r1 = runSrc(
+        "def brick(at: vec3, w: f32) -> (b: geo<mesh>) {\n"
+        "    \"\"\"one brick\"\"\"\n"
+        "    expect w > 0.0\n"
+        "    b = transform(box(size = vec3(w, 0.2, 0.2)), translate = at)\n"
+        "}\n"
+        "def course(n: int, y: f32) -> (row: geo<mesh>) {\n"
+        "    \"\"\"a row of n bricks\"\"\"\n"
+        "    pts = mesh_line(count = n, length = f32(n - 1) * 0.5, dir = (1, 0, 0))\n"
+        "    row = foreach p in pts {\n"
+        "        p = brick(at = centroid(p) + vec3(0, y, 0), w = 0.45)\n"
+        "    }\n"
+        "}\n"
+        "rows = mesh_line(count = 3, length = 2.0, dir = (0, 1, 0))\n"
+        "wall = foreach r in rows {\n"
+        "    r = course(n = 2 + @piece_index, y = f32(@piece_index))\n"
+        "}\n"
+        "output wall\n",
+        1);
+    EXPECT_EQ(geoContentHash(pgg::asGeo(r.outputs[0].value)), geoContentHash(pgg::asGeo(r1.outputs[0].value)));
+}
+
+TEST(ZoneExpand, ContractsOfInstancesInsideZoneBodiesFire) {
+    pgg::RunResult r = runSrc(
+        "def brick(w: f32) -> (b: geo<mesh>) {\n"
+        "    \"\"\"one brick\"\"\"\n"
+        "    expect w > 0.0\n"
+        "    b = box(size = vec3(w, 0.2, 0.2))\n"
+        "}\n"
+        "pts = mesh_line(count = 3, length = 2.0, dir = (1, 0, 0))\n"
+        "m = foreach p in pts {\n"
+        "    p = brick(w = 1.0 - f32(@piece_index))\n"  // piece 1 -> w == 0 -> E303
+        "}\n"
+        "output m\n");
+    EXPECT_GE(countCode(r, "E303"), 1);
 }
 
 }  // namespace

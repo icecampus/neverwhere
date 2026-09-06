@@ -98,6 +98,32 @@ Value opReduce(const BoundCall& bound, RunContext& run) {
     return Value(0.0f);
 }
 
+// value(field, on, where): the field on the single selected point, in the
+// field's own type. The accessor of the row model (foreach over points):
+// `value(@len, on = row)`. 0 or several selected -> E601.
+Value opValueOf(const BoundCall& bound, RunContext& run) {
+    const Geo& on = *asGeo(bound.values[1]);
+    ConstBufferPtr vals = evalField(bound.fields[0], on, Domain::Points, run);
+    ConstBufferPtr where;
+    if (bound.fields[2]) {
+        where = convertBuffer(evalField(bound.fields[2], on, Domain::Points, run), ScalarType::Bool);
+    } else {
+        where = makeConstBuffer(Value(true), on.pointCount());
+    }
+    const auto& mask = std::get<BoolBuf>(*where);
+    size_t n = 0, pick = 0;
+    for (size_t i = 0; i < mask.size(); ++i)
+        if (mask[i]) { if (n == 0) pick = i; ++n; }
+    if (n != 1) {
+        run.report("E601", bound.span,
+                   "value: the selection must contain exactly one point, got " + std::to_string(n),
+                   n == 0 ? "check the where mask — it selects 0 elements"
+                          : "narrow the where mask, or reduce with min_of/max_of/avg_of/sum_of");
+        return Value(0.0f);
+    }
+    return bufferValueAt(*vals, pick);
+}
+
 }  // namespace
 
 Value evalAggregateBuiltin(const BoundCall& bound, RunContext& run) {
@@ -106,6 +132,7 @@ Value evalAggregateBuiltin(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Extent: return opExtent(bound);
         case BuiltinId::Centroid: return opCentroid(bound);
         case BuiltinId::Count: return opCount(bound, run);
+        case BuiltinId::ValueOf: return opValueOf(bound, run);
         case BuiltinId::MinOf:
         case BuiltinId::MaxOf:
         case BuiltinId::AvgOf:

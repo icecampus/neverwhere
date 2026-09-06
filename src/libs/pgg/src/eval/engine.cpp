@@ -647,18 +647,24 @@ private:
     }
 
     void runContracts(size_t inst, bool ensures) {
+        runContractsWith(inst, ensures, [this](const std::string& n, Span s) { return resolveIdent(n, s); }, run_);
+    }
+
+    // Contracts of an instance evaluated against an explicit resolver/run:
+    // the top-level path passes resolveIdent/run_, a zone body passes its
+    // local resolver and (for foreach pieces) its own RunContext.
+    void runContractsWith(size_t inst, bool ensures, const IdentResolver& resolve, RunContext& run) {
         auto it = instanceContracts_.find(inst);
         if (it == instanceContracts_.end()) return;
         for (const size_t idx : it->second) {
             const FlatContract& c = flat_.contracts[idx];
             if (c.isEnsure != ensures) continue;
             if (c.attrForm) {
-                checkAttrContract(c);
+                checkAttrContract(c, resolve, run);
                 continue;
             }
-            const Value v = compileExprToValue(
-                c.cond, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
-            if (valueBase(v) == ScalarType::Bool && !asBool(v)) reportContract(c);
+            const Value v = compileExprToValue(c.cond, run, resolve);
+            if (valueBase(v) == ScalarType::Bool && !asBool(v)) reportContract(c, run);
         }
     }
 
@@ -686,13 +692,24 @@ private:
             if (auto it = localEnv.find(n); it != localEnv.end()) return it->second;
             return outerResolve(n, s);
         };
+        // Def instances expanded into the body (v1.20) run their contracts on
+        // every iteration/piece: expects before the first output binding of
+        // the instance, ensures after it (mirror of evalBinding's §7.4 order).
+        std::unordered_set<size_t> contractsStarted;
         for (const Stmt* s : body) {
             if (!s) continue;
             switch (s->kind) {
                 case NodeKind::Binding: {
                     const auto* b = static_cast<const Binding*>(s);
+                    size_t inst = kNoInstance;
+                    if (b->targets.names.size() == 1)
+                        if (auto oi = outputInstance_.find(b->targets.names[0]); oi != outputInstance_.end())
+                            inst = oi->second;
+                    const bool first = inst != kNoInstance && contractsStarted.insert(inst).second;
+                    if (first) runContractsWith(inst, /*ensures=*/false, resolve, run);
                     TypedValue tv = compileExpr(b->value, run, resolve);
                     installLocal(b, tv, localEnv);
+                    if (first) runContractsWith(inst, /*ensures=*/true, resolve, run);
                     break;
                 }
                 case NodeKind::RepeatZone: {
@@ -766,17 +783,19 @@ private:
 
     void evalForeachZone(const ForeachZone* z, EnvMap& env, const IdentResolver& outerResolve,
                          RunContext& run) {
-        static const Type kMesh{ScalarType::Geo, false, GeoKind::Mesh};
         const TypedValue coll = compileExpr(z->collection, run, outerResolve);
         GeoPtr collGeo;
         if (coll && !coll.field && valueBase(coll.value) == ScalarType::Geo) collGeo = asGeo(coll.value);
-        if (!collGeo || collGeo->kind != GeoKind::Mesh) {
-            run.report("E607", z->span, "foreach expects a geo<mesh> collection",
-                       "v0 iterates connected pieces of a mesh (§5.4)");
+        if (!collGeo || collGeo->kind == GeoKind::Instances) {
+            run.report("E607", z->span, "foreach expects a geo<mesh> or geo<points> collection",
+                       "mesh: connected pieces; points: one piece per point (§5.4); realize() instances first");
             env[z->target] = TypedValue{};
             return;
         }
-        const std::vector<GeoPtr> pieces = splitMeshPieces(*collGeo);
+        // mesh -> connected pieces; points -> one piece per point (row model).
+        const std::vector<GeoPtr> pieces =
+            collGeo->kind == GeoKind::Mesh ? splitMeshPieces(*collGeo) : splitPointPieces(*collGeo);
+        const Type kItem{ScalarType::Geo, false, collGeo->kind};
         // Free-name pre-evaluation (N1): every name the body reads but does
         // not define is force-evaluated sequentially here, so during the
         // parallel piece loop the outer environment is only read.
@@ -798,29 +817,36 @@ private:
                 pieceRun.threads = run.threads;
                 pieceRun.zoneConstants.emplace_back("piece_index", Value(static_cast<int64_t>(pi)));
                 EnvMap localEnv;
-                localEnv.emplace(z->item, TypedValue{kMesh, nullptr, Value(pieces[pi])});
+                localEnv.emplace(z->item, TypedValue{kItem, nullptr, Value(pieces[pi])});
                 execBody(z->body, localEnv, outerResolve, pieceRun);
                 outs[pi].value = localEnv.count(z->item) ? localEnv[z->item] : TypedValue{};
                 outs[pi].fieldsEvaluated = pieceRun.fieldsEvaluated;
             }
         });
         // Join in piece order: diagnostics, counters, then the rigid merge.
+        // Every body result must be a mesh or points geometry and all results
+        // must share one kind (the merged kind); anything else is E607.
         std::vector<GeoPtr> outPieces;
         outPieces.reserve(pieces.size());
+        GeoKind outKind = GeoKind::Any;
         for (size_t pi = 0; pi < pieces.size(); ++pi) {
             for (const Diagnostic& d : outs[pi].diagnostics) result_.diagnostics.push_back(d);
             run.fieldsEvaluated += outs[pi].fieldsEvaluated;
             const TypedValue& tv = outs[pi].value;
             if (tv && !tv.field && valueBase(tv.value) == ScalarType::Geo &&
-                asGeo(tv.value)->kind == GeoKind::Mesh) {
+                asGeo(tv.value)->kind != GeoKind::Instances &&
+                (outKind == GeoKind::Any || asGeo(tv.value)->kind == outKind)) {
+                outKind = asGeo(tv.value)->kind;
                 outPieces.push_back(asGeo(tv.value));
                 continue;
             }
-            run.report("E607", z->span, "foreach body did not produce a geo<mesh> piece",
-                       "the item port must stay a geo<mesh> (its input is the split piece)");
+            run.report("E607", z->span,
+                       "foreach body did not produce a geo<mesh>/geo<points> piece of one kind",
+                       "the item port must end as the same geometry kind on every piece (realize() instances)");
             outPieces.push_back(pieces[pi]);  // defensive: pass the piece through
         }
-        env[z->target] = TypedValue{kMesh, nullptr, Value(mergeMeshPieces(outPieces))};
+        const GeoPtr merged = mergeMeshPieces(outPieces);
+        env[z->target] = TypedValue{Type{ScalarType::Geo, false, merged->kind}, nullptr, Value(merged)};
     }
 
     // Names defined by the body itself (bindings, nested zone targets and
@@ -953,8 +979,8 @@ private:
         scanFreeNames(body, defined, seen, resolve);
     }
 
-    void checkAttrContract(const FlatContract& c) {
-        const TypedValue tv = evalBinding(c.ident, c.span);
+    void checkAttrContract(const FlatContract& c, const IdentResolver& resolve, RunContext& run) {
+        const TypedValue tv = resolve(c.ident, c.span);
         if (!tv) return;  // the binding's own error was already reported
         bool present = false;
         if (!tv.field && valueBase(tv.value) == ScalarType::Geo) {
@@ -969,15 +995,15 @@ private:
                 present = attrExistsOnAnyDomain(g, c.attrName);
             }
         }
-        if (!present) reportContract(c);
+        if (!present) reportContract(c, run);
     }
 
-    void reportContract(const FlatContract& c) {
+    void reportContract(const FlatContract& c, RunContext& run) {
         const FlatInstance& inst = flat_.instances[c.instance];
         std::string msg = c.hasMessage ? c.message
                                        : (c.isEnsure ? "ensure of '" + inst.defName + "' failed"
                                                      : "expect of '" + inst.defName + "' failed");
-        run_.report(c.isEnsure ? "E304" : "E303", c.span, msg + " [instance " + inst.path + "]");
+        run.report(c.isEnsure ? "E304" : "E303", c.span, msg + " [instance " + inst.path + "]");
     }
 
     TypedValue bindParam(const ParamDecl* p) {

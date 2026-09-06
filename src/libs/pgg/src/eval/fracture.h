@@ -24,10 +24,16 @@ std::vector<int32_t> computeIslands(const Geo& mesh, size_t& outCount);
 // groups of all domains gathered. Empty mesh -> no pieces.
 std::vector<GeoPtr> splitMeshPieces(const Geo& mesh);
 
-// Rigid N-way merge of meshes in piece order (no welding): union of column
-// names in first-appearance order, zero-fill for missing pieces, the first
-// seen type wins (others convert numerically), detail leftmost wins.
-// Empty list -> empty mesh.
+// Splits a geo<points> into one-point pieces in @index order (the "row model"
+// of foreach over points, spec §5.4 v1.20): each piece carries the point's
+// attributes/groups, detail shared by pointer.
+std::vector<GeoPtr> splitPointPieces(const Geo& points);
+
+// Rigid N-way merge in piece order (no welding): union of column names in
+// first-appearance order, neutral-fill for missing pieces, the first seen
+// type wins (others convert numerically), detail leftmost wins. Kind: points
+// when every piece is geo<points>, mesh otherwise (point pieces contribute no
+// faces). Empty list -> empty mesh.
 GeoPtr mergeMeshPieces(const std::vector<GeoPtr>& pieces);
 
 }  // namespace pgg

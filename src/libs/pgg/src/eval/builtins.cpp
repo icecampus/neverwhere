@@ -388,6 +388,15 @@ const std::vector<BuiltinSig>& registry() {
                             {geoArg("geo"), domain, fldDef("where", ScalarType::Bool, Value(true))},
                             Type{ScalarType::Int, false, GeoKind::Any}));
         }
+        {
+            // §8.10 value(field, on, where): the field's value on exactly one
+            // selected point (the row-model accessor for foreach over points);
+            // result type = field type (typecheck), 0 or >1 elements -> E601.
+            r.push_back(sig(BuiltinId::ValueOf, "value",
+                            {fld("field", ScalarType::Any, true), geoArg("on"),
+                             fldDef("where", ScalarType::Bool, Value(true))},
+                            Type{ScalarType::F32, false, GeoKind::Any}));
+        }
         for (BuiltinId id : {BuiltinId::MinOf, BuiltinId::MaxOf, BuiltinId::AvgOf, BuiltinId::SumOf}) {
             const char* n = id == BuiltinId::MinOf ? "min_of"
                           : id == BuiltinId::MaxOf ? "max_of"
@@ -574,6 +583,7 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::MaxOf:
         case BuiltinId::AvgOf:
         case BuiltinId::SumOf:
+        case BuiltinId::ValueOf:
             return evalAggregateBuiltin(bound, run);
         case BuiltinId::SdfSphere:
         case BuiltinId::SdfBox:

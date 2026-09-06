@@ -40,7 +40,7 @@ enum class BuiltinId {
     // §8.8 scatter and instancing
     DistributePoints, InstanceOnPoints, Realize,
     // §8.10 aggregators
-    Bbox, Extent, Centroid, Count, MinOf, MaxOf, AvgOf, SumOf,
+    Bbox, Extent, Centroid, Count, MinOf, MaxOf, AvgOf, SumOf, ValueOf,
     // §8.4 SDF
     SdfSphere, SdfBox, SdfUnion, SdfUnionSmooth, SdfSubtract, SdfSubtractSmooth,
     SdfIntersect, SdfDisplace, SdfInstanceOnPoints, SdfFromMesh, MeshFromSdf, SdfGrind,
