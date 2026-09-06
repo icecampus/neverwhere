@@ -99,17 +99,37 @@ def window(w: f32, h: f32) -> (out: geo<mesh>) {
     out = merge(merge(frame, glass), merge(merge(bar_v, bar_h), sill))
 }
 
-def window_sh(w: f32, h: f32) -> (out: geo<mesh>) {
-    """Окно со ставнями: две распахнутые дощатые створки плашмя к стене, с планками."""
+def plank_panel(w: f32, h: f32, t: f32, n: int, rng: rng) -> (out: geo<mesh>) {
+    """Щит из n вертикальных досок общей ширины w, высоты h, толщины t; центр в 0,
+    лицо в +Z. Доска = box шириной (шаг − 0.008): шов-зазор, плюс на доску свой
+    выступ по z (±0.006) и оттенок @tint (полутоновая полоса читается и при плоском
+    свете, когда шов не виден). Доски — инстансы на mesh_line, один realize."""
+    pitch = w / f32(n)
+    plank = compute_normals(box(size = vec3(pitch - 0.008, h, t)), mode = flat)
+    pts0 = mesh_line(count = n, length = w - pitch, dir = (1, 0, 0))
+    pts1 = transform(pts0, translate = vec3(0.0 - (w - pitch) * 0.5, 0, 0))
+    pts2 = set_position(pts1, offset = random_vec(lo = vec3(0, 0, -0.006), hi = vec3(0, 0, 0.006), rng = split_rng(rng, key = "z")))
+    shade = random(lo = 0.78, hi = 1.22, rng = split_rng(rng, key = "tint"))
+    pts3 = set(pts2, "tint", vec3(shade * 1.03, shade, shade * 0.95))
+    out = mark(realize(instance_on_points(pts3, source = plank)), "wood", where = true, domain = faces)
+}
+
+def shutter(sw: f32, h: f32, rng: rng) -> (out: geo<mesh>) {
+    """Ставня: щит из трёх вертикальных досок плюс две поперечные планки; центр в 0, лицо в +Z."""
+    panel = plank_panel(w = sw, h = h, t = 0.05, n = 3, rng = rng)
+    b1 = piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, h * 0.3, 0.04), grp = "wood")
+    b2 = piece(size = vec3(sw - 0.03, 0.06, 0.03), pos = vec3(0, 0.0 - h * 0.3, 0.04), grp = "wood")
+    out = merge(panel, merge(b1, b2))
+}
+
+def window_sh(w: f32, h: f32, off: f32, rng: rng) -> (out: geo<mesh>) {
+    """Окно с двумя распахнутыми ставнями плашмя к стене по бокам рамы; off — z центра
+    ставен относительно окна (у каменного этажа больше: кладка выступает до 0.2)."""
     win = window(w = w, h = h)
     sw = w * 0.48
-    sh_l = piece(size = vec3(sw, h * 0.96, 0.06), pos = vec3(0.0 - w * 0.5 - sw * 0.5 - 0.03, 0, 0.03), grp = "wood")
-    sh_r = piece(size = vec3(sw, h * 0.96, 0.06), pos = vec3(w * 0.5 + sw * 0.5 + 0.03, 0, 0.03), grp = "wood")
-    bl1 = piece(size = vec3(sw - 0.04, 0.06, 0.03), pos = vec3(0.0 - w * 0.5 - sw * 0.5 - 0.03, h * 0.3, 0.075), grp = "wood")
-    bl2 = piece(size = vec3(sw - 0.04, 0.06, 0.03), pos = vec3(0.0 - w * 0.5 - sw * 0.5 - 0.03, 0.0 - h * 0.3, 0.075), grp = "wood")
-    br1 = piece(size = vec3(sw - 0.04, 0.06, 0.03), pos = vec3(w * 0.5 + sw * 0.5 + 0.03, h * 0.3, 0.075), grp = "wood")
-    br2 = piece(size = vec3(sw - 0.04, 0.06, 0.03), pos = vec3(w * 0.5 + sw * 0.5 + 0.03, 0.0 - h * 0.3, 0.075), grp = "wood")
-    out = merge(merge(win, merge(sh_l, sh_r)), merge(merge(bl1, bl2), merge(br1, br2)))
+    sh_l = transform(shutter(sw = sw, h = h * 0.96, rng = split_rng(rng, key = "l")), translate = vec3(0.0 - w * 0.5 - sw * 0.5 - 0.03, 0, off))
+    sh_r = transform(shutter(sw = sw, h = h * 0.96, rng = split_rng(rng, key = "r")), translate = vec3(w * 0.5 + sw * 0.5 + 0.03, 0, off))
+    out = merge(win, merge(sh_l, sh_r))
 }
 
 def lantern(at: vec3) -> (out: geo<mesh>) {
@@ -521,38 +541,39 @@ puff5b = transform(ico_sphere(subdiv = 2, radius = 0.26), translate = vec3(chim_
 smoke = mark(merge(merge(merge(puff1, puff2), merge(puff3, puff3b)), merge(merge(puff4, puff4b), merge(puff5, puff5b))), "smoke", where = true, domain = faces)
 
 # --- дверь: арочное полотно в каменном портале, фонари, ступень ------------------
-leaf_sdf = arch_sdf(w = 1.0, straight = 1.45, r = 0.5, t = 0.12)
-leaf_mesh = compute_normals(mesh_from_sdf(leaf_sdf, voxel = 0.025))
-leaf_marked = mark(leaf_mesh, "wood", where = true, domain = faces)
-leaf = transform(leaf_marked, translate = vec3(door_x, 0.16, door_z + 0.08))
+# Полотно — щит из 7 вертикальных досок прямоугольником до высоты арки: верхние
+# углы прячутся за каменным кольцом портала (r_out 0.72 > диагональ угла 0.707),
+# так что скруглять доски не нужно; поперёк — две планки-обвязки.
+door_rng = split_rng(root_rng, key = "door")
+leaf = transform(plank_panel(w = 1.0, h = 1.95, t = 0.1, n = 7, rng = door_rng), translate = vec3(door_x, 0.16 + 1.95 * 0.5, door_z + 0.08))
 ring_sdf = sdf_subtract(arch_sdf(w = 1.44, straight = 1.45, r = 0.72, t = 0.22), arch_sdf(w = 1.06, straight = 1.45, r = 0.53, t = 0.3))
 ring_mesh = compute_normals(mesh_from_sdf(ring_sdf, voxel = 0.03))
 ring_marked = mark(ring_mesh, "stone", where = true, domain = faces)
 ring = transform(ring_marked, translate = vec3(door_x, 0.1, door_z + 0.15))
 ledge1 = piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 0.7, door_z + 0.15), grp = "wood")
 ledge2 = piece(size = vec3(0.9, 0.08, 0.03), pos = vec3(door_x, 1.4, door_z + 0.15), grp = "wood")
-plank1 = piece(size = vec3(0.03, 1.3, 0.025), pos = vec3(door_x - 0.17, 0.85, door_z + 0.15), grp = "wood")
-plank2 = piece(size = vec3(0.03, 1.3, 0.025), pos = vec3(door_x + 0.17, 0.85, door_z + 0.15), grp = "wood")
 door_win = piece(size = vec3(0.28, 0.28, 0.03), pos = vec3(door_x, 1.15, door_z + 0.15), grp = "glass")
 door_win_f = piece(size = vec3(0.34, 0.34, 0.02), pos = vec3(door_x, 1.15, door_z + 0.145), grp = "wood")
 knob = piece(size = vec3(0.07, 0.07, 0.09), pos = vec3(door_x + 0.35, 1.0, door_z + 0.17), grp = "wood")
 step = piece(size = vec3(1.8, 0.16, 0.6), pos = vec3(door_x, 0.08, door_z + 0.42), grp = "stone")
 lamp_l = lantern(at = vec3(door_x - 1.05, 1.72, door_z))
 lamp_r = lantern(at = vec3(door_x + 1.05, 1.72, door_z))
-door = merge(merge(leaf, ring), merge(merge(merge(ledge1, ledge2), merge(plank1, plank2)), merge(merge(door_win_f, door_win), merge(merge(knob, step), merge(lamp_l, lamp_r)))))
+door = merge(merge(leaf, ring), merge(merge(ledge1, ledge2), merge(merge(door_win_f, door_win), merge(merge(knob, step), merge(lamp_l, lamp_r)))))
 
 # --- окна ----------------------------------------------------------------------
-# Первый этаж: со ставнями справа от двери, простые на тыле и боках (боковые —
-# в проёмах кладки: локальный x стены → мир по повороту yaw).
-win_g_f = place(window_sh(w = 0.9, h = 1.0), yaw_deg = 0.0, at = vec3(win_x, 1.45, door_z + 0.1))
-win_g_b = place(window(w = 0.9, h = 1.0), yaw_deg = 180.0, at = vec3(0.0 - 0.9, 1.45, 0.0 - depth * 0.5 - 0.1))
-win_g_l = place(window(w = 0.75, h = 0.85), yaw_deg = 270.0, at = vec3(0.0 - width * 0.5 - 0.1, 1.55, side_win_x))
-win_g_r = place(window(w = 0.75, h = 0.85), yaw_deg = 90.0, at = vec3(width * 0.5 + 0.1, 1.55, 0.0 - side_win_x))
-# Второй этаж: большое окно во фронтоне над клумбой, по одному на боках и тыле.
-win_u_c = place(window(w = 1.25, h = 0.95), yaw_deg = 0.0, at = vec3(0, stone_h + 1.58, tf_z + 0.06))
-win_u_l = place(window(w = 0.85, h = 0.9), yaw_deg = 270.0, at = vec3(0.0 - uw * 0.5 - 0.06, stone_h + 1.35, 0))
-win_u_r = place(window(w = 0.85, h = 0.9), yaw_deg = 90.0, at = vec3(uw * 0.5 + 0.06, stone_h + 1.35, 0))
-win_u_b = place(window(w = 0.85, h = 0.9), yaw_deg = 180.0, at = vec3(0, stone_h + 1.35, 0.0 - tf_z - 0.06))
+# Все окна со ставнями из досок (def shutter/plank_panel); первый этаж сидит в
+# проёмах кладки (локальный x стены → мир по повороту yaw), ставни вынесены
+# вперёд (off = 0.14) поверх выступающих камней.
+win_rng = split_rng(root_rng, key = "windows")
+win_g_f = place(window_sh(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(win_rng, key = "gf")), yaw_deg = 0.0, at = vec3(win_x, 1.45, door_z + 0.1))
+win_g_b = place(window_sh(w = 0.9, h = 1.0, off = 0.14, rng = split_rng(win_rng, key = "gb")), yaw_deg = 180.0, at = vec3(0.0 - 0.9, 1.45, 0.0 - depth * 0.5 - 0.1))
+win_g_l = place(window_sh(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(win_rng, key = "gl")), yaw_deg = 270.0, at = vec3(0.0 - width * 0.5 - 0.1, 1.55, side_win_x))
+win_g_r = place(window_sh(w = 0.75, h = 0.85, off = 0.14, rng = split_rng(win_rng, key = "gr")), yaw_deg = 90.0, at = vec3(width * 0.5 + 0.1, 1.55, 0.0 - side_win_x))
+# Второй этаж: фронтон, бока и тыл.
+win_u_c = place(window_sh(w = 1.25, h = 0.95, off = 0.08, rng = split_rng(win_rng, key = "uc")), yaw_deg = 0.0, at = vec3(0, stone_h + 1.58, tf_z + 0.06))
+win_u_l = place(window_sh(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ul")), yaw_deg = 270.0, at = vec3(0.0 - uw * 0.5 - 0.06, stone_h + 1.35, 0))
+win_u_r = place(window_sh(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ur")), yaw_deg = 90.0, at = vec3(uw * 0.5 + 0.06, stone_h + 1.35, 0))
+win_u_b = place(window_sh(w = 0.85, h = 0.9, off = 0.08, rng = split_rng(win_rng, key = "ub")), yaw_deg = 180.0, at = vec3(0, stone_h + 1.35, 0.0 - tf_z - 0.06))
 windows_g = merge(merge(win_g_f, win_g_b), merge(win_g_l, win_g_r))
 windows_u = merge(merge(win_u_c, win_u_l), merge(win_u_r, win_u_b))
 windows = merge(windows_g, windows_u)
@@ -583,7 +604,7 @@ tile_col = vec3(0.045, 0.05, 0.075) * @tint
 leaf_col = mix(vec3(0.03, 0.17, 0.025), vec3(0.09, 0.36, 0.05), fbm(scale = 6.0, octaves = 2, rng = split_rng(paint_rng, key = "leaf")))
 c1 = ingroup("stone") ? stone_col : vec3(1.0, 0.0, 1.0)
 c2 = ingroup("wall") ? wall_col : c1
-c3 = ingroup("wood") ? vec3(0.11, 0.055, 0.022) : c2
+c3 = ingroup("wood") ? vec3(0.11, 0.055, 0.022) * @tint : c2
 c4 = ingroup("glass") ? vec3(0.16, 0.22, 0.30) : c3
 c5 = ingroup("lamp") ? vec3(1.0, 0.55, 0.15) : c4
 c6 = ingroup("roof") ? vec3(0.035, 0.035, 0.045) : c5
