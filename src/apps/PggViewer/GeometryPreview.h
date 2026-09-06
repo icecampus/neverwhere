@@ -35,8 +35,17 @@ struct PreviewGeometry {
     bool ok = false;
 };
 
+// How mesh normals are chosen for shading.
+//   Auto   — corner attribute N (compute_normals(mode = flat)) if present, else
+//            point @N (smooth), else face normals.
+//   Smooth — point @N if present, else face normals.
+//   Flat   — always face normals (ignores @N; architecture built from welded
+//            boxes reads as faceted instead of "pillowed").
+enum class PreviewShading { Auto, Smooth, Flat };
+
 struct PreviewBuildOptions {
     std::string highlightGroup;  // "<domain>:<name>" from PreviewGeometry::groups, "" = none
+    PreviewShading shading = PreviewShading::Auto;
     int sdfResolution = 64;      // longest bbox axis in voxels for sdf values
     unsigned threads = 0;
 };

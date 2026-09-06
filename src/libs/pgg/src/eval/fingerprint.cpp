@@ -95,7 +95,9 @@ void addAttrSet(Mixer& m, const AttrSet* set) {
     m.add(static_cast<uint64_t>(names.size()));
     for (const std::string* n : names) {
         m.addStr(*n);
-        addColumnData(m, set->find(*n)->data);
+        const AttrColumn* col = set->find(*n);
+        m.add(static_cast<uint64_t>(col->typeInfo));  // v1.14: the tag is part of the content
+        addColumnData(m, col->data);
     }
 }
 

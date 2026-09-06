@@ -84,6 +84,9 @@ private:
     void error(const std::string& code, Span span, std::string msg, std::string hint = {}) {
         diags_.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), false});
     }
+    void warn(const std::string& code, Span span, std::string msg, std::string hint = {}) {
+        diags_.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), true});
+    }
 
     void define(const std::string& name, Type t) { env_[name] = t; }
 
@@ -381,6 +384,10 @@ private:
             out = static_cast<const EnumLit*>(arg->value)->name;
             return true;
         }
+        if (arg->value->kind == NodeKind::NoneLit) {
+            out = "none";  // enum value spelled like the none literal (typeinfo = none)
+            return true;
+        }
         if (arg->value->kind == NodeKind::Ident) {
             const std::string& n = static_cast<const Ident*>(arg->value)->name;
             if (env_.count(n)) return false;
@@ -403,9 +410,17 @@ private:
         for (const auto& [attr, span] : cl.attrs) {
             if (attr == "P" || attr == "index") continue;
             if (attr == "N") {
-                if (!s.hasN && !s.hasAttr("N")) {
+                // v1.14: meshes derive @N from their faces when no column is
+                // stored; only face-less kinds (points/instances) lack @N.
+                if (!s.hasN && !s.hasAttr("N") && s.kind != GeoKind::Mesh) {
                     error("E302", span, "attribute @N is not present on this geometry (static schema)",
                           "compute normals upstream (compute_normals)");
+                } else if (s.nStale) {
+                    warn("W006", span,
+                         "@N is stale: the points were moved (set_position/smooth) after the normals were "
+                         "stored and compute_normals did not follow",
+                         "insert compute_normals(g) after the displacement, or drop the stale column with "
+                         "remove_attr(g, \"N\") to read normals derived from the faces");
                 }
                 continue;
             }
@@ -444,14 +459,40 @@ private:
             case BuiltinId::PointCloud:
                 storeSchema(&c, sourceSchema(GeoKind::Points, false));
                 break;
-            case BuiltinId::Transform:
-            case BuiltinId::Smooth:
-                storeSchema(&c, argSchema(byParam, 0));
+            case BuiltinId::Transform: {
+                GeoSchema s = argSchema(byParam, 0);
+                if (s.kind == GeoKind::Instances && byParam.size() > 3 && byParam[3] && byParam[3]->value) {
+                    // Static mirror of E611: a constant non-uniform scale on
+                    // geo<instances> is rejected before the run.
+                    Value sc;
+                    if (constEval(byParam[3]->value, sc) && valueBase(sc) == ScalarType::Vec3) {
+                        const glm::vec3 v = asVec3(sc);
+                        if (glm::abs(v.x - v.y) > 1e-6f || glm::abs(v.x - v.z) > 1e-6f)
+                            error("E611", c.span,
+                                  "transform: non-uniform scale on geo<instances> cannot be stamped into @scale",
+                                  "use a uniform scale, scale the source geometry, or realize() first");
+                    }
+                }
+                if (!s.open && s.kind == GeoKind::Instances) {
+                    // transform on instances composes the stamps (§19 v1.13):
+                    // @orient / @scale are materialized even when absent.
+                    s.attrs[domainIndex("points")]["orient"] = SchemaAttrType(ScalarType::Vec4, AttrTypeInfo::Quaternion);
+                    s.attrs[domainIndex("points")]["scale"] = ScalarType::F32;
+                }
+                storeSchema(&c, std::move(s));
                 break;
+            }
+            case BuiltinId::Smooth: {
+                GeoSchema s = argSchema(byParam, 0);
+                if (!s.open && s.hasN) s.nStale = true;  // stored normals no longer match the surface
+                storeSchema(&c, std::move(s));
+                break;
+            }
             case BuiltinId::SetPosition: {
-                const GeoSchema& s = argSchema(byParam, 0);
+                GeoSchema s = argSchema(byParam, 0);
                 checkFieldArgs(s, byParam, {1, 2, 3});  // offset, pos, where
-                storeSchema(&c, s);
+                if (!s.open && s.hasN) s.nStale = true;  // stored normals no longer match the surface
+                storeSchema(&c, std::move(s));
                 break;
             }
             case BuiltinId::ComputeNormals: {
@@ -460,9 +501,10 @@ private:
                     if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit) && lit == "flat") {
                         // flat mode writes faceted normals as a corner attribute
                         // and leaves @N (points) untouched (§19 v0.8).
-                        s.attrs[domainIndex("corners")]["N"] = ScalarType::Vec3;
+                        s.attrs[domainIndex("corners")]["N"] = SchemaAttrType(ScalarType::Vec3, AttrTypeInfo::Normal);
                     } else {
                         s.hasN = true;
+                        s.nStale = false;
                     }
                 }
                 storeSchema(&c, std::move(s));
@@ -502,6 +544,56 @@ private:
                 const GeoSchema& in = argSchema(byParam, 0);
                 checkFieldArgs(in, byParam, {2});  // value
                 GeoSchema s = in;
+                // Static mirror of the runtime E610 contract (typeinfo v1.14):
+                // decidable whenever the name is a literal and the value type
+                // is known — independent of the schema being open.
+                {
+                    const Type vt = byParam.size() > 2 && byParam[2] ? argTypes[2] : Type{};
+                    const ScalarType st = vt.base;
+                    std::string nm, ti;
+                    const bool nameLit = literalString(byParam.size() > 1 ? byParam[1] : nullptr, nm);
+                    const bool tiGiven = byParam.size() > 4 && byParam[4];
+                    const bool tiLit = tiGiven && literalString(byParam[4], ti);
+                    if (nameLit && st != ScalarType::None) {
+                        if (const char* need = reservedAttrTypeName(nm)) {
+                            const bool fits = (nm == "orient" && st == ScalarType::Vec4) ||
+                                              (nm == "tint" && st == ScalarType::Vec3) ||
+                                              (nm == "scale" && (st == ScalarType::F32 || st == ScalarType::Int)) ||
+                                              (nm == "variant" && st == ScalarType::Int);
+                            if (!fits)
+                                error("E610", c.span,
+                                      "attribute '@" + nm + "' is a reserved instance stamp and must be " +
+                                          std::string(need) + " (got " + typeName(vt) + ")",
+                                      "orient: vec4 quaternion (orient_from_euler), tint: vec3, scale: f32, "
+                                      "variant: int");
+                        }
+                        const bool isVec = st == ScalarType::Vec3 || st == ScalarType::Vec4;
+                        if ((!tiGiven || (tiLit && ti == "auto")) && isVec && !reservedAttrTypeName(nm) &&
+                            nm != "color" && nm != "Cd" && nm != "N") {
+                            error("E610", c.span,
+                                  "attribute '@" + nm + "' is a " + typeName(vt) +
+                                      ": its typeinfo must be explicit",
+                                  "set(..., typeinfo = vector | normal | point | quaternion | none) — "
+                                  "vector/normal/point/quaternion ride with transform/realize, none is plain "
+                                  "data (colors, sizes)");
+                        }
+                        if (tiLit && ti != "auto") {
+                            const AttrTypeInfo info = attrTypeInfoFromName(ti).value_or(AttrTypeInfo::None);
+                            const bool fits = info == AttrTypeInfo::None ||
+                                              (info == AttrTypeInfo::Quaternion ? st == ScalarType::Vec4
+                                                                                 : st == ScalarType::Vec3);
+                            if (!fits)
+                                error("E610", c.span,
+                                      "typeinfo " + ti + " does not fit attribute '@" + nm + "' of type " +
+                                          typeName(vt),
+                                      info == AttrTypeInfo::Quaternion ? "quaternion needs a vec4 value"
+                                                                        : "vector/normal/point need a vec3 value");
+                            if (nm == "orient" && info != AttrTypeInfo::Quaternion)
+                                error("E610", c.span, "attribute '@orient' must have typeinfo quaternion",
+                                      "drop the typeinfo argument (auto infers quaternion for orient)");
+                        }
+                    }
+                }
                 if (!s.open) {
                     if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit) &&
                         lit != "P" && lit != "N" && lit != "index") {
@@ -525,7 +617,33 @@ private:
                         } else {
                             for (size_t d2 = 0; d2 < s.attrs.size(); ++d2)
                                 if (d2 != dom) s.attrs[d2].erase(lit);
-                            s.attrs[dom][lit] = vt.base == ScalarType::None ? ScalarType::F32 : vt.base;
+                            const ScalarType st = vt.base == ScalarType::None ? ScalarType::F32 : vt.base;
+                            // typeinfo (v1.14): literal tag, or the runtime
+                            // inference mirrored (reserved names, vec3 -> vector).
+                            AttrTypeInfo info = AttrTypeInfo::None;
+                            bool infoOpen = false;
+                            std::string lit4;
+                            if (byParam.size() > 4 && byParam[4]) {
+                                if (literalString(byParam[4], lit4)) {
+                                    if (lit4 != "auto") info = attrTypeInfoFromName(lit4).value_or(AttrTypeInfo::None);
+                                    else infoOpen = true;  // handled below
+                                } else {
+                                    domOpen = true;  // non-literal typeinfo: schema opens
+                                }
+                            } else {
+                                infoOpen = true;
+                            }
+                            if (infoOpen) {
+                                ColumnData probe = st == ScalarType::Vec3
+                                                       ? ColumnData(std::shared_ptr<const std::vector<glm::vec3>>())
+                                                   : st == ScalarType::Vec4
+                                                       ? ColumnData(std::shared_ptr<const std::vector<glm::vec4>>())
+                                                       : ColumnData(std::shared_ptr<const std::vector<float>>());
+                                // nullopt = ambiguous vec3/vec4 — E610 above already reported.
+                                info = inferAttrTypeInfo(lit, probe).value_or(AttrTypeInfo::None);
+                            }
+                            if (domOpen) s = openSchema();
+                            else s.attrs[dom][lit] = SchemaAttrType(st, info);
                         }
                     } else {
                         s = openSchema();
@@ -539,6 +657,7 @@ private:
                 if (!s.open) {
                     if (literalString(byParam.size() > 1 ? byParam[1] : nullptr, lit)) {
                         for (auto& perDomain : s.attrs) perDomain.erase(lit);
+                        if (lit == "N") { s.hasN = false; s.nStale = false; }  // dedicated column dropped too
                     } else {
                         s = openSchema();
                     }
@@ -604,12 +723,22 @@ private:
                 for (size_t d = 0; d < 4; ++d) {
                     for (const auto& [n, t] : a.attrs[d]) {
                         const unsigned ma = maskOf(a.attrs, n), mb = maskOf(bb.attrs, n);
-                        if (ma && mb && ma != mb)
+                        if (ma && mb && ma != mb) {
                             error("E609", c.span,
                                   "merge: attribute '@" + n +
                                       "' sits on different domains in the two operands (static schema)",
                                   "promote it to the same domain on both sides, or remove_attr/rename_attr "
                                   "one side");
+                        } else if (ma && mb) {
+                            const auto itB = bb.attrs[d].find(n);
+                            if (itB != bb.attrs[d].end() && itB->second.info != t.info)
+                                error("E609", c.span,
+                                      "merge: attribute '@" + n + "' has typeinfo " +
+                                          std::string(attrTypeInfoName(t.info)) + " on the left and " +
+                                          std::string(attrTypeInfoName(itB->second.info)) +
+                                          " on the right (static schema)",
+                                      "write both sides with the same set(..., typeinfo = ...)");
+                        }
                     }
                     for (const std::string& n : a.groups[d]) {
                         const unsigned ma = maskOf(a.groups, n), mb = maskOf(bb.groups, n);
@@ -623,6 +752,7 @@ private:
                 GeoSchema s = a;
                 s.kind = a.kind == bb.kind ? a.kind : GeoKind::Any;
                 s.hasN = a.hasN || bb.hasN;
+                s.nStale = a.nStale || bb.nStale;
                 for (size_t d = 0; d < 4; ++d) {
                     for (const auto& [n, t] : bb.attrs[d]) s.attrs[d].emplace(n, t);
                     for (const std::string& n : bb.groups[d]) s.groups[d].insert(n);
@@ -719,7 +849,7 @@ private:
                 }
                 const GeoSchema& gs = sit->second;
                 const bool present = c.attrName == "P" || c.attrName == "index" ||
-                                     (c.attrName == "N" ? gs.hasN || gs.hasAttr("N")
+                                     (c.attrName == "N" ? gs.hasN || gs.hasAttr("N") || gs.kind == GeoKind::Mesh
                                                         : gs.hasAttr(c.attrName));
                 if (!present) contractError(c);
                 continue;

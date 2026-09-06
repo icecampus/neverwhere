@@ -113,15 +113,27 @@ GeoPtr genBox(glm::vec3 size, int res) {
     VertexWelder welder;
     std::vector<int32_t> corners;
     std::vector<int32_t> offsets{0};
+    // Smooth vertex normals: each welded vertex accumulates the unit normal of
+    // every side it belongs to (interior side vertices get the exact side
+    // normal, edges the 45-degree bisector, corners the diagonal). Reading @N on
+    // the faces domain averages the corner normals back to the exact side
+    // normal, and displacing along @N keeps the box closed. A welded box has
+    // no faceted point normals by construction; a faceted look is
+    // compute_normals(mode = flat) or flat shading in the viewer.
+    std::vector<glm::vec3> normals;
     const float invR = 1.0f / static_cast<float>(res);
     for (const auto& f : frames) {
         const glm::vec3 u = f[1] - f[0];
         const glm::vec3 v = f[3] - f[0];
+        const glm::vec3 sideN = glm::normalize(glm::cross(u, v));
         std::vector<int32_t> grid(static_cast<size_t>(res + 1) * (res + 1));
         for (int j = 0; j <= res; ++j)
-            for (int i = 0; i <= res; ++i)
-                grid[static_cast<size_t>(j) * (res + 1) + i] =
-                    welder.add(f[0] + u * (i * invR) + v * (j * invR));
+            for (int i = 0; i <= res; ++i) {
+                const int32_t idx = welder.add(f[0] + u * (i * invR) + v * (j * invR));
+                grid[static_cast<size_t>(j) * (res + 1) + i] = idx;
+                if (static_cast<size_t>(idx) >= normals.size()) normals.resize(idx + 1, glm::vec3(0.0f));
+                normals[static_cast<size_t>(idx)] += sideN;
+            }
         for (int j = 0; j < res; ++j) {
             for (int i = 0; i < res; ++i) {
                 const int32_t p00 = grid[static_cast<size_t>(j) * (res + 1) + i];
@@ -133,21 +145,13 @@ GeoPtr genBox(glm::vec3 size, int res) {
             }
         }
     }
-    std::vector<glm::vec3> normals(welder.positions.size());
+    normals.resize(welder.positions.size(), glm::vec3(0.0f));
+    for (glm::vec3& n : normals) n = glm::normalize(n);
     Geo geo;
     geo.kind = GeoKind::Mesh;
     geo.positions = std::make_shared<const std::vector<glm::vec3>>(std::move(welder.positions));
     geo.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(corners));
     geo.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(offsets));
-    // Box vertex normals: the dominant axis of the position (facet normals,
-    // matching how a subdivided box shades).
-    for (size_t i = 0; i < geo.positions->size(); ++i) {
-        const glm::vec3 p = (*geo.positions)[i];
-        const glm::vec3 a = glm::abs(p);
-        normals[i] = a.x >= a.y && a.x >= a.z ? glm::vec3(glm::sign(p.x), 0, 0)
-                     : a.y >= a.z              ? glm::vec3(0, glm::sign(p.y), 0)
-                                               : glm::vec3(0, 0, glm::sign(p.z));
-    }
     addNormals(geo, std::move(normals));
     return std::make_shared<const Geo>(std::move(geo));
 }

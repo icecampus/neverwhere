@@ -29,7 +29,7 @@ std::shared_ptr<const AttrSet> gatheredAttrs(const Geo& mesh, Domain d, const st
     const AttrSet* src = mesh.attrs(d);
     if (!src) return nullptr;
     AttrSet out;
-    for (const auto& [name, col] : src->columns) out.columns[name] = AttrColumn{gatherColumn(col.data, idx)};
+    for (const auto& [name, col] : src->columns) out.columns[name] = AttrColumn{gatherColumn(col.data, idx), col.typeInfo};
     return std::make_shared<const AttrSet>(std::move(out));
 }
 
@@ -225,20 +225,27 @@ GeoPtr mergeMeshPieces(const std::vector<GeoPtr>& pieces) {
         }
         AttrSet attrs;
         for (const std::string& n : unionNames(pieces, d, false)) {
+            // Exemplar column (first piece that has the name) fixes the type and
+            // tag; pieces before it are neutral-filled too, so the column
+            // length matches the merged domain regardless of which piece
+            // carries the name first.
+            const AttrColumn* exemplar = nullptr;
+            for (const GeoPtr& p : pieces) {
+                const AttrSet* s = p->attrs(d);
+                if (const AttrColumn* c = s ? s->find(n) : nullptr) { exemplar = c; break; }
+            }
+            if (!exemplar) continue;
             ColumnData acc;
             bool have = false;
             for (const GeoPtr& p : pieces) {
                 const AttrSet* s = p->attrs(d);
                 const AttrColumn* c = s ? s->find(n) : nullptr;
-                if (!have) {
-                    if (!c) continue;
-                    acc = c->data;
-                    have = true;
-                    continue;
-                }
-                acc = concatColumns(acc, c ? c->data : zeroColumnLike(acc, p->elementCount(d)));
+                ColumnData part = c ? convertColumn(c->data, exemplar->data)
+                                    : neutralColumnLike(*exemplar, *p, d, p->elementCount(d));
+                acc = have ? concatColumns(acc, part) : part;
+                have = true;
             }
-            if (have) attrs.columns[n] = AttrColumn{std::move(acc)};
+            attrs.columns[n] = AttrColumn{std::move(acc), exemplar->typeInfo};
         }
         GroupSet groups;
         for (const std::string& n : unionNames(pieces, d, true)) {

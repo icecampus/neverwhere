@@ -103,14 +103,64 @@ void appendPoints(const pgg::Geo& g, const pgg::ConstBoolColumnPtr& mask, Previe
     }
 }
 
-void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewGeometry& out) {
+// compute_normals(mode = flat) writes faceted normals into a vec3 corner
+// attribute "N"; nullptr when absent or malformed.
+const std::vector<glm::vec3>* cornerNormals(const pgg::Geo& g) {
+    const pgg::AttrSet* attrs = g.attrs(pgg::Domain::Corners);
+    const pgg::AttrColumn* col = attrs ? attrs->find("N") : nullptr;
+    if (!col) return nullptr;
+    const auto* vec = std::get_if<std::shared_ptr<const std::vector<glm::vec3>>>(&col->data);
+    if (!vec || !*vec || (*vec)->size() != g.cornerCount()) return nullptr;
+    return vec->get();
+}
+
+void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewShading shading,
+                PreviewGeometry& out) {
     pgg::Domain maskDomain = pgg::Domain::Points;
     const pgg::ConstBoolColumnPtr mask = groupColumn(g, highlight, maskDomain);
-    const bool smooth = g.normals && g.normals->size() == g.pointCount() &&
-                        !(mask && maskDomain == pgg::Domain::Faces);
     const std::vector<glm::vec3>& P = *g.positions;
     const std::vector<int32_t>& CV = *g.cornerVerts;
     const std::vector<int32_t>& FO = *g.faceOffsets;
+
+    const std::vector<glm::vec3>* cornerN =
+        shading == PreviewShading::Auto ? cornerNormals(g) : nullptr;
+    const bool smooth = !cornerN && shading != PreviewShading::Flat && g.normals &&
+                        g.normals->size() == g.pointCount() &&
+                        !(mask && maskDomain == pgg::Domain::Faces);
+
+    // Mask of a face for the unwelded (corner / flat) paths.
+    auto faceMask = [&](size_t f, int32_t begin, int32_t end) -> float {
+        if (!mask) return 0.0f;
+        if (maskDomain == pgg::Domain::Faces) return (f < mask->size() && (*mask)[f]) ? 1.0f : 0.0f;
+        // Point group on an unwelded mesh: the face is lit when every corner is in.
+        for (int32_t c = begin; c < end; ++c) {
+            const size_t pi = static_cast<size_t>(CV[c]);
+            if (!(pi < mask->size() && (*mask)[pi])) return 0.0f;
+        }
+        return 1.0f;
+    };
+
+    if (cornerN) {
+        // Faceted normals per corner: one vertex per corner, fan-triangulated.
+        for (size_t f = 0; f < g.faceCount(); ++f) {
+            const int32_t begin = FO[f], end = FO[f + 1];
+            if (end - begin < 3) continue;
+            const float m = faceMask(f, begin, end);
+            auto normalAt = [&](int32_t c) {
+                const glm::vec3 n = (*cornerN)[static_cast<size_t>(c)];
+                const float len = glm::length(n);
+                return len > 1e-12f ? n / len : glm::normalize(pgg::faceNormal(g, f));
+            };
+            for (int32_t c = begin + 1; c + 1 < end; ++c) {
+                const uint32_t base = static_cast<uint32_t>(out.vertices.size());
+                out.vertices.push_back({P[CV[begin]], normalAt(begin), m});
+                out.vertices.push_back({P[CV[c]], normalAt(c), m});
+                out.vertices.push_back({P[CV[c + 1]], normalAt(c + 1), m});
+                out.indices.insert(out.indices.end(), {base, base + 1, base + 2});
+            }
+        }
+        return;
+    }
 
     if (smooth) {
         // merge() zero-fills @N for operands that never had normals (e.g. a
@@ -159,20 +209,7 @@ void appendMesh(const pgg::Geo& g, const std::string& highlight, PreviewGeometry
         glm::vec3 n = pgg::faceNormal(g, f);
         const float len = glm::length(n);
         n = len > 1e-12f ? n / len : glm::vec3(0, 1, 0);
-        float m = 0.0f;
-        if (mask) {
-            if (maskDomain == pgg::Domain::Faces) {
-                m = (f < mask->size() && (*mask)[f]) ? 1.0f : 0.0f;
-            } else {
-                // Point group on a flat mesh: the face is lit when every corner is in.
-                bool all = true;
-                for (int32_t c = begin; c < end; ++c) {
-                    const size_t pi = static_cast<size_t>(CV[c]);
-                    if (!(pi < mask->size() && (*mask)[pi])) all = false;
-                }
-                m = all ? 1.0f : 0.0f;
-            }
-        }
+        const float m = faceMask(f, begin, end);
         for (int32_t c = begin + 1; c + 1 < end; ++c) {
             const uint32_t base = static_cast<uint32_t>(out.vertices.size());
             out.vertices.push_back({P[CV[begin]], n, m});
@@ -230,7 +267,7 @@ PreviewGeometry buildPreviewGeometry(const pgg::Value& value, const PreviewBuild
         pgg::Domain dom = pgg::Domain::Points;
         appendPoints(*geo, groupColumn(*geo, opts.highlightGroup, dom), out);
     } else {
-        appendMesh(*geo, opts.highlightGroup, out);
+        appendMesh(*geo, opts.highlightGroup, opts.shading, out);
     }
     extendBBox(out);
     out.summary = prefix + countsLabel(*geo);

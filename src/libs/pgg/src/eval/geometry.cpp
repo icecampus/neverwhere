@@ -34,6 +34,66 @@ Domain domainFromName(const std::string& name) {
     return Domain::Detail;
 }
 
+const char* attrTypeInfoName(AttrTypeInfo info) {
+    switch (info) {
+        case AttrTypeInfo::Vector: return "vector";
+        case AttrTypeInfo::Normal: return "normal";
+        case AttrTypeInfo::Point: return "point";
+        case AttrTypeInfo::Quaternion: return "quaternion";
+        default: return "none";
+    }
+}
+
+std::optional<AttrTypeInfo> attrTypeInfoFromName(const std::string& name) {
+    if (name == "none") return AttrTypeInfo::None;
+    if (name == "vector") return AttrTypeInfo::Vector;
+    if (name == "normal") return AttrTypeInfo::Normal;
+    if (name == "point") return AttrTypeInfo::Point;
+    if (name == "quaternion") return AttrTypeInfo::Quaternion;
+    return std::nullopt;
+}
+
+namespace {
+bool isVec3Col(const ColumnData& v) { return std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(v); }
+bool isVec4Col(const ColumnData& v) { return std::holds_alternative<std::shared_ptr<const std::vector<glm::vec4>>>(v); }
+bool isF32Col(const ColumnData& v) { return std::holds_alternative<std::shared_ptr<const std::vector<float>>>(v); }
+bool isIntCol(const ColumnData& v) { return std::holds_alternative<std::shared_ptr<const std::vector<int64_t>>>(v); }
+}  // namespace
+
+std::optional<AttrTypeInfo> inferAttrTypeInfo(const std::string& name, const ColumnData& value) {
+    if (name == "N") return AttrTypeInfo::Normal;
+    if (name == "orient") return AttrTypeInfo::Quaternion;
+    if (name == "tint" || name == "color" || name == "Cd") return AttrTypeInfo::None;
+    if (isVec3Col(value) || isVec4Col(value)) return std::nullopt;
+    return AttrTypeInfo::None;
+}
+
+bool attrTypeInfoFits(AttrTypeInfo info, const ColumnData& value) {
+    switch (info) {
+        case AttrTypeInfo::Vector:
+        case AttrTypeInfo::Normal:
+        case AttrTypeInfo::Point: return isVec3Col(value);
+        case AttrTypeInfo::Quaternion: return isVec4Col(value);
+        default: return true;
+    }
+}
+
+const char* reservedAttrTypeName(const std::string& name) {
+    if (name == "orient") return "vec4";
+    if (name == "tint") return "vec3";
+    if (name == "scale") return "f32";
+    if (name == "variant") return "int";
+    return nullptr;
+}
+
+bool reservedAttrTypeFits(const std::string& name, const ColumnData& value) {
+    if (name == "orient") return isVec4Col(value);
+    if (name == "tint") return isVec3Col(value);
+    if (name == "scale") return isF32Col(value) || isIntCol(value);
+    if (name == "variant") return isIntCol(value);
+    return true;
+}
+
 size_t AttrColumn::size() const {
     return std::visit([](const auto& ptr) { return ptr ? ptr->size() : size_t(0); }, data);
 }
@@ -411,7 +471,7 @@ std::shared_ptr<const std::vector<glm::vec3>> samplePositions(const Geo& geo, Do
 }
 
 std::shared_ptr<const std::vector<glm::vec3>> sampleNormals(const Geo& geo, Domain domain) {
-    if (!geo.normals) return nullptr;
+    if (!geo.normals) return derivedNormals(geo, domain);  // v1.14 read fallback
     if (domain == Domain::Points) return geo.normals;
     DColumn dc;
     dc.width = 3;
@@ -429,6 +489,99 @@ std::shared_ptr<const std::vector<glm::vec3>> sampleNormals(const Geo& geo, Doma
 }
 
 // --- column utilities (merge/realize union semantics) -------------------------
+
+std::shared_ptr<const std::vector<glm::vec3>> derivedNormals(const Geo& geo, Domain domain) {
+    if (geo.kind != GeoKind::Mesh || !geo.cornerVerts || !geo.faceOffsets || geo.faceCount() == 0)
+        return nullptr;
+    const size_t nf = geo.faceCount();
+    const std::vector<int32_t>& CV = *geo.cornerVerts;
+    const std::vector<int32_t>& FO = *geo.faceOffsets;
+    std::vector<glm::vec3> faceN(nf);
+    for (size_t f = 0; f < nf; ++f) {
+        const glm::vec3 n = faceNormal(geo, f);
+        const float len = glm::length(n);
+        faceN[f] = len > 1e-20f ? n / len : glm::vec3(0.0f);
+    }
+    std::vector<glm::vec3> out;
+    switch (domain) {
+        case Domain::Faces: out = std::move(faceN); break;
+        case Domain::Corners:
+            out.resize(geo.cornerCount());
+            for (size_t f = 0; f < nf; ++f)
+                for (int32_t c = FO[f]; c < FO[f + 1]; ++c) out[static_cast<size_t>(c)] = faceN[f];
+            break;
+        case Domain::Points:
+        case Domain::Detail: {
+            std::vector<glm::vec3> acc(geo.pointCount(), glm::vec3(0.0f));
+            for (size_t f = 0; f < nf; ++f)
+                for (int32_t c = FO[f]; c < FO[f + 1]; ++c) acc[static_cast<size_t>(CV[c])] += faceN[f];
+            for (glm::vec3& n : acc) {
+                const float len = glm::length(n);
+                n = len > 1e-20f ? n / len : glm::vec3(0.0f);
+            }
+            if (domain == Domain::Points) {
+                out = std::move(acc);
+            } else {
+                glm::vec3 sum(0.0f);
+                for (const glm::vec3& n : acc) sum += n;
+                out.assign(1, acc.empty() ? glm::vec3(0.0f) : sum / static_cast<float>(acc.size()));
+            }
+            break;
+        }
+    }
+    return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
+}
+
+ColumnData neutralColumnLike(const AttrColumn& typeOf, const Geo& forGeo, Domain domain, size_t count) {
+    if (typeOf.typeInfo == AttrTypeInfo::Quaternion &&
+        std::holds_alternative<std::shared_ptr<const std::vector<glm::vec4>>>(typeOf.data))
+        return std::make_shared<const std::vector<glm::vec4>>(count, glm::vec4(0, 0, 0, 1));
+    if (typeOf.typeInfo == AttrTypeInfo::Normal &&
+        std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(typeOf.data)) {
+        if (auto n = derivedNormals(forGeo, domain); n && n->size() == count) return n;
+    }
+    return zeroColumnLike(typeOf.data, count);
+}
+
+ColumnData transformColumn(const AttrColumn& col, const glm::quat& rot, const glm::vec3& scale,
+                           const glm::vec3& translate) {
+    using Vec3Col = std::shared_ptr<const std::vector<glm::vec3>>;
+    using Vec4Col = std::shared_ptr<const std::vector<glm::vec4>>;
+    switch (col.typeInfo) {
+        case AttrTypeInfo::Vector:
+        case AttrTypeInfo::Normal:
+        case AttrTypeInfo::Point: {
+            if (!std::holds_alternative<Vec3Col>(col.data)) return col.data;
+            const std::vector<glm::vec3>& src = *std::get<Vec3Col>(col.data);
+            std::vector<glm::vec3> out(src.size());
+            if (col.typeInfo == AttrTypeInfo::Normal) {
+                const bool safeScale = glm::abs(scale.x) > 1e-12f && glm::abs(scale.y) > 1e-12f &&
+                                       glm::abs(scale.z) > 1e-12f;
+                for (size_t i = 0; i < out.size(); ++i) {
+                    const glm::vec3 rn = rot * (safeScale ? src[i] / scale : src[i]);
+                    const float len = glm::length(rn);
+                    out[i] = len > 0.0f ? rn / len : glm::vec3(0.0f);
+                }
+            } else if (col.typeInfo == AttrTypeInfo::Vector) {
+                for (size_t i = 0; i < out.size(); ++i) out[i] = rot * (src[i] * scale);
+            } else {
+                for (size_t i = 0; i < out.size(); ++i) out[i] = rot * (src[i] * scale) + translate;
+            }
+            return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
+        }
+        case AttrTypeInfo::Quaternion: {
+            if (!std::holds_alternative<Vec4Col>(col.data)) return col.data;
+            const std::vector<glm::vec4>& src = *std::get<Vec4Col>(col.data);
+            std::vector<glm::vec4> out(src.size());
+            for (size_t i = 0; i < out.size(); ++i) {
+                const glm::quat q = rot * glm::quat(src[i].w, src[i].x, src[i].y, src[i].z);
+                out[i] = glm::vec4(q.x, q.y, q.z, q.w);
+            }
+            return std::make_shared<const std::vector<glm::vec4>>(std::move(out));
+        }
+        default: return col.data;
+    }
+}
 
 ColumnData zeroColumnLike(const ColumnData& typeOf, size_t count) {
     return std::visit(

@@ -223,6 +223,47 @@ bool runPggViewerSmokeTest() {
         check(!none.ok && none.summary.find("no geometry") != std::string::npos, "preview of a scalar reports no geometry");
     }
 
+    // 8. Preview shading modes on a welded box: auto/smooth -> indexed with
+    //    smooth @N (8 vertices, outward diagonals), flat -> face normals per
+    //    triangle, auto with compute_normals(flat) -> corner N per corner.
+    {
+        const std::string src =
+            "b = box(size = (2, 4, 6))\n"
+            "f = compute_normals(b, mode = flat)\n"
+            "output f\n";
+        pgg::RunParams rp;
+        rp.pulls = {"b", "f"};
+        pgg::RunResult r = pgg::run(src, rp, {}, "<smoke-shading>");
+        check(!r.hasErrors() && r.pulled.size() == 2, "value pulls for shading modes");
+        if (r.pulled.size() == 2) {
+            auto axisAligned = [](const glm::vec3& n) {
+                const glm::vec3 a = glm::abs(n);
+                return std::abs(std::max(a.x, std::max(a.y, a.z)) - 1.0f) < 1e-4f;
+            };
+            PreviewBuildOptions opts;
+            opts.shading = PreviewShading::Smooth;
+            const PreviewGeometry sm = buildPreviewGeometry(r.pulled[0].value, opts);
+            bool outward = sm.vertices.size() == 8;
+            for (const PreviewVertex& v : sm.vertices)
+                outward = outward && glm::dot(v.normal, glm::normalize(v.pos)) > 0.5f && !axisAligned(v.normal);
+            check(sm.ok && outward && sm.indices.size() == 36, "shading smooth: 8 indexed vertices, diagonal outward @N");
+
+            opts.shading = PreviewShading::Flat;
+            const PreviewGeometry fl = buildPreviewGeometry(r.pulled[0].value, opts);
+            bool faceted = fl.vertices.size() == 36;
+            for (const PreviewVertex& v : fl.vertices) faceted = faceted && axisAligned(v.normal);
+            check(fl.ok && faceted, "shading flat: per-triangle face normals, axis-aligned");
+
+            opts.shading = PreviewShading::Auto;
+            const PreviewGeometry autoBox = buildPreviewGeometry(r.pulled[0].value, opts);
+            check(autoBox.ok && autoBox.vertices.size() == 8, "shading auto without corner N falls back to smooth @N");
+            const PreviewGeometry autoFlat = buildPreviewGeometry(r.pulled[1].value, opts);
+            bool cornerFaceted = autoFlat.vertices.size() == 36;
+            for (const PreviewVertex& v : autoFlat.vertices) cornerFaceted = cornerFaceted && axisAligned(v.normal);
+            check(autoFlat.ok && cornerFaceted, "shading auto prefers corner N from compute_normals(flat)");
+        }
+    }
+
     if (g_failures == 0) {
         spdlog::info("TEST PASS: PggViewer smoke (all checks)");
     } else {

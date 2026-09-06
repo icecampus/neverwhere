@@ -50,13 +50,36 @@ TEST(Geometry, BoxCountsBoundsNormals) {
         EXPECT_EQ(mn, glm::vec3(-1, -2, -3));
         EXPECT_EQ(mx, glm::vec3(1, 2, 3));
     }
-    // Outward facet normals on a res=1 box.
-    pgg::GeoPtr g = pgg::genBox(glm::vec3(2, 2, 2), 1);
+    // Smooth vertex normals on a welded non-cubic box: every corner gets the
+    // unit diagonal of its own octant (regression: the dominant-axis rule used
+    // to hand all 8 corners of a 2x4x6 box the same +-X normal).
+    pgg::GeoPtr g = pgg::genBox(glm::vec3(2, 4, 6), 1);
     for (size_t i = 0; i < g->pointCount(); ++i) {
-        const glm::vec3& n = (*g->normals)[i];
+        const glm::vec3 n = (*g->normals)[i];
+        const glm::vec3 p = (*g->positions)[i];
         EXPECT_NEAR(glm::length(n), 1.0f, 1e-6f);
-        EXPECT_GT(glm::dot(n, glm::normalize((*g->positions)[i])), 0.5f);
+        const glm::vec3 expected = glm::normalize(glm::vec3(glm::sign(p.x), glm::sign(p.y), glm::sign(p.z)));
+        EXPECT_NEAR(glm::length(n - expected), 0.0f, 1e-5f) << "point " << i;
     }
+    // Reading @N on the faces domain averages the corner normals back to the
+    // exact side direction (the "top faces of a box" mask idiom).
+    auto faceN = pgg::sampleNormals(*g, pgg::Domain::Faces);
+    ASSERT_TRUE(faceN);
+    ASSERT_EQ(faceN->size(), g->faceCount());
+    for (size_t f = 0; f < g->faceCount(); ++f) {
+        const glm::vec3 side = glm::normalize(pgg::faceNormal(*g, f));
+        const glm::vec3 avg = glm::normalize((*faceN)[f]);
+        EXPECT_NEAR(glm::length(avg - side), 0.0f, 1e-5f) << "face " << f;
+    }
+    // Subdivided: interior side vertices carry the exact side normal.
+    pgg::GeoPtr g3 = pgg::genBox(glm::vec3(2, 4, 6), 3);
+    size_t exact = 0;
+    for (size_t i = 0; i < g3->pointCount(); ++i) {
+        const glm::vec3 n = (*g3->normals)[i];
+        const glm::vec3 a = glm::abs(n);
+        if (std::abs(std::max(a.x, std::max(a.y, a.z)) - 1.0f) < 1e-5f) ++exact;
+    }
+    EXPECT_EQ(exact, 6u * 4u);  // 6 sides x (res-1)^2 interior vertices
 }
 
 TEST(Geometry, GridCountsBoundsNormals) {

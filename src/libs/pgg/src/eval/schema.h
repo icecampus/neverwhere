@@ -24,11 +24,28 @@
 
 namespace pgg {
 
+// Static view of an attribute column: value type + typeinfo tag (v1.14).
+// Implicitly convertible from/to ScalarType so the transfer table can keep
+// writing `attrs[d][name] = ScalarType::Vec3` (tag None) and reading the type.
+struct SchemaAttrType {
+    ScalarType type = ScalarType::None;
+    AttrTypeInfo info = AttrTypeInfo::None;
+    SchemaAttrType() = default;
+    SchemaAttrType(ScalarType t) : type(t) {}  // NOLINT(google-explicit-constructor)
+    SchemaAttrType(ScalarType t, AttrTypeInfo i) : type(t), info(i) {}
+    operator ScalarType() const { return type; }  // NOLINT(google-explicit-constructor)
+};
+
 struct GeoSchema {
     bool open = true;
     GeoKind kind = GeoKind::Any;
     bool hasN = false;  // dedicated normals column (@N, points)
-    std::array<std::unordered_map<std::string, ScalarType>, 4> attrs;   // per domain
+    // Stored @N no longer matches the surface: set_position/smooth moved the
+    // points after the column was written and no compute_normals followed.
+    // Reading @N in that state is W006 (a mesh without a column derives fresh
+    // normals from its faces and is never stale).
+    bool nStale = false;
+    std::array<std::unordered_map<std::string, SchemaAttrType>, 4> attrs;   // per domain
     std::array<std::unordered_set<std::string>, 4> groups;              // per domain
     std::shared_ptr<GeoSchema> instanceSource;  // geo<instances>: source schema when proven
 

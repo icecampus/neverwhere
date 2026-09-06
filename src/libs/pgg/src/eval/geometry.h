@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace pgg {
 
@@ -44,8 +45,34 @@ using ColumnData = std::variant<
     std::shared_ptr<const std::vector<glm::vec4>>,
     std::shared_ptr<const std::vector<std::string>>>;
 
+// Geometric meaning of an attribute (spec §4.4, v1.14 — Houdini typeinfo).
+// transform/realize move a column by its tag instead of by a name list:
+//   None       — plain data (colors, sizes, ids): copied untouched.
+//   Vector     — direction with magnitude: rotated and scaled, not translated.
+//   Normal     — surface normal: inverse-transpose rotation, renormalized.
+//   Point      — position: full affine (rotation, scale, translation).
+//   Quaternion — orientation (x, y, z, w): composed, q' = rot * q.
+enum class AttrTypeInfo : uint8_t { None = 0, Vector, Normal, Point, Quaternion };
+
+const char* attrTypeInfoName(AttrTypeInfo info);
+// Parses "none|vector|normal|point|quaternion"; nullopt otherwise.
+std::optional<AttrTypeInfo> attrTypeInfoFromName(const std::string& name);
+// Default tag for set(..., typeinfo = auto): reserved names (N -> normal,
+// orient -> quaternion, tint/color/Cd -> none), scalars/vec2/int/bool/string
+// -> none. A vec3/vec4 under any other name is ambiguous (direction? position?
+// color?) and returns nullopt — the caller demands an explicit tag (E610).
+std::optional<AttrTypeInfo> inferAttrTypeInfo(const std::string& name, const ColumnData& value);
+// Tag/type compatibility: vector/normal/point need vec3, quaternion needs vec4,
+// none accepts anything.
+bool attrTypeInfoFits(AttrTypeInfo info, const ColumnData& value);
+// Reserved instance-stamp names (§8.8) and their required value type; nullptr
+// for a free name. Returned string is the type name for diagnostics.
+const char* reservedAttrTypeName(const std::string& name);
+bool reservedAttrTypeFits(const std::string& name, const ColumnData& value);
+
 struct AttrColumn {
     ColumnData data;
+    AttrTypeInfo typeInfo = AttrTypeInfo::None;
     size_t size() const;
 };
 
@@ -126,6 +153,24 @@ ConstBoolColumnPtr sampleGroupColumn(const Geo& geo, const std::string& name, Do
 // geo has none.
 std::shared_ptr<const std::vector<glm::vec3>> samplePositions(const Geo& geo, Domain domain);
 std::shared_ptr<const std::vector<glm::vec3>> sampleNormals(const Geo& geo, Domain domain);
+
+// Normals derived from the topology when no @N column is stored (v1.14
+// read fallback, Blender-style): points — accumulated incident face normals,
+// corners/faces — the face normal, detail — the average. nullptr for
+// geometries without faces (points/instances) — there @N stays E302.
+std::shared_ptr<const std::vector<glm::vec3>> derivedNormals(const Geo& geo, Domain domain);
+
+// Neutral fill for a missing column in a union (merge/realize/fracture): the
+// identity quaternion for Quaternion, derived normals for Normal on a mesh
+// domain that has them, zeros otherwise.
+ColumnData neutralColumnLike(const AttrColumn& typeOf, const Geo& forGeo, Domain domain, size_t count);
+
+// Applies p' = rot * (p * scale) + translate to a column by its typeinfo
+// (vector: no translation; normal: inverse-transpose + renormalize; point:
+// full affine; quaternion: rot * q). None or a non-vec3/vec4 column returns
+// the input unchanged.
+ColumnData transformColumn(const AttrColumn& col, const glm::quat& rot, const glm::vec3& scale,
+                           const glm::vec3& translate);
 
 // Explicit domain conversion for `promote` (spec §8.7): mode sum/average/
 // first; on expanding conversions (detail -> *, points -> corners, faces ->

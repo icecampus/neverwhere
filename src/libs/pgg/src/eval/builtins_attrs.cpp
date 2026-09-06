@@ -114,7 +114,47 @@ Value opSet(const BoundCall& bound, RunContext& run) {
         }
     }
     AttrSet attrs = out.attrs(domain) ? *out.attrs(domain) : AttrSet{};
-    attrs.columns[name] = AttrColumn{bufferToColumn(*buf)};
+    ColumnData col = bufferToColumn(*buf);
+    // typeinfo (v1.14): explicit tag or the reserved-name inference; every
+    // ambiguity is an error (E610) — the author is an agent, nothing is guessed
+    // silently. `typeinfo = none` parses as the none literal, not the string.
+    const std::string infoArg =
+        valueBase(bound.values[4]) == ScalarType::String ? asString(bound.values[4]) : std::string("none");
+    if (!reservedAttrTypeFits(name, col)) {
+        run.report("E610", bound.span,
+                   "attribute '@" + name + "' is a reserved instance stamp and must be " +
+                       std::string(reservedAttrTypeName(name)),
+                   "orient: vec4 quaternion (orient_from_euler), tint: vec3, scale: f32, variant: int");
+        return Value(asGeo(bound.values[0]));
+    }
+    AttrTypeInfo info = AttrTypeInfo::None;
+    if (infoArg == "auto") {
+        const std::optional<AttrTypeInfo> inferred = inferAttrTypeInfo(name, col);
+        if (!inferred) {
+            run.report("E610", bound.span,
+                       "attribute '@" + name + "' is a vec3/vec4: its typeinfo must be explicit",
+                       "set(..., typeinfo = vector | normal | point | quaternion | none) — vector/normal/point/"
+                       "quaternion ride with transform/realize, none is plain data (colors, sizes)");
+            return Value(asGeo(bound.values[0]));
+        }
+        info = *inferred;
+    } else {
+        info = attrTypeInfoFromName(infoArg).value_or(AttrTypeInfo::None);
+        if (!attrTypeInfoFits(info, col)) {
+            run.report("E610", bound.span,
+                       "typeinfo " + infoArg + " does not fit attribute '@" + name + "': " +
+                           (info == AttrTypeInfo::Quaternion ? "quaternion needs a vec4 value"
+                                                              : "vector/normal/point need a vec3 value"),
+                       "pick a matching typeinfo or typeinfo = none");
+            return Value(asGeo(bound.values[0]));
+        }
+        if (name == "orient" && info != AttrTypeInfo::Quaternion) {
+            run.report("E610", bound.span, "attribute '@orient' must have typeinfo quaternion",
+                       "drop the typeinfo argument (auto infers quaternion for orient)");
+            return Value(asGeo(bound.values[0]));
+        }
+    }
+    attrs.columns[name] = AttrColumn{std::move(col), info};
     return Value(withAttrs(out, domain, std::make_shared<const AttrSet>(std::move(attrs))));
 }
 
@@ -123,6 +163,10 @@ Value opRemoveAttr(const BoundCall& bound) {
     const Geo& in = *asGeo(bound.values[0]);
     const std::string& name = asString(bound.values[1]);
     Geo out = in;
+    // "N" also drops the dedicated normals column: a mesh then reads fresh
+    // normals derived from its faces (v1.14) — the documented way out of a
+    // stale @N (W006).
+    if (name == "N") out.normals = nullptr;
     for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
         const AttrSet* as = out.attrs(d);
         if (!as || !as->find(name)) continue;
@@ -187,7 +231,7 @@ Value opPromote(const BoundCall& bound, RunContext& run) {
         return Value(asGeo(bound.values[0]));
     }
     AttrSet attrs = in.attrs(to) ? *in.attrs(to) : AttrSet{};
-    attrs.columns[name] = AttrColumn{std::move(*col)};
+    attrs.columns[name] = AttrColumn{std::move(*col), existing->typeInfo};
     return Value(withAttrs(in, to, std::make_shared<const AttrSet>(std::move(attrs))));
 }
 

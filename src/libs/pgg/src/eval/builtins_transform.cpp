@@ -12,11 +12,23 @@ namespace {
 
 // transform(geo, translate, rotate, scale): affine p' = R*(p*s) + t with
 // Euler-degree rotation; normals get the inverse-transpose direction part.
-Value opTransform(const BoundCall& bound) {
+Value opTransform(const BoundCall& bound, RunContext& run) {
     const Geo& in = *asGeo(bound.values[0]);
     const glm::vec3 translate = asVec3(bound.values[1]);
     const glm::quat rot(glm::radians(asVec3(bound.values[2])));
     const glm::vec3 scale = asVec3(bound.values[3]);
+    if (in.kind == GeoKind::Instances) {
+        // A stamp holds one scalar @scale: a non-uniform scale has no
+        // representation on geo<instances> and would silently only move the
+        // anchors (E611). Realize first, or scale the source.
+        const bool uniform = glm::abs(scale.x - scale.y) < 1e-6f && glm::abs(scale.x - scale.z) < 1e-6f;
+        if (!uniform) {
+            run.report("E611", bound.span,
+                       "transform: non-uniform scale on geo<instances> cannot be stamped into @scale",
+                       "use a uniform scale, scale the source geometry, or realize() first");
+            return Value(asGeo(bound.values[0]));
+        }
+    }
 
     std::vector<glm::vec3> pos(in.pointCount());
     for (size_t i = 0; i < pos.size(); ++i)
@@ -36,6 +48,71 @@ Value opTransform(const BoundCall& bound) {
             nrm[i] = len > 0.0f ? rn / len : glm::vec3(0, 1, 0);
         }
         out.normals = std::make_shared<const std::vector<glm::vec3>>(std::move(nrm));
+    }
+    // Tagged attributes ride along by typeinfo (v1.14): vector — rotate+scale,
+    // normal — inverse-transpose, point — full affine, quaternion — compose.
+    // Untagged columns are plain data and stay untouched.
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const AttrSet* as = in.attrs(d);
+        if (!as) continue;
+        std::optional<AttrSet> copy;
+        for (const auto& [name, col] : as->columns) {
+            if (col.typeInfo == AttrTypeInfo::None) continue;
+            ColumnData moved = transformColumn(col, rot, scale, translate);
+            if (moved.index() != col.data.index()) continue;  // tag on a non-vector column: ignored
+            if (!copy) copy = *as;
+            copy->columns[name] = AttrColumn{std::move(moved), col.typeInfo};
+        }
+        if (copy) {
+            auto ptr = std::make_shared<const AttrSet>(std::move(*copy));
+            switch (d) {
+                case Domain::Points: out.pointAttrs = std::move(ptr); break;
+                case Domain::Corners: out.cornerAttrs = std::move(ptr); break;
+                case Domain::Faces: out.faceAttrs = std::move(ptr); break;
+                case Domain::Detail: out.detailAttrs = std::move(ptr); break;
+            }
+        }
+    }
+    // geo<instances>: the rotation must reach the realized copies, so the
+    // @orient/@scale stamps are materialized (identity when absent) and
+    // composed — @orient is Quaternion-tagged and already rotated above when
+    // present; the (uniform, see E611) scale multiplies @scale.
+    if (in.kind == GeoKind::Instances) {
+        AttrSet attrs;
+        if (out.pointAttrs) attrs = *out.pointAttrs;
+        bool changed = false;
+        if (const AttrColumn* col = attrs.find("orient"); !col) {
+            attrs.columns["orient"] = AttrColumn{std::make_shared<const std::vector<glm::vec4>>(
+                                                     in.pointCount(), glm::vec4(rot.x, rot.y, rot.z, rot.w)),
+                                                 AttrTypeInfo::Quaternion};
+            changed = true;
+        } else if (col->typeInfo != AttrTypeInfo::Quaternion && col->data.index() == 5) {
+            // Untagged vec4 named orient (legacy data): treat as a quaternion.
+            const auto& src = *std::get<std::shared_ptr<const std::vector<glm::vec4>>>(col->data);
+            std::vector<glm::vec4> o(src.size());
+            for (size_t i = 0; i < o.size(); ++i) {
+                const glm::quat q = rot * glm::quat(src[i].w, src[i].x, src[i].y, src[i].z);
+                o[i] = glm::vec4(q.x, q.y, q.z, q.w);
+            }
+            attrs.columns["orient"] = AttrColumn{std::make_shared<const std::vector<glm::vec4>>(std::move(o)),
+                                                 AttrTypeInfo::Quaternion};
+            changed = true;
+        }
+        const float stampScale = scale.x;  // uniform — guaranteed by the E611 guard above
+        if (const AttrColumn* col = attrs.find("scale"); col && col->data.index() == 0) {
+            if (glm::abs(stampScale - 1.0f) > 1e-6f) {
+                const auto& src = *std::get<std::shared_ptr<const std::vector<float>>>(col->data);
+                std::vector<float> sc(src.size());
+                for (size_t i = 0; i < sc.size(); ++i) sc[i] = src[i] * stampScale;
+                attrs.columns["scale"] = AttrColumn{std::make_shared<const std::vector<float>>(std::move(sc))};
+                changed = true;
+            }
+        } else if (!col) {
+            attrs.columns["scale"] = AttrColumn{
+                std::make_shared<const std::vector<float>>(in.pointCount(), stampScale)};
+            changed = true;
+        }
+        if (changed) out.pointAttrs = std::make_shared<const AttrSet>(std::move(attrs));
     }
     return Value(std::make_shared<const Geo>(std::move(out)));
 }
@@ -158,7 +235,8 @@ Value opComputeNormals(const BoundCall& bound, RunContext& run) {
         });
         Geo out = in;
         AttrSet attrs = out.cornerAttrs ? *out.cornerAttrs : AttrSet{};
-        attrs.columns["N"] = AttrColumn{std::make_shared<const std::vector<glm::vec3>>(std::move(cornerN))};
+        attrs.columns["N"] = AttrColumn{std::make_shared<const std::vector<glm::vec3>>(std::move(cornerN)),
+                                        AttrTypeInfo::Normal};
         out.cornerAttrs = std::make_shared<const AttrSet>(std::move(attrs));
         return Value(std::make_shared<const Geo>(std::move(out)));
     }
@@ -222,7 +300,7 @@ Value opComputeNormals(const BoundCall& bound, RunContext& run) {
 
 Value evalTransformBuiltin(const BoundCall& bound, RunContext& run) {
     switch (bound.sig->id) {
-        case BuiltinId::Transform: return opTransform(bound);
+        case BuiltinId::Transform: return opTransform(bound, run);
         case BuiltinId::SetPosition: return opSetPosition(bound, run);
         case BuiltinId::Smooth: return opSmooth(bound);
         case BuiltinId::ComputeNormals: return opComputeNormals(bound, run);

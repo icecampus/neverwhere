@@ -77,7 +77,7 @@ TEST(Attrs, ReadBackAndTypes) {
     // int and vec3 attributes keep their types; bool fields store u8.
     pgg::RunResult r = pgg::run(std::string(kGrid) +
                                 "s1 = set(b, \"i\", @index)\n"
-                                "s2 = set(s1, \"v\", @P)\n"
+                                "s2 = set(s1, \"v\", @P, typeinfo = none)\n"
                                 "s = set(s2, \"m\", dot(@P, (1, 0, 0)) > 0)\n"
                                 "output s\n");
     expectNoErrors(r);

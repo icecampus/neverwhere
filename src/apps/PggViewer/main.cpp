@@ -1,7 +1,7 @@
 // PggViewer: read-only node-graph projection of .pgg files (spec §10, stage E8).
 //   PggViewer [file.pgg] [--shot=out.png] [--shot-delay=S] [--zoom=Z] [--center=X,Y] [--no-ui]
 //             [--dive=<ipath>] [--preview=<pull path>] [--preview-highlight=<domain>:<group>]
-//             [--preview-size=W,H] [--param=name=value]...
+//             [--preview-shading=auto|smooth|flat] [--preview-size=W,H] [--param=name=value]...
 //   PggViewer --smoke
 // The graph is derived from the text (no separate storage): names are nodes,
 // uses are wires, def calls collapse into diveable nodes addressed by their
@@ -491,6 +491,19 @@ void drawPanel(int w, int h) {
             ImGui::EndCombo();
         }
         if (g_previewGroups.empty()) ImGui::TextDisabled("(no groups on the previewed geometry)");
+        // Normal source: corner N (flat compute_normals) > point @N > face normals.
+        {
+            static const char* kShading[] = {"auto", "smooth", "flat"};
+            int sh = static_cast<int>(g_previewOpts.shading);
+            if (ImGui::Combo("shading", &sh, kShading, 3)) {
+                g_previewOpts.shading = static_cast<PreviewShading>(sh);
+                rebuildPreviewGeometry(false);
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("auto: corner N (compute_normals flat) > point @N > face normals\n"
+                                  "smooth: point @N > face normals\n"
+                                  "flat: face normals only (faceted look for welded boxes)");
+        }
         // sdf meshing resolution (only matters for sdf values).
         if (ImGui::SliderInt("sdf voxels", &g_previewOpts.sdfResolution, 16, 256)) {
             if (g_previewHasValue && pgg::valueBase(g_previewValue) == pgg::ScalarType::Sdf)
@@ -836,6 +849,11 @@ int main(int argc, char* argv[]) {
             g_cliPreview = arg.substr(10);
         } else if (arg.rfind("--preview-highlight=", 0) == 0) {
             g_previewOpts.highlightGroup = arg.substr(20);
+        } else if (arg.rfind("--preview-shading=", 0) == 0) {
+            const std::string v = arg.substr(18);
+            g_previewOpts.shading = v == "flat"     ? PreviewShading::Flat
+                                    : v == "smooth" ? PreviewShading::Smooth
+                                                    : PreviewShading::Auto;
         } else if (arg.rfind("--preview-size=", 0) == 0) {
             float pw = 0.0f, ph = 0.0f;
             if (std::sscanf(arg.c_str() + 15, "%f,%f", &pw, &ph) == 2) g_cliPreviewSize = ImVec2(pw, ph);

@@ -8,6 +8,7 @@
 #include <chrono>
 
 #include "pgg/eval.h"
+#include "pgg/src/eval/geometry.h"
 
 namespace {
 
@@ -308,6 +309,99 @@ TEST(Merge, PreservesStampsThroughInstancePipeline) {
         hi = std::max(hi, p.y);
     }
     EXPECT_NEAR(hi - lo, 3.0f, 1e-5f);
+}
+
+// §19 v1.13: realize carries every source domain (face groups, corner N),
+// rotating corner N with the stamp; transform composes instance stamps and
+// rotates corner N.
+TEST(Instance, RealizeCarriesFaceGroupsAndCornerNormals) {
+    pgg::RunResult r = pgg::run(
+        "b = box(size = (2, 1, 1))\n"
+        "t = mark(b, \"top\", where = dot(@N, (0, 1, 0)) > 0.5, domain = faces)\n"
+        "f = compute_normals(t, mode = flat)\n"
+        "l = mesh_line(count = 3, length = 6.0)\n"
+        "o = set(l, \"orient\", orient_from_euler((0, 0, 90)))\n"
+        "inst = instance_on_points(o, f)\n"
+        "m = realize(inst)\n"
+        "output m\n");
+    expectNoErrors(r);
+    pgg::GeoPtr m = geoOutput(r, "m");
+    ASSERT_TRUE(m);
+    EXPECT_EQ(m->pointCount(), 24u);
+    EXPECT_EQ(m->faceCount(), 18u);
+    ASSERT_TRUE(m->faceGroups);
+    pgg::ConstBoolColumnPtr top = m->faceGroups->find("top");
+    ASSERT_TRUE(top);
+    ASSERT_EQ(top->size(), 18u);
+    size_t inTop = 0;
+    for (uint8_t v : *top) inTop += v ? 1 : 0;
+    EXPECT_EQ(inTop, 3u);  // one top face per stamped box
+    ASSERT_TRUE(m->cornerAttrs);
+    const pgg::AttrColumn* n = m->cornerAttrs->find("N");
+    ASSERT_TRUE(n);
+    const auto& N = *std::get<std::shared_ptr<const std::vector<glm::vec3>>>(n->data);
+    ASSERT_EQ(N.size(), 72u);
+    // Corner N follows the stamp: roll 90 deg about Z sends +Y to -X, so the
+    // top faces' corners now point along -X (and match the rotated geometry).
+    for (size_t f = 0; f < m->faceCount(); ++f) {
+        const glm::vec3 fn = glm::normalize(pgg::faceNormal(*m, f));
+        for (int32_t c = (*m->faceOffsets)[f]; c < (*m->faceOffsets)[f + 1]; ++c) {
+            const glm::vec3 cn = N[static_cast<size_t>(c)];
+            if ((*top)[f]) EXPECT_NEAR(cn.x, -1.0f, 1e-5f);
+            EXPECT_NEAR(glm::length(cn - fn), 0.0f, 1e-5f) << "face " << f;
+        }
+    }
+    // Point attributes still materialize tint.
+    ASSERT_TRUE(m->pointAttrs);
+    EXPECT_TRUE(m->pointAttrs->find("tint"));
+}
+
+TEST(Instance, TransformRotatesCornerNormals) {
+    pgg::RunResult r = pgg::run(
+        "b = box(size = (2, 4, 6))\n"
+        "f = compute_normals(b, mode = flat)\n"
+        "t = transform(f, rotate = (0, 0, 90))\n"
+        "output t\n");
+    expectNoErrors(r);
+    pgg::GeoPtr t = geoOutput(r, "t");
+    ASSERT_TRUE(t && t->cornerAttrs);
+    const pgg::AttrColumn* n = t->cornerAttrs->find("N");
+    ASSERT_TRUE(n);
+    const auto& N = *std::get<std::shared_ptr<const std::vector<glm::vec3>>>(n->data);
+    ASSERT_EQ(N.size(), t->cornerCount());
+    // Every corner normal must match its rotated face normal.
+    for (size_t f = 0; f < t->faceCount(); ++f) {
+        const glm::vec3 fn = glm::normalize(pgg::faceNormal(*t, f));
+        for (int32_t c = (*t->faceOffsets)[f]; c < (*t->faceOffsets)[f + 1]; ++c)
+            EXPECT_NEAR(glm::length(N[static_cast<size_t>(c)] - fn), 0.0f, 1e-5f) << "face " << f;
+    }
+}
+
+TEST(Instance, TransformComposesInstanceStamps) {
+    pgg::RunResult r = pgg::run(
+        "l = mesh_line(count = 1, length = 1.0)\n"
+        "b = box(size = (2, 1, 1))\n"
+        "inst = instance_on_points(l, b)\n"
+        "t = transform(inst, translate = (10, 0, 0), rotate = (0, 90, 0), scale = (2, 2, 2))\n"
+        "m = realize(t)\n"
+        "output m\n"
+        "output t\n");
+    expectNoErrors(r);
+    pgg::GeoPtr t = geoOutput(r, "t");
+    ASSERT_TRUE(t && t->pointAttrs);
+    EXPECT_TRUE(t->pointAttrs->find("orient"));
+    EXPECT_TRUE(t->pointAttrs->find("scale"));
+    pgg::GeoPtr m = geoOutput(r, "m");
+    ASSERT_TRUE(m);
+    glm::vec3 mn, mx;
+    pgg::geoBBox(*m, mn, mx);
+    // The stamped box (long along X) is rotated 90 deg about Y (-> long along
+    // Z), scaled x2 and its anchor moved to x = 10.
+    EXPECT_NEAR(mn.x, 9.0f, 1e-4f);
+    EXPECT_NEAR(mx.x, 11.0f, 1e-4f);
+    EXPECT_NEAR(mn.z, -2.0f, 1e-4f);
+    EXPECT_NEAR(mx.z, 2.0f, 1e-4f);
+    EXPECT_NEAR(mx.y, 1.0f, 1e-4f);
 }
 
 }  // namespace

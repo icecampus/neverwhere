@@ -64,17 +64,20 @@ void mergeAttrDomain(const Geo& a, const Geo& b, Domain d, AttrSet& out) {
     }
     const size_t aCount = a.elementCount(d);
     const size_t bCount = b.elementCount(d);
+    // One-sided names get the typed neutral fill (v1.14): identity for
+    // quaternions, derived normals for Normal-tagged columns, zeros otherwise.
     if (as) {
         for (const auto& [n, c] : as->columns) {
             const AttrColumn* cb = bs ? bs->find(n) : nullptr;
             out.columns[n] = AttrColumn{cb ? concatColumns(c.data, cb->data)
-                                           : concatColumns(c.data, zeroColumnLike(c.data, bCount))};
+                                           : concatColumns(c.data, neutralColumnLike(c, b, d, bCount)),
+                                        c.typeInfo};
         }
     }
     if (bs) {
         for (const auto& [n, c] : bs->columns) {
             if (as && as->find(n)) continue;  // handled above
-            out.columns[n] = AttrColumn{concatColumns(zeroColumnLike(c.data, aCount), c.data)};
+            out.columns[n] = AttrColumn{concatColumns(neutralColumnLike(c, a, d, aCount), c.data), c.typeInfo};
         }
     }
 }
@@ -126,11 +129,16 @@ std::shared_ptr<const std::vector<glm::vec3>> mergedNormals(const Geo& a, const 
     if (!a.normals && !b.normals) return nullptr;
     std::vector<glm::vec3> out;
     out.reserve(a.pointCount() + b.pointCount());
+    // The side without @N gets derived normals (v1.14) — a zero normal shaded
+    // black and broke @N-driven displacement of the merged result.
     const glm::vec3 zero(0.0f);
-    if (a.normals) out.insert(out.end(), a.normals->begin(), a.normals->end());
-    else out.resize(a.pointCount(), zero);
-    if (b.normals) out.insert(out.end(), b.normals->begin(), b.normals->end());
-    else out.resize(out.size() + b.pointCount(), zero);
+    auto append = [&](const Geo& g) {
+        std::shared_ptr<const std::vector<glm::vec3>> n = g.normals ? g.normals : derivedNormals(g, Domain::Points);
+        if (n && n->size() == g.pointCount()) out.insert(out.end(), n->begin(), n->end());
+        else out.resize(out.size() + g.pointCount(), zero);
+    };
+    append(a);
+    append(b);
     return std::make_shared<const std::vector<glm::vec3>>(std::move(out));
 }
 
@@ -208,6 +216,24 @@ Value opMerge(const BoundCall& bound, RunContext& run) {
                                      "\", from = detail, to = points)), or remove_attr/rename_attr one side");
             conflict = true;
             return;
+        }
+        if (!isGroup) {
+            // Same domains: the typeinfo tag must agree too, otherwise transform
+            // would move one half of the merged column and leave the other.
+            for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+                if (!(ma & (1u << static_cast<unsigned>(d)))) continue;
+                const AttrColumn* ca = a.attrs(d)->find(name);
+                const AttrColumn* cb = b.attrs(d)->find(name);
+                if (ca->typeInfo != cb->typeInfo) {
+                    run.report("E609", bound.span,
+                               "merge: attribute '@" + name + "' has typeinfo " +
+                                   std::string(attrTypeInfoName(ca->typeInfo)) + " on the left and " +
+                                   std::string(attrTypeInfoName(cb->typeInfo)) + " on the right",
+                               "write both sides with the same set(..., typeinfo = ...)");
+                    conflict = true;
+                    return;
+                }
+            }
         }
         if (!(ma & (1u << static_cast<unsigned>(Domain::Detail)))) return;
         if (!isGroup) {
@@ -456,13 +482,14 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
         AttrSet attrs;
         if (in.pointAttrs)
             for (const auto& [n, c] : in.pointAttrs->columns)
-                attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Points, run.threads)};
+                attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Points, run.threads), c.typeInfo};
         if (in.cornerAttrs)
             for (const auto& [n, c] : in.cornerAttrs->columns)
-                if (!attrs.find(n)) attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Corners, run.threads)};
+                if (!attrs.find(n))
+                    attrs.columns[n] = AttrColumn{barySample(c.data, cands, TriIdx::Corners, run.threads), c.typeInfo};
         if (in.faceAttrs)
             for (const auto& [n, c] : in.faceAttrs->columns)
-                if (!attrs.find(n)) attrs.columns[n] = AttrColumn{gatherColumn(c.data, faceIdx)};
+                if (!attrs.find(n)) attrs.columns[n] = AttrColumn{gatherColumn(c.data, faceIdx), c.typeInfo};
         if (!attrs.columns.empty()) probe.pointAttrs = std::make_shared<const AttrSet>(std::move(attrs));
         GroupSet groups;
         if (in.pointGroups)
@@ -576,7 +603,7 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
     if (probeGeo->pointAttrs) {
         AttrSet attrs;
         for (const auto& [n, c] : probeGeo->pointAttrs->columns)
-            attrs.columns[n] = AttrColumn{gatherColumn(c.data, keptIdx)};
+            attrs.columns[n] = AttrColumn{gatherColumn(c.data, keptIdx), c.typeInfo};
         out.pointAttrs = std::make_shared<const AttrSet>(std::move(attrs));
     }
     if (probeGeo->pointGroups) {
@@ -737,22 +764,44 @@ GeoPtr realizeInstances(const Geo& inst, unsigned threads) {
         totalFaces += src.faceCount();
     }
 
-    // Union schema of the source point attributes/groups (first variant wins).
-    std::vector<std::pair<std::string, ColumnData>> attrSchema;
-    std::vector<std::pair<std::string, ColumnData>> groupSchema;
-    for (const GeoPtr& s : sources) {
-        if (s->pointAttrs)
-            for (const auto& [name, c] : s->pointAttrs->columns) {
-                const bool seen = std::any_of(attrSchema.begin(), attrSchema.end(),
-                                              [&](const auto& e) { return e.first == name; });
-                if (!seen) attrSchema.push_back({name, c.data});
-            }
-        if (s->pointGroups)
-            for (const auto& [name, c] : s->pointGroups->columns) {
-                const bool seen = std::any_of(groupSchema.begin(), groupSchema.end(),
-                                              [&](const auto& e) { return e.first == name; });
-                if (!seen) groupSchema.push_back({name, ColumnData(c)});
-            }
+    // Union schema of the source attributes/groups per domain (first variant
+    // wins the type). Points, corners and faces are all carried: a stamped
+    // source keeps its material face-groups and its corner N from
+    // compute_normals(mode = flat) — realize used to drop everything but the
+    // points domain. Detail follows merge's rule: the first variant's columns.
+    struct DomainPlan {
+        Domain domain;
+        std::vector<std::pair<std::string, AttrColumn>> attrSchema;  // exemplar: type + typeinfo
+        std::vector<std::pair<std::string, ColumnData>> groupSchema;
+        std::vector<MutColumn> attrOut;
+        std::vector<MutColumn> groupOut;
+        const std::vector<size_t>* base = nullptr;
+        size_t total = 0;
+    };
+    DomainPlan plans[3] = {{Domain::Points}, {Domain::Corners}, {Domain::Faces}};
+    plans[0].base = &ptBase;
+    plans[0].total = totalPts;
+    plans[1].base = &cornerBase;
+    plans[1].total = totalCorners;
+    plans[2].base = &faceBase;
+    plans[2].total = totalFaces;
+    for (DomainPlan& plan : plans) {
+        for (const GeoPtr& s : sources) {
+            if (const AttrSet* as = s->attrs(plan.domain))
+                for (const auto& [name, c] : as->columns) {
+                    const bool seen = std::any_of(plan.attrSchema.begin(), plan.attrSchema.end(),
+                                                  [&](const auto& e) { return e.first == name; });
+                    if (!seen) plan.attrSchema.push_back({name, c});
+                }
+            if (const GroupSet* gs = s->groups(plan.domain))
+                for (const auto& [name, c] : gs->columns) {
+                    const bool seen = std::any_of(plan.groupSchema.begin(), plan.groupSchema.end(),
+                                                  [&](const auto& e) { return e.first == name; });
+                    if (!seen) plan.groupSchema.push_back({name, ColumnData(c)});
+                }
+        }
+        for (const auto& [name, ex] : plan.attrSchema) plan.attrOut.push_back(allocLike(ex.data, plan.total));
+        for (const auto& [name, ex] : plan.groupSchema) plan.groupOut.push_back(allocLike(ex, plan.total));
     }
 
     std::vector<glm::vec3> positions(totalPts);
@@ -761,10 +810,6 @@ GeoPtr realizeInstances(const Geo& inst, unsigned threads) {
     std::vector<int32_t> offsets(totalFaces + 1);
     offsets[0] = 0;
     std::vector<glm::vec3> tint(totalPts);
-    std::vector<MutColumn> attrOut;
-    for (const auto& [name, ex] : attrSchema) attrOut.push_back(allocLike(ex, totalPts));
-    std::vector<MutColumn> groupOut;
-    for (const auto& [name, ex] : groupSchema) groupOut.push_back(allocLike(ex, totalPts));
 
     // Per-anchor fill: transform T(P)*R(orient)*S(scale) per anchor in @index
     // order, every anchor writing only its precomputed slices (N7).
@@ -800,14 +845,35 @@ GeoPtr realizeInstances(const Geo& inst, unsigned threads) {
             const glm::vec3 t = stampVec3(tintCol ? &*tintCol : nullptr, i, glm::vec3(1.0f));
             std::fill(tint.begin() + static_cast<ptrdiff_t>(pb),
                       tint.begin() + static_cast<ptrdiff_t>(pb + sp), t);
-            for (size_t a = 0; a < attrSchema.size(); ++a) {
-                const AttrColumn* col = src.pointAttrs ? src.pointAttrs->find(attrSchema[a].first) : nullptr;
-                writeConverted(attrOut[a], pb, col ? &col->data : nullptr, attrSchema[a].second, sp);
-            }
-            for (size_t g = 0; g < groupSchema.size(); ++g) {
-                ConstBoolColumnPtr col = src.pointGroups ? src.pointGroups->find(groupSchema[g].first) : nullptr;
-                ColumnData asCol = ColumnData(col ? col : ConstBoolColumnPtr());
-                writeConverted(groupOut[g], pb, col ? &asCol : nullptr, groupSchema[g].second, sp);
+            for (DomainPlan& plan : plans) {
+                const size_t db = (*plan.base)[i];
+                const size_t count = src.elementCount(plan.domain);
+                const AttrSet* as = src.attrs(plan.domain);
+                const GroupSet* gs = src.groups(plan.domain);
+                for (size_t a = 0; a < plan.attrSchema.size(); ++a) {
+                    const AttrColumn& ex = plan.attrSchema[a].second;
+                    const AttrColumn* col = as ? as->find(plan.attrSchema[a].first) : nullptr;
+                    if (col) {
+                        // Tagged columns follow the stamp T(P)*R(orient)*S(scale)
+                        // (v1.14): the exemplar's tag rules, like its type.
+                        AttrColumn tagged{col->data, ex.typeInfo};
+                        ColumnData moved = ex.typeInfo == AttrTypeInfo::None
+                                               ? col->data
+                                               : transformColumn(tagged, q, glm::vec3(sc), anchor);
+                        writeConverted(plan.attrOut[a], db, &moved, ex.data, count);
+                    } else {
+                        // Variant lacks the column: typed neutral fill.
+                        ColumnData fill = neutralColumnLike(ex, src, plan.domain, count);
+                        if (ex.typeInfo != AttrTypeInfo::None)
+                            fill = transformColumn(AttrColumn{fill, ex.typeInfo}, q, glm::vec3(sc), anchor);
+                        writeConverted(plan.attrOut[a], db, &fill, ex.data, count);
+                    }
+                }
+                for (size_t g = 0; g < plan.groupSchema.size(); ++g) {
+                    ConstBoolColumnPtr col = gs ? gs->find(plan.groupSchema[g].first) : nullptr;
+                    ColumnData asCol = ColumnData(col ? col : ConstBoolColumnPtr());
+                    writeConverted(plan.groupOut[g], db, col ? &asCol : nullptr, plan.groupSchema[g].second, count);
+                }
             }
         }
     });
@@ -818,26 +884,127 @@ GeoPtr realizeInstances(const Geo& inst, unsigned threads) {
     if (anyNormals) out.normals = std::make_shared<const std::vector<glm::vec3>>(std::move(normals));
     out.cornerVerts = std::make_shared<const std::vector<int32_t>>(std::move(corners));
     out.faceOffsets = std::make_shared<const std::vector<int32_t>>(std::move(offsets));
-    AttrSet attrs;
-    for (size_t a = 0; a < attrSchema.size(); ++a)
-        attrs.columns[attrSchema[a].first] = AttrColumn{freezeColumn(std::move(attrOut[a]))};
-    // @tint materializes as a point attribute (default white).
-    attrs.columns["tint"] = AttrColumn{std::make_shared<const std::vector<glm::vec3>>(std::move(tint))};
-    out.pointAttrs = std::make_shared<const AttrSet>(std::move(attrs));
-    if (!groupSchema.empty()) {
-        GroupSet groups;
-        for (size_t g = 0; g < groupSchema.size(); ++g)
-            groups.columns[groupSchema[g].first] =
-                std::get<ConstBoolColumnPtr>(freezeColumn(std::move(groupOut[g])));
-        out.pointGroups = std::make_shared<const GroupSet>(std::move(groups));
+    for (DomainPlan& plan : plans) {
+        AttrSet attrs;
+        for (size_t a = 0; a < plan.attrSchema.size(); ++a)
+            attrs.columns[plan.attrSchema[a].first] =
+                AttrColumn{freezeColumn(std::move(plan.attrOut[a])), plan.attrSchema[a].second.typeInfo};
+        // @tint materializes as a point attribute (default white).
+        if (plan.domain == Domain::Points)
+            attrs.columns["tint"] = AttrColumn{std::make_shared<const std::vector<glm::vec3>>(std::move(tint))};
+        std::shared_ptr<const AttrSet> attrSet;
+        if (!attrs.columns.empty()) attrSet = std::make_shared<const AttrSet>(std::move(attrs));
+        std::shared_ptr<const GroupSet> groupSet;
+        if (!plan.groupSchema.empty()) {
+            GroupSet groups;
+            for (size_t g = 0; g < plan.groupSchema.size(); ++g)
+                groups.columns[plan.groupSchema[g].first] =
+                    std::get<ConstBoolColumnPtr>(freezeColumn(std::move(plan.groupOut[g])));
+            groupSet = std::make_shared<const GroupSet>(std::move(groups));
+        }
+        switch (plan.domain) {
+            case Domain::Points: out.pointAttrs = attrSet; out.pointGroups = groupSet; break;
+            case Domain::Corners: out.cornerAttrs = attrSet; out.cornerGroups = groupSet; break;
+            default: out.faceAttrs = attrSet; out.faceGroups = groupSet; break;
+        }
     }
+    out.detailAttrs = sources.front()->detailAttrs;
+    out.detailGroups = sources.front()->detailGroups;
     return std::make_shared<const Geo>(std::move(out));
 }
 
 namespace {
 
+// realize contracts that realizeInstances (a library helper without a run
+// context) resolves silently — surfaced as errors at the builtin boundary:
+//  * @variant outside [0, variants) — clamped by the helper, E611 here;
+//  * a name shared by several variants must sit on the same domain set with
+//    the same typeinfo (union schema is first-variant-wins) — E609, the
+//    merge rule, since realize IS a merge of the stamped copies.
+bool checkRealizeContracts(const Geo& inst, const BoundCall& bound, RunContext& run) {
+    const auto& sources = *inst.instanceSources;
+    bool ok = true;
+    if (std::optional<ColumnData> variantCol = stampColumn(inst, "variant"); variantCol && sources.size() > 0) {
+        for (size_t i = 0; i < inst.pointCount(); ++i) {
+            const int64_t v = stampInt(&*variantCol, i, 0);
+            if (v < 0 || v >= static_cast<int64_t>(sources.size())) {
+                run.report("E611", bound.span,
+                           "realize: @variant = " + std::to_string(v) + " at anchor " + std::to_string(i) +
+                               " is outside the variants list (" + std::to_string(sources.size()) + " entries)",
+                           "keep @variant in [0, count) — e.g. @index % " + std::to_string(sources.size()));
+                ok = false;
+                break;
+            }
+        }
+    }
+    auto maskAttr = [](const Geo& g, const std::string& n, AttrTypeInfo& info) -> unsigned {
+        unsigned m = 0;
+        for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+            const AttrSet* as = g.attrs(d);
+            if (const AttrColumn* c = as ? as->find(n) : nullptr) {
+                m |= 1u << static_cast<unsigned>(d);
+                info = c->typeInfo;
+            }
+        }
+        return m;
+    };
+    auto maskGroup = [](const Geo& g, const std::string& n) -> unsigned {
+        unsigned m = 0;
+        for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+            const GroupSet* gs = g.groups(d);
+            if (gs && gs->find(n)) m |= 1u << static_cast<unsigned>(d);
+        }
+        return m;
+    };
+    for (size_t a = 0; a < sources.size() && ok; ++a) {
+        for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+            if (const AttrSet* as = sources[a]->attrs(d)) {
+                for (const auto& [n, col] : as->columns) {
+                    for (size_t b = a + 1; b < sources.size() && ok; ++b) {
+                        AttrTypeInfo ia = AttrTypeInfo::None, ib = AttrTypeInfo::None;
+                        const unsigned ma = maskAttr(*sources[a], n, ia), mb = maskAttr(*sources[b], n, ib);
+                        if (!mb) continue;
+                        if (ma != mb) {
+                            run.report("E609", bound.span,
+                                       "realize: attribute '@" + n + "' sits on different domains in variants " +
+                                           std::to_string(a) + " and " + std::to_string(b),
+                                       "promote/remove_attr so every variant carries it on the same domain");
+                            ok = false;
+                        } else if (ia != ib) {
+                            run.report("E609", bound.span,
+                                       "realize: attribute '@" + n + "' has typeinfo " + attrTypeInfoName(ia) +
+                                           " in variant " + std::to_string(a) + " and " + attrTypeInfoName(ib) +
+                                           " in variant " + std::to_string(b),
+                                       "write it with the same set(..., typeinfo = ...) in every variant");
+                            ok = false;
+                        }
+                    }
+                }
+            }
+            if (const GroupSet* gs = sources[a]->groups(d)) {
+                for (const auto& [n, col] : gs->columns) {
+                    for (size_t b = a + 1; b < sources.size() && ok; ++b) {
+                        const unsigned ma = maskGroup(*sources[a], n), mb = maskGroup(*sources[b], n);
+                        if (mb && ma != mb) {
+                            run.report("E609", bound.span,
+                                       "realize: group '@" + n + "' sits on different domains in variants " +
+                                           std::to_string(a) + " and " + std::to_string(b),
+                                       "mark it on the same domain in every variant");
+                            ok = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return ok;
+}
+
 Value opRealize(const BoundCall& bound, RunContext& run) {
     const Geo& inst = *asGeo(bound.values[0]);
+    if (inst.kind == GeoKind::Instances && inst.instanceSources && !inst.instanceSources->empty() &&
+        !checkRealizeContracts(inst, bound, run))
+        return Value(asGeo(bound.values[0]));
     GeoPtr realized = realizeInstances(inst, run.threads);
     if (!realized) {
         run.report("E204", bound.span, "realize expects geo<instances>, got geo<" +
