@@ -324,6 +324,16 @@ const std::vector<BuiltinSig>& registry() {
             s.resultGeoKindOfFirstArg = true;
             r.push_back(s);
         }
+        {
+            // §8.3 delete: mask on `domain`, cascade to incident higher-domain
+            // elements (builtins_topology.cpp). detail is rejected at runtime (E204).
+            ParamSig domain = valDef("domain", ScalarType::String, Value(std::string("points")));
+            domain.enumValues = {"points", "corners", "faces"};
+            BuiltinSig s = sig(BuiltinId::Delete, "delete",
+                               {geoArg("geo"), fld("where", ScalarType::Bool, true), domain}, geoResult());
+            s.resultGeoKindOfFirstArg = true;
+            r.push_back(s);
+        }
 
         // --- §8.8 scatter and instancing ----------------------------------------
         {
@@ -423,7 +433,6 @@ const std::vector<BuiltinSig>& registry() {
         r.push_back(deferredSig("subdivide", "topology ops are a later stage (post-E4)"));
         r.push_back(deferredSig("triangulate", "topology ops are a later stage (post-E4)"));
         r.push_back(deferredSig("merge_by_distance", "topology ops are a later stage (post-E4)"));
-        r.push_back(deferredSig("delete", "topology ops are a later stage (post-E4)"));
         r.push_back(deferredSig("separate", "topology ops are a later stage (post-E4)"));
         for (const char* n : {"raycast", "transfer"})
             r.push_back(deferredSig(n, "sampling ops are a later stage (post-E4)"));
@@ -569,6 +578,8 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
         case BuiltinId::Islands:
         case BuiltinId::Fracture:
             return evalFractureBuiltin(bound, run);
+        case BuiltinId::Delete:
+            return evalTopologyBuiltin(bound, run);
         default:
             break;
     }

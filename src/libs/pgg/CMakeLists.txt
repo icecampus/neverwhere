@@ -60,6 +60,7 @@ nw_add_lib_sources(
         src/eval/builtins_aggregate.cpp
         src/eval/builtins_sdf.cpp
         src/eval/builtins_fracture.cpp
+        src/eval/builtins_topology.cpp
         src/eval/typecheck.h
         src/eval/typecheck.cpp
         src/eval/modules.h

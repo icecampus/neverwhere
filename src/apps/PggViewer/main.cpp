@@ -1,7 +1,8 @@
 // PggViewer: read-only node-graph projection of .pgg files (spec §10, stage E8).
 //   PggViewer [file.pgg] [--shot=out.png] [--shot-delay=S] [--zoom=Z] [--center=X,Y] [--no-ui]
 //             [--dive=<ipath>] [--preview=<pull path>] [--preview-highlight=<domain>:<group>]
-//             [--preview-shading=auto|smooth|flat] [--preview-size=W,H] [--param=name=value]...
+//             [--preview-shading=auto|smooth|flat] [--preview-size=W,H]
+//             [--preview-orbit=yaw_deg,pitch_deg[,zoom]] [--param=name=value]...
 //   PggViewer --smoke
 // The graph is derived from the text (no separate storage): names are nodes,
 // uses are wires, def calls collapse into diveable nodes addressed by their
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 
 #include <imgui.h>
@@ -111,6 +113,7 @@ int g_previewLastSelected = -2;      // (selected index, scope) the auto-preview
 std::string g_previewLastScope;
 std::string g_cliPreview;            // --preview=<path>: pull + show at startup
 ImVec2 g_cliPreviewSize{0.0f, 0.0f};  // --preview-size=W,H: initial preview window size (points)
+std::optional<glm::vec3> g_cliOrbit;  // --preview-orbit=yaw,pitch[,zoom]: camera (deg, deg, fit multiplier)
 std::vector<std::pair<std::string, std::string>> g_cliParams;  // --param=name=value
 
 // --- CLI ----------------------------------------------------------------------------
@@ -740,6 +743,7 @@ void init() {
         g_needFitView = true;
     }
     // --preview=<path>: pull and show a value at startup (shots / smoke by eye).
+    if (g_cliOrbit) g_preview.setOrbit(g_cliOrbit->x, g_cliOrbit->y, g_cliOrbit->z);
     if (!g_cliPreview.empty() && g_state.imguiOk) runPreview(g_cliPreview);
 }
 
@@ -854,6 +858,10 @@ int main(int argc, char* argv[]) {
             g_previewOpts.shading = v == "flat"     ? PreviewShading::Flat
                                     : v == "smooth" ? PreviewShading::Smooth
                                                     : PreviewShading::Auto;
+        } else if (arg.rfind("--preview-orbit=", 0) == 0) {
+            float yaw = 0.0f, pitch = 0.0f, zoom = 1.0f;
+            const int n = std::sscanf(arg.c_str() + 16, "%f,%f,%f", &yaw, &pitch, &zoom);
+            if (n >= 2) g_cliOrbit = glm::vec3(yaw, pitch, n == 3 ? zoom : 1.0f);
         } else if (arg.rfind("--preview-size=", 0) == 0) {
             float pw = 0.0f, ph = 0.0f;
             if (std::sscanf(arg.c_str() + 15, "%f,%f", &pw, &ph) == 2) g_cliPreviewSize = ImVec2(pw, ph);

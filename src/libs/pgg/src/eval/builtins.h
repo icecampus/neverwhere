@@ -35,8 +35,8 @@ enum class BuiltinId {
     Mark, Unmark, Ingroup,
     // §8.7 attributes
     SetAttr, RemoveAttr, RenameAttr, Promote,
-    // §8.3 topology (E2 subset)
-    Merge,
+    // §8.3 topology (E2 subset + delete)
+    Merge, Delete,
     // §8.8 scatter and instancing
     DistributePoints, InstanceOnPoints, Realize,
     // §8.10 aggregators
@@ -153,6 +153,9 @@ Value evalSdfBuiltin(const BoundCall& bound, RunContext& run);
 
 // §8.3 islands and §8.11 fracture nodes, value level (builtins_fracture.cpp, E7).
 Value evalFractureBuiltin(const BoundCall& bound, RunContext& run);
+
+// §8.3 delete (element removal with cascade), value level (builtins_topology.cpp).
+Value evalTopologyBuiltin(const BoundCall& bound, RunContext& run);
 
 // Materializes geo<instances> into geo<mesh> (spec §8.8); host entry point
 // for tools that export instances without running the graph. nullptr when the

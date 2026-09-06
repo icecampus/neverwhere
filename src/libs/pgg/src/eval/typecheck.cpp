@@ -811,6 +811,21 @@ private:
                 storeSchema(&c, std::move(s));
                 break;
             }
+            case BuiltinId::Delete: {
+                // Element removal keeps the schema (columns are gathered, never
+                // dropped); the mask is checked against the input schema.
+                const GeoSchema& in = argSchema(byParam, 0);
+                checkFieldArgs(in, byParam, {1});  // where
+                if (!in.open && in.kind != GeoKind::Mesh && byParam.size() > 2 && byParam[2] &&
+                    literalString(byParam[2], lit) && lit != "points") {
+                    error("E204", c.span,
+                          "delete on " + lit + " needs a geo<mesh>; " + std::string(geoKindName(in.kind)) +
+                              " has only points",
+                          "use domain = points");
+                }
+                storeSchema(&c, in);
+                break;
+            }
             case BuiltinId::Fracture: {
                 // SDF extraction barrier: the pieces carry @P + @island_id only.
                 GeoSchema s = sourceSchema(GeoKind::Mesh, false);

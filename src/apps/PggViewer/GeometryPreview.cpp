@@ -495,8 +495,15 @@ void GeometryPreview::setGeometry(const PreviewGeometry& geo, bool refit) {
     m_radius = std::max(1e-3f, glm::length(geo.bmax - geo.bmin) * 0.5f);
     if (refit) {
         m_center = m_fitCenter;
-        m_distance = m_radius * 2.6f;
+        m_distance = m_radius * 2.6f * m_fitZoom;
     }
+}
+
+void GeometryPreview::setOrbit(float yawDeg, float pitchDeg, float zoom) {
+    m_yaw = glm::radians(yawDeg);
+    m_pitch = std::clamp(glm::radians(pitchDeg), -1.55f, 1.55f);
+    m_fitZoom = std::clamp(zoom, 0.05f, 50.0f);
+    m_distance = m_radius * 2.6f * m_fitZoom;
 }
 
 void GeometryPreview::destroyTarget() {
@@ -569,7 +576,7 @@ glm::mat4 GeometryPreview::viewProj(float aspect) const {
 void GeometryPreview::drawWindowContents() {
     // Toolbar.
     if (ImGui::SmallButton("Fit")) {
-        m_distance = m_radius * 2.6f;
+        m_distance = m_radius * 2.6f * m_fitZoom;
         m_center = m_fitCenter;
     }
     ImGui::SameLine();

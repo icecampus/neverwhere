@@ -62,6 +62,10 @@ public:
     void setGeometry(const PreviewGeometry& geo, bool refit);
     void clear();
     bool hasGeometry() const { return m_indexCount > 0; }
+    // Orbit camera from the CLI (--preview-orbit): angles in degrees, zoom is a
+    // multiplier on the fit distance (1 = Fit, <1 closer). Applied on every
+    // refit until the user orbits by hand.
+    void setOrbit(float yawDeg, float pitchDeg, float zoom);
 
     // ImGui window body (call between simgui_new_frame and the swapchain pass).
     // Draws the image, orbit/pan/zoom on hover, and a status line.
@@ -109,6 +113,7 @@ private:
     float m_distance = 3.0f;
     float m_yaw = 0.6f;
     float m_pitch = 0.5f;
+    float m_fitZoom = 1.0f;     // fit distance multiplier (--preview-orbit)
 
     std::string m_summary;
     std::string m_error;
