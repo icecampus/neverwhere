@@ -11,7 +11,10 @@ set -euo pipefail
 
 ANTLR_VERSION=4.13.2
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GRAMMAR="$REPO_ROOT/src/libs/pgg/grammar/Pgg.g4"
+# The grammar is passed to the tool relative to the repo root: the
+# "// Generated from <path>" header in every artifact then stays
+# machine-independent and the --check diff does not trip on it.
+GRAMMAR_REL="src/libs/pgg/grammar/Pgg.g4"
 GEN_DIR="$REPO_ROOT/src/libs/pgg/parser_gen"
 JAR="$REPO_ROOT/tools/pgg/antlr-${ANTLR_VERSION}-complete.jar"
 JRE_DIR="$REPO_ROOT/toolchain/jre"
@@ -73,8 +76,10 @@ run_tool() {
     local out="$1"
     rm -rf "$out"
     mkdir -p "$out"
-    "$JAVA" -jar "$JAR" -Dlanguage=Cpp -no-listener -no-visitor \
-        -o "$out" "$GRAMMAR"
+    # -Xexact-output-dir: without it ANTLR mirrors the (relative) grammar
+    # directory under -o instead of writing flat into it.
+    (cd "$REPO_ROOT" && "$JAVA" -jar "$JAR" -Dlanguage=Cpp -no-listener -no-visitor \
+        -Xexact-output-dir -o "$out" "$GRAMMAR_REL")
 }
 
 if [ "$CHECK" -eq 1 ]; then

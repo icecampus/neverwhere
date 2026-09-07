@@ -3,7 +3,7 @@
 #include "src/compositor.h"
 
 
-// Generated from /home/neuro/sources/neverwhere/src/libs/pgg/grammar/Pgg.g4 by ANTLR 4.13.2
+// Generated from src/libs/pgg/grammar/Pgg.g4 by ANTLR 4.13.2
 
 
 

@@ -361,15 +361,16 @@ void runPreview(const std::string& target) {
     g_showPreview = true;
 }
 
-// Open... starts next to the current file; with nothing loaded — at the test
-// corpus (the only .pgg examples in the repo), else at cwd.
+// Open... starts next to the current file; with nothing loaded — at the
+// product examples (resources/pgg), else at the test corpus, else at cwd.
 void openFileDialog() {
     std::filesystem::path start;
     if (!g_filePath.empty()) {
         start = std::filesystem::path(g_filePath).parent_path();
     } else {
         std::error_code ec;
-        start = findPggCorpusDir(std::filesystem::current_path(ec));
+        start = findPggResourcesDir(std::filesystem::current_path(ec));
+        if (start.empty()) start = findPggCorpusDir(std::filesystem::current_path(ec));
     }
     fileDialogOpen(g_fileDialog, start);
 }
@@ -743,11 +744,11 @@ void init() {
     if (!g_noUi) {
         simgui_desc_t imgui_desc = {};
         // The canvas draws every node box and bezier wire of the graph each
-        // frame; a ~370-node corpus file (cottage.pgg) already exceeds the
-        // simgui default of 65536 vertices — on overflow simgui silently
-        // drops the remaining ImGui command lists (side panel and graph
-        // vanished, only the preview pane survived). 1M vertices = 20 MB
-        // vertex + 6 MB index staging, plenty for any corpus graph.
+        // frame; a ~370-node example file (resources/pgg/cottage.pgg) already
+        // exceeds the simgui default of 65536 vertices — on overflow simgui
+        // silently drops the remaining ImGui command lists (side panel and
+        // graph vanished, only the preview pane survived). 1M vertices = 20 MB
+        // vertex + 6 MB index staging, plenty for any example graph.
         imgui_desc.max_vertices = 1 << 20;
         imgui_desc.logger.func = slog_func;  // surfaces BUFFER_OVERFLOW instead of hiding it
         simgui_setup(&imgui_desc);
