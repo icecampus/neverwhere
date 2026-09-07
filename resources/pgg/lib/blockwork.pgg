@@ -38,23 +38,45 @@ def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<me
     out = clip(c1, origin = vec3(len * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
 }
 
+def quoin_corner(sx: f32, sz: f32, w: f32, d: f32, h: f32, L: f32, W: f32, p: f32, y: f32, q: f32) -> (out: geo<mesh>) {
+    """Один ряд угловой колонны (сечение «в 1.5 блока», (L+W)×(L+W)) на углу со
+    знаками sx/sz: угловой блок a (q = 0 — длиной вдоль X, q = 1 — вдоль Z),
+    примыкающий блок b перпендикулярного плеча — его торец стыкуется с длинной
+    гранью углового, — и половинка hlf, достраивающая ложковое плечо до квадратного
+    сечения. Грани колонны выпущены на p за плоскость сердцевины дома."""
+    da = q * (L - W)
+    sa = da * 0.5
+    db = q * (W + L) * 0.5
+    a = transform(parts.cbox(size = vec3(L - da, h, W + da), k = 0.12), translate = vec3(sx * (w * 0.5 + p - L * 0.5 + sa), y, sz * (d * 0.5 + p - W * 0.5 - sa)))
+    b = transform(parts.cbox(size = vec3(W + da, h, L - da), k = 0.12), translate = vec3(sx * (w * 0.5 + p - W * 0.5 - db), y, sz * (d * 0.5 + p - W - L * 0.5 + db)))
+    hlf = transform(parts.cbox(size = vec3(W, h, W), k = 0.12), translate = vec3(sx * (w * 0.5 + p - W * 0.5 - L * (1.0 - q)), y, sz * (d * 0.5 + p - W * 0.5 - L * q)))
+    out = merge(a, b, hlf)
+}
+
+def quoin_course(w: f32, d: f32, h: f32, L: f32, W: f32, p: f32, y: f32, q: f32) -> (out: geo<mesh>) {
+    """Ряд квойнов на четырёх углах дома w×d на высоте y (центр ряда). Группа stone."""
+    c1 = quoin_corner(sx = 1.0, sz = 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
+    c2 = quoin_corner(sx = 1.0, sz = 0.0 - 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
+    c3 = quoin_corner(sx = 0.0 - 1.0, sz = 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
+    c4 = quoin_corner(sx = 0.0 - 1.0, sz = 0.0 - 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
+    out = mark(merge(c1, c2, c3, c4), "stone", where = true, domain = faces)
+}
+
 def quoin_stack(w: f32, d: f32, n_rows: int, course_h: f32) -> (out: geo<mesh>) {
-    """Угловые камни (квойны) дома w×d: крупные блоки столбиком на каждом из четырёх
-    углов, ориентация чередуется по рядам (перевязка углов, заодно прячет торцы
-    рядов кладки). Ряд 0 — длинной стороной вдоль X, нечётные — вдоль Z. Группа stone."""
-    qx = w * 0.5 + 0.04
-    qz = d * 0.5 + 0.04
-    q0a = parts.cbox(size = vec3(0.62, 0.27, 0.4), k = 0.12)
-    q0 = mark(merge(transform(q0a, translate = vec3(qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, qz)), transform(q0a, translate = vec3(qx, course_h * 0.5, 0.0 - qz)), transform(q0a, translate = vec3(0.0 - qx, course_h * 0.5, 0.0 - qz))), "stone", where = true, domain = faces)
-    out = repeat (q0, iterations = n_rows - 1) |acc| {
+    """Угловая кладка дома w×d (квойны): колонны сечением «в 1.5 блока» на четырёх
+    углах, n_rows рядов с шагом course_h. Направление углового блока чередуется по
+    рядам — торец плеча одного ряда стыкуется с длинной гранью следующего (перевязка
+    угла, как у кирпичного столба), заодно квойны прячут торцы рядов кладки стен.
+    Ряд 0 — угловой длиной вдоль X. Группа stone."""
+    L = 0.62
+    W = 0.32
+    p = 0.2
+    h = course_h * 0.9
+    row0 = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = course_h * 0.5, q = 0.0)
+    out = repeat (row0, iterations = n_rows - 1) |acc| {
         k = f32(@iteration) + 1.0
-        odd = k - 2.0 * floor(k * 0.5)
-        qb = parts.cbox(size = vec3(0.62 - odd * 0.22, 0.27, 0.4 + odd * 0.22), k = 0.12)
-        qy = (k + 0.5) * course_h
-        qa = transform(qb, translate = vec3(qx, qy, qz))
-        qc = transform(qb, translate = vec3(0.0 - qx, qy, qz))
-        qd = transform(qb, translate = vec3(qx, qy, 0.0 - qz))
-        qe = transform(qb, translate = vec3(0.0 - qx, qy, 0.0 - qz))
-        acc = merge(acc, mark(merge(qa, qc, qd, qe), "stone", where = true, domain = faces))
+        q = k - 2.0 * floor(k * 0.5)
+        course = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = (k + 0.5) * course_h, q = q)
+        acc = merge(acc, course)
     }
 }
