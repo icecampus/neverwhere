@@ -6,7 +6,7 @@ _Вынесено из `AGENTS.md` (2026-09-06): корневой файл — �
 
 ## macOS: платформенные особенности порта
 
-- **CLion:** пресет `macos-clion` (Ninja, `_int_clion`, Debug + compile_commands) — CLion не поддерживает Xcode-генератор основного пресета. `macos-index` (`_intermediate_ide`) оставлен под индексацию Serena/clangd, в IDE его не используем.
+- **CLion:** пресеты `macos-clion` (Ninja, `_int_clion`, Debug + compile_commands) и `macos-clion-release` (`_int_clion_release`, Release с оптимизациями) — CLion не поддерживает Xcode-генератор основного пресета. `macos-index` (`_intermediate_ide`) оставлен под индексацию Serena/clangd, в IDE его не используем.
 - **RttrPlayground на macOS не собирается** (vcpkg-порт rttr не поддерживает osx; его CMakeLists возвращается сразу на не-Windows).
 
 - **Рендер-бэкенды:** редактор и EcsPlayground — принудительный `SOKOL_GLCORE` (Qt OpenGL контекст), standalone-приложения — `SOKOL_METAL` (выбор в `render_core/sokol_config.h` и main.cpp по `__APPLE__`). Для GLCORE на macOS обязателен core profile: `QSurfaceFormat` 4.1 Core до создания `QApplication` (см. `main.cpp` редактора), иначе Qt даёт legacy 2.1 контекст и sokol падает на `sg_setup()` в Debug.

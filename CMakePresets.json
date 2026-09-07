@@ -91,6 +91,15 @@
       "binaryDir": "${sourceDir}/_int_clion"
     },
     {
+      "name": "macos-clion-release",
+      "displayName": "CLion (Ninja, arm64-osx, Release)",
+      "inherits": "macos-clion",
+      "binaryDir": "${sourceDir}/_int_clion_release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "linux",
       "displayName": "Linux (Ninja, x64-linux)",
       "binaryDir": "${sourceDir}/_int_linux",
@@ -124,6 +133,7 @@
     { "name": "macos-debug", "configurePreset": "macos", "configuration": "Debug" },
     { "name": "macos-release", "configurePreset": "macos", "configuration": "Release" },
     { "name": "macos-clion-debug", "configurePreset": "macos-clion" },
+    { "name": "macos-clion-release", "configurePreset": "macos-clion-release" },
     { "name": "linux-debug", "configurePreset": "linux" },
     { "name": "linux-release", "configurePreset": "linux-release" }
   ]
