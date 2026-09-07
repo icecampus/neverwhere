@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -60,6 +61,14 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 #include <util/sokol_imgui.h>
+
+#if defined(SOKOL_METAL) && defined(__APPLE__)
+    #import <Metal/Metal.h>
+    #import <QuartzCore/CAMetalLayer.h>
+    #import <dispatch/dispatch.h>
+#elif defined(SOKOL_D3D11)
+    #include <d3d11.h>
+#endif
 
 #if !defined(_WIN32)
     #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -700,26 +709,155 @@ void updateAutoPreview() {
     if (!target.empty() && target != g_previewTarget) runPreview(target);
 }
 
-// Portable --shot capture (GL readback; the documented sokol/GL trap keeps
-// this in the TU that owns SOKOL_IMPL — glad must never join them).
-bool capturePng(const char* path) {
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const int width = sapp_width();
-    const int height = sapp_height();
-    if (!path || path[0] == '\0' || width <= 0 || height <= 0) return false;
-    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    stbi_flip_vertically_on_write(1);
+// Portable --shot capture. GL reads back the default framebuffer (the
+// documented sokol/GL trap keeps this in the TU that owns SOKOL_IMPL — glad
+// must never join them); Metal/D3D11 read back the drawable/backbuffer of the
+// frame's swapchain (stashed in g_frameSwapchain — sokol has no readback API
+// and this sokol version does not implement the sapp_metal/d3d11 getters).
+// The current frame's swapchain descriptor, stashed by frame() for capturePng
+// (Metal drawable / D3D11 render view; only valid during the frame callback).
+sg_swapchain g_frameSwapchain = {};
+
+void swizzleBgraToRgba(std::vector<std::uint8_t>& pixels) {
+    for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) std::swap(pixels[i], pixels[i + 2]);
+}
+
+bool writePng(const char* path, int width, int height, const std::vector<std::uint8_t>& pixels) {
     const int ok = stbi_write_png(path, width, height, 4, pixels.data(), width * 4);
-    stbi_flip_vertically_on_write(0);
     if (!ok) {
         spdlog::error("capturePng: stbi_write_png failed for {}", path);
         return false;
     }
     return true;
+}
+
+bool capturePng(const char* path) {
+    const int width = sapp_width();
+    const int height = sapp_height();
+    if (!path || path[0] == '\0' || width <= 0 || height <= 0) return false;
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    stbi_flip_vertically_on_write(1);
+    const bool ok = writePng(path, width, height, pixels);
+    stbi_flip_vertically_on_write(0);
+    return ok;
+#elif defined(SOKOL_METAL) && defined(__APPLE__)
+    // Valid only inside frame() (the drawable lives in sokol_app's per-frame
+    // autorelease pool); capturePng is called from frame() right after the
+    // stash, same pool.
+    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)g_frameSwapchain.metal.current_drawable;
+    if (drawable == nil) {
+        spdlog::error("capturePng: no Metal drawable in the current frame");
+        return false;
+    }
+    // The just-committed frame may still be shading on sokol's command queue,
+    // and cross-queue ordering is not guaranteed — wait for the drawable to be
+    // presented (all writes complete) before blitting. If the race went the
+    // other way (presented before the handler was added), proceed after the
+    // timeout; the content is final by then.
+    if (drawable.presentedTime <= 0.0) {
+        dispatch_semaphore_t presented = dispatch_semaphore_create(0);
+        [drawable addPresentedHandler:^(id<MTLDrawable>) { dispatch_semaphore_signal(presented); }];
+        dispatch_semaphore_wait(presented, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+    }
+    id<MTLTexture> src = drawable.texture;
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                    width:static_cast<NSUInteger>(width)
+                                                                                   height:static_cast<NSUInteger>(height)
+                                                                                mipmapped:NO];
+    desc.storageMode = MTLStorageModeShared;
+    desc.usage = MTLTextureUsageShaderRead;
+    id<MTLTexture> dst = [device newTextureWithDescriptor:desc];
+    id<MTLCommandQueue> queue = [device newCommandQueue];
+    id<MTLCommandBuffer> cmd = [queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromTexture:src
+              sourceSlice:0
+              sourceLevel:0
+             sourceOrigin:MTLOriginMake(0, 0, 0)
+               sourceSize:MTLSizeMake(static_cast<NSUInteger>(width), static_cast<NSUInteger>(height), 1)
+                toTexture:dst
+         destinationSlice:0
+         destinationLevel:0
+        destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [blit endEncoding];
+    [cmd commit];
+    [cmd waitUntilCompleted];
+    if (cmd.status == MTLCommandBufferStatusError) {
+        spdlog::error("capturePng: Metal blit failed");
+        return false;
+    }
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+    [dst getBytes:pixels.data()
+      bytesPerRow:static_cast<NSUInteger>(width * 4)
+       fromRegion:MTLRegionMake2D(0, 0, static_cast<NSUInteger>(width), static_cast<NSUInteger>(height))
+      mipmapLevel:0];
+    swizzleBgraToRgba(pixels);  // CAMetalLayer is BGRA8; row 0 is the top — no flip
+    return writePng(path, width, height, pixels);
+#elif defined(SOKOL_D3D11)
+    // NOTE: written without a Windows machine at hand — verify on first use.
+    // Ordering is free: CopyResource on the same immediate context is
+    // serialized after the frame's commands, and Map blocks until done.
+    ID3D11RenderTargetView* rtv = static_cast<ID3D11RenderTargetView*>(g_frameSwapchain.d3d11.render_view);
+    if (rtv == nullptr) {
+        spdlog::error("capturePng: no D3D11 render view in the current frame");
+        return false;
+    }
+    ID3D11Resource* res = nullptr;
+    rtv->GetResource(&res);
+    ID3D11Texture2D* backbuffer = nullptr;
+    HRESULT hr = res != nullptr ? res->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backbuffer))
+                                : E_POINTER;
+    if (res != nullptr) res->Release();
+    if (FAILED(hr) || backbuffer == nullptr) {
+        spdlog::error("capturePng: D3D11 backbuffer QueryInterface failed");
+        return false;
+    }
+    ID3D11Device* device = nullptr;
+    backbuffer->GetDevice(&device);
+    ID3D11DeviceContext* context = nullptr;
+    device->GetImmediateContext(&context);
+    D3D11_TEXTURE2D_DESC desc = {};
+    backbuffer->GetDesc(&desc);
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    desc.MiscFlags = 0;
+    ID3D11Texture2D* staging = nullptr;
+    hr = device->CreateTexture2D(&desc, nullptr, &staging);
+    if (FAILED(hr) || staging == nullptr) {
+        spdlog::error("capturePng: D3D11 staging texture creation failed");
+        context->Release();
+        device->Release();
+        backbuffer->Release();
+        return false;
+    }
+    context->CopyResource(staging, backbuffer);
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    hr = context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped);
+    bool ok = false;
+    if (SUCCEEDED(hr)) {
+        std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+        const auto* srcRow = static_cast<const std::uint8_t*>(mapped.pData);
+        for (int y = 0; y < height; ++y) {
+            std::memcpy(pixels.data() + static_cast<std::size_t>(y) * width * 4, srcRow + static_cast<std::size_t>(y) * mapped.RowPitch, static_cast<std::size_t>(width) * 4);
+        }
+        context->Unmap(staging, 0);
+        swizzleBgraToRgba(pixels);  // backbuffer is B8G8R8A8; row 0 is the top — no flip
+        ok = writePng(path, width, height, pixels);
+    } else {
+        spdlog::error("capturePng: D3D11 Map failed");
+    }
+    staging->Release();
+    context->Release();
+    device->Release();
+    backbuffer->Release();
+    return ok;
 #else
-    spdlog::error("capturePng: --shot is only implemented for the GL backends");
+    spdlog::error("capturePng: --shot is not implemented for this backend");
     return false;
 #endif
 }
@@ -808,9 +946,10 @@ void frame() {
     sg_pass_action action = {};
     action.colors[0].load_action = SG_LOADACTION_CLEAR;
     action.colors[0].clear_value = {0.1f, 0.11f, 0.13f, 1.0f};
+    g_frameSwapchain = sglue_swapchain();  // stash for capturePng (single nextDrawable per frame)
     sg_pass pass = {};
     pass.action = action;
-    pass.swapchain = sglue_swapchain();
+    pass.swapchain = g_frameSwapchain;
     sg_begin_pass(&pass);
     if (g_state.imguiOk) simgui_render();
     sg_end_pass();
