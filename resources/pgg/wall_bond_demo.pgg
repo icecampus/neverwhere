@@ -1,0 +1,36 @@
+# Стенд рядовой кладки (blockwork.coursed_*): стена пролётом span между двумя
+# угловыми колоннами (quoin_pier, 1.5 блока), тёмная подложка, чтобы читались швы.
+# Крутить: --param=span=... (в т.ч. некратные длины — торцы обязаны оставаться
+# кратными ¼ блока, остаток прячется в швах). Смотреть:
+#   PggViewer resources/pgg/wall_bond_demo.pgg --preview=scene --preview-colors=on
+
+param span: f32 = 4.12
+param rows: int = 8
+param joint: f32 = 0.02
+param seed: int = 3
+
+import lib.parts
+import lib.blockwork
+
+L = 0.55
+course_h = 0.3
+wall_h = f32(rows) * course_h
+
+rng0 = rng_from_seed(seed)
+
+anchors = blockwork.coursed_wall_anchors(S = span, n_rows = rows, course_h = course_h, y0 = 0.0, z = 0.03, L = L, g0 = joint)
+wall = blockwork.coursed_wall(anchors, blk = vec3(L, 0.26, 0.1), rng = split_rng(rng0, key = "wall"))
+
+# Угловые колонны по торцам пролёта: внутренняя грань колонны заподлицо с концом
+# ряда (x = ±span/2), лицевая плоскость на 0.2 наружу от плоскости стены.
+pier = blockwork.quoin_pier(n_rows = rows, course_h = course_h, bricks = 1.5)
+pier_l = transform(pier, translate = vec3(0.0 - span * 0.5, 0.0, 0.2))
+pier_r = transform(transform(pier, rotate = vec3(0.0, 270.0, 0.0)), translate = vec3(span * 0.5, 0.0, 0.2))
+
+# Подложка-сердцевина: швы читаются как раствор.
+back = parts.piece(size = vec3(span + 1.6, wall_h + 0.1, 0.05), pos = vec3(0.0, wall_h * 0.5, 0.0 - 0.06), grp = "wall")
+
+raw = merge(back, wall, pier_l, pier_r)
+colored = set(raw, "Cd", ingroup("wall") ? vec3(0.05, 0.05, 0.055) : vec3(0.42, 0.38, 0.34) * @tint, domain = faces)
+scene = colored
+output scene

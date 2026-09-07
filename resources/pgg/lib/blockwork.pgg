@@ -2,6 +2,8 @@
 # торцов `clip`, угловые квойны. Стена собирается в локальной системе (x вдоль
 # стены, центр в 0, z наружу) и ставится на место внешним transform; проёмы —
 # удалением якорей маской до вызова stone_wall. Группы: stone, cut (крышки срезов).
+# Рядовая кладка v2 (coursed_*): торцы ряда всегда кратны ¼ блока, остаток пролёта
+# прячется в швах (course_layout), торцы точные по раскладке — clip не нужен.
 
 import lib.parts
 
@@ -105,5 +107,102 @@ def quoin_stack(w: f32, d: f32, n_rows: int, course_h: f32, bricks: f32 = 1.5) -
         q = kr - 2.0 * floor(kr * 0.5)
         course = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = (kr + 0.5) * course_h, q = q, k = k, m = m)
         acc = merge(acc, course)
+    }
+}
+
+def course_layout(S: f32, L: f32, g0: f32, odd: int) -> (e: f32, cls: int, k: int, g: f32) {
+    """Раскладка одного ряда кладки вразбежку на пролёте S (блок длиной L, номинальный
+    шов g0): e — торцевой добор (одинаковый с двух концов, всегда кратен L/4 — узких
+    срезов не бывает), cls — его длина в четвертях блока (1..4), k — число полных
+    блоков, g — фактический шов. Чётный ряд (odd = 0): кладём максимум полных блоков
+    при минимальном доборе L/4, затем, пока остаток ≥ L/2, поднимаем добор на четверть
+    (два торца — минус L/2 из остатка), хвост < L/2 равномерно размазываем по k+1 швам.
+    Нечётный ряд (odd = 1) смещён на L/2: его добор жёстко (e + L/2) mod L, поэтому
+    остаток пролёта прячется выбором числа полных блоков с швом ближе к g0 (шов может
+    чуть сжаться, но не уже 0.6·g0)."""
+    expect S >= 2.0 * L: "course_layout: пролёт короче двух блоков"
+    k0 = int((S - 0.5 * L - g0) / (L + g0))
+    d0 = S - 0.5 * L - f32(k0) * L - f32(k0 + 1) * g0
+    bumps = int(d0 / (0.5 * L))
+    cls0 = 1 + bumps
+    e0 = f32(cls0) * 0.25 * L
+    ge = g0 + (d0 - f32(bumps) * 0.5 * L) / f32(k0 + 1)
+    cls1 = (cls0 + 1) % 4 + 1
+    e1 = f32(cls1) * 0.25 * L
+    k1 = int((S - 2.0 * e1 - g0) / (L + g0))
+    d1 = S - 2.0 * e1 - f32(k1) * L - f32(k1 + 1) * g0
+    d1b = d1 - (L + g0)
+    g_up = g0 + d1 / f32(k1 + 1)
+    g_dn = g0 + d1b / f32(k1 + 2)
+    take_up = d1 / f32(k1 + 1) <= 0.0 - d1b / f32(k1 + 2) | g_dn < 0.6 * g0
+    k1f = take_up ? k1 : k1 + 1
+    g1 = take_up ? g_up : g_dn
+    e = odd == 1 ? e1 : e0
+    cls = odd == 1 ? cls1 : cls0
+    k = odd == 1 ? k1f : k0
+    g = odd == 1 ? g1 : ge
+}
+
+def course_anchors(S: f32, L: f32, g0: f32, odd: int, z: f32) -> (out: geo<points>) {
+    """Якоря одного ряда раскладки course_layout на высоте y = 0 (x вдоль ряда, центр
+    в 0, z — вынос наружу): точки с @variant = классу длины куска (0 = L/4, 1 = L/2,
+    2 = 3L/4, 3 = полный). Ряд: добор e слева, k полных, добор e справа; швы g."""
+    e, cls, k, g = course_layout(S = S, L = L, g0 = g0, odd = odd)
+    p0 = transform(mesh_line(count = 1, length = 0.0, dir = (1, 0, 0)), translate = vec3(0.0 - S * 0.5 + e * 0.5, 0.0, z))
+    out = repeat (set(p0, "variant", cls - 1, domain = points), iterations = k + 1) |acc| {
+        i = @iteration + 1
+        xi = i > k ? S * 0.5 - e * 0.5 : 0.0 - S * 0.5 + e + g + (f32(i) - 1.0) * (L + g) + L * 0.5
+        ci = i > k ? cls - 1 : 3
+        pi = transform(mesh_line(count = 1, length = 0.0, dir = (1, 0, 0)), translate = vec3(xi, 0.0, z))
+        acc = merge(acc, set(pi, "variant", ci, domain = points))
+    }
+}
+
+def coursed_wall_anchors(S: f32, n_rows: int, course_h: f32, y0: f32, z: f32, L: f32, g0: f32) -> (out: geo<points>) {
+    """Якоря всех рядов стены пролётом S: два прототипа рядов (чётный/нечётный,
+    половинное смещение) расставлены по высоте; модель строк — точки-ряды mesh_line,
+    делегат — foreach (§5.4), высота ряда из @P модели. Проёмы — удалением якорей
+    маской до вызова coursed_wall."""
+    ev = course_anchors(S = S, L = L, g0 = g0, odd = 0, z = z)
+    od = course_anchors(S = S, L = L, g0 = g0, odd = 1, z = z)
+    n_even = (n_rows + 1) / 2
+    n_odd = n_rows / 2
+    rows_e = mesh_line(count = n_even, length = f32(n_even - 1) * 2.0 * course_h, dir = (0, 1, 0))
+    rows_o = mesh_line(count = n_odd, length = f32(n_odd - 1) * 2.0 * course_h, dir = (0, 1, 0))
+    we = foreach re in rows_e {
+        re = transform(ev, translate = vec3(0.0, y0 + course_h * 0.5 + dot(value(@P, on = re), (0, 1, 0)), 0.0))
+    }
+    wo = foreach ro in rows_o {
+        ro = transform(od, translate = vec3(0.0, y0 + course_h * 1.5 + dot(value(@P, on = ro), (0, 1, 0)), 0.0))
+    }
+    out = merge(we, wo)
+}
+
+def coursed_wall(rows: geo<points>, blk: vec3, rng: rng) -> (out: geo<mesh>) {
+    """Кладка по якорям coursed_wall_anchors: четыре варианта длины (¼/½/¾/полный —
+    @variant от coursed_anchors), почти серый @tint на блок, микроджиттер (по x слабый —
+    швы точные), realize. Торцы рядов точные по раскладке — clip не нужен."""
+    a0 = parts.cbox(size = blk * vec3(0.25, 1.0, 1.0), k = 0.16)
+    a1 = parts.cbox(size = blk * vec3(0.5, 1.0, 1.0), k = 0.16)
+    a2 = parts.cbox(size = blk * vec3(0.75, 1.0, 1.0), k = 0.16)
+    a3 = parts.cbox(size = blk, k = 0.16)
+    shade = random(lo = 0.7, hi = 1.25, rng = split_rng(rng, key = "tint"))
+    p1 = set(rows, "tint", vec3(shade * 1.04, shade, shade * 0.96))
+    p2 = set_position(p1, offset = random_vec(lo = vec3(-0.01, -0.01, -0.01), hi = vec3(0.01, 0.01, 0.07), rng = split_rng(rng, key = "jitter")))
+    out = realize(instance_on_points(p2, source = a3, variants = [a0, a1, a2, a3]))
+}
+
+def quoin_pier(n_rows: int, course_h: f32, bricks: f32 = 1.5) -> (out: geo<mesh>) {
+    """Отдельная угловая колонна (стенды/проверки): один угол в локальной системе
+    quoin_corner_local (грани — плоскости x = 0 и z = 0, тело в −x/−z), n_rows рядов
+    с перевязкой. Группа stone."""
+    expect bricks >= 1.0 & bricks * 2.0 == f32(int(bricks * 2.0)): "quoin_pier: bricks — от 1.0 с шагом 0.5 (1, 1.5, 2, 2.5, ...)"
+    kp = int(bricks)
+    mp = int(bricks * 2.0) - 2 * kp
+    pier0 = quoin_corner_local(h = course_h * 0.9, L = 0.62, W = 0.32, y = course_h * 0.5, q = 0.0, k = kp, m = mp)
+    out = repeat (mark(pier0, "stone", where = true, domain = faces), iterations = n_rows - 1) |acc| {
+        kpier = f32(@iteration) + 1.0
+        qpier = kpier - 2.0 * floor(kpier * 0.5)
+        acc = merge(acc, mark(quoin_corner_local(h = course_h * 0.9, L = 0.62, W = 0.32, y = (kpier + 0.5) * course_h, q = qpier, k = kp, m = mp), "stone", where = true, domain = faces))
     }
 }
