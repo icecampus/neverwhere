@@ -161,11 +161,14 @@ def multi_gable(width: f32, depth: f32, stone_h: f32, upper_h: f32, jetty: f32, 
     km = cv - 0.05
     kw = cv + 0.05
 
-    # Настил: оболочка объединения призм главной крыши и щипца.
+    # Настил: оболочка объединения призм главной крыши и щипца. Торцы щипца сдвинуты
+    # на 0.04 наружу от плоскости главного карниза (z = ±eave_z): совпадающие плоскости
+    # торца и карниза давали MC-плавни на скошенной рамке торца (видны как «бахрома»
+    # под косачом); +0.02 закрыто ветровой доской.
     main_outer = shapes.gable_prism(ridge_y = ridge_y, drop = 0.0, w = rl, d = sd, floor_y = eave_y)
     main_inner = shapes.gable_prism(ridge_y = ridge_y, drop = roof_t, w = rl - 0.02, d = sd - 0.02, floor_y = eave_y - 0.5)
-    wing_outer = shapes.gable_prism_z(ridge_y = ridge_w, drop = 0.0, w = wl, d = 2.0 * hs, floor_y = eave_y)
-    wing_inner = shapes.gable_prism_z(ridge_y = ridge_w, drop = roof_t, w = wl - 0.02, d = 2.0 * hs - 0.02, floor_y = eave_y - 0.5)
+    wing_outer = shapes.gable_prism_z(ridge_y = ridge_w, drop = 0.0, w = wl + 0.04, d = 2.0 * hs, floor_y = eave_y)
+    wing_inner = shapes.gable_prism_z(ridge_y = ridge_w, drop = roof_t, w = wl + 0.02, d = 2.0 * hs - 0.02, floor_y = eave_y - 0.5)
     shell = sdf_subtract(sdf_union(main_outer, wing_outer), sdf_union(main_inner, wing_inner))
     deck = mark(compute_normals(mesh_from_sdf(shell, voxel = 0.05), mode = auto, angle = 35), "roof", where = true, domain = faces)
 
