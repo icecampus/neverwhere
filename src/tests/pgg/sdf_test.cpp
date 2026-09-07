@@ -286,14 +286,16 @@ TEST(MeshFromSdf, SphereIsWatertightWithGoldenCounts) {
     pgg::GeoPtr m = pggtest::geoOutput(r, "m");
     ASSERT_TRUE(m);
     // Golden counts of the current numeric profile.
-    EXPECT_EQ(m->pointCount(), 7506u);
-    EXPECT_EQ(m->cornerCount(), 45024u);
-    EXPECT_EQ(m->faceCount(), 15008u);
+    EXPECT_EQ(m->pointCount(), 7572u);
+    EXPECT_EQ(m->cornerCount(), 45420u);
+    EXPECT_EQ(m->faceCount(), 15140u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*m), 0u);
     glm::vec3 mn, mx;
     pgg::geoBBox(*m, mn, mx);
-    pggtest::expectVec3Near(mn, glm::vec3(-1, -1, -1), 1e-4f);
-    pggtest::expectVec3Near(mx, glm::vec3(1, 1, 1), 1e-4f);
+    // Poles fall between lattice points (irrational lattice phase): the linear
+    // edge interpolation of the curved field undershoots by ~voxel^2/(2r).
+    pggtest::expectVec3Near(mn, glm::vec3(-1, -1, -1), 1e-3f);
+    pggtest::expectVec3Near(mx, glm::vec3(1, 1, 1), 1e-3f);
     // Attribute barrier: only @P (normals come from compute_normals).
     EXPECT_FALSE(m->normals);
     EXPECT_FALSE(m->pointAttrs);
@@ -312,9 +314,11 @@ TEST(MeshFromSdf, IsoShiftMovesSurface) {
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*m), 0u);
     glm::vec3 mn, mx;
     pgg::geoBBox(*m, mn, mx);
-    pggtest::expectVec3Near(mn, glm::vec3(-0.7f, -0.7f, -0.7f), 1e-4f);
-    pggtest::expectVec3Near(mx, glm::vec3(0.7f, 0.7f, 0.7f), 1e-4f);
-    EXPECT_LT(m->pointCount(), 7506u);  // smaller sphere -> fewer vertices
+    // The poles no longer sit on lattice points (irrational lattice phase), so
+    // the linear edge interpolation of the curved field is off by ~voxel^2/(2r).
+    pggtest::expectVec3Near(mn, glm::vec3(-0.7f, -0.7f, -0.7f), 1e-3f);
+    pggtest::expectVec3Near(mx, glm::vec3(0.7f, 0.7f, 0.7f), 1e-3f);
+    EXPECT_LT(m->pointCount(), 7572u);  // smaller sphere -> fewer vertices
 }
 
 TEST(MeshFromSdf, ThreadCountInvariant) {
@@ -381,7 +385,9 @@ TEST(MeshFromSdf, BoundaryDetectorDirect) {
     };
     pgg::MeshFromSdfResult clean = pgg::meshFromSdfExtract(*grid(1.0f), 1.0f, 0.0f, 1);
     EXPECT_FALSE(clean.boundaryTouch);
-    pgg::MeshFromSdfResult touched = pgg::meshFromSdfExtract(*grid(-1.0f), 1.0f, 0.0f, 1);
+    // fill -2: the zero level sits two voxels beyond the lattice bbox, past the
+    // one-voxel (+phase) margin — the boundary slab samples below iso.
+    pgg::MeshFromSdfResult touched = pgg::meshFromSdfExtract(*grid(-2.0f), 1.0f, 0.0f, 1);
     EXPECT_TRUE(touched.boundaryTouch);
 }
 
@@ -498,6 +504,45 @@ TEST(SdfCache, VoxelEditInvalidatesOnlyTheMeshBinding) {
               pggtest::geoContentHash(pggtest::geoOutput(fresh, "m")));
 }
 
+// Lattice phase (docs/pgg/mc_thin_shell_slivers.md): the conservative bbox of a
+// box IS its face plane, so a grid origin at exactly `bbox - voxel` sampled the
+// field at 0 on every face an integer number of voxels away — the inside test
+// flipped with float noise and a sub-voxel wall came out as a torn sheet of
+// slivers. With the irrational phase no rational face coordinate hits a lattice
+// plane: a 1 cm shell (thinner than the voxel, straddling no lattice plane) is
+// consistently dropped, and a 12 cm shell stays two clean sheets without
+// zero-area triangles from exact-iso corners.
+TEST(MeshFromSdf, SubVoxelWallIsNotATornSheet) {
+    pgg::RunResult r = pgg::run(
+        "thin = mesh_from_sdf(sdf_subtract(sdf_box(size = vec3(2.0, 2.0, 2.0)), sdf_box(size = vec3(1.98, 1.98, 1.98))), voxel = 0.05)\n"
+        "pt = set(mesh_line(count = 1, length = 0.0), \"orient\", orient_from_euler(vec3(45, 0, 0)))\n"
+        "roof = sdf_subtract(sdf_instance_on_points(pt, source = sdf_box(size = vec3(2.0, 2.0, 2.0))), sdf_instance_on_points(pt, source = sdf_box(size = vec3(1.76, 1.76, 1.76))))\n"
+        "shell = mesh_from_sdf(roof, voxel = 0.05)\n"
+        "output thin\n"
+        "output shell\n");
+    pggtest::expectNoErrors(r);
+    pgg::GeoPtr thin = pggtest::geoOutput(r, "thin");
+    ASSERT_TRUE(thin);
+    EXPECT_EQ(thin->faceCount(), 0u) << "a wall thinner than the voxel must vanish whole, not as a fringe";
+    EXPECT_EQ(thin->pointCount(), 0u);
+
+    pgg::GeoPtr shell = pggtest::geoOutput(r, "shell");
+    ASSERT_TRUE(shell);
+    ASSERT_GT(shell->faceCount(), 0u);
+    const auto& P = *shell->positions;
+    const auto& C = *shell->cornerVerts;
+    const auto& O = *shell->faceOffsets;
+    size_t degenerate = 0;
+    for (size_t f = 0; f < shell->faceCount(); ++f) {
+        const int32_t a = C[O[f]];
+        const int32_t b = C[O[f] + 1];
+        const int32_t c = C[O[f] + 2];
+        if (P[a] == P[b] || P[b] == P[c] || P[a] == P[c]) ++degenerate;
+    }
+    EXPECT_EQ(degenerate, 0u);
+    EXPECT_EQ(pgg::nonManifoldEdgeCount(*shell), 0u);
+}
+
 // --- 8. corpus (both acceptance criteria) ---------------------------------------------
 
 TEST(SdfCorpus, RockAndWallMatchGoldens) {
@@ -510,27 +555,27 @@ TEST(SdfCorpus, RockAndWallMatchGoldens) {
     // Criterion 1: the SDF-pipeline rock (exact counts of the current profile).
     pgg::GeoPtr rock = pggtest::geoOutput(r, "rock");
     ASSERT_TRUE(rock);
-    EXPECT_EQ(rock->pointCount(), 12508u);
-    EXPECT_EQ(rock->cornerCount(), 75012u);
-    EXPECT_EQ(rock->faceCount(), 25004u);
+    EXPECT_EQ(rock->pointCount(), 12466u);
+    EXPECT_EQ(rock->cornerCount(), 74784u);
+    EXPECT_EQ(rock->faceCount(), 24928u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*rock), 0u);
     glm::vec3 rmn, rmx;
     pgg::geoBBox(*rock, rmn, rmx);
-    pggtest::expectVec3Near(rmn, glm::vec3(-1.20845f, -1.23195f, -1.24334f), 1e-4f);
-    pggtest::expectVec3Near(rmx, glm::vec3(1.24725f, 1.24194f, 1.23437f), 1e-4f);
+    pggtest::expectVec3Near(rmn, glm::vec3(-1.211f, -1.2283f, -1.24293f), 1e-4f);
+    pggtest::expectVec3Near(rmx, glm::vec3(1.24757f, 1.24358f, 1.23663f), 1e-4f);
     ASSERT_TRUE(rock->normals);  // compute_normals ran after extraction
 
     // Criterion 2: the instance wall.
     pgg::GeoPtr wall = pggtest::geoOutput(r, "wall");
     ASSERT_TRUE(wall);
-    EXPECT_EQ(wall->pointCount(), 13542u);
-    EXPECT_EQ(wall->cornerCount(), 81168u);
-    EXPECT_EQ(wall->faceCount(), 27056u);
+    EXPECT_EQ(wall->pointCount(), 13410u);
+    EXPECT_EQ(wall->cornerCount(), 80388u);
+    EXPECT_EQ(wall->faceCount(), 26796u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*wall), 0u);
     glm::vec3 wmn, wmx;
     pgg::geoBBox(*wall, wmn, wmx);
-    pggtest::expectVec3Near(wmn, glm::vec3(-0.572802f, -0.603777f, 3.16101f), 1e-4f);
-    pggtest::expectVec3Near(wmx, glm::vec3(10.7438f, 0.604746f, 4.83796f), 1e-4f);
+    pggtest::expectVec3Near(wmn, glm::vec3(-0.569595f, -0.603484f, 3.16706f), 1e-4f);
+    pggtest::expectVec3Near(wmx, glm::vec3(10.7637f, 0.605047f, 4.84354f), 1e-4f);
 
     // The raw sdf output (§6.7 allows sdf roots; PggTool prints its summary).
     pgg::SdfPtr field = sdfOutput(r, "rock_field");

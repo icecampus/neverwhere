@@ -281,12 +281,12 @@ TEST(EvalE7, FractureCorpusMatchesGoldens) {
     EXPECT_EQ(rock.pointCount(), 162u);
     EXPECT_EQ(rock.faceCount(), 320u);
     const pgg::Geo& fractured = *pgg::asGeo(*outputOf(r, "fractured"));
-    EXPECT_EQ(fractured.pointCount(), 135860u);
-    EXPECT_EQ(fractured.faceCount(), 271708u);
+    EXPECT_EQ(fractured.pointCount(), 135788u);
+    EXPECT_EQ(fractured.faceCount(), 271564u);
     glm::vec3 mn, mx;
     pgg::geoBBox(fractured, mn, mx);
-    expectVec3Near(mn, glm::vec3(-0.997602f, -1.06918f, -1.10772f), 1e-4f);
-    expectVec3Near(mx, glm::vec3(1.04371f, 0.983486f, 0.997078f), 1e-4f);
+    expectVec3Near(mn, glm::vec3(-0.996878f, -1.06846f, -1.10489f), 1e-4f);
+    expectVec3Near(mx, glm::vec3(1.04136f, 0.983057f, 0.996578f), 1e-4f);
     // Three non-empty pieces: dense @island_id 0..2 on the faces.
     const std::vector<int64_t> ids = islandIds(fractured);
     ASSERT_EQ(ids.size(), fractured.faceCount());
@@ -299,8 +299,8 @@ TEST(EvalE7, FractureCorpusMatchesGoldens) {
     EXPECT_EQ(pieces.size(), unique.size());
     for (const pgg::GeoPtr& piece : pieces) EXPECT_EQ(pgg::nonManifoldEdgeCount(*piece), 0u);
     pgg::geoBBox(chunks, mn, mx);
-    expectVec3Near(mn, glm::vec3(-1.04315f, -1.06009f, -1.09909f), 1e-4f);
-    expectVec3Near(mx, glm::vec3(1.03561f, 0.952295f, 1.03629f), 1e-4f);
+    expectVec3Near(mn, glm::vec3(-1.04187f, -1.05953f, -1.09795f), 1e-4f);
+    expectVec3Near(mx, glm::vec3(1.03472f, 0.952295f, 1.03661f), 1e-4f);
 }
 
 TEST(EvalE7, FractureCorpusDeterministicAndThreadInvariant) {

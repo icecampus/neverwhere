@@ -1,5 +1,7 @@
 #include "../../pch.h"
 
+#include <cstring>
+
 #include "sdf.h"
 
 #include <cmath>
@@ -614,7 +616,17 @@ MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso
         res.mesh = makeMesh({}, {}, {0});  // empty field (e.g. zero instance anchors)
         return res;
     }
-    const glm::vec3 mn = bbn - glm::vec3(voxel);
+    // Lattice phase: the conservative bbox of an axis-aligned primitive IS its
+    // face plane, so an origin at `bbn - voxel` puts that face (and every face
+    // an integer number of voxels away from it) exactly on lattice points where
+    // the field is 0 up to rounding — the inside test then flips with float
+    // noise and marching cubes emits a fringe of slivers / holes along the face
+    // (visible as a torn sheet on thin walls, e.g. two prism shells whose end
+    // faces sit one voxel apart). Shift the origin by an irrational fraction of
+    // a voxel (golden-ratio conjugate) so no face at a rational model coordinate
+    // can coincide with a lattice plane; the extraction stays deterministic.
+    constexpr float kLatticePhase = 0.381966011f;
+    const glm::vec3 mn = bbn - glm::vec3(voxel) * (1.0f + kLatticePhase);
     const glm::vec3 mx = bbx + glm::vec3(voxel);
     glm::ivec3 dims;
     for (int i = 0; i < 3; ++i)
@@ -665,13 +677,31 @@ MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso
     std::vector<glm::vec3> positions;
     std::vector<int32_t> corners;
     std::unordered_map<uint64_t, int32_t> edgeVert;
+    // Position weld: a lattice value exactly at iso puts the vertex of every
+    // edge leaving that corner onto the corner itself (t = 0 / 1) — three edges,
+    // one point. Welding them to one index keeps the mesh watertight in index
+    // space and turns the collapsed triangles into index-degenerate ones that
+    // can be dropped below without opening an edge.
+    struct Vec3BitsHash {
+        size_t operator()(const glm::vec3& v) const noexcept {
+            uint32_t bx, by, bz;
+            std::memcpy(&bx, &v.x, 4);
+            std::memcpy(&by, &v.y, 4);
+            std::memcpy(&bz, &v.z, 4);
+            uint64_t h = bx;
+            h = h * 0x9E3779B97F4A7C15ull ^ by;
+            h = h * 0x9E3779B97F4A7C15ull ^ bz;
+            return static_cast<size_t>(h ^ (h >> 29));
+        }
+    };
+    std::unordered_map<glm::vec3, int32_t, Vec3BitsHash> posIndex;
     auto edgeVertex = [&](int edge, int x, int y, int z) -> int32_t {
         const int axis = kEdgeInfo[edge][0];
         const int gx = x + kEdgeInfo[edge][1];
         const int gy = y + kEdgeInfo[edge][2];
         const int gz = z + kEdgeInfo[edge][3];
         const uint64_t key = (static_cast<uint64_t>(latIdx(gx, gy, gz)) << 2) | static_cast<uint64_t>(axis);
-        auto [it, inserted] = edgeVert.emplace(key, static_cast<int32_t>(positions.size()));
+        auto [it, inserted] = edgeVert.emplace(key, -1);
         if (!inserted) return it->second;
         const glm::vec3 pa = mn + glm::vec3(static_cast<float>(gx), static_cast<float>(gy),
                                             static_cast<float>(gz)) * voxel;
@@ -682,7 +712,10 @@ MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso
         bi[axis] += 1;
         const float vb = values[latIdx(bi.x, bi.y, bi.z)];
         const float t = std::fabs(vb - va) < 1e-12f ? 0.5f : (iso - va) / (vb - va);
-        positions.push_back(pa + (pb - pa) * t);
+        const glm::vec3 p = pa + (pb - pa) * t;
+        auto [pit, pinserted] = posIndex.emplace(p, static_cast<int32_t>(positions.size()));
+        if (pinserted) positions.push_back(p);
+        it->second = pit->second;
         return it->second;
     };
     for (int z = 0; z + 1 < dims.z; ++z) {
@@ -699,6 +732,9 @@ MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso
                     const int32_t v0 = edgeVertex(kMcTriTable[cubeindex][t], x, y, z);
                     const int32_t v1 = edgeVertex(kMcTriTable[cubeindex][t + 1], x, y, z);
                     const int32_t v2 = edgeVertex(kMcTriTable[cubeindex][t + 2], x, y, z);
+                    // Index-degenerate after the position weld (collapsed onto an
+                    // exact-iso corner): no area, no normal — drop it.
+                    if (v0 == v1 || v1 == v2 || v0 == v2) continue;
                     // The published table is wound toward the inside under
                     // (bit set = inside): reverse for outward normals.
                     corners.push_back(v0);
@@ -707,6 +743,21 @@ MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso
                 }
             }
         }
+    }
+    // Compact points left without a face by the degenerate-triangle filter
+    // (order of first use — deterministic).
+    {
+        std::vector<int32_t> remap(positions.size(), -1);
+        std::vector<glm::vec3> kept;
+        kept.reserve(positions.size());
+        for (int32_t& c : corners) {
+            if (remap[c] < 0) {
+                remap[c] = static_cast<int32_t>(kept.size());
+                kept.push_back(positions[c]);
+            }
+            c = remap[c];
+        }
+        positions = std::move(kept);
     }
     std::vector<int32_t> offsets;
     offsets.reserve(corners.size() / 3 + 1);

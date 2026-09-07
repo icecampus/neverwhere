@@ -27,26 +27,26 @@ TEST(Tower, CorpusMatchesGoldensAndReproduces) {
     pgg::GeoPtr scene = pggtest::geoOutput(r, "scene");
     ASSERT_TRUE(scene != nullptr);
     ASSERT_EQ(scene->kind, pgg::GeoKind::Mesh);
-    EXPECT_EQ(scene->pointCount(), 359196u);
-    EXPECT_EQ(scene->cornerCount(), 2154984u);
-    EXPECT_EQ(scene->faceCount(), 718328u);
+    EXPECT_EQ(scene->pointCount(), 359224u);
+    EXPECT_EQ(scene->cornerCount(), 2155128u);
+    EXPECT_EQ(scene->faceCount(), 718376u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*scene), 0u);
     glm::vec3 mn, mx;
     pgg::geoBBox(*scene, mn, mx);
     // Bbox goldens were recorded through the PggTool %g print (6 significant
     // digits) — at magnitudes ~123 that is ~5e-4, hence the 1e-3 tolerance.
-    pggtest::expectVec3Near(mn, glm::vec3(-4.15436f, -6.10666f, -2.94878f), 1e-3f);
-    pggtest::expectVec3Near(mx, glm::vec3(18.1502f, 6.2129f, 123.022f), 1e-3f);
+    pggtest::expectVec3Near(mn, glm::vec3(-4.16137f, -6.1173f, -2.93377f), 1e-3f);
+    pggtest::expectVec3Near(mx, glm::vec3(18.1676f, 6.2218f, 123.009f), 1e-3f);
 
     // anchors: the poisson landing points on the wall's flat tops.
     pgg::GeoPtr anchors = pggtest::geoOutput(r, "anchors");
     ASSERT_TRUE(anchors != nullptr);
     ASSERT_EQ(anchors->kind, pgg::GeoKind::Points);
-    EXPECT_EQ(anchors->pointCount(), 146u);
+    EXPECT_EQ(anchors->pointCount(), 141u);
     glm::vec3 amn, amx;
     pgg::geoBBox(*anchors, amn, amx);
-    pggtest::expectVec3Near(amn, glm::vec3(-2.36365f, -2.81133f, 1.90485f), 1e-3f);
-    pggtest::expectVec3Near(amx, glm::vec3(2.47599f, 3.29271f, 122.995f), 1e-3f);
+    pggtest::expectVec3Near(amn, glm::vec3(-2.44021f, -3.32785f, 1.92822f), 1e-3f);
+    pggtest::expectVec3Near(amx, glm::vec3(2.60365f, 2.97232f, 122.994f), 1e-3f);
 
     // N1: a second run reproduces the world bit-for-bit (same seed, §5.2).
     pgg::RunResult r2 = pgg::runFile(kTower, towerParams());
