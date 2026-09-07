@@ -5,14 +5,16 @@
 import lib.parts
 import lib.blockwork
 
-def ground_floor(width: f32, depth: f32, stone_h: f32, door_x: f32, win_x: f32, side_win_x: f32, rng: rng) -> (out: geo<mesh>) {
+def ground_floor(width: f32, depth: f32, stone_h: f32, door_x: f32, win_x: f32, side_win_x: f32, rng: rng, quoin_bricks: f32 = 1.5) -> (out: geo<mesh>) {
     """Первый этаж width×depth высотой stone_h: сплошная сердцевина и цоколь (stone),
     кладка четырёх стен (blockwork.stone_wall по якорям blockwork.bond_anchors: блоки
     0.5/0.55/0.6 × 0.26 × 0.1, ряд 0.3, перевязка, джиттер, подрезка торцов `clip`)
     и квойны по углам. Проёмы — удалением якорей в локальных координатах стены:
     арка двери в door_x (фасад), окно фасада в win_x (0.9×1.0 на высоте 1.45),
     окно тыла в x = 0.9 (то же), по окну на боках в side_win_x (0.75×0.85 на 1.55) —
-    размеры вырезов согласованы с cottage/windows.pgg (портал и рамы закрывают край)."""
+    размеры вырезов согласованы с cottage/windows.pgg (портал и рамы закрывают край).
+    quoin_bricks — сечение угловых колонн в блоках (от 1.0 с шагом 0.5, см.
+    blockwork.quoin_stack)."""
     core = parts.piece(size = vec3(width, stone_h, depth), pos = vec3(0, stone_h * 0.5, 0), grp = "stone")
     plinth = parts.piece(size = vec3(width + 0.3, 0.32, depth + 0.3), pos = vec3(0, 0.16, 0), grp = "stone")
     course_h = 0.3
@@ -29,6 +31,6 @@ def ground_floor(width: f32, depth: f32, stone_h: f32, door_x: f32, win_x: f32, 
     wall_l = transform(transform(blockwork.stone_wall(rows_side, len = depth, blk = blk, rng = split_rng(rng, key = "left")), rotate = vec3(0, 270, 0)), translate = vec3(0.0 - width * 0.5, 0, 0))
     wall_r = transform(transform(blockwork.stone_wall(rows_side, len = depth, blk = blk, rng = split_rng(rng, key = "right")), rotate = vec3(0, 90, 0)), translate = vec3(width * 0.5, 0, 0))
     veneer = mark(merge(wall_f, wall_b, wall_l, wall_r), "stone", where = true, domain = faces)
-    quoins = blockwork.quoin_stack(w = width, d = depth, n_rows = n_rows, course_h = course_h)
+    quoins = blockwork.quoin_stack(w = width, d = depth, n_rows = n_rows, course_h = course_h, bricks = quoin_bricks)
     out = merge(core, plinth, veneer, quoins)
 }

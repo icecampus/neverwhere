@@ -38,45 +38,72 @@ def stone_wall(rows: geo<points>, len: f32, blk: vec3, rng: rng) -> (out: geo<me
     out = clip(c1, origin = vec3(len * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
 }
 
-def quoin_corner(sx: f32, sz: f32, w: f32, d: f32, h: f32, L: f32, W: f32, p: f32, y: f32, q: f32) -> (out: geo<mesh>) {
-    """Один ряд угловой колонны (сечение «в 1.5 блока», (L+W)×(L+W)) на углу со
-    знаками sx/sz: угловой блок a (q = 0 — длиной вдоль X, q = 1 — вдоль Z),
-    примыкающий блок b перпендикулярного плеча — его торец стыкуется с длинной
-    гранью углового, — и половинка hlf, достраивающая ложковое плечо до квадратного
-    сечения. Грани колонны выпущены на p за плоскость сердцевины дома."""
+def quoin_corner_local(h: f32, L: f32, W: f32, y: f32, q: f32, k: int, m: int) -> (out: geo<mesh>) {
+    """Один угол ряда колонны сечением «в k + m/2 блока» (k ≥ 1 полных + m ∈ {0, 1}
+    половинка; лицо ряда = k·L + m·W) в локальной системе: грани колонны — плоскости
+    x = 0 и z = 0, тело в октанте −x/−z. Угловой блок a при q = 0 длиной вдоль X
+    (ложок на грани z, тычок на грани x), при q = 1 — вдоль Z. Плечо вдоль оси a:
+    k−1 полных блоков + m половинок; перпендикулярное плечо, чей первый блок
+    стыкуется торцом с длинной гранью a: k−1+m полных; при m = 0 добавляется короткий
+    добор длиной L−W (аналог четвертки в кладке углов с целым числом кирпичей).
+    Плечи — repeat-зоны, iterations = 0 отдаёт вход как есть (§5.4)."""
     da = q * (L - W)
     sa = da * 0.5
-    db = q * (W + L) * 0.5
-    a = transform(parts.cbox(size = vec3(L - da, h, W + da), k = 0.12), translate = vec3(sx * (w * 0.5 + p - L * 0.5 + sa), y, sz * (d * 0.5 + p - W * 0.5 - sa)))
-    b = transform(parts.cbox(size = vec3(W + da, h, L - da), k = 0.12), translate = vec3(sx * (w * 0.5 + p - W * 0.5 - db), y, sz * (d * 0.5 + p - W - L * 0.5 + db)))
-    hlf = transform(parts.cbox(size = vec3(W, h, W), k = 0.12), translate = vec3(sx * (w * 0.5 + p - W * 0.5 - L * (1.0 - q)), y, sz * (d * 0.5 + p - W * 0.5 - L * q)))
-    out = merge(a, b, hlf)
+    a = transform(parts.cbox(size = vec3(L - da, h, W + da), k = 0.12), translate = vec3(0.0 - (L * 0.5 - sa), y, 0.0 - (W * 0.5 + sa)))
+    arm_p = repeat (a, iterations = k - 1) |acc| {
+        ui = L * (1.5 + f32(@iteration))
+        blk = transform(parts.cbox(size = vec3(L - da, h, W + da), k = 0.12), translate = vec3(0.0 - (ui * (1.0 - q) + W * 0.5 * q), y, 0.0 - (W * 0.5 * (1.0 - q) + ui * q)))
+        acc = merge(acc, blk)
+    }
+    arm_h = repeat (arm_p, iterations = m) |acc| {
+        uh = f32(k) * L + W * 0.5
+        hlf = transform(parts.cbox(size = vec3(W, h, W), k = 0.12), translate = vec3(0.0 - (uh * (1.0 - q) + W * 0.5 * q), y, 0.0 - (W * 0.5 * (1.0 - q) + uh * q)))
+        acc = merge(acc, hlf)
+    }
+    arm_q = repeat (arm_h, iterations = k - 1 + m) |acc| {
+        vj = W + L * (0.5 + f32(@iteration))
+        blq = transform(parts.cbox(size = vec3(W + da, h, L - da), k = 0.12), translate = vec3(0.0 - (W * 0.5 * (1.0 - q) + vj * q), y, 0.0 - (vj * (1.0 - q) + W * 0.5 * q)))
+        acc = merge(acc, blq)
+    }
+    out = repeat (arm_q, iterations = 1 - m) |acc| {
+        ds = L - 2.0 * W
+        vs = W + f32(k - 1) * L + (L - W) * 0.5
+        sht = transform(parts.cbox(size = vec3(W + q * ds, h, L - W - q * ds), k = 0.12), translate = vec3(0.0 - (W * 0.5 * (1.0 - q) + vs * q), y, 0.0 - (vs * (1.0 - q) + W * 0.5 * q)))
+        acc = merge(acc, sht)
+    }
 }
 
-def quoin_course(w: f32, d: f32, h: f32, L: f32, W: f32, p: f32, y: f32, q: f32) -> (out: geo<mesh>) {
-    """Ряд квойнов на четырёх углах дома w×d на высоте y (центр ряда). Группа stone."""
-    c1 = quoin_corner(sx = 1.0, sz = 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
-    c2 = quoin_corner(sx = 1.0, sz = 0.0 - 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
-    c3 = quoin_corner(sx = 0.0 - 1.0, sz = 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
-    c4 = quoin_corner(sx = 0.0 - 1.0, sz = 0.0 - 1.0, w = w, d = d, h = h, L = L, W = W, p = p, y = y, q = q)
+def quoin_course(w: f32, d: f32, h: f32, L: f32, W: f32, p: f32, y: f32, q: f32, k: int, m: int) -> (out: geo<mesh>) {
+    """Ряд угловой кладки на четырёх углах дома w×d (центр ряда на высоте y; грани
+    колонн выпущены на p за сердцевину): один локальный угол + повороты 0/90/180/270° —
+    хиральность кладки одна, как у реальных кирпичей. Группа stone."""
+    corner = quoin_corner_local(h = h, L = L, W = W, y = y, q = q, k = k, m = m)
+    c1 = transform(corner, translate = vec3(w * 0.5 + p, 0.0, d * 0.5 + p))
+    c2 = transform(transform(corner, rotate = vec3(0.0, 180.0, 0.0)), translate = vec3(0.0 - w * 0.5 - p, 0.0, 0.0 - d * 0.5 - p))
+    c3 = transform(transform(corner, rotate = vec3(0.0, 90.0, 0.0)), translate = vec3(w * 0.5 + p, 0.0, 0.0 - d * 0.5 - p))
+    c4 = transform(transform(corner, rotate = vec3(0.0, 270.0, 0.0)), translate = vec3(0.0 - w * 0.5 - p, 0.0, d * 0.5 + p))
     out = mark(merge(c1, c2, c3, c4), "stone", where = true, domain = faces)
 }
 
-def quoin_stack(w: f32, d: f32, n_rows: int, course_h: f32) -> (out: geo<mesh>) {
-    """Угловая кладка дома w×d (квойны): колонны сечением «в 1.5 блока» на четырёх
-    углах, n_rows рядов с шагом course_h. Направление углового блока чередуется по
-    рядам — торец плеча одного ряда стыкуется с длинной гранью следующего (перевязка
-    угла, как у кирпичного столба), заодно квойны прячут торцы рядов кладки стен.
-    Ряд 0 — угловой длиной вдоль X. Группа stone."""
+def quoin_stack(w: f32, d: f32, n_rows: int, course_h: f32, bricks: f32 = 1.5) -> (out: geo<mesh>) {
+    """Угловая кладка дома w×d (квойны): колонны сечением «в bricks блоков» на четырёх
+    углах, n_rows рядов с шагом course_h. bricks — от 1.0 с шагом 0.5 (1, 1.5, 2, 2.5…);
+    классика — 1.5 (угловой блок + примыкающий торцом в его длинную грань + половинка).
+    Направление углового блока чередуется по рядам — торец плеча одного ряда стыкуется
+    с длинной гранью следующего (перевязка угла, как у кирпичного столба), заодно квойны
+    прячут торцы рядов кладки стен. Ряд 0 — угловой длиной вдоль X. Группа stone."""
+    expect bricks >= 1.0 & bricks * 2.0 == f32(int(bricks * 2.0)): "quoin_stack: bricks — от 1.0 с шагом 0.5 (1, 1.5, 2, 2.5, ...)"
+    k = int(bricks)
+    m = int(bricks * 2.0) - 2 * k
     L = 0.62
     W = 0.32
     p = 0.2
     h = course_h * 0.9
-    row0 = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = course_h * 0.5, q = 0.0)
+    row0 = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = course_h * 0.5, q = 0.0, k = k, m = m)
     out = repeat (row0, iterations = n_rows - 1) |acc| {
-        k = f32(@iteration) + 1.0
-        q = k - 2.0 * floor(k * 0.5)
-        course = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = (k + 0.5) * course_h, q = q)
+        kr = f32(@iteration) + 1.0
+        q = kr - 2.0 * floor(kr * 0.5)
+        course = quoin_course(w = w, d = d, h = h, L = L, W = W, p = p, y = (kr + 0.5) * course_h, q = q, k = k, m = m)
         acc = merge(acc, course)
     }
 }

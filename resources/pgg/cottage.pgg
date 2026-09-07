@@ -4,6 +4,7 @@ param stone_h: f32 = 2.5
 param upper_h: f32 = 2.4
 param jetty: f32 = 0.18
 param overhang: f32 = 0.45
+param quoin_bricks: f32 = 1.5
 param seed: int = 7
 
 import lib.greenery
@@ -62,7 +63,7 @@ chim_z = 0.0 - 0.9
 root_rng = rng_from_seed(seed)
 
 # --- элементы -------------------------------------------------------------------
-masonry = ground_floor.ground_floor(width = width, depth = depth, stone_h = stone_h, door_x = door_x, win_x = win_x, side_win_x = side_win_x, rng = split_rng(root_rng, key = "veneer"))
+masonry = ground_floor.ground_floor(width = width, depth = depth, stone_h = stone_h, door_x = door_x, win_x = win_x, side_win_x = side_win_x, rng = split_rng(root_rng, key = "veneer"), quoin_bricks = quoin_bricks)
 upper = upper_floor.upper_floor(width = width, depth = depth, stone_h = stone_h, upper_h = upper_h, jetty = jetty, ridge_y = ridge_y, roof_t = roof_t)
 # Клумба 1.7×0.42×0.36 под окном фронтона, задняя стенка на плоскости фахверка.
 planter = transform(greenery.flower_box(w = 1.7, d = 0.42, h = 0.36, rng = split_rng(root_rng, key = "green")), translate = vec3(0, stone_h + 0.92, tf_z))
