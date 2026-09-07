@@ -40,6 +40,16 @@ def gable_prism(ridge_y: f32, drop: f32, w: f32, d: f32, floor_y: f32) -> (out: 
     out = sdf_intersect(bounds, sdf_intersect(right, left))
 }
 
+def gable_prism_z(ridge_y: f32, drop: f32, w: f32, d: f32, floor_y: f32) -> (out: sdf) {
+    """gable_prism, повёрнутая на 90° вокруг Y: конёк вдоль Z (длина конька w), скаты
+    на ±X до floor_y. drop — сдвиг плоскостей скатов вниз (толщина кровли). Призма
+    центрирована, поэтому знак поворота неважен. Нужна для поперечных щипцов
+    многощипцовых крыш (cottage/roof.pgg, multi_gable)."""
+    pt0 = mesh_line(count = 1, length = 0.0)
+    pt = set(pt0, "orient", orient_from_euler(vec3(0, 90, 0)))
+    out = sdf_instance_on_points(pt, source = gable_prism(ridge_y = ridge_y, drop = drop, w = w, d = d, floor_y = floor_y))
+}
+
 def arch_sdf(w: f32, straight: f32, r: f32, t: f32) -> (out: sdf) {
     """Арочная плита: бокс w×straight×t (низ на y=0, центр по x/z в 0) плюс диск
     радиуса r сверху — сфера, зажатая тонким боксом (толщина плиты t)."""

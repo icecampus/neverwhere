@@ -1,19 +1,104 @@
-# Крыша коттеджа: настил-оболочка (SDF-призма), сланцевая черепица рядами
-# вразбежку с подрезкой по фронтонам, колпаки конька, фронтоны-заполнение,
-# ветровые доски и шпильки. Собирается в локальной системе (конёк вдоль X,
-# скаты на ±Z) и поворачивается на 90° вокруг Y — конёк дома идёт вдоль Z.
-# Материалы: roof (настил), tile (черепица, колпаки), wall (фронтоны), wood.
+# Крыши коттеджа — два варианта над общим вторым этажом:
+# gable — двускатная 45° (настил-оболочка SDF-призмы, сланцевая черепица рядами
+# вразбежку с подрезкой по фронтонам, колпаки конька, фронтоны-заполнение, ветровые
+# доски и шпильки); multi_gable — многощипцовая (крестовая) для мансарды: к главному
+# двускату добавлен поперечный щипец с торцами-окнами и ендовами.
+# Собираются в локальной системе (главный конёк вдоль X, скаты на ±Z) и поворачиваются
+# на 90° вокруг Y — главный конёк дома идёт вдоль Z. У multi_gable щипец в локальной
+# системе стоит коньком вдоль Z (скаты на ±X) — в мире конёк вдоль X, торцы на ±X.
+# Материалы: roof (настил), tile (черепица, колпаки), wall (фронтоны/щипцы), wood
+# (ветровые доски, рамы, ставни), glass, iron (ендовы-желоба).
 
 import lib.parts
 import lib.shapes
+import lib.fixtures
 
-def roof(width: f32, depth: f32, stone_h: f32, upper_h: f32, jetty: f32, overhang: f32, rng: rng) -> (out: geo<mesh>) {
+def tile_field(len: f32, slope_len: f32, rng: rng) -> (out: geo<mesh>) {
+    """Сланцевое поле одного ската в канонической раскладке: плоские плитки 0.3×0.42
+    рядами вразбежку вдоль X с нахлёстом (каждый ряд выше предыдущего на 0.012), подъём
+    в −Z (ряд 0 у карниза, конёк на z = −slope_len), микро-джиттер против копланарных
+    граней и per-tile @tint (rng). Края — как у кладки: шаг колонок подогнан под длину
+    (tpitch = len / n), ряд с запасом на плитку за каждым торцом, плитки с центром за
+    краем не кладутся, остальное подрезается `clip` по торцам (x = ±len/2) и под
+    коньком (z = −slope_len + 0.03, конёк накрывают колпаки); у карниза плитка свисает
+    намеренно. Крышки резов в группе cut, поле — в группе tile."""
+    tile_w = 0.3
+    tile_len = 0.42
+    tile_th = 0.03
+    col_pitch = 0.32
+    row_pitch = 0.28
+    tile = compute_normals(box(size = vec3(tile_w, tile_th, tile_len)), mode = flat)
+    n_trows = int(slope_len / row_pitch) + 1
+    n_tcols = int(len / col_pitch)
+    tpitch = len / f32(n_tcols)
+    tanchors0 = mesh_line(count = 0, length = 0.0)
+    tanchors = repeat (tanchors0, iterations = n_trows) |acc| {
+        kt = f32(@iteration)
+        odd_t = kt - 2.0 * floor(kt * 0.5)
+        row_pts0 = mesh_line(count = n_tcols + 2, length = f32(n_tcols + 1) * tpitch, dir = (1, 0, 0))
+        row_pts = transform(row_pts0, translate = vec3(0.0 - len * 0.5 - tpitch * 0.5 + odd_t * tpitch * 0.5, tile_th + kt * 0.012, 0.0 - kt * row_pitch))
+        acc = merge(acc, row_pts)
+    }
+    tanchors_k = delete(tanchors, where = abs(dot(@P, (1, 0, 0))) > len * 0.5 + 0.01)
+    tanchors_j = set_position(tanchors_k, offset = random_vec(lo = vec3(-0.004, -0.003, -0.004), hi = vec3(0.004, 0.003, 0.004), rng = split_rng(rng, key = "jit")))
+    tile_shade = random(lo = 0.75, hi = 1.35, rng = split_rng(rng, key = "tint"))
+    tanchors_t = set(tanchors_j, "tint", vec3(tile_shade * 0.97, tile_shade, tile_shade * 1.06))
+    slope_raw = realize(instance_on_points(tanchors_t, source = tile))
+    slope_c1 = clip(slope_raw, origin = vec3(0.0 - len * 0.5, 0, 0), normal = vec3(1, 0, 0), cap_group = "cut")
+    slope_c2 = clip(slope_c1, origin = vec3(len * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
+    slope_c3 = clip(slope_c2, origin = vec3(0, 0, 0.03 - slope_len), normal = vec3(0, 0, 1), cap_group = "cut")
+    out = mark(slope_c3, "tile", where = true, domain = faces)
+}
+
+def ridge_caps(len: f32, y: f32) -> (out: geo<mesh>) {
+    """Ряд плоских колпаков-уголков 0.3 вдоль конька: конёк вдоль X на высоте y (z = 0),
+    ряд центрирован по длине и намеренно не доходит до торцов (там ветровые доски).
+    Группа tile."""
+    cap_src = parts.piece(size = vec3(0.3, 0.26, 0.26), pos = (0, 0, 0), grp = "tile")
+    cap = transform(cap_src, rotate = vec3(45, 0, 0))
+    n_caps = int(len / 0.3)
+    cap_len = f32(n_caps - 1) * 0.3
+    cap_pts0 = mesh_line(count = n_caps, length = cap_len, dir = (1, 0, 0))
+    cap_pts = transform(cap_pts0, translate = vec3(0.0 - cap_len * 0.5, y, 0))
+    out = mark(realize(instance_on_points(cap_pts, source = cap)), "tile", where = true, domain = faces)
+}
+
+def valley_strip(p0: vec3, p1: vec3) -> (out: geo<mesh>) {
+    """Ендова-желоб: квадратный брус 0.16 (профиль circle(4) повёрнут на 45°, стороны по
+    осям), протянутый sweep'ем по прямой p0→p1. Лежит поверх настила по линии стыка
+    скатов, края уходят под отступы черепицы. Группа iron."""
+    d = p1 - p0
+    len = length(d)
+    path0 = mesh_line(count = 2, length = len, dir = d * (1.0 / len))
+    path = transform(path0, translate = p0)
+    sq = transform(circle(sides = 4, radius = 0.11313708), rotate = vec3(0, 0, 45))
+    out = mark(compute_normals(sweep(path, profile = sq), mode = flat), "iron", where = true, domain = faces)
+}
+
+def barge_main(eave_z: f32, rl: f32, eave_y: f32, ridge_y: f32, slope_len: f32) -> (out: geo<mesh>) {
+    """Ветровые доски главных фронтонов и шпильки на концах главного конька — в МИРОВОЙ
+    системе (ставить после поворота крыши): доски по краям фронтонов z = ±rl/2 идут от
+    карниза до конька (+0.2 запаса у конька, где две доски сходятся): центр — середина
+    ската, сдвинутая вверх по скату на 0.1. Группа wood."""
+    barg_len = slope_len + 0.2
+    barg_cx = eave_z * 0.5 - 0.07
+    barg_cy = (eave_y + ridge_y) * 0.5 + 0.07 + 0.1
+    barg_r0 = transform(parts.piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 135))
+    barg_rf = transform(barg_r0, translate = vec3(barg_cx, barg_cy, rl * 0.5 + 0.02))
+    barg_rb = transform(barg_r0, translate = vec3(barg_cx, barg_cy, 0.0 - rl * 0.5 - 0.02))
+    barg_l0 = transform(parts.piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 45))
+    barg_lf = transform(barg_l0, translate = vec3(0.0 - barg_cx, barg_cy, rl * 0.5 + 0.02))
+    barg_lb = transform(barg_l0, translate = vec3(0.0 - barg_cx, barg_cy, 0.0 - rl * 0.5 - 0.02))
+    fin_f = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, rl * 0.5 - 0.05), grp = "wood")
+    fin_b = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, 0.0 - rl * 0.5 + 0.05), grp = "wood")
+    out = merge(barg_rf, barg_rb, barg_lf, barg_lb, fin_f, fin_b)
+}
+
+def gable(width: f32, depth: f32, stone_h: f32, upper_h: f32, jetty: f32, overhang: f32, rng: rng) -> (out: geo<mesh>) {
     """Двускатная крыша 45° над вторым этажом (uw = width + 2·jetty, ud = depth + 2·jetty):
     карниз на eave_y = stone_h + upper_h − 0.1, конёк ridge_y = eave_y + uw/2 + overhang,
-    свес overhang по всем сторонам. Черепица — плоские плитки 0.3×0.42 рядами с
-    нахлёстом и микро-джиттером (rng), шаг колонок подогнан под конёк, края —
-    `clip` по фронтонам и под коньком (крышки в группе cut); per-tile @tint.
-    Ветровые доски идут от карниза до конька (+0.2 запаса у конька)."""
+    свес overhang по всем сторонам. Черепица — tile_field на оба ската, конёк —
+    ridge_caps, фронтоны-заполнение — стеновой материал, ветровые доски — barge_main."""
     uw = width + 2.0 * jetty
     ud = depth + 2.0 * jetty
     wall_top = stone_h + upper_h
@@ -28,74 +113,128 @@ def roof(width: f32, depth: f32, stone_h: f32, upper_h: f32, jetty: f32, overhan
     roof_mesh = compute_normals(mesh_from_sdf(roof_shell, voxel = 0.05), mode = auto, angle = 35)
     deck = mark(roof_mesh, "roof", where = true, domain = faces)
 
-    # Сланец: плоские прямоугольные плитки рядами вразбежку вверх по скату, каждый
-    # ряд чуть выше предыдущего (нахлёст), микро-джиттер против копланарных граней.
-    # Сборка локально (ряд 0 у карниза, вверх = −Z), затем поворот на ±45°.
-    tile_w = 0.3
-    tile_len = 0.42
-    tile_th = 0.03
-    col_pitch = 0.32
-    row_pitch = 0.28
-    tile = compute_normals(box(size = vec3(tile_w, tile_th, tile_len)), mode = flat)
-    # Края ската — как у кладки: шаг колонок подогнан под длину конька (tpitch =
-    # rl / n), ряд с запасом на плитку за каждым фронтоном, плитки с центром за
-    # краем не кладутся, остальное подрезается `clip` по фронтонам (x = ±rl/2) и
-    # под коньком (z = −slope_len + 0.03, конёк накрывают колпаки); у карниза
-    # плитка свисает намеренно.
     slope_len = (sd * 0.5 + overhang) * 1.4142136
-    n_trows = int(slope_len / row_pitch) + 1
-    n_tcols = int(rl / col_pitch)
-    tpitch = rl / f32(n_tcols)
-    tanchors0 = mesh_line(count = 0, length = 0.0)
-    tanchors = repeat (tanchors0, iterations = n_trows) |acc| {
-        kt = f32(@iteration)
-        odd_t = kt - 2.0 * floor(kt * 0.5)
-        row_pts0 = mesh_line(count = n_tcols + 2, length = f32(n_tcols + 1) * tpitch, dir = (1, 0, 0))
-        row_pts = transform(row_pts0, translate = vec3(0.0 - rl * 0.5 - tpitch * 0.5 + odd_t * tpitch * 0.5, tile_th + kt * 0.012, 0.0 - kt * row_pitch))
-        acc = merge(acc, row_pts)
-    }
-    tanchors_k = delete(tanchors, where = abs(dot(@P, (1, 0, 0))) > rl * 0.5 + 0.01)
-    tanchors_j = set_position(tanchors_k, offset = random_vec(lo = vec3(-0.004, -0.003, -0.004), hi = vec3(0.004, 0.003, 0.004), rng = split_rng(rng, key = "jit")))
-    tile_shade = random(lo = 0.75, hi = 1.35, rng = split_rng(rng, key = "tint"))
-    tanchors_t = set(tanchors_j, "tint", vec3(tile_shade * 0.97, tile_shade, tile_shade * 1.06))
-    slope_raw = realize(instance_on_points(tanchors_t, source = tile))
-    slope_c1 = clip(slope_raw, origin = vec3(0.0 - rl * 0.5, 0, 0), normal = vec3(1, 0, 0), cap_group = "cut")
-    slope_c2 = clip(slope_c1, origin = vec3(rl * 0.5, 0, 0), normal = vec3(-1, 0, 0), cap_group = "cut")
-    slope_c3 = clip(slope_c2, origin = vec3(0, 0, 0.03 - slope_len), normal = vec3(0, 0, 1), cap_group = "cut")
-    slope_local = mark(slope_c3, "tile", where = true, domain = faces)
+    slope_local = tile_field(len = rl, slope_len = slope_len, rng = rng)
     eave_z = sd * 0.5 + overhang
     slope_right = transform(transform(slope_local, rotate = vec3(45, 0, 0)), translate = vec3(0, eave_y + 0.02, eave_z - 0.02))
     slope_left = transform(transform(transform(slope_local, rotate = vec3(0, 180, 0)), rotate = vec3(0.0 - 45, 0, 0)), translate = vec3(0, eave_y + 0.02, 0.02 - eave_z))
-    # Конёк: ряд плоских колпаков-уголков.
-    cap_src = parts.piece(size = vec3(0.3, 0.26, 0.26), pos = (0, 0, 0), grp = "tile")
-    cap = transform(cap_src, rotate = vec3(45, 0, 0))
-    n_caps = int(rl / 0.3)
-    cap_len = f32(n_caps - 1) * 0.3
-    cap_pts0 = mesh_line(count = n_caps, length = cap_len, dir = (1, 0, 0))
-    cap_pts = transform(cap_pts0, translate = vec3(0.0 - cap_len * 0.5, ridge_y + 0.03, 0))
-    ridge_caps = mark(realize(instance_on_points(cap_pts, source = cap)), "tile", where = true, domain = faces)
+    ridge = ridge_caps(len = rl, y = ridge_y + 0.03)
     # Фронтоны под кровлей (стеновой материал).
     gable_sdf = shapes.gable_prism(ridge_y = ridge_y, drop = roof_t + 0.01, w = ud, d = sd - 0.02, floor_y = wall_top - 0.05)
     gable_mesh = compute_normals(mesh_from_sdf(gable_sdf, voxel = 0.05), mode = auto, angle = 35)
     gables = mark(gable_mesh, "wall", where = true, domain = faces)
 
-    roof_local = merge(deck, slope_right, slope_left, ridge_caps, gables)
+    roof_local = merge(deck, slope_right, slope_left, ridge, gables)
     roof_world = transform(roof_local, rotate = vec3(0, 90, 0))
+    barge = barge_main(eave_z = eave_z, rl = rl, eave_y = eave_y, ridge_y = ridge_y, slope_len = slope_len)
+    out = merge(roof_world, barge)
+}
 
-    # Ветровые доски по краям фронтонов (мир, после поворота крыши) и шпильки.
-    # Доска идёт от карниза до конька (+0.2 запаса у конька, где две доски сходятся):
-    # центр — середина ската, сдвинутая вверх по скату на 0.1.
-    barg_len = slope_len + 0.2
-    barg_cx = eave_z * 0.5 - 0.07
-    barg_cy = (eave_y + ridge_y) * 0.5 + 0.07 + 0.1
-    barg_r0 = transform(parts.piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 135))
-    barg_rf = transform(barg_r0, translate = vec3(barg_cx, barg_cy, rl * 0.5 + 0.02))
-    barg_rb = transform(barg_r0, translate = vec3(barg_cx, barg_cy, 0.0 - rl * 0.5 - 0.02))
-    barg_l0 = transform(parts.piece(size = vec3(barg_len, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 45))
-    barg_lf = transform(barg_l0, translate = vec3(0.0 - barg_cx, barg_cy, rl * 0.5 + 0.02))
-    barg_lb = transform(barg_l0, translate = vec3(0.0 - barg_cx, barg_cy, 0.0 - rl * 0.5 - 0.02))
-    fin_f = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, rl * 0.5 - 0.05), grp = "wood")
-    fin_b = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_y + 0.22, 0.0 - rl * 0.5 + 0.05), grp = "wood")
-    barge = merge(barg_rf, barg_rb, barg_lf, barg_lb, fin_f, fin_b)
+def multi_gable(width: f32, depth: f32, stone_h: f32, upper_h: f32, jetty: f32, overhang: f32, rng: rng) -> (out: geo<mesh>) {
+    """Многощипцовая (крестовая) крыша 45° для мансарды: к главному двускату добавлен
+    поперечный щипец — конёк вдоль локальной Z (мир X) на ridge_w = eave_y + ud/2 +
+    overhang (пролёт щипца уже главного, конёк ниже на cv = (uw − ud)/2), его скаты
+    выходят на фасад/тыл и ложатся на те же карнизы. Торцы щипца — треугольные стены
+    (wall) заподлицо с боковыми стенами, в каждом — окно со ставнями (мини-мансарда
+    светится с торцов). Настил — оболочка объединения двух призм, поэтому ендовы
+    (линии пересечения скатов — вертикальные плоскости |z| − |x| = cv, от точек
+    расхождения коньков (0, ridge_w, ±cv) к углам кровли (±hs, eave_y, ±eave_z))
+    выходятся сами; черепица обоих скатов подрезана по ендовам с отступом ∓0.05 —
+    стык накрыт желобами valley_strip (iron). Конёк щипца зарыт в главные скаты на
+    среднем участке (|z| < cv), колпаки — только на видимых отрезках."""
+    uw = width + 2.0 * jetty
+    ud = depth + 2.0 * jetty
+    wall_top = stone_h + upper_h
+    eave_y = wall_top - 0.1
+    ridge_y = eave_y + uw * 0.5 + overhang
+    roof_t = 0.12
+    rl = ud + 2.0 * overhang
+    sd = uw
+    eave_z = sd * 0.5 + overhang
+    slope_len = eave_z * 1.4142136
+    # Поперечный щипец.
+    wl = uw + 2.0 * overhang
+    hs = ud * 0.5 + overhang
+    ridge_w = eave_y + hs
+    slope_w = hs * 1.4142136
+    cv = eave_z - hs
+    km = cv - 0.05
+    kw = cv + 0.05
+
+    # Настил: оболочка объединения призм главной крыши и щипца.
+    main_outer = shapes.gable_prism(ridge_y = ridge_y, drop = 0.0, w = rl, d = sd, floor_y = eave_y)
+    main_inner = shapes.gable_prism(ridge_y = ridge_y, drop = roof_t, w = rl - 0.02, d = sd - 0.02, floor_y = eave_y - 0.5)
+    wing_outer = shapes.gable_prism_z(ridge_y = ridge_w, drop = 0.0, w = wl, d = 2.0 * hs, floor_y = eave_y)
+    wing_inner = shapes.gable_prism_z(ridge_y = ridge_w, drop = roof_t, w = wl - 0.02, d = 2.0 * hs - 0.02, floor_y = eave_y - 0.5)
+    shell = sdf_subtract(sdf_union(main_outer, wing_outer), sdf_union(main_inner, wing_inner))
+    deck = mark(compute_normals(mesh_from_sdf(shell, voxel = 0.05), mode = auto, angle = 35), "roof", where = true, domain = faces)
+
+    # Черепица главных скатов: ендова — V-образный вырез (зарытый щипцом участок
+    # расширяется к карнизу), поэтому скат собирается из двух заплат, подрезанных
+    # диагональными вертикальными плоскостями: заплата a держит одну сторону V целиком,
+    # заплата b — вторую сторону минус пересечение с a (без дублей геометрии).
+    field_m = tile_field(len = rl, slope_len = slope_len, rng = rng)
+    mr0 = transform(transform(field_m, rotate = vec3(45, 0, 0)), translate = vec3(0, eave_y + 0.02, eave_z - 0.02))
+    mr_a = clip(mr0, origin = vec3(0, 0, km), normal = vec3(0.70710678, 0, 0.0 - 0.70710678), cap_group = "cut")
+    mr_b = clip(clip(mr0, origin = vec3(0, 0, km), normal = vec3(0.0 - 0.70710678, 0, 0.0 - 0.70710678), cap_group = "cut"), origin = vec3(0, 0, km), normal = vec3(0.0 - 0.70710678, 0, 0.70710678), cap_group = "cut")
+    slope_right = merge(mr_a, mr_b)
+    ml0 = transform(transform(transform(field_m, rotate = vec3(0, 180, 0)), rotate = vec3(0.0 - 45, 0, 0)), translate = vec3(0, eave_y + 0.02, 0.02 - eave_z))
+    ml_a = clip(ml0, origin = vec3(0, 0, 0.0 - km), normal = vec3(0.70710678, 0, 0.70710678), cap_group = "cut")
+    ml_b = clip(clip(ml0, origin = vec3(0, 0, 0.0 - km), normal = vec3(0.0 - 0.70710678, 0, 0.70710678), cap_group = "cut"), origin = vec3(0, 0, 0.0 - km), normal = vec3(0.0 - 0.70710678, 0, 0.0 - 0.70710678), cap_group = "cut")
+    slope_left = merge(ml_a, ml_b)
+
+    # Черепица скатов щипца: видимая часть ската — два разъединённых участка по бокам
+    # от зарытого главной крышей среднего пролёта, каждый — своя подрезка поля.
+    field_w = tile_field(len = wl, slope_len = slope_w, rng = split_rng(rng, key = "wing"))
+    wf0 = transform(transform(transform(field_w, rotate = vec3(0, 0.0 - 90, 0)), rotate = vec3(0, 0, 45)), translate = vec3(0.02 - hs, eave_y + 0.02, 0))
+    wf_a = clip(wf0, origin = vec3(0, 0, kw), normal = vec3(0.70710678, 0, 0.70710678), cap_group = "cut")
+    wf_b = clip(wf0, origin = vec3(0, 0, 0.0 - kw), normal = vec3(0.70710678, 0, 0.0 - 0.70710678), cap_group = "cut")
+    slope_wfront = merge(wf_a, wf_b)
+    wb0 = transform(transform(transform(field_w, rotate = vec3(0, 90, 0)), rotate = vec3(0, 0, 0.0 - 45)), translate = vec3(hs - 0.02, eave_y + 0.02, 0))
+    wb_a = clip(wb0, origin = vec3(0, 0, kw), normal = vec3(0.0 - 0.70710678, 0, 0.70710678), cap_group = "cut")
+    wb_b = clip(wb0, origin = vec3(0, 0, 0.0 - kw), normal = vec3(0.0 - 0.70710678, 0, 0.0 - 0.70710678), cap_group = "cut")
+    slope_wback = merge(wb_a, wb_b)
+
+    # Коньки: главный на всю длину; конёк щипца — два видимых отрезка от края зарытия
+    # (cv + запас против просвечивания колпака сквозь главный скат) до торца.
+    ridge_main = ridge_caps(len = rl, y = ridge_y + 0.03)
+    cap_seg0 = transform(ridge_caps(len = eave_z - cv - 0.38, y = ridge_w + 0.03), rotate = vec3(0, 90, 0))
+    cap_seg_f = transform(cap_seg0, translate = vec3(0, 0, (eave_z + cv) * 0.5 - 0.04))
+    cap_seg_b = transform(cap_seg0, translate = vec3(0, 0, 0.0 - (eave_z + cv) * 0.5 + 0.04))
+
+    # Ендовы: четыре желоба от точек расхождения коньков к углам кровли.
+    valley = merge(valley_strip(p0 = vec3(0, ridge_w, cv), p1 = vec3(hs, eave_y, eave_z)), valley_strip(p0 = vec3(0, ridge_w, cv), p1 = vec3(0.0 - hs, eave_y, eave_z)), valley_strip(p0 = vec3(0, ridge_w, 0.0 - cv), p1 = vec3(hs, eave_y, 0.0 - eave_z)), valley_strip(p0 = vec3(0, ridge_w, 0.0 - cv), p1 = vec3(0.0 - hs, eave_y, 0.0 - eave_z)))
+
+    # Фронтоны-заполнение: главные (как у gable) + торцы щипца на плоскостях боковых
+    # стен (стеновой материал).
+    gable_sdf = shapes.gable_prism(ridge_y = ridge_y, drop = roof_t + 0.01, w = ud, d = sd - 0.02, floor_y = wall_top - 0.05)
+    wing_sdf = shapes.gable_prism_z(ridge_y = ridge_w, drop = roof_t + 0.01, w = uw, d = ud - 0.02, floor_y = wall_top - 0.05)
+    gable_mesh = compute_normals(mesh_from_sdf(gable_sdf, voxel = 0.05), mode = auto, angle = 35)
+    wing_mesh = compute_normals(mesh_from_sdf(wing_sdf, voxel = 0.05), mode = auto, angle = 35)
+    fills = mark(merge(gable_mesh, wing_mesh), "wall", where = true, domain = faces)
+
+    # Окна мансарды на торцах щипца (щипцовые стены смотрят на ±Z локально).
+    win_y = wall_top + 0.95
+    win_r = parts.place(fixtures.shuttered_window(w = 0.75, h = 0.85, off = 0.08, rng = split_rng(rng, key = "wr")), yaw_deg = 0.0, at = vec3(0, win_y, uw * 0.5 + 0.06))
+    win_l = parts.place(fixtures.shuttered_window(w = 0.75, h = 0.85, off = 0.08, rng = split_rng(rng, key = "wl")), yaw_deg = 180.0, at = vec3(0, win_y, 0.0 - uw * 0.5 - 0.06))
+
+    # Ветровые доски по краям торцов щипца (от карниза до конька щипца, как у
+    # главных фронтонов) и шпильки на вершинах щипцов.
+    barg_len_w = slope_w + 0.2
+    barg_wcx = hs * 0.5 - 0.07
+    barg_wcy = (eave_y + ridge_w) * 0.5 + 0.17
+    wbr_0 = transform(parts.piece(size = vec3(barg_len_w, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 135))
+    wbr_f = transform(wbr_0, translate = vec3(barg_wcx, barg_wcy, eave_z + 0.02))
+    wbr_b = transform(wbr_0, translate = vec3(barg_wcx, barg_wcy, 0.0 - eave_z - 0.02))
+    wbl_0 = transform(parts.piece(size = vec3(barg_len_w, 0.26, 0.08), pos = (0, 0, 0), grp = "wood"), rotate = vec3(0, 0, 45))
+    wbl_f = transform(wbl_0, translate = vec3(0.0 - barg_wcx, barg_wcy, eave_z + 0.02))
+    wbl_b = transform(wbl_0, translate = vec3(0.0 - barg_wcx, barg_wcy, 0.0 - eave_z - 0.02))
+    fin_wf = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_w + 0.22, eave_z - 0.05), grp = "wood")
+    fin_wb = parts.piece(size = vec3(0.14, 0.4, 0.14), pos = vec3(0, ridge_w + 0.22, 0.0 - eave_z + 0.05), grp = "wood")
+    barge_w = merge(wbr_f, wbr_b, wbl_f, wbl_b, fin_wf, fin_wb)
+
+    roof_local = merge(deck, slope_right, slope_left, slope_wfront, slope_wback, ridge_main, cap_seg_f, cap_seg_b, valley, fills, win_r, win_l, barge_w)
+    roof_world = transform(roof_local, rotate = vec3(0, 90, 0))
+    barge = barge_main(eave_z = eave_z, rl = rl, eave_y = eave_y, ridge_y = ridge_y, slope_len = slope_len)
     out = merge(roof_world, barge)
 }

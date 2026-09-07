@@ -1,0 +1,96 @@
+# Общая сборка и окраска коттеджа: каменный первый этаж из отдельных блоков (с
+# настоящими проёмами под дверь и окна), фахверковый второй этаж со свесом (jetty) и
+# торцами балок, клумба с цветами под окном фронтона, арочная дверь в каменном портале
+# с двумя фонарями, восемь окон со ставнями, пучки травы у цоколя. Крыша и труба —
+# вариантная часть, приходят готовыми аргументами: cottage.pgg — двускатная крыша,
+# cottage_mansard.pgg — многощипцовая (мансардная).
+#
+# Верх — ось Y, фасад с дверью и фронтоном смотрит в +Z, главный конёк вдоль Z (скаты
+# крыши выходят на ±X).
+#
+# Материалы — группы faces (в PggViewer: highlight = faces:<имя>):
+# stone (кладка, цоколь, портал, ступень, труба), wall (штукатурка + фронтоны),
+# wood (балки, рамы, ставни, дверь, клумба, ветровые доски), glass (стёкла),
+# lamp (светящиеся стёкла фонарей), iron (ковка фонарей, ендовы), roof (настил), tile
+# (черепица и конёк), leaf (зелень: листья светлеют к кончику через @tint), flower
+# (лепестки, @tint — палитра), pollen (сердцевины), soil (земля клумбы), grass
+# (трава), smoke (дым),
+# edge (грани фасок cbox — краевой износ). Цвет — `@Cd` на faces по группам в
+# блоке «окраска» внизу (превью: чекбокс «colors (@Cd)»).
+
+import lib.greenery
+import cottage.ground_floor
+import cottage.upper_floor
+import cottage.entrance
+import cottage.windows
+
+def assemble(width: f32, depth: f32, stone_h: f32, upper_h: f32, jetty: f32, quoin_bricks: f32, ridge_y: f32, root_rng: rng, roof_all: geo<mesh>, chimney_all: geo<mesh>) -> (out: geo<mesh>) {
+    """Собирает дом width×depth вокруг готовых крыши roof_all и трубы chimney_all:
+    раскладка (door_x/win_x/side_win_x/door_z), вызовы элементов (кладка с проёмами и
+    квойнами, фахверковый этаж до конька ridge_y, клумба на фронтоне, дверь, восемь
+    окон, трава), окраска @Cd по группам-материалам (линейные цвета × per-block @tint ×
+    низкочастотный fbm по мировому @P; грань вне групп — пурпур-маркер), краевой износ
+    фасок (edge светлее), bake_ao по точкам (контактные тени под свесами, радиус 1.2).
+    Все rng-ветки — split_rng(root_rng, key) по именам элементов."""
+    ud = depth + 2.0 * jetty
+    roof_t = 0.12
+    door_x = 0.0 - 0.75
+    win_x = 1.55
+    side_win_x = 0.3
+    door_z = depth * 0.5
+    tf_z = ud * 0.5
+
+    # --- элементы -------------------------------------------------------------------
+    masonry = ground_floor.ground_floor(width = width, depth = depth, stone_h = stone_h, door_x = door_x, win_x = win_x, side_win_x = side_win_x, rng = split_rng(root_rng, key = "veneer"), quoin_bricks = quoin_bricks)
+    upper = upper_floor.upper_floor(width = width, depth = depth, stone_h = stone_h, upper_h = upper_h, jetty = jetty, ridge_y = ridge_y, roof_t = roof_t)
+    # Клумба 1.7×0.42×0.36 под окном фронтона, задняя стенка на плоскости фахверка.
+    planter = transform(greenery.flower_box(w = 1.7, d = 0.42, h = 0.36, rng = split_rng(root_rng, key = "green")), translate = vec3(0, stone_h + 0.92, tf_z))
+    door = entrance.entrance(door_x = door_x, door_z = door_z, rng = split_rng(root_rng, key = "door"))
+    windows_all = windows.windows(width = width, depth = depth, stone_h = stone_h, jetty = jetty, door_z = door_z, win_x = win_x, side_win_x = side_win_x, rng = split_rng(root_rng, key = "windows"))
+
+    # Трава у цоколя.
+    grass_rng = split_rng(root_rng, key = "grass")
+    tuft1 = greenery.grass_clump(at = vec3(0.0 - width * 0.5 + 0.5, 0, depth * 0.5 + 0.3), rng = split_rng(grass_rng, key = 1))
+    tuft2 = greenery.grass_clump(at = vec3(win_x + 0.2, 0, depth * 0.5 + 0.28), rng = split_rng(grass_rng, key = 2))
+    tuft3 = greenery.grass_clump(at = vec3(width * 0.5 + 0.3, 0, depth * 0.5 - 0.6), rng = split_rng(grass_rng, key = 3))
+    tuft4 = greenery.grass_clump(at = vec3(width * 0.5 + 0.28, 0, 0.0 - 1.2), rng = split_rng(grass_rng, key = 4))
+    tuft5 = greenery.grass_clump(at = vec3(0.0 - width * 0.5 - 0.3, 0, 0.4), rng = split_rng(grass_rng, key = 5))
+    tuft6 = greenery.grass_clump(at = vec3(door_x - 0.6, 0, depth * 0.5 + 0.35), rng = split_rng(grass_rng, key = 6))
+    grass = merge(tuft1, tuft2, tuft3, tuft4, tuft5, tuft6)
+
+    # --- сборка ----------------------------------------------------------------------
+    body = merge(masonry, upper, planter)
+    top = merge(roof_all, chimney_all)
+    house_raw = merge(body, top, door, windows_all, grass)
+
+    # --- окраска: @Cd по группам-материалам (faces) ---------------------------------
+    # Камень/черепица — базовый цвет × per-block @tint (см. якоря) + низкочастотный
+    # fbm по мировому @P; цветы — @tint напрямую (палитра на якорях).
+    paint_rng = split_rng(root_rng, key = "paint")
+    stone_col = mix(vec3(0.21, 0.18, 0.16), vec3(0.10, 0.09, 0.09), fbm(scale = 2.2, octaves = 3, rng = split_rng(paint_rng, key = "stone"))) * @tint
+    wall_col = mix(vec3(0.74, 0.57, 0.35), vec3(0.58, 0.44, 0.26), fbm(scale = 3.0, octaves = 3, rng = split_rng(paint_rng, key = "wall")))
+    tile_col = vec3(0.045, 0.05, 0.075) * @tint
+    leaf_col = mix(vec3(0.03, 0.17, 0.025), vec3(0.09, 0.36, 0.05), fbm(scale = 6.0, octaves = 2, rng = split_rng(paint_rng, key = "leaf")))
+    c1 = ingroup("stone") ? stone_col : vec3(1.0, 0.0, 1.0)
+    c2 = ingroup("wall") ? wall_col : c1
+    c3 = ingroup("wood") ? vec3(0.11, 0.055, 0.022) * @tint : c2
+    c4 = ingroup("glass") ? vec3(0.16, 0.22, 0.30) : c3
+    c5 = ingroup("lamp") ? vec3(1.0, 0.55, 0.15) : c4
+    c6 = ingroup("roof") ? vec3(0.035, 0.035, 0.045) : c5
+    c7 = ingroup("tile") ? tile_col : c6
+    c8 = ingroup("leaf") ? leaf_col * @tint : c7
+    c9 = ingroup("flower") ? @tint : c8
+    c10 = ingroup("grass") ? vec3(0.07, 0.28, 0.04) : c9
+    c11 = ingroup("smoke") ? vec3(0.55, 0.52, 0.55) : c10
+    c12 = ingroup("iron") ? vec3(0.025, 0.025, 0.03) : c11
+    c13 = ingroup("soil") ? vec3(0.05, 0.03, 0.015) : c12
+    c14 = ingroup("pollen") ? vec3(0.95, 0.8, 0.1) : c13
+    # Краевой износ: грани фасок (группа "edge" из cbox) светлее и чуть теплее —
+    # та самая светлая кромка, по которой глаз читает объём блока/бруса.
+    edge_mul = ingroup("edge") ? vec3(1.45, 1.4, 1.3) : vec3(1.0)
+    house_col = set(house_raw, "Cd", c14 * edge_mul, domain = faces)
+    # Запечённая AO (v1.24): по точкам (у сварных боксов усреднённые нормали, hits
+    # «изнутри» игнорируются), радиус 1.2 м — контактные тени под свесами, за
+    # ставнями, между камнями. Превью и OBJ-экспорт умножают @Cd на @ao.
+    out = bake_ao(house_col, rays = 16, distance = 1.2, rng = split_rng(root_rng, key = "ao"), domain = points)
+}
