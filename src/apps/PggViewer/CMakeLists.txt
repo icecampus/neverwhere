@@ -5,6 +5,7 @@ if(EMSCRIPTEN)
 endif()
 
 find_package(imgui CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 nw_add_console_app(
     GROUP apps/tools
@@ -12,6 +13,7 @@ nw_add_console_app(
         pgg
         spdlog::spdlog_header_only
         imgui::imgui
+        nlohmann_json::nlohmann_json
 )
 
 find_path(SOKOL_INCLUDE_DIRS "sokol_app.h")

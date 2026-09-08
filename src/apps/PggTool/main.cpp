@@ -4,27 +4,41 @@
 //   PggTool ast <file.pgg>              dump the AST
 //   PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]
 //                      [--threads N] [--lib <dir>]... [--probe <spec>]... [--debug]
+//                      [--fingerprint] [--json]
 //                                       run the graph, print output summaries
-//                                       (E6: probes/taps print inspector records)
+//                                       (E6: probes/taps print inspector records;
+//                                       --fingerprint adds one structural hash per
+//                                       output, --json prints the report as JSON)
+//   PggTool diff <a.pgg> [<b.pgg>] [--output name]... [--lib <dir>]... [--json]
+//                      [--baseline <fpfile>]
+//                                       compare two runs (or a run against a saved
+//                                       --fingerprint report) output by output
 //   PggTool docs <file.pgg> <symbol> [--lib <dir>]...
 //                                       print a def's signature + docstring (§7.5)
-// Exit codes: 0 ok, 1 diagnostics with errors, 2 usage/io failure.
+// Exit codes: 0 ok (diff: all compared outputs identical), 1 diagnostics with
+// errors (diff: outputs differ), 2 usage/io failure.
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <variant>
 
+#include <nlohmann/json.hpp>
+
 #include <pgg/eval.h>
 #include <pgg/pgg.h>
-#include <pgg/src/eval/builtins.h>  // realizeInstances for the --obj export
-#include <pgg/src/eval/modules.h>   // import closure for docs of qualified symbols
-#include <pgg/src/eval/sdf.h>       // sdf output summaries
+#include <pgg/src/eval/builtins.h>    // realizeInstances for the --obj export
+#include <pgg/src/eval/docs_lookup.h> // findDef/signatureText for docs
+#include <pgg/src/eval/fingerprint.h> // fingerprintValue for --fingerprint/diff
+#include <pgg/src/eval/geo_diff.h>    // diffGeo/formatGeoDiff for diff
+#include <pgg/src/eval/obj_export.h>  // writeObj for the --obj export
+#include <pgg/src/eval/sdf.h>         // sdf output summaries
 
 namespace {
 
@@ -36,12 +50,24 @@ void usage() {
                  "  PggTool ast <file.pgg>              dump the AST\n"
                  "  PggTool run <file.pgg> [--param k=v]... [--output name]... [--obj <dir>]\n"
                  "                        [--threads N] [--lib <dir>]... [--probe <spec>]... [--debug]\n"
+                 "                        [--fingerprint] [--json]\n"
                  "                                      run the graph, print output summaries\n"
                  "                                      (--obj writes one Wavefront OBJ per geo output;\n"
                  "                                      --probe 'path:inspector[param=value,...]' inspects a\n"
                  "                                      binding without computing downstream nodes — probes\n"
                  "                                      without --output skip the declared outputs;\n"
-                 "                                      --debug also fires the file's tap marks)\n"
+                 "                                      --debug also fires the file's tap marks;\n"
+                 "                                      --fingerprint prints one structural hash per output\n"
+                 "                                      (the baseline format of diff --baseline);\n"
+                 "                                      --json prints the whole report as one JSON document)\n"
+                 "  PggTool diff <a.pgg> [<b.pgg>] [--output name]... [--lib <dir>]... [--json]\n"
+                 "                        [--baseline <fpfile>]\n"
+                 "                                      compare two runs output by output: equal\n"
+                 "                                      structural fingerprints -> identical, otherwise a\n"
+                 "                                      kind/counts/bbox/+-attr/+-group table with ΔP stats;\n"
+                 "                                      --baseline compares a.pgg against a saved\n"
+                 "                                      run --fingerprint report instead of b.pgg\n"
+                 "                                      (exit 0 identical, 1 different/run errors, 2 usage/io)\n"
                  "  PggTool docs <file.pgg> <symbol> [--lib <dir>]...\n"
                  "                                      print a def's signature + docstring (§7.5)\n");
 }
@@ -162,10 +188,13 @@ pgg::Value parseCliValue(const std::string& v) {
     return pgg::Value(v);
 }
 
-void printGeoSummary(const std::string& name, const pgg::Geo& geo) {
-    std::printf("%s: geo<%s> points=%zu", name.c_str(), pgg::geoKindName(geo.kind), geo.pointCount());
+// The geo detail text after "name: " (geo<kind> points=N [corners/faces |
+// instances breakdown] [bbox=...]); printGeoSummary prints it with the prefix.
+std::string geoSummaryText(const pgg::Geo& geo) {
+    std::ostringstream out;
+    out << "geo<" << pgg::geoKindName(geo.kind) << "> points=" << geo.pointCount();
     if (geo.kind == pgg::GeoKind::Mesh)
-        std::printf(" corners=%zu faces=%zu", geo.cornerCount(), geo.faceCount());
+        out << " corners=" << geo.cornerCount() << " faces=" << geo.faceCount();
     if (geo.kind == pgg::GeoKind::Instances && geo.instanceSources) {
         // Per-variant instance counts from the @variant stamp (default 0) and
         // the total realized potential (sum of source sizes per instance).
@@ -182,136 +211,106 @@ void printGeoSummary(const std::string& name, const pgg::Geo& geo) {
             perVariant[idx] += 1;
             realizedPoints += (*geo.instanceSources)[idx]->pointCount();
         }
-        std::printf(" variants=%zu instances=[", geo.instanceSources->size());
-        for (size_t i = 0; i < perVariant.size(); ++i)
-            std::printf("%s%zu", i ? ", " : "", perVariant[i]);
-        std::printf("] realized_points=%zu", realizedPoints);
+        out << " variants=" << geo.instanceSources->size() << " instances=[";
+        for (size_t i = 0; i < perVariant.size(); ++i) out << (i ? ", " : "") << perVariant[i];
+        out << "] realized_points=" << realizedPoints;
     }
     if (geo.pointCount() > 0) {
         glm::vec3 mn, mx;
         pgg::geoBBox(geo, mn, mx);
-        std::printf(" bbox=(%g, %g, %g)..(%g, %g, %g)", mn.x, mn.y, mn.z, mx.x, mx.y, mx.z);
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), " bbox=(%g, %g, %g)..(%g, %g, %g)", mn.x, mn.y, mn.z, mx.x,
+                      mx.y, mx.z);
+        out << buf;
     }
-    std::printf("\n");
+    return out.str();
+}
+
+void printGeoSummary(const std::string& name, const pgg::Geo& geo) {
+    std::printf("%s: %s\n", name.c_str(), geoSummaryText(geo).c_str());
+}
+
+std::string sdfSummaryText(const pgg::SdfNode& sdf) {
+    glm::vec3 mn, mx;
+    sdf.conservativeBBox(mn, mx);
+    std::ostringstream out;
+    out << "sdf nodes=" << pgg::sdfNodeCount(sdf);
+    char buf[128];
+    if (mn.x <= mx.x && mn.y <= mx.y && mn.z <= mx.z)
+        std::snprintf(buf, sizeof(buf), " bbox=(%g, %g, %g)..(%g, %g, %g)", mn.x, mn.y, mn.z, mx.x,
+                      mx.y, mx.z);
+    else
+        std::snprintf(buf, sizeof(buf), " bbox=(empty)");
+    out << buf;
+    return out.str();
 }
 
 void printSdfSummary(const std::string& name, const pgg::SdfNode& sdf) {
-    glm::vec3 mn, mx;
-    sdf.conservativeBBox(mn, mx);
-    std::printf("%s: sdf nodes=%zu", name.c_str(), pgg::sdfNodeCount(sdf));
-    if (mn.x <= mx.x && mn.y <= mx.y && mn.z <= mx.z)
-        std::printf(" bbox=(%g, %g, %g)..(%g, %g, %g)", mn.x, mn.y, mn.z, mx.x, mx.y, mx.z);
-    else
-        std::printf(" bbox=(empty)");
-    std::printf("\n");
+    std::printf("%s: %s\n", name.c_str(), sdfSummaryText(sdf).c_str());
 }
 
-// Domain the vec3 @Cd column lives on (spec §4.3 read order); nullopt when
-// absent or not vec3.
-std::optional<pgg::Domain> colorDomain(const pgg::Geo& geo) {
-    for (pgg::Domain d : {pgg::Domain::Points, pgg::Domain::Corners, pgg::Domain::Faces, pgg::Domain::Detail}) {
-        const pgg::AttrSet* attrs = geo.attrs(d);
-        const pgg::AttrColumn* col = attrs ? attrs->find("Cd") : nullptr;
-        if (!col) continue;
-        return std::holds_alternative<std::shared_ptr<const std::vector<glm::vec3>>>(col->data)
-                   ? std::optional<pgg::Domain>(d)
-                   : std::nullopt;
-    }
-    return std::nullopt;
+// "geo<mesh>" for geo payloads, scalarName otherwise (kind field of --json).
+std::string valueKindName(const pgg::Value& v) {
+    if (pgg::valueBase(v) == pgg::ScalarType::Geo)
+        return std::string("geo<") + pgg::geoKindName(pgg::asGeo(v)->kind) + ">";
+    return pgg::scalarName(pgg::valueBase(v));
 }
 
-std::shared_ptr<const std::vector<glm::vec3>> vec3Column(const std::optional<pgg::ColumnData>& col, size_t count) {
-    if (!col) return nullptr;
-    const auto* vec = std::get_if<std::shared_ptr<const std::vector<glm::vec3>>>(&*col);
-    if (!vec || !*vec || (*vec)->size() != count) return nullptr;
-    return *vec;
+std::string hex16(uint64_t v) {
+    char buf[17];
+    std::snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)v);
+    return buf;
 }
 
-std::shared_ptr<const std::vector<float>> f32Column(const std::optional<pgg::ColumnData>& col, size_t count) {
-    if (!col) return nullptr;
-    const auto* vec = std::get_if<std::shared_ptr<const std::vector<float>>>(&*col);
-    if (!vec || !*vec || (*vec)->size() != count) return nullptr;
-    return *vec;
+// The human summary text after "name: " for any value (same text cmdRun
+// prints in non-JSON mode).
+std::string outputSummaryText(const pgg::Value& v) {
+    if (pgg::valueBase(v) == pgg::ScalarType::Geo) return geoSummaryText(*pgg::asGeo(v));
+    if (pgg::valueBase(v) == pgg::ScalarType::Sdf) return sdfSummaryText(*pgg::asSdf(v));
+    return std::string(pgg::scalarName(pgg::valueBase(v))) + " = " + pgg::valueToString(v);
 }
 
-bool hasAttr(const pgg::Geo& g, const char* name) {
-    for (pgg::Domain d : {pgg::Domain::Points, pgg::Domain::Corners, pgg::Domain::Faces})
-        if (const pgg::AttrSet* a = g.attrs(d); a && a->find(name)) return true;
-    return false;
+// Diagnostic object of check --json / run --json / diff --json (hint only when
+// present — the format cmdCheck established).
+nlohmann::ordered_json diagToJson(const pgg::Diagnostic& d) {
+    nlohmann::ordered_json j;
+    j["code"] = d.code;
+    j["line"] = d.span.line;
+    j["col"] = d.span.col;
+    j["warning"] = d.isWarning;
+    j["message"] = d.message;
+    if (!d.hint.empty()) j["hint"] = d.hint;
+    return j;
 }
 
-// Wavefront OBJ. Surface color @Cd (spec §4.3) goes out as the widely read
-// `v x y z r g b` extension (Blender, MeshLab, Houdini). @Cd on points writes
-// the welded mesh; on corners/faces/detail the mesh is unwelded (one vertex
-// per corner) so face colors survive without bleeding into neighbours.
-// Normals: stored point @N (or corner N from compute_normals flat) as `vn`.
-bool writeObj(const std::string& path, const pgg::Geo& geo) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) return false;
-    out << "# PggTool run export\n";
-    const std::optional<pgg::Domain> cdDomain = colorDomain(geo);
-    const bool unweld = geo.kind == pgg::GeoKind::Mesh && cdDomain && *cdDomain != pgg::Domain::Points;
-    const pgg::Domain vdom = unweld ? pgg::Domain::Corners : pgg::Domain::Points;
-    const size_t vcount = geo.elementCount(vdom);
-    const std::shared_ptr<const std::vector<glm::vec3>> P = pgg::samplePositions(geo, vdom);
-    std::shared_ptr<const std::vector<glm::vec3>> Cd =
-        cdDomain ? vec3Column(pgg::sampleAttrColumn(geo, "Cd", vdom), vcount) : nullptr;
-    // Baked occlusion (@ao, v1.24) is multiplied into the exported color: OBJ
-    // has no separate AO channel, and the viewer applies it the same way.
-    if (const auto ao = hasAttr(geo, "ao") ? f32Column(pgg::sampleAttrColumn(geo, "ao", vdom), vcount) : nullptr) {
-        std::vector<glm::vec3> shaded(vcount);
-        for (size_t i = 0; i < vcount; ++i)
-            shaded[i] = (Cd ? (*Cd)[i] : glm::vec3(0.66f, 0.64f, 0.61f)) * std::clamp((*ao)[i], 0.0f, 1.0f);
-        Cd = std::make_shared<const std::vector<glm::vec3>>(std::move(shaded));
-    }
-    std::shared_ptr<const std::vector<glm::vec3>> N;
-    if (geo.kind == pgg::GeoKind::Mesh) {
-        const pgg::AttrSet* cattrs = geo.attrs(pgg::Domain::Corners);
-        const pgg::AttrColumn* cornerN = cattrs ? cattrs->find("N") : nullptr;
-        if (cornerN && unweld) N = vec3Column(cornerN->data, vcount);
-        if (!N && geo.normals) N = pgg::sampleNormals(geo, vdom);
-    }
-    if (Cd) out << "# vertex colors: @Cd" << (cdDomain ? std::string(" on ") + pgg::domainName(*cdDomain) : std::string(" (neutral)"))
-                << (hasAttr(geo, "ao") ? " x @ao" : "") << (unweld ? " (unwelded)" : "") << "\n";
-    for (size_t i = 0; i < vcount; ++i) {
-        const glm::vec3& p = (*P)[i];
-        out << "v " << p.x << " " << p.y << " " << p.z;
-        if (Cd) {
-            const glm::vec3 c = glm::clamp((*Cd)[i], glm::vec3(0.0f), glm::vec3(1.0f));
-            out << " " << c.x << " " << c.y << " " << c.z;
-        }
-        out << "\n";
-    }
-    if (N && N->size() == vcount)
-        for (const glm::vec3& n : *N) out << "vn " << n.x << " " << n.y << " " << n.z << "\n";
-    else
-        N = nullptr;
-    if (geo.kind == pgg::GeoKind::Mesh) {
-        // Fan triangulation of polygon faces, 1-based indices.
-        auto vertex = [&](int32_t c) { return unweld ? c + 1 : (*geo.cornerVerts)[c] + 1; };
-        auto emit = [&](int32_t c) {
-            const int idx = vertex(c);
-            out << " " << idx;
-            if (N) out << "//" << idx;
-        };
-        for (size_t f = 0; f < geo.faceCount(); ++f) {
-            const int32_t begin = (*geo.faceOffsets)[f];
-            const int32_t end = (*geo.faceOffsets)[f + 1];
-            for (int32_t c = begin + 1; c + 1 < end; ++c) {
-                out << "f";
-                emit(begin);
-                emit(c);
-                emit(c + 1);
-                out << "\n";
-            }
-        }
-    }
-    return static_cast<bool>(out);
+nlohmann::ordered_json diagnosticsToJson(const std::vector<pgg::Diagnostic>& ds) {
+    nlohmann::ordered_json out = nlohmann::ordered_json::array();
+    for (const pgg::Diagnostic& d : ds) out.push_back(diagToJson(d));
+    return out;
+}
+
+nlohmann::ordered_json statsToJson(const pgg::RunStats& s) {
+    nlohmann::ordered_json j;
+    j["fieldsEvaluated"] = s.fieldsEvaluated;
+    j["cacheHits"] = s.cacheHits;
+    j["cacheMisses"] = s.cacheMisses;
+    j["threadsUsed"] = s.threadsUsed;
+    j["profileId"] = hex16(s.profileId);
+    return j;
+}
+
+// fingerprintValue lifted to optional: nullopt for payloads without a
+// structural hash (sdf / compiled fields).
+std::optional<uint64_t> outputFingerprint(const pgg::Value& v) {
+    uint64_t fp = 0;
+    if (!pgg::fingerprintValue(v, fp)) return std::nullopt;
+    return fp;
 }
 
 int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std::string>>& params,
            const std::vector<std::string>& outputs, const std::string& objDir, unsigned threads,
-           const std::vector<std::string>& libRoots, const std::vector<std::string>& probes, bool debug) {
+           const std::vector<std::string>& libRoots, const std::vector<std::string>& probes,
+           bool debug, bool fingerprint, bool json) {
     pgg::RunParams rp;
     for (const auto& [k, v] : params) rp.values.push_back({k, parseCliValue(v)});
     rp.threads = threads;
@@ -319,6 +318,41 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
     rp.probes = probes;
     rp.debug = debug;
     pgg::RunResult result = pgg::runFile(path, rp, outputs);
+
+    if (json) {
+        // One JSON document on stdout; diagnostics are in the document (not on
+        // stderr), the human report is suppressed. --obj export notes still go
+        // to stdout after the document (export stays a human operation).
+        nlohmann::ordered_json doc;
+        doc["file"] = path;
+        doc["ok"] = !result.hasErrors();
+        doc["diagnostics"] = diagnosticsToJson(result.diagnostics);
+        nlohmann::ordered_json outs = nlohmann::ordered_json::array();
+        for (const pgg::RunOutput& o : result.outputs) {
+            nlohmann::ordered_json jo;
+            jo["name"] = o.name;
+            jo["kind"] = valueKindName(o.value);
+            jo["summary"] = outputSummaryText(o.value);
+            std::optional<uint64_t> fp = fingerprint ? outputFingerprint(o.value) : std::nullopt;
+            jo["fingerprint"] = fp ? nlohmann::ordered_json(hex16(*fp)) : nlohmann::ordered_json();
+            outs.push_back(std::move(jo));
+        }
+        doc["outputs"] = std::move(outs);
+        nlohmann::ordered_json prs = nlohmann::ordered_json::array();
+        for (const pgg::ProbeRecord& pr : result.probes) {
+            nlohmann::ordered_json jp;
+            jp["origin"] = pr.origin;
+            jp["path"] = pr.path;
+            jp["inspector"] = pr.inspector;
+            jp["text"] = pr.text;
+            prs.push_back(std::move(jp));
+        }
+        doc["probes"] = std::move(prs);
+        doc["stats"] = statsToJson(result.stats);
+        std::printf("%s\n", doc.dump().c_str());
+        return result.hasErrors() ? 1 : 0;
+    }
+
     for (const pgg::Diagnostic& d : result.diagnostics) {
         std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
         std::fputc('\n', stderr);
@@ -330,8 +364,19 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
         } else if (pgg::valueBase(o.value) == pgg::ScalarType::Sdf) {
             printSdfSummary(o.name, *pgg::asSdf(o.value));
         } else {
-            std::printf("%s: %s = %s\n", o.name.c_str(), pgg::scalarName(pgg::valueBase(o.value)),
-                        pgg::valueToString(o.value).c_str());
+            std::printf("%s: %s\n", o.name.c_str(), outputSummaryText(o.value).c_str());
+        }
+    }
+    if (fingerprint) {
+        // One line per output, in output order; this block is exactly the
+        // baseline file format consumed by diff --baseline. Payloads without a
+        // structural hash (sdf / compiled fields) get the "-" placeholder.
+        for (const pgg::RunOutput& o : result.outputs) {
+            std::optional<uint64_t> fp = outputFingerprint(o.value);
+            if (fp)
+                std::printf("fingerprint %s: %s\n", o.name.c_str(), hex16(*fp).c_str());
+            else
+                std::printf("fingerprint %s: - (no structural fingerprint)\n", o.name.c_str());
         }
     }
     // E6 probe/tap records (§9), after the outputs (or standalone in a
@@ -359,14 +404,14 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
             // them first (the only place instances get expensive, §8.8).
             if (geo.kind == pgg::GeoKind::Instances) {
                 pgg::GeoPtr realized = pgg::realizeInstances(geo);
-                if (!realized || !writeObj(objPath, *realized)) {
+                if (!realized || !pgg::writeObj(objPath, *realized)) {
                     std::fprintf(stderr, "cannot write %s\n", objPath.c_str());
                     return 2;
                 }
                 std::printf("wrote %s (realized from geo<instances>)\n", objPath.c_str());
                 continue;
             }
-            if (!writeObj(objPath, geo)) {
+            if (!pgg::writeObj(objPath, geo)) {
                 std::fprintf(stderr, "cannot write %s\n", objPath.c_str());
                 return 2;
             }
@@ -375,108 +420,344 @@ int cmdRun(const std::string& path, const std::vector<std::pair<std::string, std
     }
     return 0;
 }
-// --- docs (spec §7.5): a def's signature as written + its docstring ---------
+// --- diff (agent_tooling_plan C2) --------------------------------------------
+// Compares two runs output by output (or one run against a saved
+// run --fingerprint report). Equal structural fingerprints take the fast path
+// to "identical"; geo outputs that differ go through pgg::diffGeo for the
+// kind/counts/bbox/+-attr/+-group table and the ΔP stats. sdf/compiled-field
+// outputs have no structural fingerprint: they are reported as skipped and do
+// not affect the verdict. Exit 0 = all compared outputs identical, 1 =
+// differences or run diagnostics with errors, 2 = usage/io.
 
-std::string typeRefText(const pgg::TypeRef* t) {
-    if (!t) return "?";
-    std::string out = t->base;
-    if (t->base == "geo" && !t->geoKind.empty()) out += "<" + t->geoKind + ">";
-    if (t->base == "field" && t->arg) out = "field<" + typeRefText(t->arg) + ">";
-    if (t->base == "enum" && !t->enumValues.empty()) {
-        out = "enum {";
-        for (size_t i = 0; i < t->enumValues.size(); ++i) out += (i ? ", " : "") + t->enumValues[i];
-        out += "}";
+struct DiffEntry {
+    std::string name;
+    // identical | different | changed | only_in_a | only_in_b |
+    // missing_in_baseline | missing_in_run | skipped
+    std::string status;
+    std::optional<uint64_t> fpA;
+    std::optional<uint64_t> fpB;  // the b run's, or the baseline's recorded one
+    pgg::GeoDiffResult geoDiff;
+    bool hasGeoDiff = false;
+    std::string note;  // scalar-change / kind-change text, or the skip reason
+};
+
+// Parses a saved run --fingerprint report: the fingerprint lines
+// (`fingerprint <name>: <hex16>` or `fingerprint <name>: - (no structural
+// fingerprint)`) are picked out of the full human report — every other line
+// (summaries, run/profile stats) is skipped, so `--fingerprint > a.fp` works
+// as a baseline as-is. Output order is kept. false + err on io failure or a
+// malformed fingerprint line (the caller maps it to exit 2).
+bool readBaselineFile(const std::string& path,
+                      std::vector<std::pair<std::string, std::optional<uint64_t>>>& out,
+                      std::string& err) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        err = "cannot read " + path;
+        return false;
     }
-    if (t->optional) out += "?";
-    if (t->list) out += "[]";
-    return out;
-}
-
-// Minimal expression rendering for signature defaults (literals and simple
-// arithmetic is all the grammar allows there).
-std::string exprText(const pgg::Expr* e) {
-    if (!e) return "?";
-    switch (e->kind) {
-        case pgg::NodeKind::NumberLit: return static_cast<const pgg::NumberLit*>(e)->text;
-        case pgg::NodeKind::StringLit:
-            return "\"" + static_cast<const pgg::StringLit*>(e)->value + "\"";
-        case pgg::NodeKind::BoolLit:
-            return static_cast<const pgg::BoolLit*>(e)->value ? "true" : "false";
-        case pgg::NodeKind::NoneLit: return "none";
-        case pgg::NodeKind::EnumLit: return static_cast<const pgg::EnumLit*>(e)->name;
-        case pgg::NodeKind::Ident: return static_cast<const pgg::Ident*>(e)->name;
-        case pgg::NodeKind::AttrRef: return "@" + static_cast<const pgg::AttrRef*>(e)->name;
-        case pgg::NodeKind::VecLit: {
-            std::string out = "(";
-            const auto* v = static_cast<const pgg::VecLit*>(e);
-            for (size_t i = 0; i < v->elems.size(); ++i) out += (i ? ", " : "") + exprText(v->elems[i]);
-            return out + ")";
+    const std::string prefix = "fingerprint ";
+    const std::string noFp = "- (no structural fingerprint)";
+    std::string line;
+    int lineNo = 0;
+    while (std::getline(in, line)) {
+        lineNo += 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.rfind(prefix, 0) != 0) continue;  // report prose: skipped
+        const std::string rest = line.substr(prefix.size());
+        const size_t colon = rest.rfind(':');
+        if (colon == std::string::npos) {
+            err = path + ":" + std::to_string(lineNo) + ": missing ':'";
+            return false;
         }
-        case pgg::NodeKind::ListLit: {
-            std::string out = "[";
-            const auto* l = static_cast<const pgg::ListLit*>(e);
-            for (size_t i = 0; i < l->elems.size(); ++i) out += (i ? ", " : "") + exprText(l->elems[i]);
-            return out + "]";
-        }
-        case pgg::NodeKind::Paren: return "(" + exprText(static_cast<const pgg::Paren*>(e)->inner) + ")";
-        case pgg::NodeKind::Unary: {
-            const auto* u = static_cast<const pgg::Unary*>(e);
-            return u->op + exprText(u->operand);
-        }
-        case pgg::NodeKind::Binary: {
-            const auto* b = static_cast<const pgg::Binary*>(e);
-            return exprText(b->lhs) + " " + b->op + " " + exprText(b->rhs);
-        }
-        case pgg::NodeKind::Ternary: {
-            const auto* t = static_cast<const pgg::Ternary*>(e);
-            return exprText(t->cond) + " ? " + exprText(t->thenExpr) + " : " + exprText(t->elseExpr);
-        }
-        case pgg::NodeKind::Call: {
-            const auto* c = static_cast<const pgg::Call*>(e);
-            std::string out;
-            for (const std::string& p : c->path) out += (out.empty() ? "" : ".") + p;
-            out += "(";
-            for (size_t i = 0; i < c->args.size(); ++i) {
-                out += i ? ", " : "";
-                if (c->args[i].hasName) out += c->args[i].name + " = ";
-                out += exprText(c->args[i].value);
+        std::string name = rest.substr(0, colon);
+        std::string value = rest.substr(colon + 1);
+        const size_t first = value.find_first_not_of(' ');
+        value = first == std::string::npos ? "" : value.substr(first);
+        std::optional<uint64_t> fp;
+        if (value == noFp) {
+            fp = std::nullopt;
+        } else {
+            char* end = nullptr;
+            const unsigned long long v = std::strtoull(value.c_str(), &end, 16);
+            if (end == value.c_str() || *end != '\0') {
+                err = path + ":" + std::to_string(lineNo) + ": bad hex fingerprint";
+                return false;
             }
-            return out + ")";
+            fp = static_cast<uint64_t>(v);
         }
-        default: return "?";
+        out.push_back({std::move(name), fp});
     }
+    return true;
 }
 
-std::string signatureText(const pgg::Def* d) {
-    std::string out = "def " + d->name + "(";
-    for (size_t i = 0; i < d->params.size(); ++i) {
-        const pgg::DefParam& p = d->params[i];
-        out += (i ? ", " : "") + p.name + ": " + typeRefText(p.type);
-        if (p.hasDefault) out += " = " + exprText(p.def);
-    }
-    out += ") -> (";
-    for (size_t i = 0; i < d->outputs.size(); ++i) {
-        const pgg::OutDecl& o = d->outputs[i];
-        out += (i ? ", " : "") + o.name + ": " + typeRefText(o.type);
-    }
-    return out + ")";
+nlohmann::ordered_json vec3ToJson(const glm::vec3& v) {
+    nlohmann::ordered_json j = nlohmann::ordered_json::array();
+    j.push_back(v.x);
+    j.push_back(v.y);
+    j.push_back(v.z);
+    return j;
 }
 
-void printDocCard(const pgg::Def* d) {
-    std::puts(signatureText(d).c_str());
-    if (d->hasDoc) {
-        std::string doc = d->docstring;
-        // Docstrings are written as one indented block; dedent line-by-line.
-        std::stringstream ss(doc);
-        std::string line;
-        while (std::getline(ss, line)) {
-            const size_t first = line.find_first_not_of(" \t");
-            std::puts((first == std::string::npos ? "" : line.substr(first)).c_str());
+nlohmann::ordered_json geoDiffToJson(const pgg::GeoDiffResult& d) {
+    nlohmann::ordered_json j;
+    j["kind_a"] = pgg::geoKindName(d.kindA);
+    j["kind_b"] = pgg::geoKindName(d.kindB);
+    j["points_a"] = d.pointsA;
+    j["points_b"] = d.pointsB;
+    j["faces_a"] = d.facesA;
+    j["faces_b"] = d.facesB;
+    j["bbox_a"] = d.hasBBoxA ? nlohmann::ordered_json({vec3ToJson(d.bboxMinA), vec3ToJson(d.bboxMaxA)})
+                             : nlohmann::ordered_json();
+    j["bbox_b"] = d.hasBBoxB ? nlohmann::ordered_json({vec3ToJson(d.bboxMinB), vec3ToJson(d.bboxMaxB)})
+                             : nlohmann::ordered_json();
+    nlohmann::ordered_json attrs = nlohmann::ordered_json::array();
+    for (const pgg::GeoAttrDelta& a : d.attrs) {
+        nlohmann::ordered_json ja;
+        ja["name"] = a.name;
+        ja["domain"] = pgg::domainName(a.domain);
+        ja["type"] = a.type;
+        ja["added"] = a.addedInB;
+        attrs.push_back(std::move(ja));
+    }
+    j["attrs"] = std::move(attrs);
+    nlohmann::ordered_json groups = nlohmann::ordered_json::array();
+    for (const pgg::GeoGroupDelta& g : d.groups) {
+        nlohmann::ordered_json jg;
+        jg["name"] = g.name;
+        jg["domain"] = pgg::domainName(g.domain);
+        jg["added"] = g.addedInB;
+        groups.push_back(std::move(jg));
+    }
+    j["groups"] = std::move(groups);
+    if (d.hasDeltaP) {
+        nlohmann::ordered_json jp;
+        jp["max"] = d.deltaPMax;
+        jp["mean"] = d.deltaPMean;
+        jp["max_index"] = d.deltaPMaxIndex;
+        jp["max_group"] = d.deltaPMaxGroup;
+        j["delta_p"] = std::move(jp);
+    } else {
+        j["delta_p"] = nullptr;
+    }
+    return j;
+}
+
+int cmdDiff(const std::string& pathA, const std::string& pathB, const std::string& baselinePath,
+            const std::vector<std::string>& outputs, const std::vector<std::string>& libRoots,
+            bool json) {
+    const bool baselineMode = !baselinePath.empty();
+    pgg::RunParams rp;
+    rp.importRoots = libRoots;
+    pgg::RunResult ra = pgg::runFile(pathA, rp, outputs);
+    pgg::RunResult rb;
+    if (!baselineMode) rb = pgg::runFile(pathB, rp, outputs);
+
+    std::vector<pgg::Diagnostic> emptyDiags;
+    const std::vector<pgg::Diagnostic>& diagsB = baselineMode ? emptyDiags : rb.diagnostics;
+    if (ra.hasErrors() || (!baselineMode && rb.hasErrors())) {
+        if (json) {
+            nlohmann::ordered_json doc;
+            doc["a"] = pathA;
+            doc["b"] = baselineMode ? nlohmann::ordered_json() : nlohmann::ordered_json(pathB);
+            doc["baseline"] = baselineMode ? nlohmann::ordered_json(baselinePath) : nlohmann::ordered_json();
+            doc["ok"] = false;
+            doc["diagnostics_a"] = diagnosticsToJson(ra.diagnostics);
+            doc["diagnostics_b"] = diagnosticsToJson(diagsB);
+            std::printf("%s\n", doc.dump().c_str());
+        } else {
+            for (const pgg::Diagnostic& d : ra.diagnostics) {
+                std::fputs(pgg::formatDiagnostic(d, pathA).c_str(), stderr);
+                std::fputc('\n', stderr);
+            }
+            for (const pgg::Diagnostic& d : diagsB) {
+                std::fputs(pgg::formatDiagnostic(d, pathB).c_str(), stderr);
+                std::fputc('\n', stderr);
+            }
+        }
+        return 1;
+    }
+
+    std::vector<DiffEntry> entries;
+    if (baselineMode) {
+        std::vector<std::pair<std::string, std::optional<uint64_t>>> baseline;
+        std::string err;
+        if (!readBaselineFile(baselinePath, baseline, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 2;
+        }
+        std::map<std::string, std::optional<uint64_t>> byName;
+        for (const auto& [n, fp] : baseline) byName[n] = fp;
+        std::map<std::string, bool> seen;
+        for (const pgg::RunOutput& o : ra.outputs) {
+            DiffEntry e;
+            e.name = o.name;
+            e.fpA = outputFingerprint(o.value);
+            seen[o.name] = true;
+            auto it = byName.find(o.name);
+            if (it == byName.end()) {
+                e.status = "missing_in_baseline";
+            } else if (!e.fpA || !it->second) {
+                e.status = "skipped";
+                e.note = "no structural fingerprint";
+                e.fpB = it->second;
+            } else {
+                e.fpB = it->second;
+                e.status = *e.fpA == *e.fpB ? "identical" : "changed";
+            }
+            entries.push_back(std::move(e));
+        }
+        for (const auto& [n, fp] : baseline) {
+            if (seen.count(n)) continue;
+            DiffEntry e;
+            e.name = n;
+            e.status = "missing_in_run";
+            e.fpB = fp;
+            entries.push_back(std::move(e));
         }
     } else {
-        std::puts("(no docstring)");
+        std::map<std::string, const pgg::Value*> valuesA, valuesB;
+        for (const pgg::RunOutput& o : ra.outputs) valuesA[o.name] = &o.value;
+        for (const pgg::RunOutput& o : rb.outputs) valuesB[o.name] = &o.value;
+        std::vector<std::string> names;
+        for (const pgg::RunOutput& o : ra.outputs) names.push_back(o.name);
+        for (const pgg::RunOutput& o : rb.outputs)
+            if (!valuesA.count(o.name)) names.push_back(o.name);
+        for (const std::string& name : names) {
+            DiffEntry e;
+            e.name = name;
+            const pgg::Value* va = valuesA.count(name) ? valuesA[name] : nullptr;
+            const pgg::Value* vb = valuesB.count(name) ? valuesB[name] : nullptr;
+            if (!va) {
+                e.status = "only_in_b";
+                e.fpB = outputFingerprint(*vb);
+            } else if (!vb) {
+                e.status = "only_in_a";
+                e.fpA = outputFingerprint(*va);
+            } else {
+                e.fpA = outputFingerprint(*va);
+                e.fpB = outputFingerprint(*vb);
+                if (e.fpA && e.fpB && *e.fpA == *e.fpB) {
+                    e.status = "identical";
+                } else if (!e.fpA || !e.fpB) {
+                    e.status = "skipped";
+                    e.note = "no structural fingerprint";
+                } else if (pgg::valueBase(*va) == pgg::ScalarType::Geo &&
+                           pgg::valueBase(*vb) == pgg::ScalarType::Geo) {
+                    e.status = "different";
+                    e.geoDiff = pgg::diffGeo(*pgg::asGeo(*va), *pgg::asGeo(*vb));
+                    e.hasGeoDiff = true;
+                } else {
+                    e.status = "different";
+                    const std::string kindA = valueKindName(*va);
+                    const std::string kindB = valueKindName(*vb);
+                    if (kindA != kindB) {
+                        e.note = kindA + " \xe2\x86\x92 " + kindB;
+                    } else {
+                        e.note = kindA + " " + pgg::valueToString(*va) + " \xe2\x86\x92 " +
+                                 pgg::valueToString(*vb);
+                    }
+                }
+            }
+            entries.push_back(std::move(e));
+        }
     }
+
+    int nIdentical = 0, nDifferent = 0, nOnlyA = 0, nOnlyB = 0, nSkipped = 0;
+    for (const DiffEntry& e : entries) {
+        if (e.status == "identical") nIdentical += 1;
+        else if (e.status == "different" || e.status == "changed") nDifferent += 1;
+        else if (e.status == "only_in_a" || e.status == "missing_in_baseline") nOnlyA += 1;
+        else if (e.status == "only_in_b" || e.status == "missing_in_run") nOnlyB += 1;
+        else nSkipped += 1;
+    }
+    const bool identical = nDifferent == 0 && nOnlyA == 0 && nOnlyB == 0;
+
+    if (json) {
+        nlohmann::ordered_json doc;
+        doc["a"] = pathA;
+        doc["b"] = baselineMode ? nlohmann::ordered_json() : nlohmann::ordered_json(pathB);
+        doc["baseline"] = baselineMode ? nlohmann::ordered_json(baselinePath) : nlohmann::ordered_json();
+        doc["ok"] = true;
+        doc["diagnostics_a"] = diagnosticsToJson(ra.diagnostics);
+        doc["diagnostics_b"] = diagnosticsToJson(diagsB);
+        nlohmann::ordered_json outs = nlohmann::ordered_json::array();
+        for (const DiffEntry& e : entries) {
+            nlohmann::ordered_json jo;
+            jo["name"] = e.name;
+            jo["status"] = e.status;
+            jo["fingerprint_a"] =
+                e.fpA ? nlohmann::ordered_json(hex16(*e.fpA)) : nlohmann::ordered_json();
+            jo["fingerprint_b"] =
+                e.fpB ? nlohmann::ordered_json(hex16(*e.fpB)) : nlohmann::ordered_json();
+            if (!e.note.empty()) jo["note"] = e.note;
+            if (e.hasGeoDiff)
+                jo["diff"] = geoDiffToJson(e.geoDiff);
+            else
+                jo["diff"] = nullptr;
+            outs.push_back(std::move(jo));
+        }
+        doc["outputs"] = std::move(outs);
+        doc["stats_a"] = statsToJson(ra.stats);
+        doc["stats_b"] = baselineMode ? nlohmann::ordered_json() : statsToJson(rb.stats);
+        doc["identical"] = identical;
+        std::printf("%s\n", doc.dump().c_str());
+        return identical ? 0 : 1;
+    }
+
+    const char* onlyALabel = baselineMode ? "missing in baseline" : "only in a";
+    const char* onlyBLabel = baselineMode ? "missing in run" : "only in b";
+    for (const DiffEntry& e : entries) {
+        if (e.status == "identical") {
+            std::printf("%s: identical\n", e.name.c_str());
+        } else if (e.hasGeoDiff) {
+            const std::vector<std::string> lines = pgg::formatGeoDiff(e.geoDiff);
+            for (size_t i = 0; i < lines.size(); ++i) {
+                if (i == 0)
+                    std::printf("%s: %s\n", e.name.c_str(), lines[i].c_str());
+                else
+                    std::printf("  %s\n", lines[i].c_str());
+            }
+        } else if (e.status == "different") {
+            std::printf("%s: %s\n", e.name.c_str(), e.note.c_str());
+        } else if (e.status == "changed") {
+            std::printf("%s: changed (baseline %s, run %s)\n", e.name.c_str(),
+                        e.fpB ? hex16(*e.fpB).c_str() : "-", e.fpA ? hex16(*e.fpA).c_str() : "-");
+        } else if (e.status == "skipped") {
+            std::printf("%s: skipped (%s)\n", e.name.c_str(), e.note.c_str());
+        } else {
+            std::printf("%s: %s\n", e.name.c_str(),
+                        e.status == "only_in_a" || e.status == "missing_in_baseline" ? onlyALabel
+                                                                                     : onlyBLabel);
+        }
+    }
+    if (identical) {
+        std::printf("diff: identical\n");
+    } else {
+        std::string tail;
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%d compared, %d identical, %d different",
+                      nIdentical + nDifferent, nIdentical, nDifferent);
+        tail += buf;
+        if (nOnlyA) {
+            std::snprintf(buf, sizeof(buf), ", %d %s", nOnlyA, onlyALabel);
+            tail += buf;
+        }
+        if (nOnlyB) {
+            std::snprintf(buf, sizeof(buf), ", %d %s", nOnlyB, onlyBLabel);
+            tail += buf;
+        }
+        if (nSkipped) {
+            std::snprintf(buf, sizeof(buf), ", %d skipped", nSkipped);
+            tail += buf;
+        }
+        std::printf("diff: different (%s)\n", tail.c_str());
+    }
+    return identical ? 0 : 1;
 }
+
+// --- docs (spec §7.5): a def's signature as written + its docstring ---------
+// The lookup itself lives in pgg lib (eval/docs_lookup.h), shared with the
+// viewer RPC docs command.
 
 int cmdDocs(const std::string& path, const std::string& symbol, const std::vector<std::string>& libRoots) {
     pgg::Document doc = pgg::parseFile(path);
@@ -488,44 +769,21 @@ int cmdDocs(const std::string& path, const std::string& symbol, const std::vecto
     }
     if (!doc.file) return 1;
 
-    const pgg::Def* found = nullptr;
-    const size_t dot = symbol.rfind('.');
-    if (dot == std::string::npos) {
-        for (const pgg::Node* item : doc.file->items) {
-            if (item->kind != pgg::NodeKind::Def) continue;
-            const auto* d = static_cast<const pgg::Def*>(item);
-            if (d->name == symbol) found = d;
-        }
-        if (!found) {
-            std::fprintf(stderr, "no def '%s' in %s\n", symbol.c_str(), path.c_str());
-            return 1;
-        }
-    } else {
-        // Qualified symbol: resolve through the file's import closure (same
-        // roots as a run: --lib + the file's own directory).
-        const std::string ns = symbol.substr(0, dot);
-        const std::string name = symbol.substr(dot + 1);
-        std::vector<std::string> roots = libRoots;
-        const std::string dir = std::filesystem::path(path).parent_path().string();
-        if (!dir.empty()) roots.push_back(dir);
-        std::vector<pgg::Diagnostic> diags;
-        pgg::ModuleClosure closure = pgg::loadModuleClosure(*doc.file, roots, diags);
-        for (const pgg::Diagnostic& d : diags) {
-            std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
-            std::fputc('\n', stderr);
-        }
-        bool errors = false;
-        for (const pgg::Diagnostic& d : diags) errors = errors || !d.isWarning;
-        if (errors) return 1;
-        if (auto it = closure.mainNamespaces.find(ns); it != closure.mainNamespaces.end()) {
-            if (auto d = it->second->defs.find(name); d != it->second->defs.end()) found = d->second;
-        }
-        if (!found) {
-            std::fprintf(stderr, "unknown qualified symbol '%s' (E505)\n", symbol.c_str());
-            return 1;
-        }
+    pgg::DocsLookupResult res = pgg::findDef(*doc.file, path, symbol, libRoots);
+    for (const pgg::Diagnostic& d : res.diagnostics) {
+        std::fputs(pgg::formatDiagnostic(d, path).c_str(), stderr);
+        std::fputc('\n', stderr);
     }
-    printDocCard(found);
+    if (!res.found) {
+        if (!res.error.empty()) std::fprintf(stderr, "%s\n", res.error.c_str());
+        return 1;
+    }
+    std::puts(res.signature.c_str());
+    if (res.hasDoc) {
+        std::puts(res.docstring.c_str());
+    } else {
+        std::puts("(no docstring)");
+    }
     return 0;
 }
 
@@ -539,6 +797,49 @@ int main(int argc, char** argv) {
     }
     const std::string cmd = argv[1];
     const std::string path = argv[2];
+    if (cmd == "diff") {
+        std::vector<std::string> files;
+        std::vector<std::string> outputs;
+        std::vector<std::string> libRoots;
+        std::string baseline;
+        bool json = false;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            auto takeValue = [&](const std::string& flag, std::string& out) -> bool {
+                if (a == flag && i + 1 < argc) {
+                    out = argv[++i];
+                    return true;
+                }
+                if (a.rfind(flag + "=", 0) == 0) {
+                    out = a.substr(flag.size() + 1);
+                    return true;
+                }
+                return false;
+            };
+            std::string v;
+            if (takeValue("--output", v)) {
+                outputs.push_back(v);
+            } else if (takeValue("--lib", v)) {
+                libRoots.push_back(v);
+            } else if (takeValue("--baseline", v)) {
+                baseline = v;
+            } else if (a == "--json") {
+                json = true;
+            } else if (!a.empty() && a[0] == '-') {
+                usage();
+                return 2;
+            } else {
+                files.push_back(a);
+            }
+        }
+        // Two-file mode needs a.pgg + b.pgg; --baseline replaces b.pgg.
+        if (baseline.empty() ? files.size() != 2 : files.size() != 1) {
+            usage();
+            return 2;
+        }
+        return cmdDiff(files[0], files.size() > 1 ? files[1] : "", baseline, outputs, libRoots,
+                       json);
+    }
     if (cmd == "docs") {
         if (argc < 4) {
             usage();
@@ -567,6 +868,8 @@ int main(int argc, char** argv) {
         std::string objDir;
         unsigned threads = 0;  // 0 = hardware concurrency (RunParams default)
         bool debug = false;
+        bool fingerprint = false;
+        bool json = false;
         for (int i = 3; i < argc; ++i) {
             const std::string a = argv[i];
             auto takeValue = [&](const std::string& flag, std::string& out) -> bool {
@@ -600,12 +903,17 @@ int main(int argc, char** argv) {
                 probes.push_back(v);
             } else if (a == "--debug") {
                 debug = true;
+            } else if (a == "--fingerprint") {
+                fingerprint = true;
+            } else if (a == "--json") {
+                json = true;
             } else {
                 usage();
                 return 2;
             }
         }
-        return cmdRun(path, params, outputs, objDir, threads, libRoots, probes, debug);
+        return cmdRun(path, params, outputs, objDir, threads, libRoots, probes, debug, fingerprint,
+                      json);
     }
     bool json = false, inPlace = false, checkOnly = false;
     for (int i = 3; i < argc; ++i) {

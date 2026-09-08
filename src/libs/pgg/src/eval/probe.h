@@ -9,7 +9,15 @@
 // inspector means schema+stats (the tap default, §9.3). Path resolution lives
 // in the engine (it needs the FlatProgram metadata); this module owns the
 // spec parser, the deterministic L0–L2 output formats (schema/stats/coverage/
-// table) and the aggregate=stats merging (§9.4).
+// table, the field/mesh inspectors sample/slice/check of §9.6) and the
+// aggregate=stats merging (§9.4).
+//
+// Param grammar (§9.6): pairs split on TOP-LEVEL commas (commas inside `()`
+// do not split), vector values are parenthesised `(x,y,z)`, point lists use
+// `;` inside one value (`at=(0,1,3.4);(1,0,0)`). The valid parameter names
+// depend on the inspector; limit/aggregate stay typed fields, every other
+// (inspector-specific) parameter is stored raw in `params` and parsed by the
+// inspector function itself.
 //
 // Determinism rules (pinned in §19): attribute/group names are sorted, floats
 // print with %g, the mean accumulates in f64 in @index order, percentiles are
@@ -25,10 +33,14 @@ namespace pgg {
 
 struct ProbeSpec {
     std::string path;
-    std::string inspector;  // "" = default (schema+stats); schema|stats|coverage|table
-    int limit = 8;          // table row cap
-    bool hasLimit = false;  // limit explicitly given (valid for table only)
+    std::string inspector;  // "" = default (schema+stats); schema|stats|coverage|table|sample|slice|check
+    int limit = 8;          // table row cap / check index-list cap
+    bool hasLimit = false;  // limit explicitly given (valid for table and check only)
     bool aggregate = false; // aggregate=stats: merge per-instance lines (§9.4)
+    // Inspector-specific parameters in written order, values raw (vec/float
+    // parsing happens inside the inspector functions); limit/aggregate are
+    // NOT here — they are the typed fields above.
+    std::vector<std::pair<std::string, std::string>> params;
 };
 
 // Parses the text form; false + err on a malformed spec (the caller reports
@@ -38,11 +50,11 @@ struct ProbeSpec {
 bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err);
 
 // One printed record per (target, inspector); `text` may span several lines
-// (vec component lines, table rows).
+// (vec component lines, table rows, sample rows, the slice ASCII map).
 struct ProbeRecord {
     std::string origin;     // "probe" (CLI/API) | "tap" (file mark, debug mode)
     std::string path;       // target path as written / instance path
-    std::string inspector;  // schema|stats|coverage|table
+    std::string inspector;  // schema|stats|coverage|table|sample|slice|check
     std::string text;
 };
 
@@ -111,6 +123,50 @@ std::string formatProbeCoverage(const ProbeCoverage& c);
 // Header `table[limit=L] (first K of N by @index)` + rows
 // `i: @P=(x, y, z), name=value, ...` (cols = @P + point attributes, sorted).
 std::string probeGeoTable(const Geo& g, int limit);
+
+// --- L2: sample (§9.6) ----------------------------------------------------------
+
+// `path:sample[at=(x,y,z);(x2,y2,z2)]` or the profile form
+// `path:sample[from=(x,y,z),to=(x,y,z),n=41]` (n >= 2, default 41, endpoints
+// included). Header echoes the normalised params; rows are `x y z value`
+// (%g). sdf target: the signed field value. geo<mesh>: pseudo-sign distance —
+// BVH closest point, sign by the closest triangle's normal (the same oracle
+// sdf_from_mesh uses), the header carries the note
+// ` (pseudo-sign distance from mesh)`. geo<points>: unsigned distance to the
+// nearest point, noted ` (unsigned distance from points)`.
+bool probeSample(const Value& v, const std::vector<std::pair<std::string, std::string>>& params,
+                 std::string& out, std::string& err);
+
+// --- L2: slice (§9.6) -----------------------------------------------------------
+
+// `path:slice[axis=x|y|z,at=<plane>,step=<cell>,bounds=(u0,v0,u1,v1)?,
+// format=ascii|csv,iso=0.0]` — a grid over the plane perpendicular to `axis`.
+// Plane coords (u,v): axis=x -> (y,z), axis=y -> (x,z), axis=z -> (x,y).
+// Default bounds = the target's conservative bbox projection. ASCII (default):
+// `#` where value <= iso, `.` otherwise, first row = v_max; width is capped
+// at 120 columns by widening the step (noted in the header). csv: `i,j,value`
+// rows (%g) in storage order (j ascending, then i). Header:
+// `slice[<normalised params>] (W x H, bounds (u0, v0)..(u1, v1)[, notes])`.
+// Values come from the same evaluators as sample (sdf field / mesh pseudo-sign
+// distance / points unsigned distance).
+bool probeSlice(const Value& v, const std::vector<std::pair<std::string, std::string>>& params,
+                std::string& out, std::string& err);
+
+// --- L2: check (§9.6) -----------------------------------------------------------
+
+// `path:check[warn_aspect=20,limit=8]` on geo<mesh>: `key value` lines —
+// degenerate (zero-area / repeated-index faces, `degenerate_faces` list when
+// > 0), nonmanifold (edge incidence > 2), boundary (incidence 1; informative,
+// never an issue), isolated (points in no face), nan (points with a
+// non-finite @P/@N/@Cd component), components (face connectivity via shared
+// points; informative), oriented_mismatch (components where some directed
+// edge (a,b) appears 2+ times), edge_min/edge_median (%g, `-` when edgeless),
+// needles (faces whose fan-triangle aspect longest^2/(2*area) exceeds
+// warn_aspect) + needle_ratio/needles_faces when > 0. Last line: `ok` or
+// `issues N` (N = degenerate+nonmanifold+isolated+nan+oriented_mismatch+
+// needles; boundary and components are informative only).
+bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::string>>& params,
+                   int limit, std::string& out, std::string& err);
 
 // --- aggregate=stats (§9.4) -----------------------------------------------------
 

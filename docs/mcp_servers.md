@@ -8,6 +8,7 @@ _Вынесено из `AGENTS.md` (2026-09-06): корневой файл — �
 |---|---|---|
 | `neverwhere-debug` / `neverwhere-debug-macos` | отладка падений (cdb на Windows, LLDB на macOS), контракт `debug_*` | `docs/debugging.md` |
 | `neverwhere-editor` / `neverwhere-editor-win` | автоматизация EpicMapEditor (`editor_*` поверх TCP RPC :9877) | `docs/editor_rpc.md` |
+| `neverwhere-pgg` / `neverwhere-pgg-win` | агентский цикл отладки PGG-графов (`pgg_*` поверх TCP RPC :9878; PggViewer `--serve` поднимается автоматически) | `docs/pgg/viewer_rpc.md` |
 | `blender` | Blender Lab MCP | ниже |
 | Context7 | документация по библиотекам/API — использовать без напоминания | — |
 

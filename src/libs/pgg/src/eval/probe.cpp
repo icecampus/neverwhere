@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <limits>
 #include <map>
 
 #include "sdf.h"
@@ -220,51 +223,44 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
     std::string head = text;
     // Trailing params: `[name=value, ...]` at the very end. The bracket only
     // counts as params when its content parses as a name=value list — an
-    // instance index (`make_rock[1]`) is part of the path.
+    // instance index (`make_rock[1]`) is part of the path. Pairs split on
+    // top-level commas only: vector values carry commas inside `(x,y,z)`.
+    std::vector<std::pair<std::string, std::string>> pairs;
     if (!head.empty() && head.back() == ']') {
         const size_t open = head.rfind('[');
         if (open != std::string::npos) {
             const std::string content = head.substr(open + 1, head.size() - open - 2);
             bool looksLikeParams = true;
-            std::vector<std::pair<std::string, std::string>> pairs;
-            size_t pos = 0;
-            do {
-                const size_t comma = content.find(',', pos);
-                const std::string pair = content.substr(pos, comma == std::string::npos ? comma : comma - pos);
+            int depth = 0;
+            size_t segStart = 0;
+            auto flush = [&](size_t end) {
+                const std::string pair = content.substr(segStart, end - segStart);
                 const size_t eq = pair.find('=');
                 if (eq == std::string::npos || eq == 0) {
                     looksLikeParams = false;
-                    break;
+                    return;
                 }
                 pairs.push_back({pair.substr(0, eq), pair.substr(eq + 1)});
-                pos = comma == std::string::npos ? content.size() : comma + 1;
-            } while (pos < content.size());
-            if (looksLikeParams && !pairs.empty()) {
-                for (const auto& [name, value] : pairs) {
-                    if (name == "limit") {
-                        if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
-                            err = "bad limit value '" + value + "' (a positive integer expected)";
-                            return false;
-                        }
-                        out.limit = std::stoi(value);
-                        out.hasLimit = true;
-                        if (out.limit <= 0) {
-                            err = "bad limit value '" + value + "' (a positive integer expected)";
-                            return false;
-                        }
-                    } else if (name == "aggregate") {
-                        if (value != "stats") {
-                            err = "bad aggregate value '" + value + "' (only aggregate=stats is defined)";
-                            return false;
-                        }
-                        out.aggregate = true;
-                    } else {
-                        err = "unknown probe parameter '" + name + "' (limit|aggregate)";
-                        return false;
+            };
+            for (size_t i = 0; i < content.size() && looksLikeParams; ++i) {
+                const char c = content[i];
+                if (c == '(') {
+                    ++depth;
+                } else if (c == ')') {
+                    if (--depth < 0) {
+                        looksLikeParams = false;
+                        break;
                     }
+                } else if (c == ',' && depth == 0) {
+                    flush(i);
+                    segStart = i + 1;
                 }
-                head = head.substr(0, open);
             }
+            // A trailing comma (`limit=2,`) leaves an empty tail — tolerated.
+            if (looksLikeParams && depth == 0 && segStart < content.size()) flush(content.size());
+            if (depth != 0) looksLikeParams = false;
+            if (looksLikeParams && !pairs.empty()) head = head.substr(0, open);
+            else pairs.clear();
         }
     }
     // `:inspector` — split on the first ':'.
@@ -285,9 +281,59 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
         return false;
     }
     if (!out.inspector.empty() && out.inspector != "schema" && out.inspector != "stats" &&
-        out.inspector != "coverage" && out.inspector != "table") {
-        err = "unknown inspector '" + out.inspector + "' (schema|stats|coverage|table)";
+        out.inspector != "coverage" && out.inspector != "table" && out.inspector != "sample" &&
+        out.inspector != "slice" && out.inspector != "check") {
+        err = "unknown inspector '" + out.inspector + "' (schema|stats|coverage|table|sample|slice|check)";
         return false;
+    }
+    // Param names: limit/aggregate are generic typed fields; every other name
+    // must belong to the inspector's own list (§9.6).
+    for (const auto& [name, value] : pairs) {
+        if (name == "limit") {
+            if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
+                err = "bad limit value '" + value + "' (a positive integer expected)";
+                return false;
+            }
+            out.limit = std::stoi(value);
+            out.hasLimit = true;
+            if (out.limit <= 0) {
+                err = "bad limit value '" + value + "' (a positive integer expected)";
+                return false;
+            }
+            continue;
+        }
+        if (name == "aggregate") {
+            if (value != "stats") {
+                err = "bad aggregate value '" + value + "' (only aggregate=stats is defined)";
+                return false;
+            }
+            out.aggregate = true;
+            continue;
+        }
+        // Inspector-specific names (§9.6); the message lists the valid set.
+        std::string validForInspector = "limit|aggregate";
+        bool known = false;
+        if (out.inspector == "sample") {
+            validForInspector = "at|from|to|n";
+            known = name == "at" || name == "from" || name == "to" || name == "n";
+        } else if (out.inspector == "slice") {
+            validForInspector = "axis|at|step|bounds|format|iso";
+            known = name == "axis" || name == "at" || name == "step" || name == "bounds" ||
+                    name == "format" || name == "iso";
+        } else if (out.inspector == "check") {
+            validForInspector = "warn_aspect|limit";
+            known = name == "warn_aspect";
+        }
+        if (!known) {
+            err = "unknown probe parameter '" + name + "' (" + validForInspector + ")";
+            return false;
+        }
+        for (const auto& [seen, v] : out.params)
+            if (seen == name) {
+                err = "duplicate probe parameter '" + name + "'";
+                return false;
+            }
+        out.params.push_back({name, value});
     }
     return true;
 }
@@ -503,6 +549,548 @@ std::string probeGeoTable(const Geo& g, int limit) {
         for (const auto& [name, col] : cols) out += ", " + name + "=" + columnElementText(col, i);
     }
     return out;
+}
+
+// --- L2: sample / slice shared field access (§9.6) ------------------------------
+
+namespace {
+
+const std::string* findProbeParam(const std::vector<std::pair<std::string, std::string>>& params,
+                                  const std::string& name) {
+    for (const auto& [n, v] : params)
+        if (n == name) return &v;
+    return nullptr;
+}
+
+std::string trimSpaces(const std::string& s) {
+    const size_t b = s.find_first_not_of(' ');
+    if (b == std::string::npos) return "";
+    return s.substr(b, s.find_last_not_of(' ') - b + 1);
+}
+
+// Full-string float (' 3.425 ' tolerated); no partial parses.
+bool parseFloatRaw(const std::string& s, float& out) {
+    const std::string t = trimSpaces(s);
+    if (t.empty()) return false;
+    char* end = nullptr;
+    const float v = std::strtof(t.c_str(), &end);
+    if (end != t.c_str() + t.size()) return false;
+    out = v;
+    return true;
+}
+
+bool parseIntRaw(const std::string& s, int& out) {
+    const std::string t = trimSpaces(s);
+    if (t.empty()) return false;
+    char* end = nullptr;
+    const long v = std::strtol(t.c_str(), &end, 10);
+    if (end != t.c_str() + t.size()) return false;
+    out = static_cast<int>(v);
+    return true;
+}
+
+// `(f, f, ...)` — exactly `width` floats inside parens.
+bool parseVecRaw(const std::string& s, int width, float* out) {
+    const std::string t = trimSpaces(s);
+    if (t.size() < 2 || t.front() != '(' || t.back() != ')') return false;
+    const std::string inner = t.substr(1, t.size() - 2);
+    size_t start = 0;
+    for (int c = 0; c < width; ++c) {
+        const size_t comma = inner.find(',', start);
+        if (c + 1 < width && comma == std::string::npos) return false;
+        if (c + 1 == width && comma != std::string::npos) return false;
+        if (!parseFloatRaw(inner.substr(start, comma == std::string::npos ? comma : comma - start), out[c]))
+            return false;
+        start = comma == std::string::npos ? inner.size() : comma + 1;
+    }
+    return true;
+}
+
+bool parseVec3Raw(const std::string& s, glm::vec3& out) {
+    float f[3];
+    if (!parseVecRaw(s, 3, f)) return false;
+    out = glm::vec3(f[0], f[1], f[2]);
+    return true;
+}
+
+// `(x,y,z);(x2,y2,z2);...` — `;`-separated vec3 list in one value.
+bool parseVec3ListRaw(const std::string& s, std::vector<glm::vec3>& out) {
+    size_t start = 0;
+    while (true) {
+        const size_t semi = s.find(';', start);
+        glm::vec3 v;
+        if (!parseVec3Raw(s.substr(start, semi == std::string::npos ? semi : semi - start), v)) return false;
+        out.push_back(v);
+        if (semi == std::string::npos) break;
+        start = semi + 1;
+    }
+    return !out.empty();
+}
+
+std::string fmtVec3(const glm::vec3& v) {
+    return "(" + fmtG(v.x) + ", " + fmtG(v.y) + ", " + fmtG(v.z) + ")";
+}
+
+// At-point field shared by sample/slice: the signed sdf field, the mesh
+// pseudo-sign distance (BVH closest point, sign by the closest triangle's
+// normal — the same oracle sdf_from_mesh uses) or the unsigned nearest-point
+// distance of a points geometry. `note` describes the non-sdf modes for the
+// record header; bboxMn/bboxMx carry the (conservative) bbox for slice's
+// default bounds.
+struct ProbeField {
+    std::function<float(const glm::vec3&)> eval;
+    std::string note;
+    glm::vec3 bboxMn{0.0f};
+    glm::vec3 bboxMx{0.0f};
+    MeshBvh bvh;  // mesh mode only; eval captures this member
+};
+
+bool probeFieldFor(const Value& v, ProbeField& out, std::string& err) {
+    if (valueBase(v) == ScalarType::Sdf) {
+        const SdfNode& sdf = *asSdf(v);
+        out.eval = [&sdf](const glm::vec3& p) { return sdf.eval(p); };
+        sdf.conservativeBBox(out.bboxMn, out.bboxMx);
+        return true;
+    }
+    if (valueBase(v) != ScalarType::Geo) {
+        err = std::string("target is ") + scalarName(valueBase(v)) + " (an sdf or geo value expected)";
+        return false;
+    }
+    const Geo& g = *asGeo(v);
+    geoBBox(g, out.bboxMn, out.bboxMx);
+    if (g.kind == GeoKind::Mesh) {
+        if (g.faceCount() == 0) {
+            err = "target mesh has no faces to measure distance to";
+            return false;
+        }
+        out.note = "pseudo-sign distance from mesh";
+        out.bvh.build(g);
+        ProbeField* self = &out;
+        out.eval = [self](const glm::vec3& p) {
+            float dist = 0.0f;
+            glm::vec3 cp, n;
+            if (!self->bvh.closest(p, dist, cp, n)) return 0.0f;
+            return glm::dot(p - cp, n) >= 0.0f ? dist : -dist;
+        };
+        return true;
+    }
+    if (g.kind == GeoKind::Points) {
+        if (g.pointCount() == 0) {
+            err = "target geometry has no points to measure distance to";
+            return false;
+        }
+        out.note = "unsigned distance from points";
+        const std::shared_ptr<const std::vector<glm::vec3>> pos = g.positions;
+        out.eval = [pos](const glm::vec3& p) {
+            float best = std::numeric_limits<float>::max();
+            for (const glm::vec3& q : *pos) best = std::min(best, glm::distance(p, q));
+            return best;
+        };
+        return true;
+    }
+    err = "target is geo<instances> (an sdf, geo<mesh> or geo<points> value expected)";
+    return false;
+}
+
+}  // namespace
+
+// --- L2: sample -----------------------------------------------------------------
+
+bool probeSample(const Value& v, const std::vector<std::pair<std::string, std::string>>& params,
+                 std::string& out, std::string& err) {
+    std::vector<glm::vec3> points;
+    std::string echo;
+    const std::string* at = findProbeParam(params, "at");
+    if (at) {
+        if (findProbeParam(params, "from") || findProbeParam(params, "to") || findProbeParam(params, "n")) {
+            err = "sample mixes forms: at=(x,y,z)[;...] stands alone, from/to/n form the profile";
+            return false;
+        }
+        if (!parseVec3ListRaw(*at, points)) {
+            err = "bad at value '" + *at + "' (vec3 points in parens expected: (x,y,z)[;(x,y,z);...])";
+            return false;
+        }
+        echo = "at=";
+        for (size_t i = 0; i < points.size(); ++i) echo += (i ? ";" : "") + fmtVec3(points[i]);
+    } else {
+        const std::string* from = findProbeParam(params, "from");
+        const std::string* to = findProbeParam(params, "to");
+        if (!from && !to) {
+            err = "sample needs at=(x,y,z)[;(x,y,z);...] or from=(x,y,z),to=(x,y,z)[,n=41]";
+            return false;
+        }
+        if (!from || !to) {
+            err = "sample profile needs both from=(x,y,z) and to=(x,y,z)";
+            return false;
+        }
+        glm::vec3 a, b;
+        if (!parseVec3Raw(*from, a)) {
+            err = "bad from value '" + *from + "' (a parenthesised vec3 expected: (x,y,z))";
+            return false;
+        }
+        if (!parseVec3Raw(*to, b)) {
+            err = "bad to value '" + *to + "' (a parenthesised vec3 expected: (x,y,z))";
+            return false;
+        }
+        int n = 41;
+        if (const std::string* ns = findProbeParam(params, "n")) {
+            if (!parseIntRaw(*ns, n) || n < 2) {
+                err = "bad n value '" + *ns + "' (an integer >= 2 expected)";
+                return false;
+            }
+        }
+        points.reserve(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+            points.push_back(a + (b - a) * t);
+        }
+        echo = "from=" + fmtVec3(a) + ",to=" + fmtVec3(b) + ",n=" + std::to_string(n);
+    }
+    ProbeField field;
+    if (!probeFieldFor(v, field, err)) return false;
+    out = "sample[" + echo + "]" + (field.note.empty() ? "" : " (" + field.note + ")");
+    for (const glm::vec3& p : points)
+        out += "\n" + fmtG(p.x) + " " + fmtG(p.y) + " " + fmtG(p.z) + " " + fmtG(field.eval(p));
+    return true;
+}
+
+// --- L2: slice ------------------------------------------------------------------
+
+bool probeSlice(const Value& v, const std::vector<std::pair<std::string, std::string>>& params,
+                std::string& out, std::string& err) {
+    const std::string* axisP = findProbeParam(params, "axis");
+    if (!axisP) {
+        err = "slice needs axis=x|y|z";
+        return false;
+    }
+    if (*axisP != "x" && *axisP != "y" && *axisP != "z") {
+        err = "bad axis value '" + *axisP + "' (x|y|z expected)";
+        return false;
+    }
+    const int axisIdx = (*axisP)[0] - 'x';
+    float atV = 0.0f, step = 0.0f, iso = 0.0f;
+    const std::string* atP = findProbeParam(params, "at");
+    if (!atP) {
+        err = "slice needs at=<plane coordinate>";
+        return false;
+    }
+    if (!parseFloatRaw(*atP, atV)) {
+        err = "bad at value '" + *atP + "' (a number expected)";
+        return false;
+    }
+    const std::string* stepP = findProbeParam(params, "step");
+    if (!stepP) {
+        err = "slice needs step=<grid cell size>";
+        return false;
+    }
+    if (!parseFloatRaw(*stepP, step) || !(step > 0.0f)) {
+        err = "bad step value '" + *stepP + "' (a positive number expected)";
+        return false;
+    }
+    if (const std::string* isoP = findProbeParam(params, "iso")) {
+        if (!parseFloatRaw(*isoP, iso)) {
+            err = "bad iso value '" + *isoP + "' (a number expected)";
+            return false;
+        }
+    }
+    std::string format = "ascii";
+    if (const std::string* fmtP = findProbeParam(params, "format")) {
+        format = *fmtP;
+        if (format != "ascii" && format != "csv") {
+            err = "bad format value '" + *fmtP + "' (ascii|csv expected)";
+            return false;
+        }
+    }
+    ProbeField field;
+    if (!probeFieldFor(v, field, err)) return false;
+    // Plane coords: axis=x -> (y,z), axis=y -> (x,z), axis=z -> (x,y).
+    const int u = (axisIdx + 1) % 3, w = (axisIdx + 2) % 3;
+    float u0, v0, u1, v1;
+    if (const std::string* boundsP = findProbeParam(params, "bounds")) {
+        float b[4];
+        if (!parseVecRaw(*boundsP, 4, b)) {
+            err = "bad bounds value '" + *boundsP + "' ((u0,v0,u1,v1) in parens expected)";
+            return false;
+        }
+        u0 = b[0];
+        v0 = b[1];
+        u1 = b[2];
+        v1 = b[3];
+        if (!(u1 >= u0) || !(v1 >= v0)) {
+            err = "bad bounds value '" + *boundsP + "' (u1 >= u0 and v1 >= v0 expected)";
+            return false;
+        }
+    } else {
+        u0 = field.bboxMn[u];
+        u1 = field.bboxMx[u];
+        v0 = field.bboxMn[w];
+        v1 = field.bboxMx[w];
+        if (!(u0 <= u1) || !(v0 <= v1)) {
+            err = "slice bounds are empty (the target has no finite bbox; pass bounds=(u0,v0,u1,v1))";
+            return false;
+        }
+    }
+    int width = static_cast<int>(std::lround((u1 - u0) / step)) + 1;
+    int height = static_cast<int>(std::lround((v1 - v0) / step)) + 1;
+    float effStep = step;
+    std::string adjustNote;
+    if (width > 120) {
+        effStep = (u1 - u0) / 119.0f;
+        width = 120;
+        height = static_cast<int>(std::lround((v1 - v0) / effStep)) + 1;
+        adjustNote = ", step widened to " + fmtG(effStep) + " (120 col cap)";
+    }
+    // Header: the given params normalised, in written order.
+    std::string echo;
+    for (const auto& [name, value] : params) {
+        if (!echo.empty()) echo += ",";
+        if (name == "axis")
+            echo += "axis=" + value;
+        else if (name == "at")
+            echo += "at=" + fmtG(atV);
+        else if (name == "step")
+            echo += "step=" + fmtG(step);
+        else if (name == "bounds")
+            echo += "bounds=(" + fmtG(u0) + ", " + fmtG(v0) + ", " + fmtG(u1) + ", " + fmtG(v1) + ")";
+        else if (name == "format")
+            echo += "format=" + format;
+        else if (name == "iso")
+            echo += "iso=" + fmtG(iso);
+    }
+    out = "slice[" + echo + "] (" + std::to_string(width) + " x " + std::to_string(height) + ", bounds (" +
+          fmtG(u0) + ", " + fmtG(v0) + ")..(" + fmtG(u1) + ", " + fmtG(v1) + ")" + adjustNote +
+          (field.note.empty() ? "" : ", " + field.note) + ")";
+    const auto valueAt = [&](int i, int j) {
+        glm::vec3 p(0.0f);
+        p[axisIdx] = atV;
+        p[u] = u0 + i * effStep;
+        p[w] = v0 + j * effStep;
+        return field.eval(p);
+    };
+    if (format == "csv") {
+        for (int j = 0; j < height; ++j)
+            for (int i = 0; i < width; ++i)
+                out += "\n" + std::to_string(i) + "," + std::to_string(j) + "," + fmtG(valueAt(i, j));
+    } else {
+        for (int j = height - 1; j >= 0; --j) {  // first row = v_max (map view)
+            out += "\n";
+            for (int i = 0; i < width; ++i) out += valueAt(i, j) <= iso ? '#' : '.';
+        }
+    }
+    return true;
+}
+
+// --- L2: check ------------------------------------------------------------------
+
+namespace {
+
+// Face aspect: max over the fan triangles of longest_edge^2 / (2 * area) —
+// the longest edge over the triangle's smallest altitude. Zero-area fan
+// triangles are skipped (they are counted as degenerate, not needles).
+float faceAspect(const std::vector<glm::vec3>& P, const int32_t* corners, int32_t count) {
+    float worst = 0.0f;
+    const glm::vec3& a = P[corners[0]];
+    for (int32_t k = 1; k + 1 < count; ++k) {
+        const glm::vec3& b = P[corners[k]];
+        const glm::vec3& c = P[corners[k + 1]];
+        const float ab = glm::distance(a, b), bc = glm::distance(b, c), ca = glm::distance(c, a);
+        const float longest = std::max(ab, std::max(bc, ca));
+        const float area2 = glm::length(glm::cross(b - a, c - a));  // 2 * area
+        if (area2 == 0.0f) continue;
+        worst = std::max(worst, longest * longest / area2);
+    }
+    return worst;
+}
+
+}  // namespace
+
+bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::string>>& params,
+                   int limit, std::string& out, std::string& err) {
+    if (g.kind != GeoKind::Mesh) {
+        err = std::string("check needs a geo<mesh> value (target is geo<") + geoKindName(g.kind) + ">)";
+        return false;
+    }
+    float warnAspect = 20.0f;
+    if (const std::string* wa = findProbeParam(params, "warn_aspect")) {
+        if (!parseFloatRaw(*wa, warnAspect) || !(warnAspect > 0.0f)) {
+            err = "bad warn_aspect value '" + *wa + "' (a positive number expected)";
+            return false;
+        }
+    }
+    static const std::vector<glm::vec3> kNoPos;
+    static const std::vector<int32_t> kNoIdx;
+    const std::vector<glm::vec3>& P = g.positions ? *g.positions : kNoPos;
+    const std::vector<int32_t>& cv = g.cornerVerts ? *g.cornerVerts : kNoIdx;
+    const std::vector<int32_t>& fo = g.faceOffsets ? *g.faceOffsets : kNoIdx;
+    const size_t np = P.size();
+    const size_t nf = fo.size() > 0 ? fo.size() - 1 : 0;
+
+    // Components: union-find over faces via shared points (degenerate faces
+    // connect too — a broken face still references its points).
+    std::vector<int32_t> parent(nf);
+    for (size_t f = 0; f < nf; ++f) parent[f] = static_cast<int32_t>(f);
+    const std::function<int32_t(int32_t)> find = [&](int32_t x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    };
+    // Per-face pass: degenerate (zero Newell area / repeated / out-of-range
+    // corner indices), used points, edge incidence, directed edges, edge
+    // lengths. Broken faces add no edge/orientation evidence (their winding
+    // is meaningless), but their points are NOT isolated.
+    std::vector<int32_t> degenFaces;
+    std::map<std::pair<int32_t, int32_t>, int32_t> edgeUse;  // (lo,hi) -> side count
+    std::vector<std::pair<int32_t, int32_t>> dirEdges;       // directed, a != b
+    std::vector<int32_t> dirEdgeFace;
+    std::vector<float> edgeLens;
+    std::vector<uint8_t> used(np, 0);
+    std::vector<int32_t> firstFace(np, -1);
+    for (size_t f = 0; f < nf; ++f) {
+        const int32_t begin = fo[f], end = fo[f + 1];
+        for (int32_t k = begin; k < end; ++k) {
+            const int32_t a = cv[k];
+            if (a < 0 || static_cast<size_t>(a) >= np) continue;
+            used[a] = 1;
+            if (firstFace[a] == -1) {
+                firstFace[a] = static_cast<int32_t>(f);
+            } else if (firstFace[a] != static_cast<int32_t>(f)) {
+                const int32_t ra = find(firstFace[a]), rb = find(static_cast<int32_t>(f));
+                if (ra != rb) parent[std::max(ra, rb)] = std::min(ra, rb);
+            }
+        }
+        bool degen = end - begin < 3;
+        for (int32_t k = begin; k < end && !degen; ++k) {
+            if (cv[k] < 0 || static_cast<size_t>(cv[k]) >= np) degen = true;
+            for (int32_t m = begin; m < k && !degen; ++m)
+                if (cv[m] == cv[k]) degen = true;
+        }
+        if (!degen) {
+            glm::vec3 n(0.0f);  // Newell
+            for (int32_t k = begin; k < end; ++k) {
+                const glm::vec3& a = P[cv[k]];
+                const glm::vec3& b = P[cv[k + 1 < end ? k + 1 : begin]];
+                n.x += (a.y - b.y) * (a.z + b.z);
+                n.y += (a.z - b.z) * (a.x + b.x);
+                n.z += (a.x - b.x) * (a.y + b.y);
+            }
+            if (glm::length(n) == 0.0f) degen = true;
+        }
+        if (degen) {
+            degenFaces.push_back(static_cast<int32_t>(f));
+            continue;
+        }
+        for (int32_t k = begin; k < end; ++k) {
+            const int32_t a = cv[k], b = cv[k + 1 < end ? k + 1 : begin];
+            if (a == b) continue;
+            edgeUse[{std::min(a, b), std::max(a, b)}] += 1;
+            dirEdges.push_back({a, b});
+            dirEdgeFace.push_back(static_cast<int32_t>(f));
+            edgeLens.push_back(glm::distance(P[a], P[b]));
+        }
+    }
+    size_t boundary = 0, nonmanifold = 0;
+    for (const auto& [e, count] : edgeUse) {
+        if (count == 1) ++boundary;
+        else if (count > 2) ++nonmanifold;
+    }
+    size_t isolated = 0;
+    for (const uint8_t u : used)
+        if (!u) ++isolated;
+    // Points with a non-finite component in @P/@N/@Cd.
+    size_t nan = 0;
+    {
+        const glm::vec3* cd = nullptr;
+        if (const AttrSet* attrs = g.attrs(Domain::Points)) {
+            if (const AttrColumn* col = attrs->find("Cd")) {
+                if (col->data.index() == 4 &&
+                    (*std::get<std::shared_ptr<const std::vector<glm::vec3>>>(col->data)).size() >= np)
+                    cd = (*std::get<std::shared_ptr<const std::vector<glm::vec3>>>(col->data)).data();
+            }
+        }
+        const glm::vec3* nrm = g.normals && g.normals->size() >= np ? g.normals->data() : nullptr;
+        for (size_t i = 0; i < np; ++i) {
+            const glm::vec3 p = P[i];
+            bool bad = !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z);
+            if (!bad && nrm) {
+                const glm::vec3 q = nrm[i];
+                bad = !std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z);
+            }
+            if (!bad && cd) {
+                const glm::vec3 q = cd[i];
+                bad = !std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z);
+            }
+            if (bad) ++nan;
+        }
+    }
+    // Components: union-find over faces via shared points ran in the face
+    // pass above (degenerate faces connect too).
+    size_t components = 0;
+    for (size_t f = 0; f < nf; ++f)
+        if (find(static_cast<int32_t>(f)) == static_cast<int32_t>(f)) ++components;
+    // Orientation: a directed edge (a,b) seen 2+ times inside one component
+    // means two adjacent faces wind the same way — the component is
+    // mismatched (a consistently oriented closed mesh walks every edge once
+    // per direction).
+    size_t orientedMismatch = 0;
+    {
+        std::map<std::pair<int32_t, int64_t>, int32_t> dirCount;  // (root, (a,b)) -> count
+        std::vector<uint8_t> flagged(nf, 0);
+        for (size_t k = 0; k < dirEdges.size(); ++k) {
+            const int32_t root = find(dirEdgeFace[k]);
+            const int64_t key = (static_cast<int64_t>(dirEdges[k].first) << 32) |
+                                static_cast<uint32_t>(dirEdges[k].second);
+            if (++dirCount[{root, key}] == 2) flagged[root] = 1;
+        }
+        for (size_t f = 0; f < nf; ++f)
+            if (flagged[f]) ++orientedMismatch;
+    }
+    // Needles.
+    std::vector<int32_t> needleFaces;
+    for (size_t f = 0; f < nf; ++f) {
+        const int32_t begin = fo[f], end = fo[f + 1];
+        bool valid = end - begin >= 3;
+        for (int32_t k = begin; k < end && valid; ++k)
+            if (cv[k] < 0 || static_cast<size_t>(cv[k]) >= np) valid = false;
+        if (!valid) continue;
+        if (faceAspect(P, cv.data() + begin, end - begin) > warnAspect)
+            needleFaces.push_back(static_cast<int32_t>(f));
+    }
+
+    const size_t issues = degenFaces.size() + nonmanifold + isolated + nan + orientedMismatch + needleFaces.size();
+    const auto indexList = [&](const std::vector<int32_t>& faces) {
+        std::string s;
+        const size_t k = std::min(faces.size(), static_cast<size_t>(std::max(limit, 0)));
+        for (size_t i = 0; i < k; ++i) s += (i ? " " : "") + std::to_string(faces[i]);
+        return s;
+    };
+    out = "degenerate " + std::to_string(degenFaces.size());
+    if (!degenFaces.empty()) out += "\ndegenerate_faces " + indexList(degenFaces);
+    out += "\nnonmanifold " + std::to_string(nonmanifold);
+    out += "\nboundary " + std::to_string(boundary);
+    out += "\nisolated " + std::to_string(isolated);
+    out += "\nnan " + std::to_string(nan);
+    out += "\ncomponents " + std::to_string(components);
+    out += "\noriented_mismatch " + std::to_string(orientedMismatch);
+    if (edgeLens.empty()) {
+        out += "\nedge_min -";
+        out += "\nedge_median -";
+    } else {
+        std::sort(edgeLens.begin(), edgeLens.end());
+        out += "\nedge_min " + fmtG(edgeLens.front());
+        out += "\nedge_median " + fmtG(nearestRank(edgeLens, 50.0));
+    }
+    out += "\nneedles " + std::to_string(needleFaces.size());
+    if (!needleFaces.empty()) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.1f",
+                      100.0 * static_cast<double>(needleFaces.size()) / static_cast<double>(std::max(nf, size_t(1))));
+        out += "\nneedle_ratio " + std::string(buf) + "%";
+        out += "\nneedles_faces " + indexList(needleFaces);
+    }
+    out += issues == 0 ? "\nok" : "\nissues " + std::to_string(issues);
+    return true;
 }
 
 // --- aggregate=stats ------------------------------------------------------------

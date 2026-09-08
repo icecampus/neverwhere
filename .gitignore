@@ -10,6 +10,7 @@ _intermediate_ide
 _b-em
 _int_mac
 _int_clion
+_int_clion_release
 Testing/Temporary/
 __pycache__
 logs/
@@ -42,6 +43,9 @@ tools/blender_mcp/.venv/
 # Shadertoy fetcher venv + persistent Chrome profile (Cloudflare clearance)
 tools/shadertoy/.venv/
 tools/shadertoy/.chrome-profile/
+
+# PGG MCP server venv (macOS)
+tools/pgg_mcp/.venv/
 
 # Scratch space for local experiments (asset downloads, one-off venvs)
 tmp/

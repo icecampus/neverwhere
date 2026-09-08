@@ -72,9 +72,11 @@ struct ProbeTarget {
 struct ResolvedProbe {
     std::string origin;      // "probe" | "tap"
     std::string specPath;    // path as written (record path of aggregated probes)
-    std::string inspector;   // schema|stats|coverage|table
+    std::string inspector;   // schema|stats|coverage|table|sample|slice|check
     int limit = 8;
     bool aggregate = false;
+    // Raw inspector-specific params (§9.6 sample/slice/check), written order.
+    std::vector<std::pair<std::string, std::string>> params;
     std::vector<ProbeTarget> targets;
 };
 
@@ -373,13 +375,15 @@ private:
     // Parses/validates one spec and appends resolved probes (a spec without
     // an inspector expands to schema+stats, the tap default §9.3).
     void resolveSpec(const std::string& origin, const ProbeSpec& spec, std::vector<ResolvedProbe>& out) {
-        if (spec.aggregate && spec.inspector == "table") {
+        if (spec.aggregate && spec.inspector != "schema" && spec.inspector != "stats" &&
+            spec.inspector != "coverage" && !spec.inspector.empty()) {
             run_.report("E606", Span{},
-                        "probe '" + spec.path + "': aggregate=stats is not supported for the table inspector");
+                        "probe '" + spec.path + "': aggregate=stats is not supported for the " + spec.inspector +
+                            " inspector");
             return;
         }
-        if (spec.hasLimit && spec.inspector != "table") {
-            run_.report("E606", Span{}, "probe '" + spec.path + "': limit applies to the table inspector");
+        if (spec.hasLimit && spec.inspector != "table" && spec.inspector != "check") {
+            run_.report("E606", Span{}, "probe '" + spec.path + "': limit applies to the table and check inspectors");
             return;
         }
         std::vector<std::string> inspectors;
@@ -395,6 +399,7 @@ private:
             rp.inspector = insp;
             rp.limit = spec.limit;
             rp.aggregate = spec.aggregate;
+            rp.params = spec.params;
             if (resolveProbePath(spec.path, rp)) out.push_back(std::move(rp));
         }
     }
@@ -538,6 +543,49 @@ private:
                 for (size_t i = 0; i < ok.size(); ++i)
                     result_.probes.push_back(
                         {rp.origin, ok[i]->target->recordPath, rp.inspector, formatProbeCoverage(perTarget[i])});
+            }
+            return;
+        }
+
+        if (rp.inspector == "sample" || rp.inspector == "slice") {
+            for (const Pulled& p : pulled) {
+                if (!p.target->terminal.empty()) {
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath + "': " + rp.inspector +
+                                    " does not take attr terminals (probe the binding itself)");
+                    continue;
+                }
+                std::string text, err;
+                const bool ok = rp.inspector == "sample" ? probeSample(p.value, rp.params, text, err)
+                                                         : probeSlice(p.value, rp.params, text, err);
+                if (!ok) {
+                    run_.report("E606", Span{}, "probe target '" + p.target->recordPath + "': " + err);
+                    continue;
+                }
+                result_.probes.push_back({rp.origin, p.target->recordPath, rp.inspector, std::move(text)});
+            }
+            return;
+        }
+
+        if (rp.inspector == "check") {
+            for (const Pulled& p : pulled) {
+                if (!p.target->terminal.empty()) {
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath +
+                                    "': check does not take attr terminals (probe the binding itself)");
+                    continue;
+                }
+                if (valueBase(p.value) != ScalarType::Geo) {
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath + "': check needs a geo<mesh> value");
+                    continue;
+                }
+                std::string text, err;
+                if (!probeGeoCheck(*asGeo(p.value), rp.params, rp.limit, text, err)) {
+                    run_.report("E606", Span{}, "probe target '" + p.target->recordPath + "': " + err);
+                    continue;
+                }
+                result_.probes.push_back({rp.origin, p.target->recordPath, rp.inspector, std::move(text)});
             }
             return;
         }

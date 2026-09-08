@@ -75,6 +75,12 @@ nw_add_lib_sources(
         src/eval/schema.cpp
         src/eval/probe.h
         src/eval/probe.cpp
+        src/eval/obj_export.h
+        src/eval/obj_export.cpp
+        src/eval/docs_lookup.h
+        src/eval/docs_lookup.cpp
+        src/eval/geo_diff.h
+        src/eval/geo_diff.cpp
         src/eval/engine.h
         src/eval/engine.cpp
         ${PARSER_GEN}

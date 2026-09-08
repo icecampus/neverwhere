@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
+#include <unordered_set>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -122,6 +124,77 @@ void extendBBox(PreviewGeometry& out) {
     for (const PreviewVertex& v : out.vertices) {
         out.bmin = glm::min(out.bmin, v.pos);
         out.bmax = glm::max(out.bmax, v.pos);
+    }
+}
+
+// Per-group bounding boxes (A2 camera targeting): computed on the source
+// points, not on the emitted preview vertices (those are unwelded/duplicated
+// and points-geo markers would inflate the box). O(groups x elements) — fine
+// for the usual < 50 groups.
+void collectGroupBBoxes(const pgg::Geo& g, PreviewGeometry& out) {
+    if (!g.positions) return;
+    const std::vector<glm::vec3>& P = *g.positions;
+    auto extendOf = [](glm::vec3& mn, glm::vec3& mx, const glm::vec3& p) {
+        mn = glm::min(mn, p);
+        mx = glm::max(mx, p);
+    };
+    if (const pgg::GroupSet* set = g.groups(pgg::Domain::Points)) {
+        for (const auto& [name, col] : set->columns) {
+            if (!col) continue;
+            glm::vec3 mn(std::numeric_limits<float>::max());
+            glm::vec3 mx(-std::numeric_limits<float>::max());
+            bool any = false;
+            const size_t n = std::min(col->size(), P.size());
+            for (size_t i = 0; i < n; ++i) {
+                if (!(*col)[i]) continue;
+                extendOf(mn, mx, P[i]);
+                any = true;
+            }
+            if (any) out.groupBBoxes["points:" + name] = {mn, mx};
+        }
+    }
+    if (const pgg::GroupSet* set = g.groups(pgg::Domain::Faces); set && g.cornerVerts && g.faceOffsets) {
+        const std::vector<int32_t>& CV = *g.cornerVerts;
+        const std::vector<int32_t>& FO = *g.faceOffsets;
+        for (const auto& [name, col] : set->columns) {
+            if (!col) continue;
+            glm::vec3 mn(std::numeric_limits<float>::max());
+            glm::vec3 mx(-std::numeric_limits<float>::max());
+            bool any = false;
+            const size_t nf = std::min(col->size(), g.faceCount());
+            for (size_t f = 0; f < nf; ++f) {
+                if (!(*col)[f]) continue;
+                for (int32_t c = FO[f]; c < FO[f + 1]; ++c) extendOf(mn, mx, P[static_cast<size_t>(CV[c])]);
+                any = true;
+            }
+            if (any) out.groupBBoxes["faces:" + name] = {mn, mx};
+        }
+    }
+}
+
+// Undirected mesh edges as a line list over the source points (A2 wire
+// overlay), deduplicated by the (min, max) index pair so a wire pass draws
+// every edge once. Points-geo markers get no wire (octahedron noise).
+void appendWire(const pgg::Geo& g, PreviewGeometry& out) {
+    if (!g.positions || !g.cornerVerts || !g.faceOffsets || g.faceCount() == 0) return;
+    out.wirePositions = g.positions;  // shared, not copied
+    const std::vector<int32_t>& CV = *g.cornerVerts;
+    const std::vector<int32_t>& FO = *g.faceOffsets;
+    std::unordered_set<uint64_t> seen;
+    for (size_t f = 0; f < g.faceCount(); ++f) {
+        const int32_t begin = FO[f], end = FO[f + 1];
+        for (int32_t c = begin; c < end; ++c) {
+            const int32_t c2 = c + 1 < end ? c + 1 : begin;
+            const uint32_t a = static_cast<uint32_t>(CV[c]);
+            const uint32_t b = static_cast<uint32_t>(CV[c2]);
+            if (a == b) continue;
+            const uint64_t key = a < b ? (static_cast<uint64_t>(a) << 32) | b
+                                       : (static_cast<uint64_t>(b) << 32) | a;
+            if (seen.insert(key).second) {
+                out.wireIndices.push_back(a);
+                out.wireIndices.push_back(b);
+            }
+        }
     }
 }
 
@@ -328,11 +401,13 @@ PreviewGeometry buildPreviewGeometry(const pgg::Value& value, const PreviewBuild
         return out;
     }
     collectGroups(*geo, out.groups);
+    collectGroupBBoxes(*geo, out);
     if (geo->kind == pgg::GeoKind::Points || geo->faceCount() == 0) {
         pgg::Domain dom = pgg::Domain::Points;
         appendPoints(*geo, groupColumn(*geo, opts.highlightGroup, dom), opts.vertexColors, out);
     } else {
         appendMesh(*geo, opts.highlightGroup, opts.shading, opts.vertexColors, out);
+        appendWire(*geo, out);
     }
     extendBBox(out);
     out.summary = prefix + countsLabel(*geo);
@@ -445,6 +520,68 @@ fragment float4 _main(PSIn in [[stage_in]], constant FsParams& p [[buffer(0)]], 
 }
 )";
 
+// Wire overlay (A2): flat-color line list over the shaded mesh. The small
+// clip-space z bias wins the depth tie against the surface the edges lie on
+// (portable polygon-offset replacement; the sign works for both ZO and NO
+// depth because near maps to the smaller NDC z in both conventions).
+const char* kWireVsGlsl = R"(
+#version 330
+uniform mat4 mvp;
+layout(location=0) in vec3 pos;
+void main() {
+    gl_Position = mvp * vec4(pos, 1.0);
+    gl_Position.z -= gl_Position.w * 1e-4;
+}
+)";
+
+const char* kWireFsGlsl = R"(
+#version 330
+uniform vec4 line_color;
+out vec4 frag_color;
+void main() {
+    frag_color = line_color;
+}
+)";
+
+const char* kWireVsHlsl = R"(
+cbuffer vs_params: register(b0) { float4x4 mvp; };
+float4 main(float3 pos: TEXCOORD0): SV_Position {
+    float4 o = mul(mvp, float4(pos, 1.0));
+    o.z -= o.w * 1e-4;
+    return o;
+}
+)";
+
+const char* kWireFsHlsl = R"(
+cbuffer fs_params: register(b0) { float4 line_color; };
+float4 main(): SV_Target { return line_color; }
+)";
+
+const char* kWireVsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+struct VsParams { float4x4 mvp; };
+// stage_in struct like the main shader: a bare float3 attribute parameter is
+// rejected by the Metal compiler ("invalid type for input declaration").
+struct VSIn { float3 pos [[attribute(0)]]; };
+struct VSOut { float4 pos [[position]]; };
+vertex VSOut _main(VSIn in [[stage_in]], constant VsParams& p [[buffer(0)]]) {
+    VSOut o;
+    o.pos = p.mvp * float4(in.pos, 1.0);
+    o.pos.z -= o.pos.w * 1e-4;
+    return o;
+}
+)";
+
+const char* kWireFsMsl = R"(
+#include <metal_stdlib>
+using namespace metal;
+struct FsParams { float4 line_color; };
+fragment float4 _main(constant FsParams& p [[buffer(0)]]) {
+    return p.line_color;
+}
+)";
+
 constexpr int kMaxTarget = 4096;
 constexpr sg_pixel_format kColorFormat = SG_PIXELFORMAT_RGBA8;
 constexpr sg_pixel_format kDepthFormat = SG_PIXELFORMAT_DEPTH;
@@ -455,8 +592,15 @@ constexpr sg_pixel_format kDepthFormat = SG_PIXELFORMAT_DEPTH;
 
 void GeometryPreview::init() {
     static_assert(sizeof(FsParams) == 32, "2 x vec4 std140 block");
+    static_assert(sizeof(WireFsParams) == 16, "1 x vec4 std140 block");
     sg_shader_desc shd = {};
     const sg_backend backend = sg_query_backend();
+    // Depth-range convention of the backend, cached: viewProj() must stay
+    // callable headless (--smoke runs before any sokol setup, and
+    // sg_query_backend asserts _sg.valid in Debug).
+    m_backendZeroToOne = backend == SG_BACKEND_D3D11 || backend == SG_BACKEND_METAL_MACOS ||
+                         backend == SG_BACKEND_METAL_IOS || backend == SG_BACKEND_METAL_SIMULATOR ||
+                         backend == SG_BACKEND_WGPU;
     if (backend == SG_BACKEND_D3D11) {
         shd.vertex_func.source = kVsHlsl;
         shd.fragment_func.source = kFsHlsl;
@@ -518,8 +662,58 @@ void GeometryPreview::init() {
     pip.label = "pggviewer-preview-pip";
     m_pip = sg_make_pipeline(&pip);
 
+    // Wire overlay: same mvp uniform, flat line color, line list, no depth
+    // write (the z bias in the VS handles the tie with the shaded surface).
+    sg_shader_desc wshd = {};
+    if (backend == SG_BACKEND_D3D11) {
+        wshd.vertex_func.source = kWireVsHlsl;
+        wshd.fragment_func.source = kWireFsHlsl;
+        wshd.attrs[0].hlsl_sem_name = "TEXCOORD";
+        wshd.attrs[0].hlsl_sem_index = 0;
+    } else if (backend == SG_BACKEND_METAL_MACOS || backend == SG_BACKEND_METAL_IOS ||
+               backend == SG_BACKEND_METAL_SIMULATOR) {
+        wshd.vertex_func.source = kWireVsMsl;
+        wshd.fragment_func.source = kWireFsMsl;
+    } else {
+        wshd.vertex_func.source = kWireVsGlsl;
+        wshd.fragment_func.source = kWireFsGlsl;
+    }
+    wshd.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
+    wshd.uniform_blocks[0].size = sizeof(VsParams);
+    wshd.uniform_blocks[0].layout = SG_UNIFORMLAYOUT_STD140;
+    wshd.uniform_blocks[0].hlsl_register_b_n = 0;
+    wshd.uniform_blocks[0].msl_buffer_n = 0;
+    wshd.uniform_blocks[0].glsl_uniforms[0].glsl_name = "mvp";
+    wshd.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_MAT4;
+    wshd.uniform_blocks[0].glsl_uniforms[0].array_count = 1;
+    wshd.uniform_blocks[1].stage = SG_SHADERSTAGE_FRAGMENT;
+    wshd.uniform_blocks[1].size = sizeof(WireFsParams);
+    wshd.uniform_blocks[1].layout = SG_UNIFORMLAYOUT_STD140;
+    wshd.uniform_blocks[1].hlsl_register_b_n = 0;
+    wshd.uniform_blocks[1].msl_buffer_n = 0;
+    wshd.uniform_blocks[1].glsl_uniforms[0].glsl_name = "line_color";
+    wshd.uniform_blocks[1].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+    wshd.uniform_blocks[1].glsl_uniforms[0].array_count = 1;
+    wshd.label = "pggviewer-preview-wire-shd";
+    m_wireShader = sg_make_shader(&wshd);
+
+    sg_pipeline_desc wpip = {};
+    wpip.shader = m_wireShader;
+    wpip.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    wpip.primitive_type = SG_PRIMITIVETYPE_LINES;
+    wpip.index_type = SG_INDEXTYPE_UINT32;
+    wpip.cull_mode = SG_CULLMODE_NONE;
+    wpip.depth.pixel_format = kDepthFormat;
+    wpip.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    wpip.depth.write_enabled = false;
+    wpip.colors[0].pixel_format = kColorFormat;
+    wpip.label = "pggviewer-preview-wire-pip";
+    m_wirePip = sg_make_pipeline(&wpip);
+
     if (sg_query_shader_state(m_shader) != SG_RESOURCESTATE_VALID ||
-        sg_query_pipeline_state(m_pip) != SG_RESOURCESTATE_VALID) {
+        sg_query_pipeline_state(m_pip) != SG_RESOURCESTATE_VALID ||
+        sg_query_shader_state(m_wireShader) != SG_RESOURCESTATE_VALID ||
+        sg_query_pipeline_state(m_wirePip) != SG_RESOURCESTATE_VALID) {
         spdlog::error("GeometryPreview: pipeline creation failed");
         m_ok = false;
         return;
@@ -532,22 +726,38 @@ void GeometryPreview::shutdown() {
     destroyTarget();
     if (m_pip.id != SG_INVALID_ID) sg_destroy_pipeline(m_pip);
     if (m_shader.id != SG_INVALID_ID) sg_destroy_shader(m_shader);
+    if (m_wirePip.id != SG_INVALID_ID) sg_destroy_pipeline(m_wirePip);
+    if (m_wireShader.id != SG_INVALID_ID) sg_destroy_shader(m_wireShader);
     m_pip = {};
     m_shader = {};
+    m_wirePip = {};
+    m_wireShader = {};
 }
 
 void GeometryPreview::clear() {
     if (m_vbuf.id != SG_INVALID_ID) sg_destroy_buffer(m_vbuf);
     if (m_ibuf.id != SG_INVALID_ID) sg_destroy_buffer(m_ibuf);
+    if (m_wireVbuf.id != SG_INVALID_ID) sg_destroy_buffer(m_wireVbuf);
+    if (m_wireIbuf.id != SG_INVALID_ID) sg_destroy_buffer(m_wireIbuf);
     m_vbuf = {};
     m_ibuf = {};
+    m_wireVbuf = {};
+    m_wireIbuf = {};
     m_indexCount = 0;
+    m_wireIndexCount = 0;
 }
 
 void GeometryPreview::setGeometry(const PreviewGeometry& geo, bool refit) {
     clear();
     m_summary = geo.summary;
-    if (!geo.ok || !m_ok) return;
+    if (!geo.ok) return;
+
+    // Scene fit is CPU state: update it even headless (m_ok == false in
+    // --smoke), so camera math stays testable without sokol.
+    m_sceneCenter = (geo.bmin + geo.bmax) * 0.5f;
+    m_sceneRadius = std::max(1e-3f, glm::length(geo.bmax - geo.bmin) * 0.5f);
+    if (refit) fit();
+    if (!m_ok) return;
 
     sg_buffer_desc vb = {};
     vb.usage.vertex_buffer = true;
@@ -564,11 +774,21 @@ void GeometryPreview::setGeometry(const PreviewGeometry& geo, bool refit) {
     m_ibuf = sg_make_buffer(&ib);
     m_indexCount = static_cast<int>(geo.indices.size());
 
-    m_fitCenter = (geo.bmin + geo.bmax) * 0.5f;
-    m_radius = std::max(1e-3f, glm::length(geo.bmax - geo.bmin) * 0.5f);
-    if (refit) {
-        m_center = m_fitCenter;
-        m_distance = m_radius * 2.6f * m_fitZoom;
+    if (geo.wirePositions && !geo.wireIndices.empty()) {
+        sg_buffer_desc wvb = {};
+        wvb.usage.vertex_buffer = true;
+        wvb.data.ptr = geo.wirePositions->data();
+        wvb.data.size = geo.wirePositions->size() * sizeof(glm::vec3);
+        wvb.label = "pggviewer-preview-wire-vb";
+        m_wireVbuf = sg_make_buffer(&wvb);
+
+        sg_buffer_desc wib = {};
+        wib.usage.index_buffer = true;
+        wib.data.ptr = geo.wireIndices.data();
+        wib.data.size = geo.wireIndices.size() * sizeof(uint32_t);
+        wib.label = "pggviewer-preview-wire-ib";
+        m_wireIbuf = sg_make_buffer(&wib);
+        m_wireIndexCount = static_cast<int>(geo.wireIndices.size());
     }
 }
 
@@ -577,6 +797,50 @@ void GeometryPreview::setOrbit(float yawDeg, float pitchDeg, float zoom) {
     m_pitch = std::clamp(glm::radians(pitchDeg), -1.55f, 1.55f);
     m_fitZoom = std::clamp(zoom, 0.05f, 50.0f);
     m_distance = m_radius * 2.6f * m_fitZoom;
+}
+
+void GeometryPreview::setTarget(const glm::vec3& center, float radius, std::optional<float> distance) {
+    m_targetCenter = center;
+    m_targetRadius = std::max(1e-3f, radius);
+    m_hasTarget = true;
+    m_center = center;
+    m_radius = m_targetRadius;
+    m_distance = distance.has_value() ? *distance : m_radius * 2.6f * m_fitZoom;
+}
+
+void GeometryPreview::fit() {
+    if (m_fitMode == PreviewFitMode::Target && m_hasTarget) {
+        m_center = m_targetCenter;
+        m_radius = m_targetRadius;
+    } else {
+        m_center = m_sceneCenter;
+        m_radius = m_sceneRadius;
+    }
+    m_distance = m_radius * 2.6f * m_fitZoom;
+}
+
+void GeometryPreview::setProjection(PreviewProjection p) {
+    m_projection = p;
+    // The ortho modes are fixed axis views: snap the orbit to the preset so a
+    // leftover --preview-orbit does not tilt the "front" shot. Note the orbit
+    // convention eye = center + dir(yaw, pitch) * distance: pitch = +90 deg
+    // puts the camera ABOVE the target (looking down) — that is the top view.
+    switch (p) {
+        case PreviewProjection::OrthoFront:
+            m_yaw = 0.0f;
+            m_pitch = 0.0f;
+            break;
+        case PreviewProjection::OrthoSide:
+            m_yaw = glm::half_pi<float>();
+            m_pitch = 0.0f;
+            break;
+        case PreviewProjection::OrthoTop:
+            m_yaw = 0.0f;
+            m_pitch = glm::half_pi<float>();
+            break;
+        case PreviewProjection::Perspective:
+            break;
+    }
 }
 
 void GeometryPreview::destroyTarget() {
@@ -634,28 +898,38 @@ void GeometryPreview::ensureTarget(int w, int h) {
 glm::mat4 GeometryPreview::viewMatrix() const {
     const glm::vec3 dir(std::cos(m_pitch) * std::sin(m_yaw), std::sin(m_pitch), std::cos(m_pitch) * std::cos(m_yaw));
     const glm::vec3 eye = m_center + dir * m_distance;
-    return glm::lookAt(eye, m_center, glm::vec3(0.0f, 1.0f, 0.0f));
+    // At the poles (top view) world +Y is parallel to the view direction and
+    // lookAt degenerates; -Z keeps the plan reading "facade at the bottom".
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    if (std::abs(std::abs(m_pitch) - glm::half_pi<float>()) < 1e-4f)
+        up = glm::vec3(0.0f, 0.0f, m_pitch > 0.0f ? -1.0f : 1.0f);
+    return glm::lookAt(eye, m_center, up);
 }
 
 glm::mat4 GeometryPreview::viewProj(float aspect) const {
     const glm::mat4 view = viewMatrix();
     const float nearZ = std::max(1e-3f, m_distance * 0.01f);
     const float farZ = m_distance + m_radius * 4.0f + 1.0f;
-    const sg_backend backend = sg_query_backend();
-    const bool zeroToOne = backend == SG_BACKEND_D3D11 || backend == SG_BACKEND_METAL_MACOS ||
-                           backend == SG_BACKEND_METAL_IOS || backend == SG_BACKEND_METAL_SIMULATOR ||
-                           backend == SG_BACKEND_WGPU;
-    const glm::mat4 proj = zeroToOne ? glm::perspectiveRH_ZO(glm::radians(40.0f), aspect, nearZ, farZ)
-                                     : glm::perspectiveRH_NO(glm::radians(40.0f), aspect, nearZ, farZ);
+    const bool zeroToOne = m_backendZeroToOne;
+    glm::mat4 proj;
+    if (m_projection == PreviewProjection::Perspective) {
+        proj = zeroToOne ? glm::perspectiveRH_ZO(glm::radians(40.0f), aspect, nearZ, farZ)
+                         : glm::perspectiveRH_NO(glm::radians(40.0f), aspect, nearZ, farZ);
+    } else {
+        // Half-height of the ortho frustum: the fit radius plus margin,
+        // scaled by the same zoom multiplier the perspective fit uses (bigger
+        // fitZoom = farther camera = more visible = larger half-height).
+        const float h = std::max(1e-3f, m_radius * 1.3f * m_fitZoom);
+        const float a = h * std::max(1e-3f, aspect);
+        proj = zeroToOne ? glm::orthoRH_ZO(-a, a, -h, h, nearZ, farZ)
+                         : glm::orthoRH_NO(-a, a, -h, h, nearZ, farZ);
+    }
     return proj * view;
 }
 
 void GeometryPreview::drawWindowContents() {
     // Toolbar.
-    if (ImGui::SmallButton("Fit")) {
-        m_distance = m_radius * 2.6f * m_fitZoom;
-        m_center = m_fitCenter;
-    }
+    if (ImGui::SmallButton("Fit")) fit();
     ImGui::SameLine();
     ImGui::TextDisabled("%s", m_summary.empty() ? "(no geometry)" : m_summary.c_str());
 
@@ -763,6 +1037,23 @@ void GeometryPreview::render() {
         sg_apply_uniforms(0, SG_RANGE(vs));
         sg_apply_uniforms(1, SG_RANGE(fs));
         sg_draw(0, m_indexCount, 1);
+
+        // Wire overlay (A2): mesh edges as flat dark lines over the shading.
+        if (m_wireframe && m_wireIndexCount > 0) {
+            WireFsParams wfs = {};
+            wfs.color[0] = 0.05f;
+            wfs.color[1] = 0.06f;
+            wfs.color[2] = 0.08f;
+            wfs.color[3] = 1.0f;
+            sg_apply_pipeline(m_wirePip);
+            sg_bindings wbind = {};
+            wbind.vertex_buffers[0] = m_wireVbuf;
+            wbind.index_buffer = m_wireIbuf;
+            sg_apply_bindings(&wbind);
+            sg_apply_uniforms(0, SG_RANGE(vs));
+            sg_apply_uniforms(1, SG_RANGE(wfs));
+            sg_draw(0, m_wireIndexCount, 1);
+        }
     }
     sg_end_pass();
 }

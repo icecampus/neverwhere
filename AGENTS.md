@@ -116,6 +116,8 @@ Linux-флоу — Ninja (single-config) + CMake Presets, триплет `x64-li
 
 EpicMapEditor поднимает TCP RPC-сервер на `127.0.0.1:9877` (построчный JSON, команды на GUI-потоке; `src/apps/EpicMapEditor/src/editor_rpc_server.cpp`), MCP-обёртка — `neverwhere-editor`/`neverwhere-editor-win` (`tools/editor_mcp/`, инструменты `editor_*`). Авторинг — в координатах клеток через `MapAuthoring`, идемпотентно и независимо от камеры. Типовой цикл «карта по описанию»: `create_chapter`/`load_chapter` → `list_assets` → `set_landscape` / `fence_stroke` → `fill_rect`/`set_tile` → `set_camera` + `screenshot` → `get_map` → `save` → `play`. Полный список операций, имена слоёв, соответствие типов ассетов слоям и грабли камеры/скриншотов — `docs/editor_rpc.md`.
 
+PggViewer поднимает похожий TCP RPC на `127.0.0.1:9878` (`--serve`; `src/apps/PggViewer/ViewerRpcServer.cpp`), MCP-обёртка — `neverwhere-pgg`/`neverwhere-pgg-win` (`tools/pgg_mcp/`, инструменты `pgg_*`; viewer поднимается автоматически, если порт не отвечает). Контракт команд и грабли — `docs/pgg/viewer_rpc.md`.
+
 ### PGG (язык процедурной генерации геометрии)
 
 - Спецификация языка — `docs/pgg/geometry_generation_language.md` (ТЗ: текст-first нодовый граф для LLM-агентов + нодовая проекция; этапы и критерии — §15, история — §19).

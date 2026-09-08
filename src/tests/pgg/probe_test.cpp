@@ -7,7 +7,11 @@
 // per-instance def-body taps), aggregate=stats merging and E606 cases.
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "pgg/eval.h"
+#include "pgg/src/eval/probe.h"
 #include "test_utils.h"
 
 namespace {
@@ -425,7 +429,7 @@ TEST(Probe, E606MalformedSpecs) {
 TEST(Probe, E606ParamMisuse) {
     pgg::RunResult limitOnStats = runProbe(kErr, "base:stats[limit=2]");
     EXPECT_EQ(countCode(limitOnStats, "E606"), 1);
-    EXPECT_TRUE(hasMessage(limitOnStats, "E606", "limit applies to the table inspector"));
+    EXPECT_TRUE(hasMessage(limitOnStats, "E606", "limit applies to the table and check inspectors"));
     pgg::RunResult aggOnTable = runProbe(kErr, "base:table[aggregate=stats]");
     EXPECT_EQ(countCode(aggOnTable, "E606"), 1);
     EXPECT_TRUE(hasMessage(aggOnTable, "E606", "aggregate=stats is not supported for the table inspector"));
@@ -485,6 +489,227 @@ TEST(Probe, DeterminismAndOutputIdentity) {
     pggtest::expectNoErrors(plain);
     EXPECT_EQ(pggtest::geoContentHash(pgg::asGeo(a.outputs[0].value)),
               pggtest::geoContentHash(pgg::asGeo(plain.outputs[0].value)));
+}
+
+// --- 10. sample (§9.6) ------------------------------------------------------------
+
+TEST(Probe, SampleSdfSphere) {
+    pgg::RunResult r = runProbe("s = sdf_sphere(r = 1.0)\noutput s\n", "s:sample[at=(2,0,0);(0,0,0)]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].inspector, "sample");
+    EXPECT_EQ(r.probes[0].text,
+              "sample[at=(2, 0, 0);(0, 0, 0)]\n"
+              "2 0 0 1\n"
+              "0 0 0 -1");
+}
+
+TEST(Probe, SampleProfileForm) {
+    pgg::RunResult r = runProbe("s = sdf_sphere(r = 1.0)\noutput s\n",
+                                "s:sample[from=(2,0,0),to=(4,0,0),n=3]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "sample[from=(2, 0, 0),to=(4, 0, 0),n=3]\n"
+              "2 0 0 1\n"
+              "3 0 0 2\n"
+              "4 0 0 3");
+}
+
+TEST(Probe, SampleGeoMeshPseudoSign) {
+    // Box spans [-1,1]^3: the outside point reads +1, the centre -1 (sign by
+    // the closest triangle's normal — pseudo, noted in the header).
+    pgg::RunResult r = runProbe("b = box(size = vec3(2, 2, 2))\noutput b\n",
+                                "b:sample[at=(2,0,0);(0,0,0)]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "sample[at=(2, 0, 0);(0, 0, 0)] (pseudo-sign distance from mesh)\n"
+              "2 0 0 1\n"
+              "0 0 0 -1");
+}
+
+TEST(Probe, SampleInstancePathWithVecParams) {
+    // `make_ball[1]` ends with a bracket too — params still parse, and the
+    // instance path still resolves (the vec-in-parens grammar regression).
+    pgg::RunResult r = runProbe(
+        "def make_ball(r: f32) -> (out: sdf) {\n"
+        "    \"\"\"Ball.\"\"\"\n"
+        "    out = sdf_sphere(r = r)\n"
+        "}\n"
+        "a = make_ball(1.0)\n"
+        "b = make_ball(2.0)\n"
+        "output a\n",
+        "make_ball[1]:sample[at=(0,0,0)]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].path, "make_ball[1]");
+    EXPECT_EQ(r.probes[0].text, "sample[at=(0, 0, 0)]\n0 0 0 -2");
+}
+
+// --- 11. slice (§9.6) -------------------------------------------------------------
+
+TEST(Probe, SliceSdfSphereAsciiExact) {
+    pgg::RunResult r = runProbe("s = sdf_sphere(r = 1.0)\noutput s\n", "s:slice[axis=z,at=0,step=0.5]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "slice[axis=z,at=0,step=0.5] (5 x 5, bounds (-1, -1)..(1, 1))\n"
+              "..#..\n"
+              ".###.\n"
+              "#####\n"
+              ".###.\n"
+              "..#..");
+}
+
+TEST(Probe, SliceSdfSphereCsv) {
+    pgg::RunResult r = runProbe("s = sdf_sphere(r = 1.0)\noutput s\n",
+                                "s:slice[axis=z,at=0,step=0.5,format=csv]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    const std::string& t = r.probes[0].text;
+    EXPECT_TRUE(t.starts_with("slice[axis=z,at=0,step=0.5,format=csv] (5 x 5, bounds (-1, -1)..(1, 1))\n"));
+    EXPECT_NE(t.find("\n0,0,0.414214\n"), std::string::npos);
+    EXPECT_NE(t.find("\n2,2,-1\n"), std::string::npos);
+    EXPECT_EQ(std::count(t.begin(), t.end(), '\n'), 25);  // 25 grid rows after the header
+}
+
+TEST(Probe, SliceThinShellRepro) {
+    // Flattened analog of docs/pgg/mc_thin_shell_slivers.md: two crossing
+    // box-prisms minus a slab cutter — 2 cm end walls at z = +/-3.425, so the
+    // field is negative only in a narrow z window (the plus-shaped wall
+    // footprint at 3.425, nothing one voxel step away).
+    const std::string src =
+        "main_outer = sdf_box(size = vec3(5.86, 6.86, 6.87))\n"
+        "wing_outer = sdf_box(size = vec3(6.86, 5.86, 6.87))\n"
+        "cutter = sdf_box(size = vec3(100.0, 100.0, 6.83))\n"
+        "shell = sdf_subtract(sdf_union(main_outer, wing_outer), cutter)\n"
+        "output shell\n";
+    pgg::RunResult wall = runProbe(src, "shell:slice[axis=z,at=3.425,step=0.25]");
+    pggtest::expectNoErrors(wall);
+    ASSERT_EQ(wall.probes.size(), 1u);
+    EXPECT_TRUE(wall.probes[0].text.starts_with(
+        "slice[axis=z,at=3.425,step=0.25] (28 x 28, bounds (-3.43, -3.43)..(3.43, 3.43))\n"));
+    EXPECT_GT(std::count(wall.probes[0].text.begin(), wall.probes[0].text.end(), '#'), 100);
+
+    for (const std::string spec :
+         {"shell:slice[axis=z,at=3.40,step=0.25]", "shell:slice[axis=z,at=3.45,step=0.25]"}) {
+        pgg::RunResult miss = runProbe(src, spec);
+        pggtest::expectNoErrors(miss);
+        ASSERT_EQ(miss.probes.size(), 1u) << spec;
+        EXPECT_EQ(miss.probes[0].text.find('#'), std::string::npos) << spec;
+    }
+}
+
+TEST(Probe, SliceGeoMeshNotesDistance) {
+    pgg::RunResult r = runProbe("b = box(size = vec3(2, 2, 2))\noutput b\n",
+                                "b:slice[axis=z,at=0,step=1]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    // The z=0 plane cuts through the box: every grid point reads <= 0
+    // (inside or on the surface), so the map is all '#'; the header marks
+    // the pseudo-sign distance mode.
+    EXPECT_EQ(r.probes[0].text,
+              "slice[axis=z,at=0,step=1] (3 x 3, bounds (-1, -1)..(1, 1), pseudo-sign distance from mesh)\n"
+              "###\n"
+              "###\n"
+              "###");
+}
+
+// --- 12. check (§9.6) -------------------------------------------------------------
+
+TEST(Probe, CheckCleanBox) {
+    pgg::RunResult r = runProbe("b = box(size = vec3(2, 2, 2))\noutput b\n", "b:check");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "degenerate 0\n"
+              "nonmanifold 0\n"
+              "boundary 0\n"
+              "isolated 0\n"
+              "nan 0\n"
+              "components 1\n"
+              "oriented_mismatch 0\n"
+              "edge_min 2\n"
+              "edge_median 2\n"
+              "needles 0\n"
+              "ok");
+}
+
+TEST(Probe, CheckBrokenMeshDirect) {
+    // Degenerate face (repeated index), a duplicated triangle (orientation
+    // mismatch), an isolated NaN point. Direct C++-level call — PGG sources
+    // cannot express broken meshes on purpose.
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    pgg::GeoPtr g = pgg::makeMesh({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {qnan, 5, 5}},
+                                  {0, 1, 2, 0, 0, 1, 0, 1, 2}, {0, 3, 6, 9});
+    std::string text, err;
+    ASSERT_TRUE(pgg::probeGeoCheck(*g, {}, 8, text, err)) << err;
+    EXPECT_EQ(text,
+              "degenerate 1\n"
+              "degenerate_faces 1\n"
+              "nonmanifold 0\n"
+              "boundary 0\n"
+              "isolated 1\n"
+              "nan 1\n"
+              "components 1\n"
+              "oriented_mismatch 1\n"
+              "edge_min 1\n"
+              "edge_median 1\n"
+              "needles 0\n"
+              "issues 4");
+}
+
+TEST(Probe, CheckNeedlesAndComponents) {
+    // Two disconnected triangles, one a sliver (aspect 100): boundary edges
+    // and 2 components are informative, the needle is the only issue.
+    pgg::GeoPtr g = pgg::makeMesh({{0, 0, 0}, {10, 0, 0}, {0, 0.1f, 0}, {0, 0, 0}, {0, 1, 0}, {1, 0, 0}},
+                                  {0, 1, 2, 3, 4, 5}, {0, 3, 6});
+    std::string text, err;
+    ASSERT_TRUE(pgg::probeGeoCheck(*g, {}, 8, text, err)) << err;
+    EXPECT_EQ(text,
+              "degenerate 0\n"
+              "nonmanifold 0\n"
+              "boundary 6\n"
+              "isolated 0\n"
+              "nan 0\n"
+              "components 2\n"
+              "oriented_mismatch 0\n"
+              "edge_min 0.1\n"
+              "edge_median 1\n"
+              "needles 1\n"
+              "needle_ratio 50.0%\n"
+              "needles_faces 0\n"
+              "issues 1");
+}
+
+TEST(Probe, CheckLimitIsAccepted) {
+    pgg::RunResult r = runProbe("b = box(size = vec3(2, 2, 2))\noutput b\n", "b:check[limit=2]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].inspector, "check");
+}
+
+// --- 13. sample/slice/check E606 ----------------------------------------------------
+
+TEST(Probe, E606SampleSliceCheckMisuse) {
+    const std::string src =
+        "b = box(size = vec3(2, 2, 2))\n"
+        "pts = mesh_line(count = 3, length = 2.0)\n"
+        "s = sdf_sphere(r = 1.0)\n"
+        "output b\n";
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:sample[foo=1]"), "E606", "unknown probe parameter 'foo'"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:sample"), "E606", "sample needs at="));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:sample[at=(0,0)]"), "E606", "bad at value"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:sample[from=(0,0,0)]"), "E606", "needs both"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:sample[aggregate=stats]"), "E606",
+                           "aggregate=stats is not supported for the sample inspector"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:slice[axis=z]"), "E606", "slice needs at="));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:slice[axis=q,at=0,step=1]"), "E606", "bad axis value"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:slice[axis=z,at=0,step=-1]"), "E606", "bad step value"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "pts:check"), "E606", "check needs a geo<mesh>"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "s:check"), "E606", "check needs a geo<mesh>"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:check[warn_aspect=abc]"), "E606", "bad warn_aspect value"));
 }
 
 }  // namespace
