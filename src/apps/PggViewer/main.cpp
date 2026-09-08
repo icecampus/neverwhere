@@ -223,6 +223,7 @@ struct PendingRender {
     std::string outPath;
     std::string node;
     nlohmann::json stats;  // {kind,pts,tri,bbox,groups,ms} of the pulled value
+    nlohmann::json diagnostics;  // warnings of the run (errors fail the render instead)
     uint64_t cacheHits = 0, cacheMisses = 0;
 };
 PendingRender g_pendingRender;
@@ -1437,6 +1438,7 @@ void frame() {
                                    {"height", sapp_height()},
                                    {"node", pr.node},
                                    {"stats", pr.stats},
+                                   {"diagnostics", pr.diagnostics},
                                    {"camera",
                                     {{"center", vec3Json(g_preview.center())},
                                      {"radius", g_preview.fitRadius()},
@@ -1656,6 +1658,18 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
             ViewerRpcServer::fail("run_failed",
                                   g_lastPreviewError.empty() ? "run failed for '" + node + "'"
                                                              : g_lastPreviewError);
+        // A run that produced a value *and* errors (e.g. E609 from a merge deep
+        // inside the graph — the pull still yields a partial mesh) is a
+        // failure for the agent: a picture of half the scene with ok=true is
+        // worse than no picture. Warnings ride along in the reply instead.
+        if (diagsHaveErrors(g_lastRunDiags)) {
+            std::string why;
+            for (const pgg::Diagnostic& d : g_lastRunDiags) {
+                if (d.isWarning) continue;
+                why += (why.empty() ? "" : "\n") + d.code + " " + d.message;
+            }
+            ViewerRpcServer::fail("run_errors", why);
+        }
         // An unresolved target is an error, not a silent fit=all picture; the
         // target is dropped so the next render without one is not stuck on it.
         if (!g_cameraTargetError.empty()) {
@@ -1681,6 +1695,7 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
         g_pendingRender.outPath = out.string();
         g_pendingRender.node = node;
         g_pendingRender.stats = valueStatsJson(g_previewValue, g_lastRunMs);
+        g_pendingRender.diagnostics = diagnosticsJson(g_lastRunDiags);
         g_pendingRender.cacheHits = g_lastCacheHits;
         g_pendingRender.cacheMisses = g_lastCacheMisses;
         return std::nullopt;  // deferred reply from frame()

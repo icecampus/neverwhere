@@ -1,0 +1,152 @@
+# Уличная ковка: точёные тела вращения (spool — усечённый конус, из них стек
+# фонарного столба), наконечник-копьё, штакетник с прогонами и клёпками,
+# подвесной фонарь. Прут/кольцо/крышка — из lib/fixtures.pgg. Все размеры в
+# метрах, вверх +Y. Группы: iron (металл), lamp (стекло фонаря — светится),
+# bulb (источник света внутри), edge (фаски боксов).
+
+import lib.parts
+import lib.fixtures
+
+def spool(p0: vec3, p1: vec3, r0: f32, r1: f32, sides: int = 12) -> (out: geo<mesh>) {
+    """Усечённый конус между p0 (радиус r0) и p1 (радиус r1) — sweep круга по
+    двухточечной линии с @profile_scale на концах. Крышки на торцах, нормали auto:
+    бок гладкий, кромки жёсткие. Стек spool'ов даёт точёную деталь (лат. lathe).
+    sides = 6 — шестигранник (корпус фонаря), 4 — квадрат под 45°."""
+    expect r0 > 0 & r1 > 0: "spool: радиусы положительные (острие — маленький r, не 0)"
+    expect length(p1 - p0) > 0: "spool: p0 и p1 совпадают"
+    path0 = mesh_line(count = 2, length = length(p1 - p0), dir = normalize(p1 - p0))
+    path = set(transform(path0, translate = p0), "profile_scale", @index == 0 ? vec2(r0, r0) : vec2(r1, r1))
+    body = sweep(path, profile = circle(sides = sides, radius = 1.0))
+    out = mark(compute_normals(body, mode = auto, angle = 40), "iron", where = true, domain = faces)
+}
+
+def bolt_heads(pts: geo<points>, r: f32) -> (out: geo<mesh>) {
+    """Клёпки/головки болтов — маленькие икосферы на точках (группа iron)."""
+    out = mark(realize(instance_on_points(pts, source = ico_sphere(subdiv = 1, radius = r))), "iron", where = true, domain = faces)
+}
+
+def spearhead(base: vec3, h: f32, w: f32) -> (out: geo<mesh>) {
+    """Наконечник штакетины: листовидный клинок высоты h — sweep квадрата под 45° по
+    пяти точкам вверх от base, @profile_scale: шейка → самое широкое на h/4 (w,
+    толщина 0.3 w) → плавное сужение → острие. Плоские нормали — грани клинка
+    читаются рёбрами."""
+    path0 = mesh_line(count = 5, length = h, dir = (0, 1, 0))
+    s0 = vec2(w * 0.30, w * 0.20)
+    s1 = vec2(w, w * 0.30)
+    s2 = vec2(w * 0.72, w * 0.24)
+    s3 = vec2(w * 0.38, w * 0.15)
+    s4 = vec2(w * 0.03, w * 0.03)
+    path = set(transform(path0, translate = base), "profile_scale", @index == 0 ? s0 : (@index == 1 ? s1 : (@index == 2 ? s2 : (@index == 3 ? s3 : s4))))
+    blade = sweep(path, profile = transform(circle(sides = 4, radius = 1.0), rotate = vec3(0, 0, 45)))
+    out = mark(compute_normals(blade, mode = flat), "iron", where = true, domain = faces)
+}
+
+def picket(y0: f32, y1: f32, t: f32) -> (out: geo<mesh>) {
+    """Штакетина в начале координат: квадратный прут t×t от y0 до y1, поясок-муфта,
+    шарик и копьё (spearhead, 0.36) сверху; острие на y1 + 0.39 + 1.1 t."""
+    shaft = parts.piece(size = vec3(t, y1 - y0, t), pos = vec3(0, (y0 + y1) * 0.5, 0), grp = "iron")
+    collar = parts.piece(size = vec3(t * 1.7, 0.03, t * 1.7), pos = vec3(0, y1 + 0.015, 0), grp = "iron")
+    ball = mark(transform(ico_sphere(subdiv = 1, radius = t * 0.7), translate = vec3(0, y1 + 0.03 + t * 0.6, 0)), "iron", where = true, domain = faces)
+    spear = spearhead(base = vec3(0, y1 + 0.03 + t * 1.1, 0), h = 0.36, w = t * 1.9)
+    out = merge(shaft, collar, ball, spear)
+}
+
+def picket_fence(x0: f32, x1: f32, n: int, y_shaft0: f32, y_shaft1: f32, rail_y_lo: f32, rail_y_hi: f32) -> (out: geo<mesh>) {
+    """Пролёт кованого штакетника вдоль X между столбами: n штакетин равномерно на
+    (x0, x1) (первая/последняя на полшага от края), два прогона от x0 до x1 на
+    высотах rail_y_lo/rail_y_hi с клёпкой у каждой штакетины с лицевой стороны (+Z).
+    Прогоны входят в столбы — концы прячутся в кладке."""
+    expect n >= 1: "picket_fence: хотя бы одна штакетина"
+    expect x1 > x0: "picket_fence: x1 должен быть больше x0"
+    span = x1 - x0
+    pitch = span / f32(n)
+    slots0 = mesh_line(count = n, length = span - pitch, dir = (1, 0, 0))
+    slots = transform(slots0, translate = vec3(x0 + pitch * 0.5, 0, 0))
+    bars = realize(instance_on_points(slots, source = picket(y0 = y_shaft0, y1 = y_shaft1, t = 0.085)))
+    rail_lo = parts.piece(size = vec3(span, 0.13, 0.06), pos = vec3((x0 + x1) * 0.5, rail_y_lo, 0), grp = "iron")
+    rail_hi = parts.piece(size = vec3(span, 0.13, 0.06), pos = vec3((x0 + x1) * 0.5, rail_y_hi, 0), grp = "iron")
+    rivets_lo = bolt_heads(transform(slots, translate = vec3(0, rail_y_lo, 0.03)), r = 0.028)
+    rivets_hi = bolt_heads(transform(slots, translate = vec3(0, rail_y_hi, 0.03)), r = 0.028)
+    out = merge(bars, rail_lo, rail_hi, rivets_lo, rivets_hi)
+}
+
+def hanging_lantern(top: vec3, s: f32 = 1.0) -> (out: geo<mesh>) {
+    """Подвесной фонарь: точка top — верх шишки подвеса; вниз: шишка, шейка, купол с
+    отливом, шестигранный корпус, сужающийся к низу (стёкла — группа lamp), шесть
+    рёбер-стоек по вершинам шестигранника (foreach по точкам circle(6) — §5.4), лампа
+    внутри (bulb), донный поясок, тарелка и капля. Полная высота 0.80·s (s — масштаб)."""
+    expect s > 0: "hanging_lantern: масштаб положительный"
+    knob = mark(transform(ico_sphere(subdiv = 1, radius = 0.028 * s), translate = top + vec3(0, -0.028 * s, 0)), "iron", where = true, domain = faces)
+    neck = spool(p0 = top + vec3(0, -0.04 * s, 0), p1 = top + vec3(0, -0.075 * s, 0), r0 = 0.015 * s, r1 = 0.038 * s)
+    dome = spool(p0 = top + vec3(0, -0.075 * s, 0), p1 = top + vec3(0, -0.20 * s, 0), r0 = 0.038 * s, r1 = 0.20 * s, sides = 12)
+    brim = spool(p0 = top + vec3(0, -0.20 * s, 0), p1 = top + vec3(0, -0.225 * s, 0), r0 = 0.235 * s, r1 = 0.235 * s, sides = 12)
+    under = spool(p0 = top + vec3(0, -0.225 * s, 0), p1 = top + vec3(0, -0.245 * s, 0), r0 = 0.235 * s, r1 = 0.19 * s, sides = 12)
+    ring_top = spool(p0 = top + vec3(0, -0.245 * s, 0), p1 = top + vec3(0, -0.275 * s, 0), r0 = 0.20 * s, r1 = 0.195 * s, sides = 6)
+    r_hi = 0.185 * s
+    r_lo = 0.145 * s
+    y_hi = 0.0 - 0.275 * s
+    y_lo = 0.0 - 0.66 * s
+    glass0 = spool(p0 = top + vec3(0, y_hi, 0), p1 = top + vec3(0, y_lo, 0), r0 = r_hi, r1 = r_lo, sides = 6)
+    glass = mark(glass0, "lamp", where = true, domain = faces)
+    # Рёбра по вершинам шестигранника: точки circle(6) лежат в XY — кладём в XZ и
+    # доворачиваем на 30°: вершины профиля sweep на вертикальном пути стоят на ±X.
+    hex_pts = transform(transform(circle(sides = 6, radius = 1.0), rotate = vec3(90, 0, 0)), rotate = vec3(0, 30, 0))
+    ribs = foreach v in hex_pts {
+        dir = value(@P, on = v)
+        a = top + dir * (r_hi + 0.004 * s) + vec3(0, y_hi, 0)
+        b = top + dir * (r_lo + 0.004 * s) + vec3(0, y_lo, 0)
+        v = fixtures.rod(p0 = a, p1 = mix(a, b, 0.33), p2 = mix(a, b, 0.66), p3 = b, r = 0.011 * s, n = 3)
+    }
+    bulb = mark(transform(ico_sphere(subdiv = 2, radius = 0.06 * s), translate = top + vec3(0, -0.47 * s, 0)), "bulb", where = true, domain = faces)
+    ring_lo = spool(p0 = top + vec3(0, y_lo, 0), p1 = top + vec3(0, y_lo - 0.04 * s, 0), r0 = 0.158 * s, r1 = 0.13 * s, sides = 6)
+    plate = spool(p0 = top + vec3(0, y_lo - 0.04 * s, 0), p1 = top + vec3(0, y_lo - 0.07 * s, 0), r0 = 0.125 * s, r1 = 0.06 * s, sides = 12)
+    drop = spool(p0 = top + vec3(0, y_lo - 0.07 * s, 0), p1 = top + vec3(0, -0.80 * s, 0), r0 = 0.042 * s, r1 = 0.006 * s, sides = 8)
+    out = merge(knob, neck, dome, brim, under, ring_top, glass, ribs, bulb, ring_lo, plate, drop)
+}
+
+def lamp_post(base_y: f32, arm_y: f32, arm_half: f32, lantern_x: f32) -> (out: geo<mesh>) {
+    """Чугунный фонарный столб в начале координат (ось — Y): плинт и колокол на
+    высоте base_y, конусный ствол, поясок посередине, на высоте arm_y — поперечина
+    длиной 2·arm_half с муфтами, клёпками и торцевыми шишками, под ней два
+    S-завитка (правый — mirror левого), над узлом — капитель, купол и остриё.
+    Подвесной фонарь висит на двух звеньях с точки (lantern_x, arm_y). Столб
+    ставится на пьедестал внешним transform."""
+    expect arm_half > 0.3: "lamp_post: поперечина короче фонаря"
+    expect abs(lantern_x) < arm_half: "lamp_post: фонарь висит за концом поперечины"
+    plinth = parts.piece(size = vec3(0.56, 0.08, 0.56), pos = vec3(0, base_y + 0.04, 0), grp = "iron")
+    foot = spool(p0 = vec3(0, base_y + 0.08, 0), p1 = vec3(0, base_y + 0.14, 0), r0 = 0.26, r1 = 0.26, sides = 16)
+    bell = spool(p0 = vec3(0, base_y + 0.14, 0), p1 = vec3(0, base_y + 0.46, 0), r0 = 0.26, r1 = 0.14, sides = 16)
+    bead = spool(p0 = vec3(0, base_y + 0.46, 0), p1 = vec3(0, base_y + 0.54, 0), r0 = 0.16, r1 = 0.16, sides = 16)
+    shaft = spool(p0 = vec3(0, base_y + 0.54, 0), p1 = vec3(0, arm_y + 0.22, 0), r0 = 0.125, r1 = 0.09, sides = 16)
+    mid_y = base_y + (arm_y - base_y) * 0.62
+    belt = spool(p0 = vec3(0, mid_y - 0.07, 0), p1 = vec3(0, mid_y + 0.07, 0), r0 = 0.14, r1 = 0.14, sides = 16)
+    belt_a = spool(p0 = vec3(0, mid_y - 0.12, 0), p1 = vec3(0, mid_y - 0.07, 0), r0 = 0.11, r1 = 0.14, sides = 16)
+    belt_b = spool(p0 = vec3(0, mid_y + 0.07, 0), p1 = vec3(0, mid_y + 0.12, 0), r0 = 0.14, r1 = 0.11, sides = 16)
+    # Узел и поперечина.
+    boss = spool(p0 = vec3(0, arm_y - 0.17, 0), p1 = vec3(0, arm_y + 0.17, 0), r0 = 0.15, r1 = 0.15, sides = 16)
+    arm = spool(p0 = vec3(0.0 - arm_half, arm_y, 0), p1 = vec3(arm_half, arm_y, 0), r0 = 0.07, r1 = 0.07, sides = 14)
+    cuff_in = spool(p0 = vec3(0.0 - arm_half * 0.58, arm_y, 0), p1 = vec3(0.0 - arm_half * 0.44, arm_y, 0), r0 = 0.105, r1 = 0.105, sides = 14)
+    cuff_out = spool(p0 = vec3(0.0 - arm_half * 0.97, arm_y, 0), p1 = vec3(0.0 - arm_half * 0.83, arm_y, 0), r0 = 0.105, r1 = 0.105, sides = 14)
+    tip_a = spool(p0 = vec3(0.0 - arm_half, arm_y, 0), p1 = vec3(0.0 - arm_half - 0.05, arm_y, 0), r0 = 0.05, r1 = 0.04, sides = 14)
+    tip_b = spool(p0 = vec3(0.0 - arm_half - 0.05, arm_y, 0), p1 = vec3(0.0 - arm_half - 0.10, arm_y, 0), r0 = 0.06, r1 = 0.015, sides = 14)
+    rivet_pts0 = mesh_line(count = 2, length = arm_half * 0.39, dir = (1, 0, 0))
+    rivets_f = bolt_heads(transform(rivet_pts0, translate = vec3(0.0 - arm_half * 0.90, arm_y, 0.10)), r = 0.022)
+    rivets_t = bolt_heads(transform(rivet_pts0, translate = vec3(0.0 - arm_half * 0.90, arm_y + 0.10, 0)), r = 0.022)
+    # S-завиток под поперечиной: от муфты вниз-внутрь к стволу и колечко на конце.
+    sx = 0.0 - arm_half * 0.46
+    scroll = fixtures.rod(p0 = vec3(sx, arm_y - 0.08, 0), p1 = vec3(sx, arm_y - 0.36, 0), p2 = vec3(sx * 0.35, arm_y - 0.24, 0), p3 = vec3(0.0 - 0.10, arm_y - 0.40, 0), r = 0.022, n = 16)
+    curl = fixtures.rod(p0 = vec3(sx * 0.62, arm_y - 0.31, 0), p1 = vec3(sx * 0.62 - 0.10, arm_y - 0.30, 0), p2 = vec3(sx * 0.62 - 0.11, arm_y - 0.16, 0), p3 = vec3(sx * 0.62 + 0.01, arm_y - 0.17, 0), r = 0.017, n = 14)
+    left = merge(cuff_in, cuff_out, tip_a, tip_b, rivets_f, rivets_t, scroll, curl)
+    both = mirror(left, origin = vec3(0, 0, 0), normal = vec3(1, 0, 0))
+    # Капитель, купол, остриё.
+    cap_ring = spool(p0 = vec3(0, arm_y + 0.22, 0), p1 = vec3(0, arm_y + 0.28, 0), r0 = 0.125, r1 = 0.125, sides = 16)
+    cap_dome = spool(p0 = vec3(0, arm_y + 0.28, 0), p1 = vec3(0, arm_y + 0.40, 0), r0 = 0.125, r1 = 0.05, sides = 16)
+    cap_neck = spool(p0 = vec3(0, arm_y + 0.40, 0), p1 = vec3(0, arm_y + 0.44, 0), r0 = 0.05, r1 = 0.065, sides = 16)
+    spire = spool(p0 = vec3(0, arm_y + 0.44, 0), p1 = vec3(0, arm_y + 0.62, 0), r0 = 0.065, r1 = 0.004, sides = 16)
+    # Подвес: звено на поперечине (плоскость XY), звено поперёк, фонарь.
+    link1 = fixtures.ring(center = vec3(lantern_x, arm_y - 0.05, 0), radius = 0.045, r = 0.008, yaw_deg = 0)
+    link2 = fixtures.ring(center = vec3(lantern_x, arm_y - 0.125, 0), radius = 0.04, r = 0.008, yaw_deg = 90)
+    lantern = hanging_lantern(top = vec3(lantern_x, arm_y - 0.15, 0), s = 1.4)
+    column = merge(plinth, foot, bell, bead, shaft, belt, belt_a, belt_b, boss, arm, both)
+    out = merge(column, cap_ring, cap_dome, cap_neck, spire, link1, link2, lantern)
+}
