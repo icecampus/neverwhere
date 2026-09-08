@@ -80,6 +80,12 @@
 #include <sokol_time.h>
 #include <util/sokol_imgui.h>
 
+// Xlib.h (via sokol_app.h on Linux) defines None as a macro (0L); it collides
+// with CameraTargetSpec::Kind::None below. This TU never calls Xlib directly.
+#if defined(None)
+    #undef None
+#endif
+
 #if defined(SOKOL_METAL) && defined(__APPLE__)
     #import <Foundation/Foundation.h>
     #import <Metal/Metal.h>

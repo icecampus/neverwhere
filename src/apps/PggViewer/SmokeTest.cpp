@@ -381,8 +381,10 @@ bool runPggViewerSmokeTest(const std::string& serveAddress) {
                        sizeof(recvTimeoutMs));
 #else
             setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &recvTimeout, sizeof(recvTimeout));
+#if defined(SO_NOSIGPIPE)
             const int one = 1;
             setsockopt(cfd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
 #endif
             clientOk = connect(cfd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
         }
