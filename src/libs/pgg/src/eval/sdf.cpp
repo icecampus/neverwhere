@@ -705,14 +705,24 @@ MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso
         if (!inserted) return it->second;
         const glm::vec3 pa = mn + glm::vec3(static_cast<float>(gx), static_cast<float>(gy),
                                             static_cast<float>(gz)) * voxel;
-        glm::vec3 pb = pa;
-        pb[axis] += voxel;
         const float va = values[latIdx(gx, gy, gz)];
         glm::ivec3 bi(gx, gy, gz);
         bi[axis] += 1;
+        // Same lattice formula as pa (not pa + voxel): a corner reached as the
+        // far end of one edge and the near end of the next must be bitwise
+        // identical for the position weld below.
+        const glm::vec3 pb = mn + glm::vec3(bi) * voxel;
         const float vb = values[latIdx(bi.x, bi.y, bi.z)];
-        const float t = std::fabs(vb - va) < 1e-12f ? 0.5f : (iso - va) / (vb - va);
-        const glm::vec3 p = pa + (pb - pa) * t;
+        float t = std::fabs(vb - va) < 1e-12f ? 0.5f : (iso - va) / (vb - va);
+        // Snap near-corner crossings onto the lattice corner: a value within
+        // rounding of iso gives t ~ 1e-7, a vertex a nanometre off the corner
+        // that the bitwise weld below cannot merge — the triangle survives as
+        // a needle of ~zero area (1 % of the faces on a CSG shell). 1e-4 of a
+        // voxel is far below anything the extraction resolves.
+        constexpr float kSnap = 1e-6f;
+        if (t < kSnap) t = 0.0f;
+        if (t > 1.0f - kSnap) t = 1.0f;
+        const glm::vec3 p = t == 0.0f ? pa : (t == 1.0f ? pb : pa + (pb - pa) * t);
         auto [pit, pinserted] = posIndex.emplace(p, static_cast<int32_t>(positions.size()));
         if (pinserted) positions.push_back(p);
         it->second = pit->second;

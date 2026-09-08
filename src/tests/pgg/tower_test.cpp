@@ -27,9 +27,9 @@ TEST(Tower, CorpusMatchesGoldensAndReproduces) {
     pgg::GeoPtr scene = pggtest::geoOutput(r, "scene");
     ASSERT_TRUE(scene != nullptr);
     ASSERT_EQ(scene->kind, pgg::GeoKind::Mesh);
-    EXPECT_EQ(scene->pointCount(), 359224u);
-    EXPECT_EQ(scene->cornerCount(), 2155128u);
-    EXPECT_EQ(scene->faceCount(), 718376u);
+    EXPECT_EQ(scene->pointCount(), 359222u);
+    EXPECT_EQ(scene->cornerCount(), 2155116u);
+    EXPECT_EQ(scene->faceCount(), 718372u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*scene), 0u);
     glm::vec3 mn, mx;
     pgg::geoBBox(*scene, mn, mx);
@@ -42,11 +42,11 @@ TEST(Tower, CorpusMatchesGoldensAndReproduces) {
     pgg::GeoPtr anchors = pggtest::geoOutput(r, "anchors");
     ASSERT_TRUE(anchors != nullptr);
     ASSERT_EQ(anchors->kind, pgg::GeoKind::Points);
-    EXPECT_EQ(anchors->pointCount(), 141u);
+    EXPECT_EQ(anchors->pointCount(), 147u);
     glm::vec3 amn, amx;
     pgg::geoBBox(*anchors, amn, amx);
-    pggtest::expectVec3Near(amn, glm::vec3(-2.44021f, -3.32785f, 1.92822f), 1e-3f);
-    pggtest::expectVec3Near(amx, glm::vec3(2.60365f, 2.97232f, 122.994f), 1e-3f);
+    pggtest::expectVec3Near(amn, glm::vec3(-2.45059f, -3.04683f, 1.92822f), 1e-3f);
+    pggtest::expectVec3Near(amx, glm::vec3(2.64278f, 2.72162f, 122.997f), 1e-3f);
 
     // N1: a second run reproduces the world bit-for-bit (same seed, §5.2).
     pgg::RunResult r2 = pgg::runFile(kTower, towerParams());

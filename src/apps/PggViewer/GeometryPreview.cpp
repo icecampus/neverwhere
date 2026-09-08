@@ -808,6 +808,16 @@ void GeometryPreview::setTarget(const glm::vec3& center, float radius, std::opti
     m_distance = distance.has_value() ? *distance : m_radius * 2.6f * m_fitZoom;
 }
 
+void GeometryPreview::faceTargetFromOutside() {
+    if (!m_hasTarget || m_projection != PreviewProjection::Perspective) return;
+    const glm::vec3 d = m_targetCenter - m_sceneCenter;
+    const float horizontal = std::sqrt(d.x * d.x + d.z * d.z);
+    if (horizontal < 0.1f * m_sceneRadius) return;
+    // eye = center + dir(yaw, pitch) * distance with dir = (sin yaw, ., cos yaw):
+    // yaw 0 looks from +Z, yaw 90 deg from +X.
+    m_yaw = std::atan2(d.x, d.z);
+}
+
 void GeometryPreview::fit() {
     if (m_fitMode == PreviewFitMode::Target && m_hasTarget) {
         m_center = m_targetCenter;

@@ -99,6 +99,12 @@ public:
     // of the whole-scene fit. radius is the target's fit radius (group bbox
     // extent); distance defaults to the usual fit distance (radius-scaled).
     void setTarget(const glm::vec3& center, float radius, std::optional<float> distance = std::nullopt);
+    // Turns the orbit yaw so the camera sits on the target's side of the scene
+    // (A2): with a facade-side target and the default yaw the eye ended up
+    // inside the model, looking at the target through the back wall. No-op
+    // without a target, in the ortho views, or when the target is (nearly) at
+    // the scene centre — then no side is "outside" and the yaw is kept.
+    void faceTargetFromOutside();
     void setFitMode(PreviewFitMode mode) { m_fitMode = mode; }
     PreviewFitMode fitMode() const { return m_fitMode; }
     bool hasTarget() const { return m_hasTarget; }

@@ -163,6 +163,13 @@ struct CameraTargetSpec {
     std::string raw;   // as given (logs)
 };
 CameraTargetSpec g_cameraTarget;  // active target ("" = none); RPC "" clears it
+// Why the last applyCameraTarget() could not resolve the target ("" = resolved
+// or no target). The RPC render reports it as an error instead of silently
+// shipping a fit=all picture the agent did not ask for.
+std::string g_cameraTargetError;
+// Auto-yaw: without an explicit orbit in the same render/CLI, a resolved target
+// turns the camera to the target's side of the scene (faceTargetFromOutside).
+bool g_cameraTargetAutoYaw = true;
 std::string g_cliPreviewTarget;
 std::string g_cliPreviewFit;    // --preview-fit=all|target ("" = auto: target iff a target is given)
 std::string g_cliPreviewOrtho;  // --preview-ortho=front|side|top
@@ -457,7 +464,13 @@ bool resolveGroupTarget(const std::string& name, glm::vec3& outCenter, float& ou
                 found = jt;
         }
     }
-    if (found == g_previewGroupBBoxes.end()) return false;
+    if (found == g_previewGroupBBoxes.end()) {
+        std::string known;
+        for (const auto& [key, bb] : g_previewGroupBBoxes) known += (known.empty() ? "" : ", ") + key;
+        g_cameraTargetError = "group '" + name + "' is not on the previewed geometry (groups: " +
+                              (known.empty() ? std::string("none") : known) + ")";
+        return false;
+    }
     outCenter = (found->second.first + found->second.second) * 0.5f;
     outRadius = glm::length(found->second.second - found->second.first) * 0.5f;
     return true;
@@ -486,12 +499,21 @@ bool resolveBindingTarget(const std::string& path, glm::vec3& outCenter, float& 
             }
         }
         if (!found) {
-            spdlog::warn("PggViewer: preview-target binding '{}' gave no geometry value", path);
+            std::string why;
+            for (const pgg::Diagnostic& d : r.diagnostics)
+                if (!d.isWarning && d.code == "E606") why = d.message;
+            g_cameraTargetError = "binding '" + path + "' gave no geometry value" +
+                                  (why.empty() ? std::string(" (a pull names a top-level binding, an instance or "
+                                                             "<instance>.<local>; locals of an inlined def are "
+                                                             "not addressable)")
+                                               : " (" + why + ")");
+            spdlog::warn("PggViewer: preview-target {}", g_cameraTargetError);
             return false;
         }
         const PreviewGeometry pg = buildPreviewGeometry(value, PreviewBuildOptions{});
         if (!pg.ok) {
-            spdlog::warn("PggViewer: preview-target binding '{}' has nothing to bound ({})", path, pg.summary);
+            g_cameraTargetError = "binding '" + path + "' has nothing to bound (" + pg.summary + ")";
+            spdlog::warn("PggViewer: preview-target {}", g_cameraTargetError);
             return false;
         }
         g_bindingTargetCenter = (pg.bmin + pg.bmax) * 0.5f;
@@ -507,6 +529,7 @@ bool resolveBindingTarget(const std::string& path, glm::vec3& outCenter, float& 
 // must survive runPreview's refit. An unresolvable target falls back to
 // fit=all with a warning.
 void applyCameraTarget() {
+    g_cameraTargetError.clear();
     if (g_cameraTarget.kind == CameraTargetSpec::Kind::None) return;
     glm::vec3 center{0.0f};
     float radius = 1.0f;
@@ -528,7 +551,9 @@ void applyCameraTarget() {
     }
     if (ok) {
         g_preview.setTarget(center, radius);
+        if (g_cameraTargetAutoYaw) g_preview.faceTargetFromOutside();
     } else {
+        if (g_cameraTargetError.empty()) g_cameraTargetError = "target '" + g_cameraTarget.raw + "' not resolved";
         spdlog::warn("PggViewer: preview target '{}' not resolved — falling back to fit=all", g_cameraTarget.raw);
         g_preview.setFitMode(PreviewFitMode::All);
         g_preview.fit();
@@ -1278,6 +1303,7 @@ void init() {
     }
     // --preview=<path>: pull and show a value at startup (shots / smoke by eye).
     if (g_cliOrbit) g_preview.setOrbit(g_cliOrbit->x, g_cliOrbit->y, g_cliOrbit->z);
+    g_cameraTargetAutoYaw = !g_cliOrbit.has_value();
     // A2 camera flags: ortho snaps after --preview-orbit (ortho wins the
     // angles), the target spec is applied by runPreview after the rebuild.
     if (!g_cliPreviewTarget.empty()) {
@@ -1563,6 +1589,7 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
                                                     : PreviewShading::Auto;
         }
         if (args.contains("colors")) g_previewOpts.vertexColors = args.value("colors", true);
+        g_cameraTargetAutoYaw = !args.contains("orbit");
         if (args.contains("orbit")) {
             const json& o = args["orbit"];
             if (o.is_array() && o.size() >= 2) {
@@ -1629,6 +1656,15 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
             ViewerRpcServer::fail("run_failed",
                                   g_lastPreviewError.empty() ? "run failed for '" + node + "'"
                                                              : g_lastPreviewError);
+        // An unresolved target is an error, not a silent fit=all picture; the
+        // target is dropped so the next render without one is not stuck on it.
+        if (!g_cameraTargetError.empty()) {
+            const std::string why = g_cameraTargetError;
+            g_cameraTarget = CameraTargetSpec{};
+            g_cameraTargetError.clear();
+            g_preview.setFitMode(PreviewFitMode::All);
+            ViewerRpcServer::fail("target_unresolved", why);
+        }
 
         std::filesystem::path out;
         const std::string outArg = args.value("out", std::string{});
