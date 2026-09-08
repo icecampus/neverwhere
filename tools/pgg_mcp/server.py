@@ -66,6 +66,8 @@ def _find_viewer_binary(root: str) -> Optional[str]:
     if env:
         candidates.append(env)
     candidates += [
+        "_int_linux_release/src/apps/PggViewer/Release/PggViewer",
+        "_int_linux/src/apps/PggViewer/Debug/PggViewer",
         "_int_clion_release/src/apps/PggViewer/Release/PggViewer",
         "_int_clion/src/apps/PggViewer/Debug/PggViewer",
         "_intermediate_64/src/apps/PggViewer/Debug/PggViewer",

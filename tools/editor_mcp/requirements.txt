@@ -1,1 +1,2 @@
-mcp>=1.0
+# mcp<2: server.py imports mcp.server.fastmcp, removed in mcp SDK 2.0
+mcp>=1.0,<2.0
