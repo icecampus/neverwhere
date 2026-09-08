@@ -1,0 +1,117 @@
+param seed: int = 5
+param island_rx: f32 = 12.5
+param island_rz: f32 = 10.0
+
+import lib.parts
+import lib.architecture
+import lib.ironwork
+import clocktower.platform
+import clocktower.body
+
+# Стимпанк-ратуша с часами по референсу (image-d6c87179): скальный лепестковый островок
+# с булыжной мостовой и причалом, четыре сужающихся кверху яруса с арочными окнами,
+# галереями-балконами на колоннах и наружными лестницами, часовая башня с красным
+# шатром, медный купол на рёбрах справа, шпиль-башенка сзади справа, латунная
+# шестерня у входа, фонари. Верх +Y, фасад +Z; башня смещена влево (x = −1.2),
+# купол — вправо, как на референсе.
+#
+# Материалы — группы faces: brick (первый ярус), wall (верхние ярусы, башня), wood
+# (колонны, рамы, перила, двери-полотна — door), brass (капители, карнизы, часы,
+# шестерня, навершия), copper (купол, конус шпиля), roof_red (шатёр), glass (стёкла),
+# dial (циферблаты), trim (плиты балконов/карнизов), stone (ступени, пороги), cobble,
+# rock (островок), iron/lamp/bulb (фонари), edge (фаски).
+
+root_rng = rng_from_seed(seed)
+
+# --- раскладка по высоте --------------------------------------------------------------
+h0 = 4.4
+h1 = 3.6
+h2 = 3.6
+h3 = 3.4
+y1 = h0
+y2 = y1 + h1
+y3 = y2 + h2
+y_tower = y3 + h3
+tower_x = 0.0 - 1.6
+
+# --- ярусы ------------------------------------------------------------------------------
+l0 = body.storey(w = 16.0, d = 12.0, h = h0, n_front = 4, n_side = 3, n_back = 4, win_w = 1.4, win_h = 2.6, grp = "brick", col_r = 0.28)
+# Двери первого яруса — между окнами ряда (окна на x = ±1.85, ±5.55): узкая слева,
+# парадная по центру; шестерня на оси — у правой стены.
+door_l = transform(architecture.arch_door(w = 1.5, h = 3.0, rng = split_rng(root_rng, key = "door_l")), translate = vec3(-3.7, 0, 6.10))
+door_c = transform(architecture.arch_door(w = 2.0, h = 3.6, rng = split_rng(root_rng, key = "door_c")), translate = vec3(0, 0, 6.10))
+gear = transform(architecture.gear(r = 0.9, teeth = 16, t = 0.18), translate = vec3(3.7, 1.05, 6.8))
+gear_axle = parts.piece(size = vec3(0.16, 1.05, 0.16), pos = vec3(3.7, 0.52, 6.55), grp = "wood")
+ground = merge(l0, door_l, door_c, gear, gear_axle)
+
+l1 = transform(body.storey(w = 15.0, d = 11.5, h = h1, n_front = 5, n_side = 3, n_back = 4, win_w = 1.5, win_h = 2.5, grp = "wall"), translate = vec3(0, y1, 0))
+l2 = transform(body.storey(w = 13.0, d = 9.5, h = h2, n_front = 4, n_side = 2, n_back = 3, win_w = 1.5, win_h = 2.5, grp = "wall"), translate = vec3(0, y2, 0))
+l3 = transform(body.storey(w = 8.0, d = 7.0, h = h3, n_front = 3, n_side = 2, n_back = 2, win_w = 1.3, win_h = 2.4, grp = "wall"), translate = vec3(tower_x, y3, 0))
+
+# --- балконы-галереи с колоннадами ------------------------------------------------------
+bal1 = transform(architecture.balcony(len = 15.6, depth = 1.8), translate = vec3(0, y1, 5.75))
+bal1_side = architecture.balcony(len = 11.5, depth = 1.4)
+bal1_l = transform(transform(bal1_side, rotate = vec3(0, 90, 0)), translate = vec3(-7.5, y1, 0))
+bal1_r = transform(transform(bal1_side, rotate = vec3(0, 270, 0)), translate = vec3(7.5, y1, 0))
+col1 = transform(body.colonnade(n = 4, span = 7.6, h = h1, z = 6.75, r = 0.16), translate = vec3(2.4, y1, 0))
+bal2 = transform(architecture.balcony(len = 13.6, depth = 2.0), translate = vec3(0, y2, 4.75))
+bal2_side = architecture.balcony(len = 9.5, depth = 1.3)
+bal2_l = transform(transform(bal2_side, rotate = vec3(0, 90, 0)), translate = vec3(-6.5, y2, 0))
+bal2_r = transform(transform(bal2_side, rotate = vec3(0, 270, 0)), translate = vec3(6.5, y2, 0))
+col2 = transform(body.colonnade(n = 3, span = 4.4, h = h2, z = 5.3, r = 0.15), translate = vec3(0.2, y2, 0))
+bal3 = transform(architecture.balcony(len = 8.6, depth = 2.0), translate = vec3(tower_x, y3, 3.5))
+bal3_side = architecture.balcony(len = 7.0, depth = 1.2)
+bal3_l = transform(transform(bal3_side, rotate = vec3(0, 90, 0)), translate = vec3(tower_x - 4.0, y3, 0))
+bal3_r = transform(transform(bal3_side, rotate = vec3(0, 270, 0)), translate = vec3(tower_x + 4.0, y3, 0))
+balconies = merge(bal1, bal1_l, bal1_r, col1, bal2, bal2_l, bal2_r, col2, bal3, bal3_l, bal3_r)
+
+# --- наружные лестницы ------------------------------------------------------------------
+# Первый марш слева и его зеркало справа (mirror по x = 0), выше — зигзаг слева.
+st0 = transform(architecture.stair(run = 4.4, rise = h0, n = 14, w = 1.0), translate = vec3(-9.8, 0, 6.85))
+st0_both = mirror(st0, origin = vec3(0, 0, 0), normal = vec3(1, 0, 0))
+st1 = transform(architecture.stair(run = 3.6, rise = h1, n = 12, w = 0.85), translate = vec3(-7.0, y1, 6.25))
+st2 = transform(architecture.stair(run = 3.6, rise = h2, n = 12, w = 0.9), translate = vec3(-6.2, y2, 5.25))
+stairs = merge(st0_both, st1, st2)
+
+# --- башня, купол, шпиль ----------------------------------------------------------------
+tower = transform(body.clock_tower(w = 6.0, h = 7.5, roof_h = 7.5, clock_r = 1.6, grp = "wall"), translate = vec3(tower_x, y_tower, 0))
+dome = transform(architecture.dome(r = 2.9, drum_h = 1.6), translate = vec3(4.4, y3, 0.6))
+spire = transform(body.spire_tower(r = 1.7, h = 13.5, cone_h = 6.0, grp = "wall"), translate = vec3(5.4, y1, -3.2))
+
+# --- фонари -----------------------------------------------------------------------------
+lamp = ironwork.lamp_post(base_y = 0.0, arm_y = 2.8, arm_half = 0.55, lantern_x = -0.42, lantern_s = 0.8)
+lamps = merge(transform(lamp, translate = vec3(-2.6, 0, 9.0)), transform(lamp, translate = vec3(2.6, 0, 9.0)), transform(lamp, translate = vec3(-9.8, 0, 3.0)), transform(lamp, translate = vec3(9.8, 0, 3.0)), transform(lamp, translate = vec3(7.1, y1, 6.9)), transform(lamp, translate = vec3(tower_x + 3.6, y3, 4.8)), transform(lamp, translate = vec3(tower_x - 3.6, y3, 4.8)))
+
+# --- платформа --------------------------------------------------------------------------
+plat = platform.platform(rx = island_rx, rz = island_rz, h = 2.2, keep_out = vec3(7.7, 0, 5.7), rng = split_rng(root_rng, key = "platform"))
+
+building = merge(ground, l1, l2, l3, balconies, stairs, tower, dome, spire, lamps)
+scene_raw = merge(plat, building)
+
+# --- окраска: @Cd по группам (faces) ------------------------------------------------------
+paint_rng = split_rng(root_rng, key = "paint")
+brick_col = mix(vec3(0.34, 0.15, 0.09), vec3(0.20, 0.09, 0.06), fbm(scale = 1.6, octaves = 3, rng = split_rng(paint_rng, key = "brick")))
+wall_col = mix(vec3(0.27, 0.14, 0.09), vec3(0.15, 0.08, 0.06), fbm(scale = 1.2, octaves = 3, rng = split_rng(paint_rng, key = "wall")))
+rock_col = mix(vec3(0.20, 0.19, 0.18), vec3(0.11, 0.105, 0.10), fbm(scale = 0.8, octaves = 3, rng = split_rng(paint_rng, key = "rock")))
+cobble_col = vec3(0.26, 0.25, 0.24) * @tint
+copper_col = mix(vec3(0.10, 0.30, 0.19), vec3(0.06, 0.20, 0.14), fbm(scale = 2.0, octaves = 2, rng = split_rng(paint_rng, key = "copper")))
+c1 = ingroup("brick") ? brick_col : vec3(1.0, 0.0, 1.0)
+c2 = ingroup("wall") ? wall_col : c1
+c3 = ingroup("wood") ? vec3(0.10, 0.058, 0.035) * @tint : c2
+c4 = ingroup("door") ? vec3(0.09, 0.26, 0.15) * @tint : c3
+c5 = ingroup("glass") ? vec3(0.38, 0.22, 0.08) : c4
+c6 = ingroup("brass") ? vec3(0.62, 0.42, 0.13) : c5
+c7 = ingroup("copper") ? copper_col : c6
+c8 = ingroup("roof_red") ? vec3(0.42, 0.06, 0.05) : c7
+c9 = ingroup("dial") ? vec3(0.92, 0.86, 0.70) : c8
+c10 = ingroup("trim") ? vec3(0.17, 0.11, 0.07) : c9
+c11 = ingroup("stone") ? vec3(0.30, 0.28, 0.26) : c10
+c12 = ingroup("cobble") ? cobble_col : c11
+c13 = ingroup("rock") ? rock_col : c12
+c14 = ingroup("iron") ? vec3(0.03, 0.03, 0.034) : c13
+c15 = ingroup("lamp") ? vec3(1.0, 0.62, 0.22) : c14
+c16 = ingroup("bulb") ? vec3(1.0, 0.92, 0.6) : c15
+edge_mul = ingroup("edge") ? vec3(1.4, 1.35, 1.3) : vec3(1.0)
+scene_col = set(scene_raw, "Cd", c16 * edge_mul, domain = faces)
+scene = bake_ao(scene_col, rays = 12, distance = 1.2, rng = split_rng(root_rng, key = "ao"), domain = points)
+output scene

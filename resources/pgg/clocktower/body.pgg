@@ -1,0 +1,88 @@
+# Ярусы часовой башни: коробка этажа с рядами арочных окон по четырём фасадам,
+# угловыми колоннами и карнизом; башня с часами; шпиль-башенка. Каждый ярус —
+# в локальной системе (центр по x/z в 0, низ на y = 0, лицо +Z), ставится
+# внешним transform. Группы — как в lib/architecture.pgg, стены — grp яруса.
+
+import lib.parts
+import lib.architecture
+import lib.ironwork
+
+def window_row(n: int, span: f32, win: geo<mesh>, y: f32, z: f32, yaw_deg: f32) -> (out: geo<mesh>) {
+    """Ряд из n одинаковых окон win (лицо +Z, низ на y = 0) равномерно по отрезку
+    длиной span вдоль X (первое/последнее на полшага от края), на высоте y, затем
+    весь ряд повёрнут на yaw_deg вокруг Y и вынесен на z вдоль своей нормали —
+    yaw 0 = фасад +Z, 180 = тыл, 90/270 = боковые фасады."""
+    expect n >= 1: "window_row: хотя бы одно окно"
+    pitch = span / f32(n)
+    pts0 = mesh_line(count = n, length = span - pitch, dir = (1, 0, 0))
+    pts = transform(pts0, translate = vec3(0.0 - (span - pitch) * 0.5, y, z))
+    row = realize(instance_on_points(pts, source = win))
+    out = transform(row, rotate = vec3(0, yaw_deg, 0))
+}
+
+def storey(w: f32, d: f32, h: f32, n_front: int, n_side: int, n_back: int, win_w: f32, win_h: f32, grp: string, col_r: f32 = 0.22) -> (out: geo<mesh>) {
+    """Ярус w×d×h: коробка стен (grp), ряды арочных окон на четырёх фасадах (окно
+    win_w×win_h с подоконником на y = 0.7), четыре угловые колонны, пилястры между
+    окнами фасада и карниз сверху."""
+    box = parts.piece(size = vec3(w, h, d), pos = vec3(0, h * 0.5, 0), grp = grp)
+    win = architecture.arch_window(w = win_w, h = win_h)
+    front = window_row(n = n_front, span = w - 1.2, win = win, y = 0.7, z = d * 0.5 + 0.06, yaw_deg = 0.0)
+    back = window_row(n = n_back, span = w - 1.2, win = win, y = 0.7, z = d * 0.5 + 0.06, yaw_deg = 180.0)
+    left = window_row(n = n_side, span = d - 1.2, win = win, y = 0.7, z = w * 0.5 + 0.06, yaw_deg = 270.0)
+    right = window_row(n = n_side, span = d - 1.2, win = win, y = 0.7, z = w * 0.5 + 0.06, yaw_deg = 90.0)
+    col = architecture.column(h = h, r = col_r)
+    cols = merge(transform(col, translate = vec3(w * 0.5, 0, d * 0.5)), transform(col, translate = vec3(0.0 - w * 0.5, 0, d * 0.5)), transform(col, translate = vec3(w * 0.5, 0, 0.0 - d * 0.5)), transform(col, translate = vec3(0.0 - w * 0.5, 0, 0.0 - d * 0.5)))
+    # Пилястры фасада — полуколонны между окнами (n_front + 1, шаг ряда окон).
+    pitch = (w - 1.2) / f32(n_front)
+    pilasters = colonnade(n = n_front + 1, span = w - 1.2 + pitch, h = h - 0.3, z = d * 0.5 + 0.05, r = col_r * 0.5)
+    top = transform(architecture.cornice(w = w, d = d, h = 0.35), translate = vec3(0, h - 0.35, 0))
+    out = merge(box, front, back, left, right, cols, pilasters, top)
+}
+
+def colonnade(n: int, span: f32, h: f32, z: f32, r: f32) -> (out: geo<mesh>) {
+    """n колонн высоты h равномерно по отрезку span вдоль X на глубине z (опоры балкона над галереей)."""
+    pitch = span / f32(n)
+    pts0 = mesh_line(count = n, length = span - pitch, dir = (1, 0, 0))
+    pts = transform(pts0, translate = vec3(0.0 - (span - pitch) * 0.5, 0, z))
+    out = realize(instance_on_points(pts, source = architecture.column(h = h, r = r)))
+}
+
+def clock_tower(w: f32, h: f32, roof_h: f32, clock_r: f32, grp: string) -> (out: geo<mesh>) {
+    """Башня w×w×h с часами на лицевом и боковых фасадах (часы на высоте h − 1.2 −
+    clock_r), двумя высокими арочными окнами под ними на фасаде, угловыми колоннами,
+    карнизом, четырьмя угловыми пинаклями, шатровой красной крышей высоты roof_h и
+    люкарнами на четырёх скатах."""
+    box = parts.piece(size = vec3(w, h, w), pos = vec3(0, h * 0.5, 0), grp = grp)
+    clock = architecture.clock_face(r = clock_r)
+    cy = h - 1.2 - clock_r
+    clocks = merge(transform(clock, translate = vec3(0, cy, w * 0.5 + 0.02)), transform(transform(clock, rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5 + 0.02, cy, 0)), transform(transform(clock, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - w * 0.5 - 0.02, cy, 0)))
+    win = architecture.arch_window(w = 0.9, h = 2.6)
+    wins = merge(window_row(n = 2, span = w - 1.6, win = win, y = 0.8, z = w * 0.5 + 0.06, yaw_deg = 0.0), window_row(n = 2, span = w - 1.6, win = win, y = 0.8, z = w * 0.5 + 0.06, yaw_deg = 180.0), window_row(n = 1, span = w - 1.6, win = win, y = 0.8, z = w * 0.5 + 0.06, yaw_deg = 90.0), window_row(n = 1, span = w - 1.6, win = win, y = 0.8, z = w * 0.5 + 0.06, yaw_deg = 270.0))
+    col = architecture.column(h = h, r = 0.2)
+    hw = w * 0.5
+    cols = merge(transform(col, translate = vec3(hw, 0, hw)), transform(col, translate = vec3(0.0 - hw, 0, hw)), transform(col, translate = vec3(hw, 0, 0.0 - hw)), transform(col, translate = vec3(0.0 - hw, 0, 0.0 - hw)))
+    top = transform(architecture.cornice(w = w, d = w, h = 0.4), translate = vec3(0, h - 0.4, 0))
+    pin = architecture.finial(h = 2.2)
+    pins = merge(transform(pin, translate = vec3(hw + 0.15, h, hw + 0.15)), transform(pin, translate = vec3(0.0 - hw - 0.15, h, hw + 0.15)), transform(pin, translate = vec3(hw + 0.15, h, 0.0 - hw - 0.15)), transform(pin, translate = vec3(0.0 - hw - 0.15, h, 0.0 - hw - 0.15)))
+    roof = transform(architecture.hip_roof(hw = hw, hd = hw, h = roof_h), translate = vec3(0, h, 0))
+    # Люкарны на четырёх скатах: на высоте 1.3 над карнизом полуглубина ската
+    # hw + 0.25 − (hw + 0.19)·(1.3 / (roof_h − 0.15)); хвост коробки уходит в скат.
+    dz = hw + 0.25 - (hw + 0.19) * (1.3 / (roof_h - 0.15)) - 0.4
+    dm = architecture.dormer(w = 1.3, h = 1.5, d = 1.8, grp = grp)
+    dm_f = transform(dm, translate = vec3(0, h + 1.3, dz))
+    dormers = merge(dm_f, transform(dm_f, rotate = vec3(0, 90, 0)), transform(dm_f, rotate = vec3(0, 180, 0)), transform(dm_f, rotate = vec3(0, 270, 0)))
+    out = merge(box, clocks, wins, cols, top, pins, roof, dormers)
+}
+
+def spire_tower(r: f32, h: f32, cone_h: f32, grp: string) -> (out: geo<mesh>) {
+    """Круглая башенка радиуса r: ствол высоты h (wall), латунный поясок, маленькие часы
+    на фасаде, три арочных окошка, медный конус высоты cone_h и латунное навершие."""
+    shaft = architecture.regroup(ironwork.spool(p0 = vec3(0, 0, 0), p1 = vec3(0, h, 0), r0 = r, r1 = r * 0.96, sides = 16), grp = grp)
+    band = architecture.regroup(ironwork.spool(p0 = vec3(0, h - 0.3, 0), p1 = vec3(0, h, 0), r0 = r * 1.08, r1 = r * 1.08, sides = 16), grp = "brass")
+    clock = transform(architecture.clock_face(r = r * 0.55), translate = vec3(0, h - 1.4 - r * 0.55, r * 0.97))
+    win = architecture.arch_window(w = 0.7, h = 1.8)
+    wins = merge(transform(win, translate = vec3(0, h * 0.35, r * 0.94)), transform(transform(win, rotate = vec3(0, 90, 0)), translate = vec3(r * 0.94, h * 0.35, 0)), transform(transform(win, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - r * 0.94, h * 0.35, 0)))
+    cone = architecture.regroup(ironwork.spool(p0 = vec3(0, h, 0), p1 = vec3(0, h + cone_h, 0), r0 = r * 1.15, r1 = 0.03, sides = 16), grp = "copper")
+    top = transform(architecture.finial(h = cone_h * 0.3), translate = vec3(0, h + cone_h - 0.05, 0))
+    out = merge(shaft, band, clock, wins, cone, top)
+}

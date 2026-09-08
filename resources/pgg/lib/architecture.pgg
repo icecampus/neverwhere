@@ -1,0 +1,233 @@
+# Архитектурные элементы «викторианско-стимпанковского» дома: колонны, арочные окна
+# и двери, балюстрады, лестницы, шатровые крыши, купол с рёбрами, часы, шестерня,
+# шпиль-навершие. Все элементы — в локальной системе (лицо +Z, вверх +Y, низ на y = 0),
+# ставятся внешним transform/parts.place. Точёные детали — ironwork.spool.
+# Группы материалов: wood, brass, glass, door, dial, copper, roof_red, trim, wall, iron,
+# edge (фаски). spool метит iron — здесь переметка regroup.
+
+import lib.parts
+import lib.ironwork
+import lib.fixtures
+
+def regroup(g: geo<mesh>, grp: string) -> (out: geo<mesh>) {
+    """Снять группу iron (её ставит ironwork.spool/rod/ring) и поставить grp — для
+    точёных деталей из латуни/меди/дерева."""
+    out = mark(unmark(g, "iron"), grp, where = true, domain = faces)
+}
+
+def column(h: f32, r: f32, grp: string = "wood") -> (out: geo<mesh>) {
+    """Колонна высоты h (низ в 0): квадратный плинт, точёная база, сужающийся ствол,
+    капитель-раструб и латунная накладка сверху. Группы: grp (ствол/плинт) и brass."""
+    expect h > 0.6: "column: короче 0.6 — не колонна, используй parts.piece"
+    plinth = parts.piece(size = vec3(r * 2.8, 0.12, r * 2.8), pos = vec3(0, 0.06, 0), grp = grp)
+    base = regroup(ironwork.spool(p0 = vec3(0, 0.12, 0), p1 = vec3(0, 0.24, 0), r0 = r * 1.3, r1 = r, sides = 10), grp = grp)
+    shaft = regroup(ironwork.spool(p0 = vec3(0, 0.24, 0), p1 = vec3(0, h - 0.30, 0), r0 = r, r1 = r * 0.88, sides = 10), grp = grp)
+    cap = regroup(ironwork.spool(p0 = vec3(0, h - 0.30, 0), p1 = vec3(0, h - 0.12, 0), r0 = r * 0.88, r1 = r * 1.35, sides = 10), grp = "brass")
+    top = parts.piece(size = vec3(r * 2.9, 0.12, r * 2.9), pos = vec3(0, h - 0.06, 0), grp = "brass")
+    out = merge(plinth, base, shaft, cap, top)
+}
+
+def arch_panel(w: f32, h: f32, t: f32, grp: string) -> (out: geo<mesh>) {
+    """Арочная плита (прямоугольник + полукруг сверху) ширины w, высоты h, толщины t,
+    центр по x/z в 0, низ на y = 0, группа grp. Полукруг — диск spool вдоль Z,
+    подрезанный clip до верхней половины."""
+    expect h > w * 0.5: "arch_panel: высота меньше радиуса арки"
+    r = w * 0.5
+    straight = h - r
+    body = parts.piece(size = vec3(w, straight, t), pos = vec3(0, straight * 0.5, 0), grp = grp)
+    disc = regroup(ironwork.spool(p0 = vec3(0, straight, 0.0 - t * 0.5), p1 = vec3(0, straight, t * 0.5), r0 = r, r1 = r, sides = 20), grp = grp)
+    half = clip(disc, origin = vec3(0, straight, 0), normal = vec3(0, 1, 0))
+    out = merge(body, half)
+}
+
+def arch_frame(w: f32, h: f32, bar: f32, depth: f32, grp: string) -> (out: geo<mesh>) {
+    """Арочная рама (наличник) под проём w×h: два косяка сечением bar×depth и
+    полукольцо-тор сверху (fixtures.ring, clip до верхней половины), замковый камень."""
+    r = w * 0.5
+    straight = h - r
+    jamb_l = parts.piece(size = vec3(bar, straight, depth), pos = vec3(0.0 - r - bar * 0.5, straight * 0.5, 0), grp = grp)
+    jamb_r = parts.piece(size = vec3(bar, straight, depth), pos = vec3(r + bar * 0.5, straight * 0.5, 0), grp = grp)
+    ring = regroup(fixtures.ring(center = vec3(0, straight, 0), radius = r + bar * 0.5, r = bar * 0.5, yaw_deg = 0), grp = grp)
+    arch = clip(ring, origin = vec3(0, straight, 0), normal = vec3(0, 1, 0))
+    key = parts.piece(size = vec3(bar * 1.6, bar * 2.0, depth + 0.04), pos = vec3(0, straight + r + bar * 0.4, 0), grp = grp)
+    out = merge(jamb_l, jamb_r, arch, key)
+}
+
+def arch_window(w: f32, h: f32) -> (out: geo<mesh>) {
+    """Арочное окно (лицо +Z, низ на y = 0): тёплое стекло (glass) утоплено на 0.06,
+    латунная рама с замком и подоконник, деревянные средник и импост."""
+    glass = transform(arch_panel(w = w - 0.04, h = h - 0.02, t = 0.06, grp = "glass"), translate = vec3(0, 0.01, -0.06))
+    frame = arch_frame(w = w, h = h, bar = 0.13, depth = 0.16, grp = "brass")
+    sill = parts.piece(size = vec3(w + 0.4, 0.10, 0.28), pos = vec3(0, -0.05, 0.05), grp = "brass")
+    mull = parts.piece(size = vec3(0.06, h - w * 0.5, 0.08), pos = vec3(0, (h - w * 0.5) * 0.5, -0.02), grp = "wood")
+    trans = parts.piece(size = vec3(w, 0.06, 0.08), pos = vec3(0, h - w * 0.5, -0.02), grp = "wood")
+    out = merge(glass, frame, sill, mull, trans)
+}
+
+def arch_door(w: f32, h: f32, rng: rng) -> (out: geo<mesh>) {
+    """Арочная дверь (лицо +Z, низ на y = 0): полотно из вертикальных досок (группа
+    door) под арочной плитой-фрамугой (glass), рама wood, латунная ручка и порог."""
+    r = w * 0.5
+    straight = h - r
+    leaf = mark(transform(parts.plank_panel(w = w - 0.04, h = straight - 0.3, t = 0.08, n = 4, rng = rng), translate = vec3(0, (straight - 0.3) * 0.5 + 0.02, -0.04)), "door", where = true, domain = faces)
+    leaf_d = unmark(leaf, "wood")
+    fan = transform(arch_panel(w = w - 0.04, h = h - 0.02, t = 0.06, grp = "glass"), translate = vec3(0, 0.01, -0.07))
+    bar = parts.piece(size = vec3(w, 0.08, 0.10), pos = vec3(0, straight - 0.26, -0.03), grp = "wood")
+    frame = arch_frame(w = w, h = h, bar = 0.12, depth = 0.16, grp = "wood")
+    knob = mark(transform(ico_sphere(subdiv = 1, radius = 0.05), translate = vec3(w * 0.3, straight * 0.45, 0.02)), "brass", where = true, domain = faces)
+    step = parts.piece(size = vec3(w + 0.5, 0.10, 0.5), pos = vec3(0, 0.05, 0.2), grp = "stone")
+    out = merge(leaf_d, fan, bar, frame, knob, step)
+}
+
+def balustrade(len: f32, h: f32) -> (out: geo<mesh>) {
+    """Перила вдоль X (центр в 0, низ на y = 0): нижний и верхний поручни, балясины
+    шагом ~0.30 (инстансы cbox на mesh_line), угловые столбики с латунными шарами."""
+    expect len > 0.4: "balustrade: короче 0.4"
+    n = int(len / 0.30)
+    pitch = len / f32(n)
+    slots0 = mesh_line(count = n - 1, length = len - 2.0 * pitch, dir = (1, 0, 0))
+    slots = transform(slots0, translate = vec3(0.0 - len * 0.5 + pitch, h * 0.5, 0))
+    bal = parts.cbox(size = vec3(0.05, h - 0.14, 0.05), k = 0.2)
+    balusters = mark(realize(instance_on_points(slots, source = bal)), "wood", where = true, domain = faces)
+    rail_lo = parts.piece(size = vec3(len, 0.07, 0.07), pos = vec3(0, 0.10, 0), grp = "wood")
+    rail_hi = parts.piece(size = vec3(len, 0.08, 0.12), pos = vec3(0, h, 0), grp = "wood")
+    newel_l = parts.piece(size = vec3(0.12, h + 0.10, 0.12), pos = vec3(0.0 - len * 0.5 + 0.06, (h + 0.10) * 0.5, 0), grp = "wood")
+    newel_r = parts.piece(size = vec3(0.12, h + 0.10, 0.12), pos = vec3(len * 0.5 - 0.06, (h + 0.10) * 0.5, 0), grp = "wood")
+    ball_l = mark(transform(ico_sphere(subdiv = 1, radius = 0.08), translate = vec3(0.0 - len * 0.5 + 0.06, h + 0.17, 0)), "brass", where = true, domain = faces)
+    ball_r = mark(transform(ico_sphere(subdiv = 1, radius = 0.08), translate = vec3(len * 0.5 - 0.06, h + 0.17, 0)), "brass", where = true, domain = faces)
+    out = merge(balusters, rail_lo, rail_hi, newel_l, newel_r, ball_l, ball_r)
+}
+
+def balcony(len: f32, depth: f32, h_rail: f32 = 1.0) -> (out: geo<mesh>) {
+    """Балкон: плита len×depth (верх плиты — y = 0, задний край на z = 0, вынос в +Z),
+    перила по переднему краю и двум торцам, четыре латунных кронштейна под плитой."""
+    slab = parts.piece(size = vec3(len, 0.22, depth), pos = vec3(0, -0.11, depth * 0.5), grp = "trim")
+    front = transform(balustrade(len = len, h = h_rail), translate = vec3(0, 0, depth - 0.08))
+    side0 = balustrade(len = depth - 0.16, h = h_rail)
+    side_l = transform(transform(side0, rotate = vec3(0, 90, 0)), translate = vec3(0.0 - len * 0.5 + 0.08, 0, depth * 0.5 - 0.08))
+    side_r = transform(transform(side0, rotate = vec3(0, 90, 0)), translate = vec3(len * 0.5 - 0.08, 0, depth * 0.5 - 0.08))
+    brk0 = transform(parts.piece(size = vec3(0.10, depth * 1.2, 0.10), pos = (0, 0, 0), grp = "brass"), rotate = vec3(-45, 0, 0))
+    brk_pts0 = mesh_line(count = 4, length = len - 0.8, dir = (1, 0, 0))
+    brk_pts = transform(brk_pts0, translate = vec3(0.0 - (len - 0.8) * 0.5, 0.0 - depth * 0.42 - 0.22, depth * 0.42))
+    brackets = mark(realize(instance_on_points(brk_pts, source = brk0)), "brass", where = true, domain = faces)
+    out = merge(slab, front, side_l, side_r, brackets)
+}
+
+def stair(run: f32, rise: f32, n: int, w: f32) -> (out: geo<mesh>) {
+    """Лестница от (0, 0, 0) вверх в +X: n ступеней (инстансы cbox по диагональной
+    mesh_line), сплошная тетива-клин (box, clip плоскостью по диагонали, группа wall),
+    перила с двух сторон: поручень-spool вдоль диагонали и столбики на каждой ступени.
+    Ширина w по Z, центр по Z в 0."""
+    expect n >= 2: "stair: минимум две ступени"
+    expect run > 0 & rise > 0: "stair: run/rise положительные"
+    t = run / f32(n)
+    r = rise / f32(n)
+    step = parts.cbox(size = vec3(t + 0.04, r, w), k = 0.15)
+    pts0 = mesh_line(count = n, length = length(vec3(t * f32(n - 1), r * f32(n - 1), 0)), dir = normalize(vec3(t, r, 0)))
+    pts = transform(pts0, translate = vec3(t * 0.5, r * 0.5, 0))
+    steps = mark(realize(instance_on_points(pts, source = step)), "stone", where = true, domain = faces)
+    wedge0 = parts.piece(size = vec3(run, rise, w - 0.1), pos = vec3(run * 0.5, rise * 0.5, 0), grp = "wall")
+    wedge = clip(wedge0, origin = vec3(0, 0, 0), normal = normalize(vec3(rise, 0.0 - run, 0)), cap_group = "wall")
+    post = parts.cbox(size = vec3(0.05, 0.9, 0.05), k = 0.2)
+    posts_l = mark(realize(instance_on_points(transform(pts, translate = vec3(0, 0.45 + r * 0.5, w * 0.5 - 0.06)), source = post)), "wood", where = true, domain = faces)
+    posts_r = mark(realize(instance_on_points(transform(pts, translate = vec3(0, 0.45 + r * 0.5, 0.0 - w * 0.5 + 0.06)), source = post)), "wood", where = true, domain = faces)
+    rail_l = regroup(ironwork.spool(p0 = vec3(t * 0.5, r + 0.9, w * 0.5 - 0.06), p1 = vec3(run - t * 0.5, rise + 0.9, w * 0.5 - 0.06), r0 = 0.04, r1 = 0.04, sides = 8), grp = "wood")
+    rail_r = regroup(ironwork.spool(p0 = vec3(t * 0.5, r + 0.9, 0.0 - w * 0.5 + 0.06), p1 = vec3(run - t * 0.5, rise + 0.9, 0.0 - w * 0.5 + 0.06), r0 = 0.04, r1 = 0.04, sides = 8), grp = "wood")
+    out = merge(steps, wedge, posts_l, posts_r, rail_l, rail_r)
+}
+
+def pyramid(hw: f32, hd: f32, h: f32, top: f32, grp: string) -> (out: geo<mesh>) {
+    """Шатёр: прямоугольник 2hw×2hd в основании (y = 0) сводится к квадрату полустороны
+    top на высоте h — sweep квадрата под 45° с @profile_scale (стороны по осям)."""
+    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
+    path = set(path0, "profile_scale", @index == 0 ? vec2(hw * 1.41421, hd * 1.41421) : vec2(top * 1.41421, top * 1.41421))
+    body = sweep(path, profile = transform(circle(sides = 4, radius = 1.0), rotate = vec3(0, 0, 45)))
+    out = mark(compute_normals(body, mode = flat), grp, where = true, domain = faces)
+}
+
+def hip_roof(hw: f32, hd: f32, h: f32, grp: string = "roof_red") -> (out: geo<mesh>) {
+    """Шатровая крыша со свесом: карнизная плита (trim) на y = 0, шатёр от y = 0.15 до h,
+    латунный гребень-навершие (finial) на вершине."""
+    eave = parts.piece(size = vec3(hw * 2.0 + 0.6, 0.15, hd * 2.0 + 0.6), pos = vec3(0, 0.075, 0), grp = "trim")
+    body = transform(pyramid(hw = hw + 0.25, hd = hd + 0.25, h = h - 0.15, top = 0.06, grp = grp), translate = vec3(0, 0.15, 0))
+    top = finial(h = h * 0.32)
+    out = merge(eave, body, transform(top, translate = vec3(0, h - 0.05, 0)))
+}
+
+def dormer(w: f32, h: f32, d: f32, grp: string, roof_grp: string = "roof_red") -> (out: geo<mesh>) {
+    """Люкарна на скате: коробка w×h×d (лицо на z = d/2, низ в 0, хвост уходит в скат),
+    арочное окошко на лице, свой маленький шатёр и латунное навершие."""
+    box = parts.piece(size = vec3(w, h, d), pos = vec3(0, h * 0.5, 0), grp = grp)
+    win = transform(arch_window(w = w * 0.5, h = h * 0.72), translate = vec3(0, h * 0.14, d * 0.5 + 0.04))
+    roof = transform(pyramid(hw = w * 0.5 + 0.15, hd = d * 0.5 + 0.15, h = h * 0.7, top = 0.04, grp = roof_grp), translate = vec3(0, h, 0))
+    top = transform(finial(h = h * 0.4), translate = vec3(0, h + h * 0.68, 0))
+    out = merge(box, win, roof, top)
+}
+
+def finial(h: f32) -> (out: geo<mesh>) {
+    """Латунное навершие высоты h (низ в 0): шар на шейке, конус-остриё, маленький шар на кончике."""
+    ball = mark(transform(ico_sphere(subdiv = 2, radius = h * 0.16), translate = vec3(0, h * 0.2, 0)), "brass", where = true, domain = faces)
+    neck = regroup(ironwork.spool(p0 = vec3(0, 0, 0), p1 = vec3(0, h * 0.08, 0), r0 = h * 0.09, r1 = h * 0.06, sides = 10), grp = "brass")
+    spike = regroup(ironwork.spool(p0 = vec3(0, h * 0.32, 0), p1 = vec3(0, h * 0.94, 0), r0 = h * 0.09, r1 = h * 0.008, sides = 10), grp = "brass")
+    tip = mark(transform(ico_sphere(subdiv = 1, radius = h * 0.045), translate = vec3(0, h * 0.95, 0)), "brass", where = true, domain = faces)
+    out = merge(ball, neck, spike, tip)
+}
+
+def dome(r: f32, drum_h: f32, grp: string = "copper") -> (out: geo<mesh>) {
+    """Купол: барабан-цилиндр высоты drum_h (низ в 0), полусфера радиуса r (ico_sphere
+    clip по экватору), восемь медных рёбер-меридианов (foreach по circle(8)), латунный
+    поясок на экваторе и фонарик-навершие (маленькая колонна + шарик)."""
+    drum = regroup(ironwork.spool(p0 = vec3(0, 0, 0), p1 = vec3(0, drum_h, 0), r0 = r * 0.96, r1 = r * 0.96, sides = 24), grp = "wall")
+    band = regroup(ironwork.spool(p0 = vec3(0, drum_h - 0.05, 0), p1 = vec3(0, drum_h + 0.15, 0), r0 = r * 1.03, r1 = r * 1.03, sides = 24), grp = "brass")
+    sphere = transform(ico_sphere(subdiv = 3, radius = r), translate = vec3(0, drum_h, 0))
+    half = clip(sphere, origin = vec3(0, drum_h, 0), normal = vec3(0, 1, 0))
+    shell = mark(compute_normals(half, mode = smooth), grp, where = true, domain = faces)
+    rib_pts = transform(circle(sides = 8, radius = 1.0), rotate = vec3(90, 0, 0))
+    ribs0 = foreach v in rib_pts {
+        dir = value(@P, on = v)
+        c = vec3(0, drum_h, 0)
+        rr = r * 1.03
+        v = fixtures.rod(p0 = c + dir * rr, p1 = c + dir * rr + vec3(0, rr * 0.55, 0), p2 = c + dir * rr * 0.55 + vec3(0, rr, 0), p3 = c + vec3(0, rr, 0), r = 0.06, n = 10)
+    }
+    ribs = regroup(ribs0, grp = "brass")
+    lantern = column(h = r * 0.5, r = r * 0.08, grp = "brass")
+    cap = finial(h = r * 0.45)
+    top = transform(merge(lantern, transform(cap, translate = vec3(0, r * 0.5, 0))), translate = vec3(0, drum_h + r * 0.98, 0))
+    out = merge(drum, band, shell, ribs, top)
+}
+
+def clock_face(r: f32) -> (out: geo<mesh>) {
+    """Часы (лицо +Z, центр в 0): белый циферблат-диск (dial), латунное кольцо-обод,
+    двенадцать латунных меток по кругу, две стрелки (10:10), латунная ось."""
+    dial = regroup(ironwork.spool(p0 = vec3(0, 0, -0.06), p1 = vec3(0, 0, 0.04), r0 = r, r1 = r, sides = 32), grp = "dial")
+    rim = regroup(fixtures.ring(center = vec3(0, 0, 0.04), radius = r + 0.04, r = r * 0.07, yaw_deg = 0), grp = "brass")
+    mark_pts = transform(circle(sides = 12, radius = r * 0.84), translate = vec3(0, 0, 0.07))
+    marks = mark(realize(instance_on_points(mark_pts, source = ico_sphere(subdiv = 1, radius = r * 0.05))), "brass", where = true, domain = faces)
+    hand_h = transform(parts.piece(size = vec3(r * 0.09, r * 0.55, 0.04), pos = vec3(0, r * 0.22, 0.08), grp = "iron"), rotate = vec3(0, 0, -60))
+    hand_m = transform(parts.piece(size = vec3(r * 0.07, r * 0.8, 0.04), pos = vec3(0, r * 0.34, 0.10), grp = "iron"), rotate = vec3(0, 0, 60))
+    hub = mark(transform(ico_sphere(subdiv = 1, radius = r * 0.08), translate = vec3(0, 0, 0.1)), "brass", where = true, domain = faces)
+    out = merge(dial, rim, marks, hand_h, hand_m, hub)
+}
+
+def gear(r: f32, teeth: int, t: f32) -> (out: geo<mesh>) {
+    """Латунная шестерня (ось Z, центр в 0): диск толщины t, зубья-cbox по окружности
+    (@orient по номеру точки), обод-тор, ступица и шесть спиц."""
+    expect teeth >= 6: "gear: минимум 6 зубьев"
+    disc = regroup(ironwork.spool(p0 = vec3(0, 0, 0.0 - t * 0.5), p1 = vec3(0, 0, t * 0.5), r0 = r, r1 = r, sides = teeth * 2), grp = "brass")
+    step = 360.0 / f32(teeth)
+    tooth_pts0 = circle(sides = teeth, radius = r + r * 0.08)
+    tooth_pts = set(tooth_pts0, "orient", orient_from_euler(vec3(0, 0, f32(@index) * step)))
+    tooth = parts.cbox(size = vec3(r * 0.18, r * 0.14, t), k = 0.2)
+    teeth_m = mark(realize(instance_on_points(tooth_pts, source = tooth)), "brass", where = true, domain = faces)
+    hub = regroup(ironwork.spool(p0 = vec3(0, 0, 0.0 - t * 0.9), p1 = vec3(0, 0, t * 0.9), r0 = r * 0.2, r1 = r * 0.2, sides = 12), grp = "brass")
+    spoke0 = parts.piece(size = vec3(r * 0.1, r * 1.6, t * 0.6), pos = (0, 0, 0), grp = "brass")
+    spokes = merge(spoke0, transform(spoke0, rotate = vec3(0, 0, 60)), transform(spoke0, rotate = vec3(0, 0, 120)))
+    out = merge(disc, teeth_m, hub, spokes)
+}
+
+def cornice(w: f32, d: f32, h: f32) -> (out: geo<mesh>) {
+    """Карниз-пояс по периметру w×d: две ступенчатые плиты (trim и brass), центр в 0, низ на y = 0."""
+    lo = parts.piece(size = vec3(w + 0.3, h * 0.7, d + 0.3), pos = vec3(0, h * 0.35, 0), grp = "trim")
+    hi = parts.piece(size = vec3(w + 0.5, h * 0.3, d + 0.5), pos = vec3(0, h * 0.85, 0), grp = "brass")
+    out = merge(lo, hi)
+}

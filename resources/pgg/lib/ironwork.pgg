@@ -104,13 +104,13 @@ def hanging_lantern(top: vec3, s: f32 = 1.0) -> (out: geo<mesh>) {
     out = merge(knob, neck, dome, brim, under, ring_top, glass, ribs, bulb, ring_lo, plate, drop)
 }
 
-def lamp_post(base_y: f32, arm_y: f32, arm_half: f32, lantern_x: f32) -> (out: geo<mesh>) {
+def lamp_post(base_y: f32, arm_y: f32, arm_half: f32, lantern_x: f32, lantern_s: f32 = 1.4) -> (out: geo<mesh>) {
     """Чугунный фонарный столб в начале координат (ось — Y): плинт и колокол на
     высоте base_y, конусный ствол, поясок посередине, на высоте arm_y — поперечина
     длиной 2·arm_half с муфтами, клёпками и торцевыми шишками, под ней два
     S-завитка (правый — mirror левого), над узлом — капитель, купол и остриё.
-    Подвесной фонарь висит на двух звеньях с точки (lantern_x, arm_y). Столб
-    ставится на пьедестал внешним transform."""
+    Подвесной фонарь (масштаб lantern_s) висит на двух звеньях с точки (lantern_x, arm_y).
+    Столб ставится на пьедестал внешним transform."""
     expect arm_half > 0.3: "lamp_post: поперечина короче фонаря"
     expect abs(lantern_x) < arm_half: "lamp_post: фонарь висит за концом поперечины"
     plinth = parts.piece(size = vec3(0.56, 0.08, 0.56), pos = vec3(0, base_y + 0.04, 0), grp = "iron")
@@ -146,7 +146,7 @@ def lamp_post(base_y: f32, arm_y: f32, arm_half: f32, lantern_x: f32) -> (out: g
     # Подвес: звено на поперечине (плоскость XY), звено поперёк, фонарь.
     link1 = fixtures.ring(center = vec3(lantern_x, arm_y - 0.05, 0), radius = 0.045, r = 0.008, yaw_deg = 0)
     link2 = fixtures.ring(center = vec3(lantern_x, arm_y - 0.125, 0), radius = 0.04, r = 0.008, yaw_deg = 90)
-    lantern = hanging_lantern(top = vec3(lantern_x, arm_y - 0.15, 0), s = 1.4)
+    lantern = hanging_lantern(top = vec3(lantern_x, arm_y - 0.15, 0), s = lantern_s)
     column = merge(plinth, foot, bell, bead, shaft, belt, belt_a, belt_b, boss, arm, both)
     out = merge(column, cap_ring, cap_dome, cap_neck, spire, link1, link2, lantern)
 }

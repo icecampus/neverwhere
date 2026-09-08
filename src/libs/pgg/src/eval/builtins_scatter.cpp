@@ -473,14 +473,19 @@ Value opDistribute(const BoundCall& bound, RunContext& run) {
         });
         probe.positions = std::make_shared<const std::vector<glm::vec3>>(std::move(pos));
     }
-    if (in.normals) {
+    // Surface normals for the candidates: go through sampleNormals so a mesh
+    // whose @N lives only on corners (compute_normals auto/flat on a
+    // mesh_from_sdf output, which carries no point normals) or has no @N at
+    // all (derived read fallback) still lets the density field read @N —
+    // the probe is a point cloud and cannot derive normals on its own.
+    if (std::shared_ptr<const std::vector<glm::vec3>> inN = sampleNormals(in, Domain::Points)) {
         std::vector<glm::vec3> nrm(cands.size());
         parallelFor(cands.size(), run.threads, [&](size_t s, size_t e) {
             for (size_t i = s; i < e; ++i) {
                 const Candidate& c = cands[i];
-                glm::vec3 n = c.bary.x * (*in.normals)[static_cast<size_t>(c.v0)] +
-                              c.bary.y * (*in.normals)[static_cast<size_t>(c.v1)] +
-                              c.bary.z * (*in.normals)[static_cast<size_t>(c.v2)];
+                glm::vec3 n = c.bary.x * (*inN)[static_cast<size_t>(c.v0)] +
+                              c.bary.y * (*inN)[static_cast<size_t>(c.v1)] +
+                              c.bary.z * (*inN)[static_cast<size_t>(c.v2)];
                 const float len = glm::length(n);
                 nrm[i] = len > 0.0f ? n / len : glm::vec3(0, 1, 0);
             }

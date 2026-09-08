@@ -44,6 +44,23 @@ TEST(Scatter, MaskDrivesDensityNoPointsOutsideMask) {
     for (const glm::vec3& p : *g->positions) EXPECT_GT(p.y, 1.0f);
 }
 
+// Regression: a mesh_from_sdf output carries no point normals, and
+// compute_normals(auto/flat) writes @N on corners only. The density field
+// still has to read @N at the candidates (the probe cloud cannot derive
+// normals itself) — points must land on the flat top of a slab-cut sphere.
+TEST(Scatter, DensityReadsNormalsOfSdfMeshWithCornerNormalsOnly) {
+    pgg::RunResult r = pgg::run(
+        "slab = sdf_intersect(sdf_box(size = (6, 1, 6)), sdf_sphere(r = 2.5))\n"
+        "m = compute_normals(mesh_from_sdf(slab, voxel = 0.2), mode = auto, angle = 40)\n"
+        "pts = distribute_points(m, density = dot(@N, (0, 1, 0)) > 0.9 ? 20.0 : 0.0, min_dist = 0.2, rng = rng_from_seed(3))\n"
+        "output pts\n");
+    expectNoErrors(r);
+    pgg::GeoPtr g = geoOutput(r, "pts");
+    ASSERT_TRUE(g);
+    ASSERT_GT(g->pointCount(), 20u);
+    for (const glm::vec3& p : *g->positions) EXPECT_NEAR(p.y, 0.5f, 0.05f);
+}
+
 TEST(Scatter, MinDistHoldsPairwise) {
     const float minDist = 0.45f;
     pgg::RunResult r = pgg::run(std::string(kSetup) +
