@@ -317,7 +317,7 @@ def pgg_reference(image: str, node: str, ortho: Optional[str] = None,
     cache:{hits,misses}, reloaded, load_diagnostics?}.
     Ошибки: image не читается — invalid_input; headless/без UI —
     no_frame_loop; прогон — run_failed/run_errors как у render.
-    Пример: pgg_reference(image="tmp/bug.png", node="house", ortho="front").
+    Пример: pgg_reference(image="tmp/reference.png", node="house", ortho="front").
     """
     return _call("reference", {"image": image, "node": node, "ortho": ortho,
                                "orbit": orbit, "zoom": zoom, "size": size})
