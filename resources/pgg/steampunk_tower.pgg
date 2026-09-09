@@ -1,0 +1,225 @@
+# Стимпанк-башня-маяк по референсу (tmp/grok-image-b33ad32a): оранжевый круглый
+# корпус на широком первом ярусе с большими решётчатыми окнами, латунный пояс с
+# розетками, выступающий эркер с высокими арочными окнами под конической черепичной
+# кровлей, латунный карниз с зубцами, фонарь-маяк (стеклянный купол на рёбрах,
+# круглые перила, навершие, громоотвод). Слева — приземистая пристройка с шатровой
+# кровлей и флюгером, парадная дверь с крыльцом, латунная шестерня, вертикальные
+# трубы с коленом, неоновый круглый знак и настенный фонарь.
+#
+# Верх +Y, фасад +Z, низ на y = 0. Группы faces: wall (оранжевый корпус), brass
+# (латунь), roof (тёмная черепица), glass (стёкла), lamp (светящееся стекло/неон),
+# iron (тёмный металл), stone (ступени), wood (двери/рамы), edge (фаски).
+
+param seed: int = 7
+
+import lib.parts
+import lib.architecture
+import lib.ironwork
+import lib.fixtures
+
+# --- вспомогательное ---------------------------------------------------------------------
+
+def cyl(y0: f32, y1: f32, r0: f32, r1: f32, sides: int, grp: string) -> (out: geo<mesh>) {
+    """Цилиндр/усечённый конус вдоль Y (низ y0, верх y1), группа grp."""
+    out = architecture.regroup(ironwork.spool(p0 = vec3(0, y0, 0), p1 = vec3(0, y1, 0), r0 = r0, r1 = r1, sides = sides), grp = grp)
+}
+
+def ring_pts(n: int, radius: f32, y: f32, phase_deg: f32, cx: f32, cz: f32) -> (out: geo<points>) {
+    """n точек по окружности радиуса radius в плоскости XZ (центр cx/y/cz), @orient —
+    yaw наружу: локальный +Z точки смотрит от центра окружности."""
+    pts0 = transform(circle(sides = n, radius = radius), rotate = vec3(90, 0, 0))
+    ang = degrees(atan2(dot(@P, (1, 0, 0)), dot(@P, (0, 0, 1)))) + phase_deg
+    pts1 = set(pts0, "orient", orient_from_euler(vec3(0, ang, 0)))
+    out = transform(pts1, translate = vec3(cx, y, cz))
+}
+
+def ring_of(pts: geo<points>, source: geo<mesh>) -> (out: geo<mesh>) {
+    """Материализованные инстансы source на точках pts (учитывая @orient)."""
+    out = realize(instance_on_points(pts, source = source))
+}
+
+def porthole(r: f32) -> (out: geo<mesh>) {
+    """Иллюминатор: латунный тор-обод и утопленное тёмное стекло (лицо +Z)."""
+    rim = architecture.regroup(fixtures.ring(center = vec3(0, 0, 0.01), radius = r, r = r * 0.20, yaw_deg = 0), grp = "brass")
+    glass = architecture.regroup(ironwork.spool(p0 = vec3(0, 0, -0.03), p1 = vec3(0, 0, 0.03), r0 = r * 0.80, r1 = r * 0.80, sides = 16), grp = "glass")
+    out = merge(rim, glass)
+}
+
+def rosette_band(y0: f32, y1: f32, r: f32, n: int) -> (out: geo<mesh>) {
+    """Латунный пояс с n розетками-шариками по кругу."""
+    band = cyl(y0, y1, r, r, 28, "brass")
+    pts = ring_pts(n = n, radius = r * 0.985, y = (y0 + y1) * 0.5, phase_deg = 0.0, cx = 0.0, cz = 0.0)
+    boss = ico_sphere(subdiv = 1, radius = (y1 - y0) * 0.42)
+    bosses = mark(ring_of(pts, boss), "brass", where = true, domain = faces)
+    out = merge(band, bosses)
+}
+
+def dentil_cornice(y0: f32, y1: f32, r: f32, n: int) -> (out: geo<mesh>) {
+    """Карниз: нижний пояс, чуть более широкая верхняя плита, n зубцов под ней."""
+    h = y1 - y0
+    band_lo = cyl(y0, y0 + h * 0.45, r, r, 28, "brass")
+    plate = cyl(y0 + h * 0.45, y1, r * 1.10, r * 1.10, 28, "brass")
+    pts = ring_pts(n = n, radius = r * 1.03, y = y0 + h * 0.26, phase_deg = 0.0, cx = 0.0, cz = 0.0)
+    dentil = parts.cbox(size = vec3(0.07, h * 0.44, 0.15), k = 0.2)
+    dents = mark(ring_of(pts, dentil), "brass", where = true, domain = faces)
+    out = merge(band_lo, plate, dents)
+}
+
+def cone_roof(y0: f32, y1: f32, r: f32, grp: string) -> (out: geo<mesh>) {
+    """Коническая черепичная кровля: конус, латунная карнизная планка и 12 рёбер."""
+    body = cyl(y0, y1, r, r * 0.05, 24, grp)
+    eave = cyl(y0 - 0.14, y0 + 0.06, r * 1.07, r * 1.07, 24, "brass")
+    rib_pts = transform(circle(sides = 12, radius = 1.0), rotate = vec3(90, 0, 0))
+    ribs0 = foreach v in rib_pts {
+        dir = value(@P, on = v)
+        v = fixtures.rod(p0 = vec3(0, y0, 0) + dir * r, p1 = vec3(0, y0, 0) + dir * (r * 0.72) + vec3(0, (y1 - y0) * 0.35, 0), p2 = vec3(0, y0, 0) + dir * (r * 0.34) + vec3(0, (y1 - y0) * 0.78, 0), p3 = vec3(0, y1, 0), r = 0.045, n = 8)
+    }
+    ribs = architecture.regroup(ribs0, grp = "brass")
+    out = merge(body, eave, ribs)
+}
+
+def pipe_run(x: f32, z: f32, y0: f32, y1: f32, r: f32) -> (out: geo<mesh>) {
+    """Вертикальная латунная труба."""
+    out = architecture.regroup(ironwork.spool(p0 = vec3(x, y0, z), p1 = vec3(x, y1, z), r0 = r, r1 = r, sides = 10), grp = "brass")
+}
+
+def beacon(r: f32, drum_h: f32) -> (out: geo<mesh>) {
+    """Фонарь маяка: барабан, латунный пояс, стеклянный купол на 8 рёбрах, навершие.
+    Низ барабана на y = 0."""
+    drum = cyl(0, drum_h, r * 0.98, r * 0.98, 20, "wall")
+    band = cyl(drum_h - 0.06, drum_h + 0.14, r * 1.04, r * 1.04, 20, "brass")
+    sphere = transform(ico_sphere(subdiv = 3, radius = r), translate = vec3(0, drum_h, 0))
+    half = clip(sphere, origin = vec3(0, drum_h, 0), normal = vec3(0, 1, 0))
+    shell = mark(compute_normals(half, mode = smooth), "glass", where = true, domain = faces)
+    rib_pts = transform(circle(sides = 8, radius = 1.0), rotate = vec3(90, 0, 0))
+    ribs0 = foreach v in rib_pts {
+        dir = value(@P, on = v)
+        c = vec3(0, drum_h, 0)
+        rr = r * 1.005
+        v = fixtures.rod(p0 = c + dir * rr, p1 = c + dir * rr + vec3(0, rr * 0.55, 0), p2 = c + dir * rr * 0.55 + vec3(0, rr, 0), p3 = c + vec3(0, rr, 0), r = 0.04, n = 10)
+    }
+    ribs = architecture.regroup(ribs0, grp = "brass")
+    cap = architecture.finial(h = r * 0.55)
+    top = transform(cap, translate = vec3(0, drum_h + r * 0.98, 0))
+    out = merge(drum, band, shell, ribs, top)
+}
+
+def ring_railing(radius: f32, y: f32, h: f32, n: int) -> (out: geo<mesh>) {
+    """Круглые перила: два латунных поручня-тора и n стоек."""
+    rail_lo = architecture.regroup(fixtures.ring(center = vec3(0, y + 0.08, 0), radius = radius, r = 0.03, yaw_deg = 0), grp = "brass")
+    rail_hi = architecture.regroup(fixtures.ring(center = vec3(0, y + h, 0), radius = radius, r = 0.04, yaw_deg = 0), grp = "brass")
+    pts = ring_pts(n = n, radius = radius, y = y + h * 0.5, phase_deg = 0.0, cx = 0.0, cz = 0.0)
+    post = parts.piece(size = vec3(0.05, h, 0.05), pos = vec3(0, 0, 0), grp = "brass")
+    posts = mark(ring_of(pts, post), "brass", where = true, domain = faces)
+    out = merge(rail_lo, rail_hi, posts)
+}
+
+# --- композиция --------------------------------------------------------------------------
+
+root_rng = rng_from_seed(seed)
+
+base_r = 3.4
+base_h = 3.4
+band_h = 0.45
+tower_r = 2.35
+tower_y0 = base_h
+tower_y1 = 13.2
+cornice_y0 = tower_y1
+cornice_y1 = cornice_y0 + 0.55
+drum_y0 = cornice_y1
+drum_h = 1.15
+dome_r = 2.15
+bay_r = 2.85
+bay_y0 = base_h + 0.15
+bay_y1 = 7.5
+bay_cz = 1.55
+
+# Первый ярус и латунный пояс с розетками.
+base_body = cyl(0, base_h, base_r, base_r, 28, "wall")
+band1 = rosette_band(base_h, base_h + band_h, base_r * 1.02, 16)
+base_win = fixtures.window(w = 1.0, h = 1.7, cols = 3, rows = 3)
+base_pts = ring_pts(n = 8, radius = base_r - 0.04, y = 1.9, phase_deg = 22.5, cx = 0.0, cz = 0.0)
+base_windows = ring_of(base_pts, base_win)
+
+# Ствол башни, иллюминаторы, карниз.
+tower_body = cyl(tower_y0, tower_y1, tower_r, tower_r, 28, "wall")
+port_pts = merge(ring_pts(n = 6, radius = tower_r - 0.02, y = 8.8, phase_deg = 30.0, cx = 0.0, cz = 0.0), ring_pts(n = 6, radius = tower_r - 0.02, y = 11.1, phase_deg = 0.0, cx = 0.0, cz = 0.0))
+portholes = ring_of(port_pts, porthole(r = 0.42))
+tower_cornice = dentil_cornice(cornice_y0, cornice_y1, tower_r * 1.04, 24)
+
+# Эркер с высокими арочными окнами и конической кровлей.
+bay_body = transform(cyl(bay_y0, bay_y1, bay_r, bay_r, 28, "wall"), translate = vec3(0, 0, bay_cz))
+bay_pts0 = ring_pts(n = 8, radius = bay_r - 0.03, y = (bay_y0 + bay_y1) * 0.5, phase_deg = 0.0, cx = 0.0, cz = bay_cz)
+bay_pts = delete(bay_pts0, where = dot(@P, (0, 0, 1)) < bay_cz + 0.35 * bay_r)
+bay_win = transform(architecture.arch_window(w = 1.3, h = 2.9), translate = vec3(0, -1.45, 0))
+bay_windows = ring_of(bay_pts, bay_win)
+bay_roof0 = cone_roof(y0 = 0.0, y1 = 1.5, r = bay_r + 0.4, grp = "roof")
+bay_roof = transform(bay_roof0, translate = vec3(0, bay_y1, bay_cz))
+
+# Фонарь-маяк, перила, громоотвод.
+beacon0 = beacon(r = dome_r, drum_h = drum_h)
+beacon_asm = transform(beacon0, translate = vec3(0, drum_y0, 0))
+railing = ring_railing(radius = tower_r + 0.45, y = cornice_y1 - 0.05, h = 0.95, n = 16)
+rod_pipe = pipe_run(x = 0.35, z = 0.0 - 1.35, y0 = drum_y0 + drum_h, y1 = drum_y0 + drum_h + 3.4, r = 0.045)
+rod_ball = mark(transform(ico_sphere(subdiv = 1, radius = 0.10), translate = vec3(0.35, drum_y0 + drum_h + 3.5, 0.0 - 1.35)), "brass", where = true, domain = faces)
+
+# Вход: дверь, крыльцо, неоновый знак, настенный фонарь.
+door0 = architecture.arch_door(w = 1.35, h = 2.7, rng = split_rng(root_rng, key = "door"))
+door = transform(door0, translate = vec3(0.0 - 0.7, 0, base_r - 0.08))
+step1 = parts.piece(size = vec3(1.9, 0.16, 0.8), pos = vec3(0.0 - 0.7, 0.08, base_r + 0.30), grp = "stone")
+neon_glass = architecture.regroup(ironwork.spool(p0 = vec3(0, 0, -0.03), p1 = vec3(0, 0, 0.02), r0 = 0.30, r1 = 0.30, sides = 20), grp = "lamp")
+neon_ring = architecture.regroup(fixtures.ring(center = vec3(0, 0, 0.02), radius = 0.34, r = 0.05, yaw_deg = 0), grp = "lamp")
+neon_sign = transform(merge(neon_glass, neon_ring), translate = vec3(0.9, 1.75, base_r + 0.03))
+wall_lamp = fixtures.lantern(at = vec3(2.0, 2.2, base_r - 0.02))
+
+# Пристройка слева: коробка, шатровая кровля, окна, шестерня, флюгер.
+annex_w = 3.6
+annex_d = 3.8
+annex_h = 3.4
+annex_x = 0.0 - 4.0
+annex_z = 1.3
+annex_body = transform(parts.piece(size = vec3(annex_w, annex_h, annex_d), pos = vec3(0, annex_h * 0.5, 0), grp = "wall"), translate = vec3(annex_x, 0, annex_z))
+annex_roof0 = architecture.hip_roof(hw = annex_w * 0.5 + 0.15, hd = annex_d * 0.5 + 0.15, h = 1.7, grp = "roof")
+annex_roof = transform(annex_roof0, translate = vec3(annex_x, annex_h, annex_z))
+anx_win = fixtures.window(w = 1.0, h = 1.5, cols = 3, rows = 3)
+anx_front = transform(anx_win, translate = vec3(annex_x, 1.75, annex_z + annex_d * 0.5 + 0.01))
+anx_left = transform(transform(anx_win, rotate = vec3(0, 270, 0)), translate = vec3(annex_x - annex_w * 0.5 - 0.01, 1.75, annex_z))
+gear = transform(architecture.gear(r = 0.6, teeth = 14, t = 0.12), translate = vec3(annex_x - 1.0, 2.35, annex_z + annex_d * 0.5 + 0.08))
+vane_arm = parts.piece(size = vec3(1.2, 0.06, 0.06), pos = vec3(annex_x - annex_w * 0.5 - 0.6, annex_h + 0.5, annex_z), grp = "brass")
+vane_ball = mark(transform(ico_sphere(subdiv = 1, radius = 0.12), translate = vec3(annex_x - annex_w * 0.5 - 1.2, annex_h + 0.5, annex_z)), "brass", where = true, domain = faces)
+
+# Трубы: две справа, одна слева, колено справа.
+pipe_r1 = pipe_run(x = 2.35, z = 0.7, y0 = base_h, y1 = 9.5, r = 0.13)
+pipe_r2 = pipe_run(x = 2.15, z = 1.15, y0 = base_h, y1 = 11.0, r = 0.09)
+pipe_l1 = pipe_run(x = 0.0 - 2.35, z = 0.9, y0 = base_h, y1 = 8.0, r = 0.11)
+elbow = architecture.regroup(fixtures.rod(p0 = vec3(2.35, 8.4, 0.7), p1 = vec3(2.35, 9.6, 0.7), p2 = vec3(2.35, 10.2, 0.3), p3 = vec3(1.8, 10.3, 0.0 - 0.3), r = 0.16, n = 10), grp = "brass")
+
+building = merge(base_body, band1, tower_body, bay_body, bay_windows, bay_roof, tower_cornice, portholes, railing, beacon_asm, rod_pipe, rod_ball, base_windows, door, step1, neon_sign, wall_lamp, annex_body, annex_roof, anx_front, anx_left, gear, vane_arm, vane_ball, pipe_r1, pipe_r2, pipe_l1, elbow)
+
+# --- окраска @Cd по группам faces + запечённая AO ----------------------------------------
+paint_rng = split_rng(root_rng, key = "paint")
+wall_col = mix(vec3(0.74, 0.27, 0.09), vec3(0.56, 0.17, 0.05), fbm(scale = 1.3, octaves = 3, rng = split_rng(paint_rng, key = "wall")))
+brass_col = mix(vec3(0.72, 0.50, 0.16), vec3(0.55, 0.36, 0.10), fbm(scale = 2.2, octaves = 2, rng = split_rng(paint_rng, key = "brass")))
+roof_col = mix(vec3(0.20, 0.16, 0.11), vec3(0.11, 0.09, 0.07), fbm(scale = 3.0, octaves = 2, rng = split_rng(paint_rng, key = "roof")))
+glass_col = vec3(0.14, 0.18, 0.24)
+lamp_col = vec3(0.30, 0.60, 1.0)
+iron_col = vec3(0.03, 0.03, 0.035)
+stone_col = vec3(0.42, 0.40, 0.37)
+trim_col = vec3(0.17, 0.11, 0.07)
+wood_col = vec3(0.24, 0.13, 0.06) * @tint
+door_col = vec3(0.10, 0.28, 0.16) * @tint
+
+c1 = ingroup("wall") ? wall_col * @tint : vec3(1, 0, 1)
+c2 = ingroup("brass") ? brass_col : c1
+c3 = ingroup("roof") ? roof_col : c2
+c4 = ingroup("trim") ? trim_col : c3
+c5 = ingroup("glass") ? glass_col : c4
+c6 = ingroup("lamp") ? lamp_col : c5
+c7 = ingroup("iron") ? iron_col : c6
+c8 = ingroup("stone") ? stone_col : c7
+c9 = ingroup("wood") ? wood_col : c8
+c10 = ingroup("door") ? door_col : c9
+edge_mul = ingroup("edge") ? vec3(1.35, 1.30, 1.25) : vec3(1.0)
+building_col = set(building, "Cd", c10 * edge_mul, domain = faces)
+scene = bake_ao(building_col, rays = 12, distance = 1.5, rng = split_rng(root_rng, key = "ao"), domain = points)
+output scene
