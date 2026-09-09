@@ -1,10 +1,12 @@
 // E5 acceptance (spec §15, §16): the composition tower runs end-to-end
 // verbatim — def calls inline through four composition levels, expect
-// contracts hold, tap stays a no-op — with golden counts/bbox/watertight of
-// the current numeric profile and run-to-run reproducibility (N1).
+// contracts hold, tap stays a no-op — with the golden structural fingerprints
+// of the current numeric profile (src/tests/pgg/goldens/tower.fp, C3) and
+// run-to-run reproducibility (N1).
 #include <gtest/gtest.h>
 
 #include "pgg/eval.h"
+#include "goldens_utils.h"
 #include "test_utils.h"
 
 namespace {
@@ -23,30 +25,18 @@ TEST(Tower, CorpusMatchesGoldensAndReproduces) {
     pggtest::expectNoErrors(r);
     ASSERT_EQ(r.outputs.size(), 2u);
 
-    // scene = merge(wall, hero): two watertight parts, no welding.
+    // Golden structural fingerprints of scene (the watertight merge of wall
+    // and hero, no welding) and anchors (the poisson landing points on the
+    // wall's flat tops): src/tests/pgg/goldens/tower.fp; re-record: PggTool
+    // run src/tests/pgg/corpus/tower.pgg --param world_seed=42 --update-goldens.
+    pggtest::expectGolden("tower", r);
     pgg::GeoPtr scene = pggtest::geoOutput(r, "scene");
     ASSERT_TRUE(scene != nullptr);
     ASSERT_EQ(scene->kind, pgg::GeoKind::Mesh);
-    EXPECT_EQ(scene->pointCount(), 359222u);
-    EXPECT_EQ(scene->cornerCount(), 2155116u);
-    EXPECT_EQ(scene->faceCount(), 718372u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*scene), 0u);
-    glm::vec3 mn, mx;
-    pgg::geoBBox(*scene, mn, mx);
-    // Bbox goldens were recorded through the PggTool %g print (6 significant
-    // digits) — at magnitudes ~123 that is ~5e-4, hence the 1e-3 tolerance.
-    pggtest::expectVec3Near(mn, glm::vec3(-4.16137f, -6.1173f, -2.93377f), 1e-3f);
-    pggtest::expectVec3Near(mx, glm::vec3(18.1676f, 6.2218f, 123.009f), 1e-3f);
-
-    // anchors: the poisson landing points on the wall's flat tops.
     pgg::GeoPtr anchors = pggtest::geoOutput(r, "anchors");
     ASSERT_TRUE(anchors != nullptr);
     ASSERT_EQ(anchors->kind, pgg::GeoKind::Points);
-    EXPECT_EQ(anchors->pointCount(), 147u);
-    glm::vec3 amn, amx;
-    pgg::geoBBox(*anchors, amn, amx);
-    pggtest::expectVec3Near(amn, glm::vec3(-2.45059f, -3.04683f, 1.92822f), 1e-3f);
-    pggtest::expectVec3Near(amx, glm::vec3(2.64278f, 2.72162f, 122.997f), 1e-3f);
 
     // N1: a second run reproduces the world bit-for-bit (same seed, §5.2).
     pgg::RunResult r2 = pgg::runFile(kTower, towerParams());

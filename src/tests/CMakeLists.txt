@@ -36,6 +36,7 @@ if(TARGET pgg)
     target_link_libraries(neverwhere_tests PRIVATE pgg)
     target_compile_definitions(neverwhere_tests PRIVATE
         PGG_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pgg/corpus"
+        PGG_GOLDENS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pgg/goldens"
     )
 else()
     file(GLOB PGG_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/pgg/*_test.cpp")

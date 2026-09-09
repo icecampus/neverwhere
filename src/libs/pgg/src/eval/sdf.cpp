@@ -608,35 +608,48 @@ SdfPtr sdfFromMeshVoxelize(const Geo& geo, float voxel, unsigned threads) {
     return node;
 }
 
-MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso, unsigned threads) {
-    MeshFromSdfResult res;
+// Lattice phase: the conservative bbox of an axis-aligned primitive IS its
+// face plane, so an origin at `bbn - voxel` puts that face (and every face
+// an integer number of voxels away from it) exactly on lattice points where
+// the field is 0 up to rounding — the inside test then flips with float
+// noise and marching cubes emits a fringe of slivers / holes along the face
+// (visible as a torn sheet on thin walls, e.g. two prism shells whose end
+// faces sit one voxel apart). Shift the origin by an irrational fraction of
+// a voxel (golden-ratio conjugate) so no face at a rational model coordinate
+// can coincide with a lattice plane; the extraction stays deterministic.
+SdfLattice meshFromSdfLattice(const SdfNode& root, float voxel) {
+    SdfLattice lat;
     glm::vec3 bbn, bbx;
     root.conservativeBBox(bbn, bbx);
     if (!(bbn.x <= bbx.x && bbn.y <= bbx.y && bbn.z <= bbx.z)) {
-        res.mesh = makeMesh({}, {}, {0});  // empty field (e.g. zero instance anchors)
+        lat.empty = true;  // empty field (e.g. zero instance anchors)
+        return lat;
+    }
+    const glm::vec3 mn = bbn - glm::vec3(voxel) * (1.0f + kSdfLatticePhase);
+    const glm::vec3 mx = bbx + glm::vec3(voxel);
+    lat.origin = mn;
+    for (int i = 0; i < 3; ++i)
+        lat.dims[i] = static_cast<int>(std::ceil((mx[i] - mn[i]) / voxel)) + 1;
+    if (lat.dims.x > kSdfLatticeMaxAxisVoxels || lat.dims.y > kSdfLatticeMaxAxisVoxels ||
+        lat.dims.z > kSdfLatticeMaxAxisVoxels)
+        lat.axisOverflow = true;
+    return lat;
+}
+
+MeshFromSdfResult meshFromSdfExtract(const SdfNode& root, float voxel, float iso, unsigned threads) {
+    MeshFromSdfResult res;
+    const SdfLattice lat = meshFromSdfLattice(root, voxel);
+    if (lat.empty) {
+        res.mesh = makeMesh({}, {}, {0});
         return res;
     }
-    // Lattice phase: the conservative bbox of an axis-aligned primitive IS its
-    // face plane, so an origin at `bbn - voxel` puts that face (and every face
-    // an integer number of voxels away from it) exactly on lattice points where
-    // the field is 0 up to rounding — the inside test then flips with float
-    // noise and marching cubes emits a fringe of slivers / holes along the face
-    // (visible as a torn sheet on thin walls, e.g. two prism shells whose end
-    // faces sit one voxel apart). Shift the origin by an irrational fraction of
-    // a voxel (golden-ratio conjugate) so no face at a rational model coordinate
-    // can coincide with a lattice plane; the extraction stays deterministic.
-    constexpr float kLatticePhase = 0.381966011f;
-    const glm::vec3 mn = bbn - glm::vec3(voxel) * (1.0f + kLatticePhase);
-    const glm::vec3 mx = bbx + glm::vec3(voxel);
-    glm::ivec3 dims;
-    for (int i = 0; i < 3; ++i)
-        dims[i] = static_cast<int>(std::ceil((mx[i] - mn[i]) / voxel)) + 1;
-    constexpr int kMaxAxisVoxels = 4096;
-    if (dims.x > kMaxAxisVoxels || dims.y > kMaxAxisVoxels || dims.z > kMaxAxisVoxels) {
+    if (lat.axisOverflow) {
         res.axisOverflow = true;
         res.mesh = makeMesh({}, {}, {0});
         return res;
     }
+    const glm::vec3 mn = lat.origin;
+    const glm::ivec3 dims = lat.dims;
     const size_t total = static_cast<size_t>(dims.x) * dims.y * dims.z;
     std::vector<float> values(total);
     const int nx = dims.x;

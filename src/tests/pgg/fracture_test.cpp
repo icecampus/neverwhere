@@ -11,6 +11,7 @@
 #include "pgg/eval.h"
 #include "pgg/src/eval/builtins.h"
 #include "pgg/src/eval/fracture.h"
+#include "goldens_utils.h"
 #include "test_utils.h"
 
 namespace {
@@ -277,16 +278,11 @@ TEST(EvalE7, FractureCorpusMatchesGoldens) {
     pgg::RunResult r = pgg::runFile(kFractureCorpus, p);
     expectNoErrors(r);
     ASSERT_EQ(r.outputs.size(), 3u);
-    const pgg::Geo& rock = *pgg::asGeo(*outputOf(r, "rock"));
-    EXPECT_EQ(rock.pointCount(), 162u);
-    EXPECT_EQ(rock.faceCount(), 320u);
+    // Golden structural fingerprints of rock/fractured/chunks:
+    // src/tests/pgg/goldens/e7_fracture.fp; re-record: PggTool run
+    // src/tests/pgg/corpus/e7_fracture.pgg --update-goldens.
+    pggtest::expectGolden("e7_fracture", r);
     const pgg::Geo& fractured = *pgg::asGeo(*outputOf(r, "fractured"));
-    EXPECT_EQ(fractured.pointCount(), 135788u);
-    EXPECT_EQ(fractured.faceCount(), 271564u);
-    glm::vec3 mn, mx;
-    pgg::geoBBox(fractured, mn, mx);
-    expectVec3Near(mn, glm::vec3(-0.996878f, -1.06846f, -1.10489f), 1e-4f);
-    expectVec3Near(mx, glm::vec3(1.04136f, 0.983057f, 0.996578f), 1e-4f);
     // Three non-empty pieces: dense @island_id 0..2 on the faces.
     const std::vector<int64_t> ids = islandIds(fractured);
     ASSERT_EQ(ids.size(), fractured.faceCount());
@@ -298,9 +294,6 @@ TEST(EvalE7, FractureCorpusMatchesGoldens) {
     const std::vector<pgg::GeoPtr> pieces = pgg::splitMeshPieces(chunks);
     EXPECT_EQ(pieces.size(), unique.size());
     for (const pgg::GeoPtr& piece : pieces) EXPECT_EQ(pgg::nonManifoldEdgeCount(*piece), 0u);
-    pgg::geoBBox(chunks, mn, mx);
-    expectVec3Near(mn, glm::vec3(-1.04187f, -1.05953f, -1.09795f), 1e-4f);
-    expectVec3Near(mx, glm::vec3(1.03472f, 0.952295f, 1.03661f), 1e-4f);
 }
 
 TEST(EvalE7, FractureCorpusDeterministicAndThreadInvariant) {

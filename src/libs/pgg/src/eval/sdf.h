@@ -166,7 +166,24 @@ struct MeshFromSdfResult {
     bool boundaryTouch = false;   // a boundary-slab voxel is <= iso (W002)
 };
 
-// Samples the DAG over conservativeBBox() + 1 voxel margin and extracts the
+// The sampling lattice of mesh_from_sdf, shared with the `lattice` probe
+// (§9.6) so the inspector reports exactly the grid the extractor samples:
+// origin = conservativeBBox - voxel*(1+kSdfLatticePhase) (the irrational
+// phase keeps rational model faces off lattice planes), max corner = bbox +
+// 1 voxel, dims = ceil(span/voxel)+1 per axis.
+inline constexpr float kSdfLatticePhase = 0.381966011f;
+inline constexpr int kSdfLatticeMaxAxisVoxels = 4096;
+
+struct SdfLattice {
+    glm::vec3 origin{0.0f};
+    glm::ivec3 dims{0};
+    bool empty = false;        // empty conservative bbox (no surface to sample)
+    bool axisOverflow = false; // a grid axis would exceed the 4096-voxel guard (E306)
+};
+
+SdfLattice meshFromSdfLattice(const SdfNode& root, float voxel);
+
+// Samples the DAG over the meshFromSdfLattice() grid and extracts the
 // iso surface with marching cubes (fixed z,y,x cell order, grid-edge vertex
 // dedup, linear interpolation with the |vb-va| guard). Output carries @P
 // only (attribute barrier, §8.4).

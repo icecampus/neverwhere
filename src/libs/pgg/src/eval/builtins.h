@@ -89,6 +89,10 @@ struct BuiltinSig {
 
 const BuiltinSig* findBuiltin(const std::string& name);
 
+// The whole signature registry in registration order (spec §8 sections).
+// Shared by the typechecker, the docs tooling (`docs builtins`) and tests.
+const std::vector<BuiltinSig>& builtinRegistry();
+
 // §8.1 geometry sources as plain functions (testable without the engine;
 // the Value-level dispatch wraps them). All write @P; surface sources
 // (ico_sphere, box, grid) also write @N.

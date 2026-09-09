@@ -9,8 +9,11 @@
 // inspector means schema+stats (the tap default, §9.3). Path resolution lives
 // in the engine (it needs the FlatProgram metadata); this module owns the
 // spec parser, the deterministic L0–L2 output formats (schema/stats/coverage/
-// table, the field/mesh inspectors sample/slice/check of §9.6) and the
-// aggregate=stats merging (§9.4).
+// table, the field/mesh inspectors sample/slice/check, the MC-lattice
+// inspector lattice and the where-filtered table/find of §9.6) and the
+// aggregate=stats merging (§9.4). The where=<expr> predicate itself is parsed
+// and compiled in the engine (it needs the shared environment); this module
+// receives the evaluated per-point mask.
 //
 // Param grammar (§9.6): pairs split on TOP-LEVEL commas (commas inside `()`
 // do not split), vector values are parenthesised `(x,y,z)`, point lists use
@@ -33,7 +36,7 @@ namespace pgg {
 
 struct ProbeSpec {
     std::string path;
-    std::string inspector;  // "" = default (schema+stats); schema|stats|coverage|table|sample|slice|check
+    std::string inspector;  // "" = default (schema+stats); schema|stats|coverage|table|sample|slice|check|lattice|find
     int limit = 8;          // table row cap / check index-list cap
     bool hasLimit = false;  // limit explicitly given (valid for table and check only)
     bool aggregate = false; // aggregate=stats: merge per-instance lines (§9.4)
@@ -54,7 +57,7 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err);
 struct ProbeRecord {
     std::string origin;     // "probe" (CLI/API) | "tap" (file mark, debug mode)
     std::string path;       // target path as written / instance path
-    std::string inspector;  // schema|stats|coverage|table|sample|slice|check
+    std::string inspector;  // schema|stats|coverage|table|sample|slice|check|lattice|find
     std::string text;
 };
 
@@ -120,9 +123,21 @@ std::string formatProbeCoverage(const ProbeCoverage& c);
 
 // --- L2: table ----------------------------------------------------------------
 
-// Header `table[limit=L] (first K of N by @index)` + rows
+// Without a mask: header `table[limit=L] (first K of N by @index)` + rows
 // `i: @P=(x, y, z), name=value, ...` (cols = @P + point attributes, sorted).
-std::string probeGeoTable(const Geo& g, int limit);
+// With a mask (table[where=<expr>], §9.6): only selected points print (rows
+// keep their real @index), header `table[where=<expr>,limit=L] (first K of M
+// matching, N total)`.
+std::string probeGeoTable(const Geo& g, int limit, const BoolColumn* mask = nullptr,
+                          const std::string& whereEcho = {});
+
+// --- L2: find (§9.6) ------------------------------------------------------------
+
+// `path:find[where=<expr>]` — the "how many and where" summary over the points
+// selected by the predicate: `count K of N`, `bbox (…)..(…)` of the subset
+// (omitted when K = 0), `groups: g1 (K1), g2 (K2)` — points-domain groups with
+// K_i > 0 selected members (omitted when none). Header `find[where=<expr>]`.
+std::string probeGeoFind(const Geo& g, const BoolColumn& mask, const std::string& whereEcho);
 
 // --- L2: sample (§9.6) ----------------------------------------------------------
 
@@ -154,6 +169,26 @@ bool probeSlice(const Value& v, const std::vector<std::pair<std::string, std::st
 
 // --- L2: check (§9.6) -----------------------------------------------------------
 
+// Face-index sets of the mesh-health categories, shared by the check
+// inspector (it prints the counts) and the OBJ check-coloring
+// (obj_export --obj-color=check paints these faces): `degenerate` — zero
+// Newell area / repeated / out-of-range corner indices / fewer than 3
+// corners; `nonmanifold` — faces incident to an edge shared by 3+ faces;
+// `boundary` — faces incident to an edge used by exactly one face. The face
+// sets are sorted, deduped and disjoint from `degenerate` (broken faces add
+// no edge evidence, same rule as the inspector). nonmanifoldEdges /
+// boundaryEdges are the DISTINCT-EDGE counts the check lines print.
+struct MeshIssueFaces {
+    std::vector<int32_t> degenerate;
+    std::vector<int32_t> nonmanifold;
+    std::vector<int32_t> boundary;
+    size_t nonmanifoldEdges = 0;
+    size_t boundaryEdges = 0;
+};
+
+// false when g is not a geo<mesh> (out is reset to empty regardless).
+bool classifyMeshIssueFaces(const Geo& g, MeshIssueFaces& out);
+
 // `path:check[warn_aspect=20,limit=8]` on geo<mesh>: `key value` lines —
 // degenerate (zero-area / repeated-index faces, `degenerate_faces` list when
 // > 0), nonmanifold (edge incidence > 2), boundary (incidence 1; informative,
@@ -167,6 +202,24 @@ bool probeSlice(const Value& v, const std::vector<std::pair<std::string, std::st
 // needles; boundary and components are informative only).
 bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::string>>& params,
                    int limit, std::string& out, std::string& err);
+
+// --- L2: lattice (§9.6) ---------------------------------------------------------
+
+// `path:lattice[voxel=0.05]` on an sdf target — the marching-cubes sampling
+// lattice as the author sees it (the SAME grid mesh_from_sdf would sample:
+// meshFromSdfLattice). Header `lattice[voxel=<v>] (dims Dx Dy Dz, origin
+// (x, y, z), step <v>)`, then warnings:
+//   - `warn: face plane x=<v> is <d> from lattice plane (threshold <t>)` —
+//     an axis plane of a Box primitive (or a Sphere centre coordinate) closer
+//     than 0.05*voxel to a lattice plane;
+//   - `warn: parallel faces x=<a> and x=<b> are <d> apart (< 2*voxel)` —
+//     axis planes of two DIFFERENT primitives closer than 2 voxels (a wall
+//     MC cannot represent; coincident planes print d = 0).
+// Instance anchors are unfolded through their transform when the rotation is
+// axis-aligned (translation + uniform scale + a signed axis permutation);
+// other anchors are skipped with a `note:` line. Last line: `warns N`.
+bool probeLattice(const SdfNode& sdf, const std::vector<std::pair<std::string, std::string>>& params,
+                  std::string& out, std::string& err);
 
 // --- aggregate=stats (§9.4) -----------------------------------------------------
 

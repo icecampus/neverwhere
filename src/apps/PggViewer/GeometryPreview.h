@@ -93,6 +93,13 @@ public:
     // multiplier on the fit distance (1 = Fit, <1 closer). Applied on every
     // refit until the user orbits by hand.
     void setOrbit(float yawDeg, float pitchDeg, float zoom);
+    // Zoom alone (F2, RPC render "zoom" — alias of setOrbit's third
+    // component): the fit-distance multiplier, 1 = fit the target, 0.5 =
+    // twice closer, 3 = three times farther. Survives refits like setOrbit.
+    void setZoom(float zoom);
+    // Absolute orbit distance in meters from the orbit center (F2, RPC render
+    // "distance"); converted to the equivalent fit-zoom so refits keep it.
+    void setDistance(float meters);
 
     // Aims the orbit at an explicit target (A2): the target is remembered, so
     // with fit mode Target the refits and the Fit button return to it instead
@@ -125,6 +132,19 @@ public:
     float distance() const { return m_distance; }
     glm::vec3 sceneCenter() const { return m_sceneCenter; }
     float sceneRadius() const { return m_sceneRadius; }
+    // Orbit angles in degrees (the F3 frame key — the effective camera state).
+    float yawDeg() const { return glm::degrees(m_yaw); }
+    float pitchDeg() const { return glm::degrees(m_pitch); }
+
+    // Framebuffer-pixel rect (top-down origin) of the image drawn by the last
+    // drawWindowContents — the F1 screenshot crop region. w/h are 0 until the
+    // pane is first drawn.
+    struct ImageRectPx { int x = 0, y = 0, w = 0, h = 0; };
+    ImageRectPx lastImageRectPx() const { return m_lastImageRectPx; }
+
+    // Offscreen pass clear color (linear 0..1) — the known exact background of
+    // preview captures; the F3 silhouette metrics take it as the model bg.
+    static constexpr float kClearColor[4] = {0.14f, 0.15f, 0.18f, 1.0f};
 
     // ImGui window body (call between simgui_new_frame and the swapchain pass).
     // Draws the image, orbit/pan/zoom on hover, and a status line.
@@ -198,4 +218,5 @@ private:
     std::string m_summary;
     std::string m_error;
     bool m_ok = false;
+    ImageRectPx m_lastImageRectPx;  // written by drawWindowContents every frame
 };

@@ -799,6 +799,17 @@ void GeometryPreview::setOrbit(float yawDeg, float pitchDeg, float zoom) {
     m_distance = m_radius * 2.6f * m_fitZoom;
 }
 
+void GeometryPreview::setZoom(float zoom) {
+    m_fitZoom = std::clamp(zoom, 0.05f, 50.0f);
+    m_distance = m_radius * 2.6f * m_fitZoom;
+}
+
+void GeometryPreview::setDistance(float meters) {
+    // Distance persists across refits as the equivalent fit-zoom (fit() and
+    // setTarget() recompute m_distance from m_fitZoom).
+    setZoom(std::max(1e-3f, meters) / std::max(1e-3f, m_radius * 2.6f));
+}
+
 void GeometryPreview::setTarget(const glm::vec3& center, float radius, std::optional<float> distance) {
     m_targetCenter = center;
     m_targetRadius = std::max(1e-3f, radius);
@@ -959,6 +970,15 @@ void GeometryPreview::drawWindowContents() {
                                ImGuiButtonFlags_MouseButtonMiddle);
     const ImVec2 rmin = ImGui::GetItemRectMin();
     const ImVec2 rmax = ImGui::GetItemRectMax();
+    // F1: the image rect in framebuffer pixels — the screenshot crop region
+    // (the capture readback covers the whole window; the crop keeps only the
+    // preview viewport, without the toolbar line above).
+    const int px0 = static_cast<int>(std::lround(rmin.x * fbScale.x));
+    const int py0 = static_cast<int>(std::lround(rmin.y * fbScale.y));
+    m_lastImageRectPx.x = px0;
+    m_lastImageRectPx.y = py0;
+    m_lastImageRectPx.w = std::max(0, static_cast<int>(std::lround(rmax.x * fbScale.x)) - px0);
+    m_lastImageRectPx.h = std::max(0, static_cast<int>(std::lround(rmax.y * fbScale.y)) - py0);
     if (m_texView.id != SG_INVALID_ID) {
         // GL render targets are stored bottom-up: flip V when the backend's
         // origin is bottom-left. (Verified on GLCORE: without the flip the
@@ -1008,7 +1028,7 @@ void GeometryPreview::render() {
 
     sg_pass pass = {};
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass.action.colors[0].clear_value = {0.14f, 0.15f, 0.18f, 1.0f};
+    pass.action.colors[0].clear_value = {kClearColor[0], kClearColor[1], kClearColor[2], kClearColor[3]};
     pass.action.depth.load_action = SG_LOADACTION_CLEAR;
     pass.action.depth.clear_value = 1.0f;
     pass.attachments.colors[0] = m_colorAttach;

@@ -43,6 +43,26 @@ TEST(Schema, StaticE302ThroughDefBoundary) {
     EXPECT_TRUE(r.outputs.empty());  // caught before execution
 }
 
+TEST(Schema, StaticE302CarriesConsumptionAndInlineChain) {
+    // D1 (agent_tooling_plan): the §9.5 context of the same failure — the
+    // field's consumption point, the def argument it rode in on and the
+    // caller's origin expression.
+    pgg::RunResult r = runSrc(
+        "def displace(geo: geo, amount: field<f32>) -> (out: geo) {\n"
+        "    \"\"\"Offset along normals.\"\"\"\n"
+        "    out = set_position(geo, offset = @N * amount)\n"
+        "}\n"
+        "root = rng_from_seed(1)\n"
+        "base = ico_sphere(subdiv = 1, radius = 1.0)\n"
+        "rock = displace(base, amount = fbm(scale = 2.5, rng = root) * @height_rel)\n"
+        "output rock\n");
+    EXPECT_EQ(countCode(r, "E302"), 1);
+    EXPECT_TRUE(hasMessage(r, "E302", "[at displace[0].out]"));
+    EXPECT_TRUE(hasMessage(r, "E302", "field consumed by set_position on displace[0].out"));
+    EXPECT_TRUE(hasMessage(r, "E302", "\xe2\x86\x90 arg amount of displace[0]"));               // ←
+    EXPECT_TRUE(hasMessage(r, "E302", "\xe2\x86\x90 fbm(scale = 2.5, rng = root) * @height_rel"));  // ←
+}
+
 TEST(Schema, MissingNormalsAreStaticE302) {
     pgg::RunResult r = runSrc(
         "line = mesh_line(count = 4, length = 2.0)\n"
@@ -181,6 +201,69 @@ TEST(Schema, MergeSameDomainSameNameIsClean) {
         "m = merge(a, b)\n"
         "output m\n");
     pggtest::expectNoErrors(r);
+}
+
+TEST(Schema, StaticE609ThroughDefInstanceSource) {
+    // F5 (agent_tooling_plan), the lamp_fence incident: instance_on_points
+    // with a DEF call in `source`, the def marking through its string
+    // parameter (parts.piece style), realized — the @tint that realize puts on
+    // points collides with the neighbour's @tint on faces. The def parameter
+    // materializes as a flat binding with the caller's literal, so the source
+    // schema stays closed through both def boundaries and the conflict is
+    // static — before any execution.
+    pgg::RunResult r = runSrc(
+        "def part(grp: string) -> (out: geo<mesh>) {\n"
+        "    out = mark(box(size = vec3(1.0)), grp, where = true, domain = faces)\n"
+        "}\n"
+        "def fence(grp: string) -> (out: geo<mesh>) {\n"
+        "    pts = mesh_line(count = 3, length = 2.0, dir = (1, 0, 0))\n"
+        "    out = realize(instance_on_points(pts, source = part(grp = grp)))\n"
+        "}\n"
+        "pier = set(box(size = vec3(2.0)), \"tint\", vec3(0.5, 0.5, 0.5), domain = faces)\n"
+        "scene = merge(pier, fence(grp = \"iron\"))\n"
+        "output scene\n");
+    EXPECT_EQ(countCode(r, "E609"), 1);
+    EXPECT_TRUE(hasMessage(r, "E609", "static schema"));
+    EXPECT_TRUE(hasMessage(r, "E609", "@tint"));
+    EXPECT_TRUE(r.outputs.empty());  // caught before execution
+}
+
+TEST(Schema, DefInstanceSourceMatchingDomainIsClean) {
+    // Control: the neighbour's @tint on points (the blockwork workaround) —
+    // domains agree, no E609, the graph runs.
+    pgg::RunResult r = runSrc(
+        "def part(grp: string) -> (out: geo<mesh>) {\n"
+        "    out = mark(box(size = vec3(1.0)), grp, where = true, domain = faces)\n"
+        "}\n"
+        "def fence(grp: string) -> (out: geo<mesh>) {\n"
+        "    pts = mesh_line(count = 3, length = 2.0, dir = (1, 0, 0))\n"
+        "    out = realize(instance_on_points(pts, source = part(grp = grp)))\n"
+        "}\n"
+        "pier = set(box(size = vec3(2.0)), \"tint\", vec3(0.5, 0.5, 0.5), domain = points)\n"
+        "scene = merge(pier, fence(grp = \"iron\"))\n"
+        "output scene\n");
+    pggtest::expectNoErrors(r);
+    EXPECT_FALSE(r.outputs.empty());
+}
+
+TEST(Schema, UnprovableSourceNameStillDefersE609ToRuntime) {
+    // Fallback intact: the group name rides in on a launch param (not a flat
+    // literal binding), so the source schema stays open and the same conflict
+    // is reported by the runtime check — not statically.
+    pgg::RunResult r = runSrc(
+        "param g: string = \"iron\"\n"
+        "def part(grp: string) -> (out: geo<mesh>) {\n"
+        "    out = mark(box(size = vec3(1.0)), grp, where = true, domain = faces)\n"
+        "}\n"
+        "pts = mesh_line(count = 3, length = 2.0, dir = (1, 0, 0))\n"
+        "bars = realize(instance_on_points(pts, source = part(grp = g)))\n"
+        "pier = set(box(size = vec3(2.0)), \"tint\", vec3(0.5, 0.5, 0.5), domain = faces)\n"
+        "scene = merge(pier, bars)\n"
+        "output scene\n");
+    EXPECT_EQ(countCode(r, "E609"), 1);
+    for (const pgg::Diagnostic& d : r.diagnostics) {
+        if (d.code == "E609") EXPECT_EQ(d.message.find("static schema"), std::string::npos);
+    }
 }
 
 }  // namespace

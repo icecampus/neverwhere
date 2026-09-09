@@ -198,6 +198,8 @@ TEST(Contract, RuntimeErrorInsideInstanceCarriesChain) {
         "output m\n");
     EXPECT_EQ(countCode(r, "E302"), 1);
     EXPECT_TRUE(hasMessage(r, "E302", "[instance explode[0]]"));
+    // D1 (agent_tooling_plan): and the flat binding under evaluation (§9.5).
+    EXPECT_TRUE(hasMessage(r, "E302", "[at explode[0].out]"));
 }
 
 }  // namespace

@@ -712,4 +712,212 @@ TEST(Probe, E606SampleSliceCheckMisuse) {
     EXPECT_TRUE(hasMessage(runProbe(src, "b:check[warn_aspect=abc]"), "E606", "bad warn_aspect value"));
 }
 
+// --- 14. lattice (§9.6, B4) ---------------------------------------------------------
+
+TEST(Probe, LatticeCleanBox) {
+    // One box, no coincident planes, no face near a lattice plane.
+    pgg::RunResult r = runProbe("b = sdf_box(size = vec3(2, 2, 2))\noutput b\n", "b:lattice[voxel=0.05]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].inspector, "lattice");
+    EXPECT_EQ(r.probes[0].text,
+              "lattice[voxel=0.05] (dims 44 44 44, origin (-1.0691, -1.0691, -1.0691), step 0.05)\n"
+              "warns 0");
+}
+
+TEST(Probe, LatticeParallelFacePairs) {
+    // Shell of two boxes with walls 0.0625 < 2*voxel thick: three axes, two
+    // ends each — one pair warn per (axis, end), sorted by axis then coord.
+    pgg::RunResult r = runProbe(
+        "outer = sdf_box(size = vec3(2, 2, 2))\n"
+        "inner = sdf_box(size = vec3(1.875, 1.875, 1.875))\n"
+        "shell = sdf_subtract(outer, inner)\n"
+        "output shell\n",
+        "shell:lattice[voxel=0.05]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "lattice[voxel=0.05] (dims 44 44 44, origin (-1.0691, -1.0691, -1.0691), step 0.05)\n"
+              "warn: parallel faces x=-1 and x=-0.9375 are 0.0625 apart (< 2*voxel)\n"
+              "warn: parallel faces x=0.9375 and x=1 are 0.0625 apart (< 2*voxel)\n"
+              "warn: parallel faces y=-1 and y=-0.9375 are 0.0625 apart (< 2*voxel)\n"
+              "warn: parallel faces y=0.9375 and y=1 are 0.0625 apart (< 2*voxel)\n"
+              "warn: parallel faces z=-1 and z=-0.9375 are 0.0625 apart (< 2*voxel)\n"
+              "warn: parallel faces z=0.9375 and z=1 are 0.0625 apart (< 2*voxel)\n"
+              "warns 6");
+}
+
+TEST(Probe, LatticeCoincidentPlanesThroughRotatedInstance) {
+    // The mc_thin_shell_slivers shape: the wing box instance is rotated 90
+    // degrees about Y (an axis permutation — unfolded), so its +-x faces land
+    // exactly on the main box's +-z... here: local (3.75, 2, 2) -> world
+    // x/y +-1 coincide with main's x/y faces (d = 0, different primitives).
+    pgg::RunResult r = runProbe(
+        "pt = mesh_line(count = 1, length = 0.0)\n"
+        "po = set(pt, \"orient\", orient_from_euler(vec3(0, 90, 0)))\n"
+        "main = sdf_instance_on_points(pt, source = sdf_box(size = vec3(2, 2, 2)))\n"
+        "wing = sdf_instance_on_points(po, source = sdf_box(size = vec3(3.75, 2, 2)))\n"
+        "field = sdf_union(main, wing)\n"
+        "output field\n",
+        "field:lattice[voxel=0.05]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "lattice[voxel=0.05] (dims 44 44 79, origin (-1.0691, -1.0691, -1.9441), step 0.05)\n"
+              "warn: parallel faces x=-1 and x=-1 are 0 apart (< 2*voxel)\n"
+              "warn: parallel faces x=1 and x=1 are 0 apart (< 2*voxel)\n"
+              "warn: parallel faces y=-1 and y=-1 are 0 apart (< 2*voxel)\n"
+              "warn: parallel faces y=1 and y=1 are 0 apart (< 2*voxel)\n"
+              "warns 4");
+}
+
+TEST(Probe, LatticeFacePlaneOnLatticeNode) {
+    // Width 2*0.0154509 = voxel*(2 - (1 + phase)): the +x face lands exactly
+    // on a lattice plane (the pre-phase-fix mc_thin_shell_slivers failure).
+    pgg::RunResult r = runProbe("b = sdf_box(size = vec3(0.0309017, 2, 2))\noutput b\n",
+                                "b:lattice[voxel=0.05]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "lattice[voxel=0.05] (dims 4 44 44, origin (-0.0845492, -1.0691, -1.0691), step 0.05)\n"
+              "warn: face plane x=0.0154509 is 0 from lattice plane (threshold 0.0025)\n"
+              "warns 1");
+}
+
+TEST(Probe, LatticeSphereCenterNearLatticePlane) {
+    // The lattice phase is relative to the union bbox (driven by the box), so
+    // the translated sphere's centre x lands on a lattice plane (float dust).
+    pgg::RunResult r = runProbe(
+        "pt = transform(mesh_line(count = 1, length = 0.0), translate = vec3(0.0309017, 0, 0))\n"
+        "ball = sdf_instance_on_points(pt, source = sdf_sphere(r = 0.5))\n"
+        "field = sdf_union(sdf_box(size = vec3(2, 2, 2)), ball)\n"
+        "output field\n",
+        "field:lattice[voxel=0.05]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    const std::string& t = r.probes[0].text;
+    EXPECT_TRUE(t.starts_with(
+        "lattice[voxel=0.05] (dims 44 44 44, origin (-1.0691, -1.0691, -1.0691), step 0.05)\n"
+        "warn: sphere center x=0.0309017 is "));
+    EXPECT_TRUE(t.find(" from lattice plane (threshold 0.0025)\nwarns 1") != std::string::npos) << t;
+}
+
+TEST(Probe, LatticeSkipsTiltedInstanceAnchors) {
+    // A 45-degree tilt is not an axis permutation: the anchor is skipped with
+    // a note instead of reporting rotated planes as axis planes.
+    pgg::RunResult r = runProbe(
+        "pt = set(mesh_line(count = 1, length = 0.0), \"orient\", orient_from_euler(vec3(45, 0, 0)))\n"
+        "slab = sdf_instance_on_points(pt, source = sdf_box(size = vec3(2, 2, 2)))\n"
+        "output slab\n",
+        "slab:lattice[voxel=0.05]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    const std::string& t = r.probes[0].text;
+    EXPECT_TRUE(t.starts_with("lattice[voxel=0.05] (dims ")) << t;
+    EXPECT_NE(t.find("\nnote: 1 instance anchor(s) skipped (non-axis-aligned rotation)\nwarns 0"),
+              std::string::npos)
+        << t;
+}
+
+TEST(Probe, LatticeE606) {
+    const std::string src =
+        "b = box(size = vec3(2, 2, 2))\n"
+        "s = sdf_sphere(r = 1.0)\n"
+        "output b\n";
+    EXPECT_TRUE(hasMessage(runProbe(src, "b:lattice[voxel=0.05]"), "E606",
+                           "lattice needs an sdf value (target is geo<mesh>)"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "s:lattice"), "E606", "lattice needs voxel="));
+    EXPECT_TRUE(hasMessage(runProbe(src, "s:lattice[voxel=abc]"), "E606", "bad voxel value 'abc'"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "s:lattice[foo=1]"), "E606", "unknown probe parameter 'foo'"));
+    EXPECT_TRUE(hasMessage(runProbe(src, "b.P:lattice[voxel=0.05]"), "E606",
+                           "lattice does not take attr terminals"));
+}
+
+// --- 15. table[where] / find (§9.6, B5) ----------------------------------------------
+
+const std::string kWhere =
+    "l = mesh_line(count = 3, length = 2.0)\n"
+    "m0 = set(l, \"ord\", index())\n"
+    "m = mark(m0, \"sel\", where = index() > 0)\n"
+    "output m\n";
+
+TEST(Probe, TableWhereFiltersRows) {
+    pgg::RunResult r = runProbe(kWhere, "m:table[where=@ord > 0,limit=8]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    // Rows keep their real @index.
+    EXPECT_EQ(r.probes[0].text,
+              "table[where=@ord > 0,limit=8] (first 2 of 2 matching, 3 total)\n"
+              "1: @P=(0, 0, 1), ord=1\n"
+              "2: @P=(0, 0, 2), ord=2");
+}
+
+TEST(Probe, TableWhereWithLimitAndModulo) {
+    pgg::RunResult r = runProbe(kWhere, "m:table[where=@ord % 2 == 0,limit=1]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "table[where=@ord % 2 == 0,limit=1] (first 1 of 2 matching, 3 total)\n"
+              "0: @P=(0, 0, 0), ord=0");
+}
+
+TEST(Probe, TableWhereConstant) {
+    // A value (non-field) predicate broadcasts to all / no points.
+    pgg::RunResult all = runProbe(kWhere, "m:table[where=1 < 2,limit=2]");
+    pggtest::expectNoErrors(all);
+    ASSERT_EQ(all.probes.size(), 1u);
+    EXPECT_EQ(all.probes[0].text,
+              "table[where=1 < 2,limit=2] (first 2 of 3 matching, 3 total)\n"
+              "0: @P=(0, 0, 0), ord=0\n"
+              "1: @P=(0, 0, 1), ord=1");
+    pgg::RunResult none = runProbe(kWhere, "m:find[where=1 > 2]");
+    pggtest::expectNoErrors(none);
+    ASSERT_EQ(none.probes.size(), 1u);
+    EXPECT_EQ(none.probes[0].text, "find[where=1 > 2]\ncount 0 of 3");
+}
+
+TEST(Probe, FindCountBboxGroups) {
+    pgg::RunResult r = runProbe(kWhere, "m:find[where=@ord > 0]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "find[where=@ord > 0]\n"
+              "count 2 of 3\n"
+              "bbox (0, 0, 1)..(0, 0, 2)\n"
+              "groups: sel (2)");
+}
+
+TEST(Probe, FindEmptySubsetOmitsBbox) {
+    pgg::RunResult r = runProbe(kWhere, "m:find[where=@ord > 100]");
+    pggtest::expectNoErrors(r);
+    ASSERT_EQ(r.probes.size(), 1u);
+    EXPECT_EQ(r.probes[0].text,
+              "find[where=@ord > 100]\n"
+              "count 0 of 3");
+}
+
+TEST(Probe, WhereE606) {
+    const std::string sdfSrc = "s = sdf_sphere(r = 1.0)\noutput s\n";
+    // find without where
+    EXPECT_TRUE(hasMessage(runProbe(kWhere, "m:find"), "E606", "find needs where=<bool field>"));
+    // syntax error in the predicate
+    pgg::RunResult syntax = runProbe(kWhere, "m:table[where=@ord > > 1]");
+    EXPECT_EQ(countCode(syntax, "E606"), 1);
+    EXPECT_TRUE(hasMessage(syntax, "E606", "bad where expression '@ord > > 1'"));
+    // where on a non-geo target
+    EXPECT_TRUE(hasMessage(runProbe(sdfSrc, "s:find[where=@index > 0]"), "E606", "find needs a geo value"));
+    EXPECT_TRUE(hasMessage(runProbe(sdfSrc, "s:table[where=@index > 0]"), "E606", "table needs a geo value"));
+    // a non-bool field predicate
+    pgg::RunResult nonBool = runProbe(kWhere, "m:find[where=@ord]");
+    EXPECT_EQ(countCode(nonBool, "E606"), 1);
+    EXPECT_TRUE(hasMessage(nonBool, "E606", "where must evaluate to a bool field (got int)"));
+    // a non-bool constant predicate
+    EXPECT_TRUE(hasMessage(runProbe(kWhere, "m:find[where=42]"), "E606",
+                           "where must be a bool expression (got a int constant)"));
+    // a missing attribute surfaces as E302 from the predicate evaluation
+    EXPECT_EQ(countCode(runProbe(kWhere, "m:find[where=@missing > 0]"), "E302"), 1);
+    // where is not a valid parameter of other inspectors
+    EXPECT_TRUE(hasMessage(runProbe(kWhere, "m:check[where=@ord > 0]"), "E606", "unknown probe parameter 'where'"));
+}
+
 }  // namespace

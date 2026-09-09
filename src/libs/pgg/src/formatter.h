@@ -12,4 +12,9 @@ namespace pgg {
 
 std::string format(const File* file, const std::vector<Comment>& comments);
 
+// Canonical one-line text of a single expression (`value(@wid, on = p1)`),
+// in source argument order (no def-parameter reordering). Used by the
+// diagnostic inline chains (§9.5) to name the origin expression of a value.
+std::string formatExpr(const Expr* e);
+
 }  // namespace pgg

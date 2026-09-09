@@ -79,6 +79,10 @@ nw_add_lib_sources(
         src/eval/obj_export.cpp
         src/eval/docs_lookup.h
         src/eval/docs_lookup.cpp
+        src/eval/error_cards.h
+        src/eval/error_cards.cpp
+        src/eval/builtin_docs.h
+        src/eval/builtin_docs.cpp
         src/eval/geo_diff.h
         src/eval/geo_diff.cpp
         src/eval/engine.h

@@ -18,6 +18,8 @@ FieldNode* RunContext::newNode() {
 }
 
 void RunContext::report(const std::string& code, Span span, std::string message, std::string hint) {
+    if ((code == "E204" || code == "E302" || code == "E606") && !bindingStack.empty())
+        message += " [at " + bindingStack.back() + "]";
     if (diagnostics) diagnostics->push_back(Diagnostic{code, span, std::move(message), std::move(hint), false});
 }
 

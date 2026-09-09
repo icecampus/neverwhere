@@ -564,6 +564,8 @@ const std::vector<BuiltinSig>& registry() {
 
 }  // namespace
 
+const std::vector<BuiltinSig>& builtinRegistry() { return registry(); }
+
 const BuiltinSig* findBuiltin(const std::string& name) {
     static const std::unordered_map<std::string, const BuiltinSig*> kIndex = [] {
         std::unordered_map<std::string, const BuiltinSig*> m;

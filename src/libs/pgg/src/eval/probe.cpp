@@ -9,6 +9,9 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <set>
+#include <tuple>
+#include <unordered_set>
 
 #include "sdf.h"
 
@@ -25,6 +28,10 @@ std::string fmtG(double v) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%g", v);
     return buf;
+}
+
+std::string fmtVec3(const glm::vec3& v) {
+    return "(" + fmtG(v.x) + ", " + fmtG(v.y) + ", " + fmtG(v.z) + ")";
 }
 
 const char* kDomainShort[] = {"pts", "corners", "faces", "detail"};
@@ -282,8 +289,9 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
     }
     if (!out.inspector.empty() && out.inspector != "schema" && out.inspector != "stats" &&
         out.inspector != "coverage" && out.inspector != "table" && out.inspector != "sample" &&
-        out.inspector != "slice" && out.inspector != "check") {
-        err = "unknown inspector '" + out.inspector + "' (schema|stats|coverage|table|sample|slice|check)";
+        out.inspector != "slice" && out.inspector != "check" && out.inspector != "lattice" &&
+        out.inspector != "find") {
+        err = "unknown inspector '" + out.inspector + "' (schema|stats|coverage|table|sample|slice|check|lattice|find)";
         return false;
     }
     // Param names: limit/aggregate are generic typed fields; every other name
@@ -323,6 +331,15 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
         } else if (out.inspector == "check") {
             validForInspector = "warn_aspect|limit";
             known = name == "warn_aspect";
+        } else if (out.inspector == "lattice") {
+            validForInspector = "voxel";
+            known = name == "voxel";
+        } else if (out.inspector == "table") {
+            validForInspector = "where|limit";
+            known = name == "where";
+        } else if (out.inspector == "find") {
+            validForInspector = "where";
+            known = name == "where";
         }
         if (!known) {
             err = "unknown probe parameter '" + name + "' (" + validForInspector + ")";
@@ -533,20 +550,76 @@ std::string formatProbeCoverage(const ProbeCoverage& c) {
 
 // --- L2: table ----------------------------------------------------------------
 
-std::string probeGeoTable(const Geo& g, int limit) {
+std::string probeGeoTable(const Geo& g, int limit, const BoolColumn* mask, const std::string& whereEcho) {
     const size_t n = g.pointCount();
-    const size_t k = std::min(n, static_cast<size_t>(std::max(limit, 0)));
-    std::string out = "table[limit=" + std::to_string(limit) + "] (first " + std::to_string(k) + " of " +
-                      std::to_string(n) + " by @index)";
+    std::vector<size_t> sel;  // selected point indices (@index order)
+    if (mask) {
+        for (size_t i = 0; i < n && i < mask->size(); ++i)
+            if ((*mask)[i]) sel.push_back(i);
+    }
+    const size_t rows = mask ? sel.size() : n;
+    const size_t k = std::min(rows, static_cast<size_t>(std::max(limit, 0)));
+    std::string out;
+    if (mask) {
+        out = "table[where=" + whereEcho + ",limit=" + std::to_string(limit) + "] (first " +
+              std::to_string(k) + " of " + std::to_string(rows) + " matching, " + std::to_string(n) + " total)";
+    } else {
+        out = "table[limit=" + std::to_string(limit) + "] (first " + std::to_string(k) + " of " +
+              std::to_string(n) + " by @index)";
+    }
     // Cols: @P + point attributes sorted by name (@N listed among them).
     ColumnData positions = g.positions;
     std::map<std::string, ColumnData> cols;
     if (const AttrSet* attrs = g.attrs(Domain::Points))
         for (const auto& [name, col] : attrs->columns) cols[name] = col.data;
     if (g.normals) cols["N"] = g.normals;
-    for (size_t i = 0; i < k; ++i) {
+    for (size_t r = 0; r < k; ++r) {
+        const size_t i = mask ? sel[r] : r;
         out += "\n" + std::to_string(i) + ": @P=" + columnElementText(positions, i);
         for (const auto& [name, col] : cols) out += ", " + name + "=" + columnElementText(col, i);
+    }
+    return out;
+}
+
+// --- L2: find -------------------------------------------------------------------
+
+std::string probeGeoFind(const Geo& g, const BoolColumn& mask, const std::string& whereEcho) {
+    const size_t n = g.pointCount();
+    size_t k = 0;
+    glm::vec3 mn(0.0f), mx(0.0f);
+    const auto& pos = g.positions;
+    for (size_t i = 0; i < n && i < mask.size(); ++i) {
+        if (!mask[i]) continue;
+        const glm::vec3 p = pos ? (*pos)[i] : glm::vec3(0.0f);
+        if (k == 0) {
+            mn = mx = p;
+        } else {
+            mn = glm::min(mn, p);
+            mx = glm::max(mx, p);
+        }
+        ++k;
+    }
+    std::string out = "find[where=" + whereEcho + "]\ncount " + std::to_string(k) + " of " +
+                      std::to_string(n);
+    if (k > 0) out += "\nbbox " + fmtVec3(mn) + ".." + fmtVec3(mx);
+    // Points-domain groups with selected members (sorted by name).
+    if (const GroupSet* groups = g.groups(Domain::Points)) {
+        std::map<std::string, size_t> hit;
+        for (const auto& [name, col] : groups->columns) {
+            size_t c = 0;
+            for (size_t i = 0; i < n && i < mask.size() && i < col->size(); ++i)
+                if (mask[i] && (*col)[i]) ++c;
+            if (c > 0) hit[name] = c;
+        }
+        if (!hit.empty()) {
+            out += "\ngroups: ";
+            bool first = true;
+            for (const auto& [name, c] : hit) {
+                if (!first) out += ", ";
+                first = false;
+                out += name + " (" + std::to_string(c) + ")";
+            }
+        }
     }
     return out;
 }
@@ -625,10 +698,6 @@ bool parseVec3ListRaw(const std::string& s, std::vector<glm::vec3>& out) {
         start = semi + 1;
     }
     return !out.empty();
-}
-
-std::string fmtVec3(const glm::vec3& v) {
-    return "(" + fmtG(v.x) + ", " + fmtG(v.y) + ", " + fmtG(v.z) + ")";
 }
 
 // At-point field shared by sample/slice: the signed sdf field, the mesh
@@ -904,6 +973,80 @@ float faceAspect(const std::vector<glm::vec3>& P, const int32_t* corners, int32_
 
 }  // namespace
 
+bool classifyMeshIssueFaces(const Geo& g, MeshIssueFaces& out) {
+    out = MeshIssueFaces{};
+    if (g.kind != GeoKind::Mesh) return false;
+    static const std::vector<glm::vec3> kNoPos;
+    static const std::vector<int32_t> kNoIdx;
+    const std::vector<glm::vec3>& P = g.positions ? *g.positions : kNoPos;
+    const std::vector<int32_t>& cv = g.cornerVerts ? *g.cornerVerts : kNoIdx;
+    const std::vector<int32_t>& fo = g.faceOffsets ? *g.faceOffsets : kNoIdx;
+    const size_t np = P.size();
+    const size_t nf = fo.size() > 0 ? fo.size() - 1 : 0;
+
+    // Pass 1: degenerate faces (zero Newell area / repeated / out-of-range
+    // corner indices / < 3 corners) and the undirected edge incidence of the
+    // intact faces. Broken faces add no edge evidence (their winding is
+    // meaningless).
+    std::map<std::pair<int32_t, int32_t>, int32_t> edgeUse;  // (lo,hi) -> side count
+    std::vector<uint8_t> isDegen(nf, 0);
+    for (size_t f = 0; f < nf; ++f) {
+        const int32_t begin = fo[f], end = fo[f + 1];
+        bool degen = end - begin < 3;
+        for (int32_t k = begin; k < end && !degen; ++k) {
+            if (cv[k] < 0 || static_cast<size_t>(cv[k]) >= np) degen = true;
+            for (int32_t m = begin; m < k && !degen; ++m)
+                if (cv[m] == cv[k]) degen = true;
+        }
+        if (!degen) {
+            glm::vec3 n(0.0f);  // Newell
+            for (int32_t k = begin; k < end; ++k) {
+                const glm::vec3& a = P[cv[k]];
+                const glm::vec3& b = P[cv[k + 1 < end ? k + 1 : begin]];
+                n.x += (a.y - b.y) * (a.z + b.z);
+                n.y += (a.z - b.z) * (a.x + b.x);
+                n.z += (a.x - b.x) * (a.y + b.y);
+            }
+            if (glm::length(n) == 0.0f) degen = true;
+        }
+        if (degen) {
+            isDegen[f] = 1;
+            out.degenerate.push_back(static_cast<int32_t>(f));
+            continue;
+        }
+        for (int32_t k = begin; k < end; ++k) {
+            const int32_t a = cv[k], b = cv[k + 1 < end ? k + 1 : begin];
+            if (a == b) continue;
+            edgeUse[{std::min(a, b), std::max(a, b)}] += 1;
+        }
+    }
+    for (const auto& [e, count] : edgeUse) {
+        if (count == 1) ++out.boundaryEdges;
+        else if (count > 2) ++out.nonmanifoldEdges;
+    }
+    // Pass 2: the face sets — intact faces incident to a classified edge.
+    if (!edgeUse.empty()) {
+        std::vector<uint8_t> nm(nf, 0), bd(nf, 0);
+        for (size_t f = 0; f < nf; ++f) {
+            if (isDegen[f]) continue;
+            const int32_t begin = fo[f], end = fo[f + 1];
+            for (int32_t k = begin; k < end; ++k) {
+                const int32_t a = cv[k], b = cv[k + 1 < end ? k + 1 : begin];
+                if (a == b) continue;
+                const auto it = edgeUse.find({std::min(a, b), std::max(a, b)});
+                if (it == edgeUse.end()) continue;
+                if (it->second == 1) bd[f] = 1;
+                else if (it->second > 2) nm[f] = 1;
+            }
+        }
+        for (size_t f = 0; f < nf; ++f) {
+            if (nm[f]) out.nonmanifold.push_back(static_cast<int32_t>(f));
+            if (bd[f]) out.boundary.push_back(static_cast<int32_t>(f));
+        }
+    }
+    return true;
+}
+
 bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::string>>& params,
                    int limit, std::string& out, std::string& err) {
     if (g.kind != GeoKind::Mesh) {
@@ -936,13 +1079,19 @@ bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::s
         }
         return x;
     };
-    // Per-face pass: degenerate (zero Newell area / repeated / out-of-range
-    // corner indices), used points, edge incidence, directed edges, edge
-    // lengths. Broken faces add no edge/orientation evidence (their winding
-    // is meaningless), but their points are NOT isolated.
-    std::vector<int32_t> degenFaces;
-    std::map<std::pair<int32_t, int32_t>, int32_t> edgeUse;  // (lo,hi) -> side count
-    std::vector<std::pair<int32_t, int32_t>> dirEdges;       // directed, a != b
+    // Per-face pass: used points, directed edges, edge lengths. The
+    // degenerate/nonmanifold/boundary classification itself lives in
+    // classifyMeshIssueFaces (shared with the OBJ check-coloring); broken
+    // faces add no edge/orientation evidence (their winding is meaningless),
+    // but their points are NOT isolated.
+    MeshIssueFaces issueFaces;
+    classifyMeshIssueFaces(g, issueFaces);
+    const std::vector<int32_t>& degenFaces = issueFaces.degenerate;
+    const size_t boundary = issueFaces.boundaryEdges;
+    const size_t nonmanifold = issueFaces.nonmanifoldEdges;
+    std::vector<uint8_t> isDegen(nf, 0);
+    for (const int32_t f : degenFaces) isDegen[static_cast<size_t>(f)] = 1;
+    std::vector<std::pair<int32_t, int32_t>> dirEdges;  // directed, a != b
     std::vector<int32_t> dirEdgeFace;
     std::vector<float> edgeLens;
     std::vector<uint8_t> used(np, 0);
@@ -960,40 +1109,14 @@ bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::s
                 if (ra != rb) parent[std::max(ra, rb)] = std::min(ra, rb);
             }
         }
-        bool degen = end - begin < 3;
-        for (int32_t k = begin; k < end && !degen; ++k) {
-            if (cv[k] < 0 || static_cast<size_t>(cv[k]) >= np) degen = true;
-            for (int32_t m = begin; m < k && !degen; ++m)
-                if (cv[m] == cv[k]) degen = true;
-        }
-        if (!degen) {
-            glm::vec3 n(0.0f);  // Newell
-            for (int32_t k = begin; k < end; ++k) {
-                const glm::vec3& a = P[cv[k]];
-                const glm::vec3& b = P[cv[k + 1 < end ? k + 1 : begin]];
-                n.x += (a.y - b.y) * (a.z + b.z);
-                n.y += (a.z - b.z) * (a.x + b.x);
-                n.z += (a.x - b.x) * (a.y + b.y);
-            }
-            if (glm::length(n) == 0.0f) degen = true;
-        }
-        if (degen) {
-            degenFaces.push_back(static_cast<int32_t>(f));
-            continue;
-        }
+        if (isDegen[f]) continue;
         for (int32_t k = begin; k < end; ++k) {
             const int32_t a = cv[k], b = cv[k + 1 < end ? k + 1 : begin];
             if (a == b) continue;
-            edgeUse[{std::min(a, b), std::max(a, b)}] += 1;
             dirEdges.push_back({a, b});
             dirEdgeFace.push_back(static_cast<int32_t>(f));
             edgeLens.push_back(glm::distance(P[a], P[b]));
         }
-    }
-    size_t boundary = 0, nonmanifold = 0;
-    for (const auto& [e, count] : edgeUse) {
-        if (count == 1) ++boundary;
-        else if (count > 2) ++nonmanifold;
     }
     size_t isolated = 0;
     for (const uint8_t u : used)
@@ -1090,6 +1213,228 @@ bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::s
         out += "\nneedles_faces " + indexList(needleFaces);
     }
     out += issues == 0 ? "\nok" : "\nissues " + std::to_string(issues);
+    return true;
+}
+
+// --- L2: lattice (§9.6) ----------------------------------------------------------
+
+namespace {
+
+// Axis-aligned transform: translation + uniform scale + a signed axis
+// permutation (the class of rotations under which Box face planes stay axis
+// planes). img[i] = world axis of local axis i; sgn[i] = its sign.
+struct AxisXform {
+    glm::vec3 offset{0.0f};
+    float scale = 1.0f;
+    int img[3] = {0, 1, 2};
+    int sgn[3] = {1, 1, 1};
+
+    bool isIdentity() const {
+        return offset == glm::vec3(0.0f) && scale == 1.0f && img[0] == 0 && img[1] == 1 &&
+               img[2] == 2 && sgn[0] == 1 && sgn[1] == 1 && sgn[2] == 1;
+    }
+    // world[img[i]] = offset[img[i]] + sgn[i]*p[i]*scale
+    glm::vec3 apply(const glm::vec3& p) const {
+        glm::vec3 out = offset;
+        for (int i = 0; i < 3; ++i) out[img[i]] += static_cast<float>(sgn[i]) * p[i] * scale;
+        return out;
+    }
+};
+
+AxisXform composeXform(const AxisXform& outer, const AxisXform& inner) {
+    AxisXform out;
+    out.scale = outer.scale * inner.scale;
+    for (int i = 0; i < 3; ++i) {
+        out.img[i] = outer.img[inner.img[i]];
+        out.sgn[i] = outer.sgn[inner.img[i]] * inner.sgn[i];
+    }
+    out.offset = outer.apply(inner.offset);
+    return out;
+}
+
+// Snaps a quaternion to a signed axis permutation (rotation matrix entries
+// within 1e-5 of 0/±1 — the float rounding of e.g. 90-degree euler angles);
+// false for genuinely tilted rotations.
+bool axisPermutation(const glm::quat& q, AxisXform& xf) {
+    const glm::mat3 m = glm::mat3_cast(q);  // column c = image of local axis c
+    bool seen[3] = {false, false, false};
+    for (int c = 0; c < 3; ++c) {
+        int best = -1;
+        float bestAbs = 0.0f;
+        for (int r = 0; r < 3; ++r) {
+            const float a = std::fabs(m[c][r]);
+            if (a > bestAbs) {
+                bestAbs = a;
+                best = r;
+            }
+        }
+        if (std::fabs(bestAbs - 1.0f) > 1e-5f) return false;
+        for (int r = 0; r < 3; ++r)
+            if (r != best && std::fabs(m[c][r]) > 1e-5f) return false;
+        if (seen[best]) return false;
+        seen[best] = true;
+        xf.img[c] = best;
+        xf.sgn[c] = m[c][best] >= 0.0f ? 1 : -1;
+    }
+    return seen[0] && seen[1] && seen[2];
+}
+
+// One axis plane of a Box primitive (or one axis of a Sphere centre).
+struct LatticePlane {
+    int axis;
+    float coord;
+    const SdfNode* node;
+    size_t order;  // first-appearance order — the stable tiebreak (pointers don't sort)
+};
+
+struct LatticeWalk {
+    std::vector<LatticePlane> planes;    // Box face planes
+    std::vector<LatticePlane> centers;   // Sphere centres, one entry per axis
+    std::unordered_set<const SdfNode*> visitedIdentity;  // DAG sharing guard (identity xform)
+    size_t skippedAnchors = 0;
+
+    void walk(const SdfNode& n, const AxisXform& xf) {
+        if (xf.isIdentity() && !visitedIdentity.insert(&n).second) return;
+        switch (n.kind) {
+            case SdfKind::Box:
+                for (int a = 0; a < 3; ++a)
+                    for (int s = -1; s <= 1; s += 2) {
+                        const float coord = xf.offset[xf.img[a]] +
+                                            static_cast<float>(xf.sgn[a] * s) * (n.size[a] * 0.5f) * xf.scale;
+                        planes.push_back({xf.img[a], coord, &n, planes.size() + centers.size()});
+                    }
+                break;
+            case SdfKind::Sphere: {
+                const glm::vec3 c = xf.apply(glm::vec3(0.0f));
+                for (int a = 0; a < 3; ++a)
+                    centers.push_back({a, c[a], &n, planes.size() + centers.size()});
+                break;
+            }
+            case SdfKind::Union:
+            case SdfKind::UnionSmooth:
+            case SdfKind::Subtract:
+            case SdfKind::SubtractSmooth:
+            case SdfKind::Intersect:
+            case SdfKind::Grind:
+                walk(*n.a, xf);
+                walk(*n.b, xf);
+                break;
+            case SdfKind::Displace:
+                walk(*n.a, xf);
+                break;
+            case SdfKind::Instance:
+                for (const SdfInstanceAnchor& an : n.anchors) {
+                    AxisXform local;
+                    local.offset = an.pos;
+                    local.scale = an.scale;
+                    if (!axisPermutation(an.orient, local)) {
+                        ++skippedAnchors;
+                        continue;
+                    }
+                    walk(*n.a, composeXform(xf, local));
+                }
+                break;
+            case SdfKind::Grid:
+            case SdfKind::VoronoiCell:
+                break;  // no analytic axis planes (a voxelized mesh / a half-plane cell)
+        }
+    }
+};
+
+// Dedup by (node, axis, coord), keeping first appearance: shared DAG children
+// and repeated anchors would otherwise print the same plane twice.
+void dedupPlanes(std::vector<LatticePlane>& v) {
+    std::set<std::tuple<const SdfNode*, int, float>> seen;
+    size_t w = 0;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (!seen.emplace(v[i].node, v[i].axis, v[i].coord).second) continue;
+        v[w++] = v[i];
+    }
+    v.resize(w);
+}
+
+const char kAxisLetter[] = {'x', 'y', 'z'};
+
+}  // namespace
+
+bool probeLattice(const SdfNode& sdf, const std::vector<std::pair<std::string, std::string>>& params,
+                  std::string& out, std::string& err) {
+    const std::string* voxelP = findProbeParam(params, "voxel");
+    if (!voxelP) {
+        err = "lattice needs voxel=<cell size> (the voxel= you would pass to mesh_from_sdf)";
+        return false;
+    }
+    float voxel = 0.0f;
+    if (!parseFloatRaw(*voxelP, voxel) || !(voxel > 0.0f)) {
+        err = "bad voxel value '" + *voxelP + "' (a positive number expected)";
+        return false;
+    }
+    const SdfLattice lat = meshFromSdfLattice(sdf, voxel);
+    out = "lattice[voxel=" + fmtG(voxel) + "]";
+    if (lat.empty) {
+        out += " (empty conservative bbox)\nwarns 0";
+        return true;
+    }
+    out += " (dims " + std::to_string(lat.dims.x) + " " + std::to_string(lat.dims.y) + " " +
+           std::to_string(lat.dims.z) + ", origin " + fmtVec3(lat.origin) + ", step " + fmtG(voxel) +
+           (lat.axisOverflow ? ", axis overflow (>4096 voxels, E306)" : "") + ")";
+
+    LatticeWalk w;
+    w.walk(sdf, AxisXform{});
+    dedupPlanes(w.planes);
+    dedupPlanes(w.centers);
+    std::stable_sort(w.planes.begin(), w.planes.end(),
+                     [](const LatticePlane& a, const LatticePlane& b) {
+                         return a.axis != b.axis ? a.axis < b.axis : a.coord < b.coord;
+                     });
+    std::stable_sort(w.centers.begin(), w.centers.end(),
+                     [](const LatticePlane& a, const LatticePlane& b) {
+                         return a.axis != b.axis ? a.axis < b.axis : a.coord < b.coord;
+                     });
+
+    std::vector<std::string> warns;
+    std::unordered_set<std::string> seenWarns;
+    const auto addWarn = [&](std::string s) {
+        if (seenWarns.insert(s).second) warns.push_back(std::move(s));
+    };
+    const float faceThr = 0.05f * voxel;
+    const auto nearLattice = [&](int axis, float coord, float& d) {
+        const float rel = (coord - lat.origin[axis]) / voxel;
+        const float nearest = lat.origin[axis] + std::round(rel) * voxel;
+        d = std::fabs(coord - nearest);
+        return d < faceThr;
+    };
+    for (const LatticePlane& pl : w.planes) {
+        float d;
+        if (nearLattice(pl.axis, pl.coord, d))
+            addWarn("warn: face plane " + std::string(1, kAxisLetter[pl.axis]) + "=" + fmtG(pl.coord) + " is " +
+                    fmtG(d) + " from lattice plane (threshold " + fmtG(faceThr) + ")");
+    }
+    for (const LatticePlane& pl : w.centers) {
+        float d;
+        if (nearLattice(pl.axis, pl.coord, d))
+            addWarn("warn: sphere center " + std::string(1, kAxisLetter[pl.axis]) + "=" + fmtG(pl.coord) +
+                    " is " + fmtG(d) + " from lattice plane (threshold " + fmtG(faceThr) + ")");
+    }
+    // Pairs of parallel planes of DIFFERENT primitives closer than 2 voxels —
+    // a wall marching cubes cannot represent (coincident planes print d = 0).
+    const float pairThr = 2.0f * voxel;
+    for (size_t i = 0; i < w.planes.size(); ++i)
+        for (size_t j = i + 1; j < w.planes.size(); ++j) {
+            const LatticePlane& a = w.planes[i];
+            const LatticePlane& b = w.planes[j];
+            if (b.axis != a.axis || b.coord - a.coord >= pairThr) break;
+            if (a.node == b.node) continue;
+            addWarn("warn: parallel faces " + std::string(1, kAxisLetter[a.axis]) + "=" + fmtG(a.coord) +
+                    " and " + std::string(1, kAxisLetter[b.axis]) + "=" + fmtG(b.coord) + " are " +
+                    fmtG(b.coord - a.coord) + " apart (< 2*voxel)");
+        }
+
+    if (w.skippedAnchors > 0)
+        out += "\nnote: " + std::to_string(w.skippedAnchors) +
+               " instance anchor(s) skipped (non-axis-aligned rotation)";
+    for (const std::string& s : warns) out += "\n" + s;
+    out += "\nwarns " + std::to_string(warns.size());
     return true;
 }
 

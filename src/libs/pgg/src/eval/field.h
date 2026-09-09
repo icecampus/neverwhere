@@ -82,6 +82,12 @@ struct RunContext {
     // constants (a field use becomes a Const node via the usual conversion).
     std::vector<std::pair<std::string, Value>> zoneConstants;
 
+    // §9.5 diagnostic context: stack of flat binding names under evaluation
+    // (innermost last), pushed by the engine around each binding/zone
+    // evaluation. report() appends " [at <name>]" to the codes that can fire
+    // deep inside an inlined def or zone body (E204/E302/E606).
+    std::vector<std::string> bindingStack;
+
     FieldNode* newNode();
     void report(const std::string& code, Span span, std::string message, std::string hint = {});
 };

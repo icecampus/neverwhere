@@ -5,17 +5,27 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "../formatter.h"
 #include "builtins.h"
 #include "schema.h"
 
 namespace pgg {
 namespace {
 
+// One attribute read of an expression: `via` lists the local field bindings
+// the read rode in on through field closures (§7.2), outermost hop first —
+// the raw material of the §9.5 inline chain in diagnostics.
+struct AttrRead {
+    std::string name;
+    Span span;
+    std::vector<std::string> via;  // flat binding names, outermost first
+};
+
 // Attribute/group reads of an expression, closed over local field bindings
 // (the §7.2 field-closure case: a field passed as an argument is checked in
 // its consumption context after expansion).
 struct ExprClosure {
-    std::vector<std::pair<std::string, Span>> attrs;   // @attr refs (via idents too)
+    std::vector<AttrRead> attrs;                     // @attr refs (via idents too)
     std::vector<std::pair<std::string, Span>> groups;  // literal ingroup("...") reads
 };
 
@@ -27,6 +37,7 @@ public:
 
     void file(const File* f) {
         if (!f) return;
+        indexItems(f->items);
         for (const Node* item : f->items) {
             switch (item->kind) {
                 case NodeKind::Import:
@@ -74,31 +85,135 @@ private:
     std::unordered_map<std::string, GeoSchema> schemas_;
     std::unordered_map<const Expr*, GeoSchema> callSchemas_;
     std::unordered_map<std::string, ExprClosure> closures_;
+    // Constant-string provenance of flat bindings (agent_tooling_plan F5): def
+    // parameters materialize as bindings `piece[0].grp = "iron"`, so a name
+    // provably bound to a constant string keeps the name/domain arguments of
+    // mark/set/promote/... literal through def boundaries instead of opening
+    // the schema (SSA: at most one binding per name in a valid program).
+    std::unordered_map<std::string, std::string> constStrings_;
     std::vector<std::pair<std::string, Span>> outputs_;
     const BuiltinSig* lastSig_ = nullptr;  // sig of the last inferred call (multi-output check)
     bool allowMulti_ = false;              // destructuring position accepts multi-output calls
     std::vector<bool> zoneStack_;          // enclosing zones: true = repeat, false = foreach (§5.4)
+    // §9.5 diagnostic context: the flat binding currently being checked (set
+    // per statement; "" at file scope between statements), every flat binding
+    // by name for origin-expression rendering, the builtin whose field
+    // argument is being schema-checked, and an aggregator's `on` expression
+    // (its field binds there, not on the consuming geometry, §8.10).
+    std::string currentBinding_;
+    std::unordered_map<std::string, const Binding*> bindings_;
+    const char* consumingBuiltin_ = nullptr;
+    const Expr* aggregatorOn_ = nullptr;
+    // Rich inline chain supplied by checkField for its next error(); consumed
+    // (and cleared) by contextSuffix, which otherwise falls back to the
+    // generic role chain of currentBinding_.
+    std::string pendingChain_;
 
     bool isBound(const std::string& name) const {
         return std::find(boundParams_.begin(), boundParams_.end(), name) != boundParams_.end();
     }
 
     void error(const std::string& code, Span span, std::string msg, std::string hint = {}) {
-        diags_.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), false});
+        diags_.push_back(Diagnostic{code, span, std::move(msg) + contextSuffix(code), std::move(hint), false});
     }
     void warn(const std::string& code, Span span, std::string msg, std::string hint = {}) {
-        diags_.push_back(Diagnostic{code, span, std::move(msg), std::move(hint), true});
+        diags_.push_back(Diagnostic{code, span, std::move(msg) + contextSuffix(code), std::move(hint), true});
+    }
+
+    // §9.5: errors that can fire deep inside an inlined def/zone body name the
+    // flat binding under check (`[at bx[0].w]`) and, for instance bindings,
+    // the inline chain element (`[inline chain: arg w of bx[0] ← <origin
+    // expression>]`). Sites that already carry a richer chain (checkField)
+    // suppress the generic one.
+    std::string contextSuffix(const std::string& code) {
+        std::string chain = std::move(pendingChain_);
+        pendingChain_.clear();
+        if (code != "E204" && code != "E302" && code != "E606") return {};
+        if (currentBinding_.empty()) return {};
+        std::string s = " [at " + currentBinding_ + "]";
+        if (chain.empty()) chain = bindingChain(currentBinding_, true);
+        if (!chain.empty()) s += " [inline chain: " + chain + "]";
+        return s;
+    }
+
+    // Role element of a flat binding inside a def instance:
+    // "arg w of bx[0]" / "output out of bx[0]" / "binding bx[0].disp of
+    // bx[0]", plus " ← <origin expression>" for argument bindings (the
+    // caller's expression, rendered from the flat binding's value).
+    // Returns "" for bindings that belong to no instance.
+    std::string bindingChain(const std::string& flatName, bool withOriginExpr) const {
+        auto it = flat_.instanceOfBinding.find(flatName);
+        if (it == flat_.instanceOfBinding.end()) return {};
+        const FlatInstance& inst = flat_.instances[it->second];
+        std::string local = flatName;
+        const std::string prefix = inst.name + ".";
+        if (local.rfind(prefix, 0) == 0) local = local.substr(prefix.size());
+        const char* role = "binding";
+        bool isArg = false;
+        if (std::find(inst.outputs.begin(), inst.outputs.end(), flatName) != inst.outputs.end())
+            role = "output";
+        else if (flat_.declaredTypes.count(flatName)) {
+            role = "arg";
+            isArg = true;
+        }
+        std::string s = std::string(role) + " " + local + " of " + inst.path;
+        if (isArg && withOriginExpr) {
+            if (auto bit = bindings_.find(flatName); bit != bindings_.end() && bit->second->value)
+                s += " \xe2\x86\x90 " + formatExpr(bit->second->value);  // ←
+        }
+        return s;
     }
 
     void define(const std::string& name, Type t) { env_[name] = t; }
 
-    // Basic instance-path context for diagnostics inside instances (§9.5;
-    // the full stack formatting is stage E6).
-    std::string instanceSuffix(const std::string& flatName) const {
-        auto it = flat_.instanceOfBinding.find(flatName);
-        if (it == flat_.instanceOfBinding.end()) return {};
-        return " [instance " + flat_.instances[it->second].path + "]";
+    // Flat binding name -> Binding node, for the origin expression of the
+    // inline chains (§9.5). Zone-body names are globally unique (validator
+    // E102), so one flat map covers nested bodies too.
+    void indexItems(const std::vector<Node*>& items) {
+        for (const Node* item : items) indexStmt(item);
     }
+    void indexStmt(const Node* s) {
+        if (!s) return;
+        switch (s->kind) {
+            case NodeKind::Binding: {
+                const auto* b = static_cast<const Binding*>(s);
+                for (const std::string& n : b->targets.names) bindings_.emplace(n, b);
+                // Constant-string provenance: record the binding's provable
+                // string value (or drop a stale entry when the name is
+                // (re)bound to something not provable — defensive, SSA makes
+                // re-binding an E102 error before this stage runs).
+                if (b->targets.names.size() == 1) {
+                    std::string cs;
+                    if (constStringOf(b->value, cs))
+                        constStrings_[b->targets.names[0]] = std::move(cs);
+                    else
+                        constStrings_.erase(b->targets.names[0]);
+                } else {
+                    for (const std::string& n : b->targets.names) constStrings_.erase(n);
+                }
+                break;
+            }
+            case NodeKind::RepeatZone:
+                for (const Stmt* b : static_cast<const RepeatZone*>(s)->body) indexStmt(b);
+                break;
+            case NodeKind::ForeachZone:
+                for (const Stmt* b : static_cast<const ForeachZone*>(s)->body) indexStmt(b);
+                break;
+            default:
+                break;
+        }
+    }
+
+    // RAII setter for currentBinding_ (zone walkers nest: body statements
+    // overwrite the zone-header context and restore it on exit).
+    struct BindingContext {
+        BindingContext(std::string& slot, std::string name) : slot_(slot), prev_(std::move(slot)) {
+            slot_ = std::move(name);
+        }
+        ~BindingContext() { slot_ = std::move(prev_); }
+        std::string& slot_;
+        std::string prev_;
+    };
 
     void output(const OutputDecl* o) {
         for (const auto& [name, span] : outputs_) {
@@ -127,6 +242,8 @@ private:
         switch (s->kind) {
             case NodeKind::Binding: {
                 const auto* b = static_cast<const Binding*>(s);
+                BindingContext ctx(currentBinding_,
+                                   b->targets.names.empty() ? std::string{} : b->targets.names[0]);
                 const size_t nTargets = b->targets.names.size();
                 lastSig_ = nullptr;
                 allowMulti_ = nTargets > 1;
@@ -155,7 +272,7 @@ private:
                         if (t.base != ScalarType::None && !canConvert(t, dit->second)) {
                             error("E204", b->span,
                                   "'" + b->targets.names[0] + "' expects " + typeName(dit->second) +
-                                      " (def interface), got " + typeName(t) + instanceSuffix(b->targets.names[0]));
+                                      " (def interface), got " + typeName(t));
                             // Recover with the declared type: downstream reads
                             // see the interface, not the mismatched argument.
                             define(b->targets.names[0], dit->second);
@@ -237,6 +354,8 @@ private:
     }
 
     void repeatZone(const RepeatZone* z) {
+        BindingContext ctx(currentBinding_,
+                           z->targets.names.empty() ? std::string{} : z->targets.names[0]);
         const size_t nState = z->state.names.size();
         const size_t nTargets = z->targets.names.size();
         if (nTargets != nState) {
@@ -312,6 +431,7 @@ private:
     }
 
     void foreachZone(const ForeachZone* z) {
+        BindingContext ctx(currentBinding_, z->target);
         // Collection: geo<mesh> (connected pieces) or geo<points> (one piece
         // per point — the row model, §5.4 v1.20); instances -> E204.
         const Type collT = infer(z->collection);
@@ -390,7 +510,9 @@ private:
     // be provable statically; anything else makes the schema open). Named-arg
     // bare idents are type-driven enum literals (spec §13): an ident that is
     // not a defined binding reads as the literal; a defined one is a computed
-    // string and therefore not provable.
+    // string and therefore not provable — unless its flat binding is a proven
+    // constant string (constStrings_: def parameters arrive as
+    // `piece[0].grp = "iron"`, so the caller's literal stays visible, F5).
     bool literalString(const CallArg* arg, std::string& out) const {
         if (!arg || !arg->value) return false;
         if (arg->value->kind == NodeKind::StringLit) {
@@ -407,11 +529,44 @@ private:
         }
         if (arg->value->kind == NodeKind::Ident) {
             const std::string& n = static_cast<const Ident*>(arg->value)->name;
+            if (auto it = constStrings_.find(n); it != constStrings_.end()) {
+                out = it->second;
+                return true;
+            }
             if (env_.count(n)) return false;
             out = n;
             return true;
         }
         return false;
+    }
+
+    // The provable constant string of an expression: the literal forms
+    // literalString accepts, plus ident chains through constStrings_ (a def
+    // passing its own string parameter down to another def). Anything else —
+    // including param defaults and computed expressions — is not provable.
+    bool constStringOf(const Expr* e, std::string& out) const {
+        if (!e) return false;
+        switch (e->kind) {
+            case NodeKind::StringLit:
+                out = static_cast<const StringLit*>(e)->value;
+                return true;
+            case NodeKind::EnumLit:
+                out = static_cast<const EnumLit*>(e)->name;
+                return true;
+            case NodeKind::NoneLit:
+                out = "none";
+                return true;
+            case NodeKind::Paren:
+                return constStringOf(static_cast<const Paren*>(e)->inner, out);
+            case NodeKind::Ident: {
+                auto it = constStrings_.find(static_cast<const Ident*>(e)->name);
+                if (it == constStrings_.end()) return false;
+                out = it->second;
+                return true;
+            }
+            default:
+                return false;
+        }
     }
 
     static size_t domainIndex(const std::string& name) {
@@ -420,16 +575,20 @@ private:
 
     // Static E302/E305: every @attr/@N/ingroup read of a field consumed on a
     // closed-schema geometry must exist there (spec §7.6). Open schemas skip —
-    // the runtime checks stay the fallback.
+    // the runtime checks stay the fallback. The E302 text carries the §9.5
+    // context: where the field is consumed and how the read flowed in.
     void checkField(const GeoSchema& s, const Expr* fieldExpr) {
         if (s.open || !fieldExpr) return;
         const ExprClosure cl = gather(fieldExpr);
-        for (const auto& [attr, span] : cl.attrs) {
+        for (const AttrRead& read : cl.attrs) {
+            const std::string& attr = read.name;
+            const Span& span = read.span;
             if (attr == "P" || attr == "index") continue;
             if (attr == "N") {
                 // v1.14: meshes derive @N from their faces when no column is
                 // stored; only face-less kinds (points/instances) lack @N.
                 if (!s.hasN && !s.hasAttr("N") && s.kind != GeoKind::Mesh) {
+                    pendingChain_ = fieldChain(read);
                     error("E302", span, "attribute @N is not present on this geometry (static schema)",
                           "compute normals upstream (compute_normals)");
                 } else if (s.nStale) {
@@ -442,6 +601,7 @@ private:
                 continue;
             }
             if (!s.hasAttr(attr)) {
+                pendingChain_ = fieldChain(read);
                 error("E302", span,
                       "attribute '@" + attr + "' is not present on this geometry (static schema)",
                       "write it upstream with set() or check the def contract (§7.6)");
@@ -453,6 +613,38 @@ private:
                       "mark it upstream (§8.6)");
             }
         }
+    }
+
+    // §9.5 inline-chain elements for one failing attribute read, joined by
+    // " ← ": the consumption context ("field consumed by set_position on
+    // bx[0].out"; aggregators bind to their `on` geometry instead), then the
+    // field-closure hops the read rode in on, ending at the origin expression
+    // ("arg w of bx[0] ← value(@wid, on = p1)"). A direct read at the binding
+    // under check (no hops) names that binding's role instead.
+    std::string fieldChain(const AttrRead& read) const {
+        std::string chain;
+        if (aggregatorOn_) {
+            chain = "field of " + std::string(consumingBuiltin_ ? consumingBuiltin_ : "?") +
+                    " binds to 'on' = " + formatExpr(aggregatorOn_);
+        } else if (consumingBuiltin_) {
+            chain = "field consumed by " + std::string(consumingBuiltin_) + " on " + currentBinding_;
+        }
+        for (size_t i = 0; i < read.via.size(); ++i) {
+            const bool last = i + 1 == read.via.size();
+            std::string hop = bindingChain(read.via[i], last);
+            if (hop.empty()) {
+                hop = "binding " + read.via[i];
+                if (last)
+                    if (auto bit = bindings_.find(read.via[i]); bit != bindings_.end() && bit->second->value)
+                        hop += " \xe2\x86\x90 " + formatExpr(bit->second->value);  // ←
+            }
+            chain += (chain.empty() ? "" : " \xe2\x86\x90 ") + hop;  // ←
+        }
+        if (read.via.empty()) {
+            const std::string role = bindingChain(currentBinding_, true);
+            if (!role.empty()) chain += (chain.empty() ? "" : " \xe2\x86\x90 ") + role;  // ←
+        }
+        return chain;
     }
 
     void checkFieldArgs(const GeoSchema& s, const std::vector<const CallArg*>& byParam,
@@ -475,14 +667,19 @@ private:
                 if (perDomain[d].count(n)) m |= 1u << d;
             return m;
         };
+        // One domain-mismatch report per name per merge step (the runtime
+        // merge reports each conflicting name once): the per-domain loop
+        // would otherwise repeat it for every domain the left side has it on.
+        std::unordered_set<std::string> reportedAttrs, reportedGroups;
         for (size_t d = 0; d < 4; ++d) {
             for (const auto& [n, t] : a.attrs[d]) {
                 const unsigned ma = maskOf(a.attrs, n), mb = maskOf(bb.attrs, n);
                 if (ma && mb && ma != mb) {
-                    error("E609", span,
-                          "merge: attribute '@" + n +
-                              "' sits on different domains in the operands (static schema)",
-                          "promote it to the same domain on all sides, or remove_attr/rename_attr one side");
+                    if (reportedAttrs.insert(n).second)
+                        error("E609", span,
+                              "merge: attribute '@" + n +
+                                  "' sits on different domains in the operands (static schema)",
+                              "promote it to the same domain on all sides, or remove_attr/rename_attr one side");
                 } else if (ma && mb) {
                     const auto itB = bb.attrs[d].find(n);
                     if (itB != bb.attrs[d].end() && itB->second.info != t.info)
@@ -495,7 +692,7 @@ private:
             }
             for (const std::string& n : a.groups[d]) {
                 const unsigned ma = maskOf(a.groups, n), mb = maskOf(bb.groups, n);
-                if (ma && mb && ma != mb)
+                if (ma && mb && ma != mb && reportedGroups.insert(n).second)
                     error("E609", span,
                           "merge: group '@" + n + "' sits on different domains in the operands (static schema)",
                           "mark it on the same domain on all sides, or unmark one side");
@@ -1056,9 +1253,15 @@ private:
             case BuiltinId::MaxOf:
             case BuiltinId::AvgOf:
             case BuiltinId::SumOf:
-            case BuiltinId::ValueOf:
+            case BuiltinId::ValueOf: {
+                // The aggregator's field binds to the `on` geometry, not to
+                // the geometry of the consuming context (§8.10) — named in
+                // the §9.5 inline chain of a failing E302.
+                aggregatorOn_ = byParam.size() > 1 && byParam[1] ? byParam[1]->value : nullptr;
                 checkFieldArgs(argSchema(byParam, 1), byParam, {0, 2});  // field, where (on `on`)
+                aggregatorOn_ = nullptr;
                 break;
+            }
             default:
                 break;
         }
@@ -1203,8 +1406,14 @@ private:
         if (!e) return;
         switch (e->kind) {
             case NodeKind::Ident: {
-                if (auto it = closures_.find(static_cast<const Ident*>(e)->name); it != closures_.end()) {
-                    out.attrs.insert(out.attrs.end(), it->second.attrs.begin(), it->second.attrs.end());
+                const std::string& iname = static_cast<const Ident*>(e)->name;
+                if (auto it = closures_.find(iname); it != closures_.end()) {
+                    // The read rode in on this binding: prepend the hop to its
+                    // via chain (§9.5 inline chains in E302/E204).
+                    for (AttrRead a : it->second.attrs) {
+                        a.via.insert(a.via.begin(), iname);
+                        out.attrs.push_back(std::move(a));
+                    }
                     out.groups.insert(out.groups.end(), it->second.groups.begin(), it->second.groups.end());
                 }
                 break;
@@ -1214,7 +1423,7 @@ private:
                 // @iteration/@piece_index are zone-provided int values (§6.3),
                 // not attribute reads — the static schema check skips them.
                 if (n == "iteration" || n == "piece_index") break;
-                out.attrs.push_back({n, e->span});
+                out.attrs.push_back(AttrRead{n, e->span, {}});
                 break;
             }
             case NodeKind::Paren:
@@ -1525,7 +1734,9 @@ private:
             lastSig_ = sig;  // after arg inference: the root call's sig wins
             return rt;
         }
+        consumingBuiltin_ = sig->name;  // §9.5 context for the field schema checks
         computeCallSchema(*sig, *c, byParam, argTypes, variadicArgs);
+        consumingBuiltin_ = nullptr;
         Type rt = sig->result;
         // value(field, on): the result has the field's own type (§8.10). A bare
         // attribute read is provisionally f32 in inferAttr; when `on` has a

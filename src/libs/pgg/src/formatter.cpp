@@ -50,6 +50,10 @@ public:
         return out_;
     }
 
+    // Expression printer for diagnostics (no file context: no def-argument
+    // reordering, arguments print in source order).
+    std::string printExpr(const Expr* e) { return expr(e); }
+
 private:
     const std::vector<Comment>& comments_;
     std::unordered_map<std::string, const Def*> defs_;
@@ -357,6 +361,13 @@ std::string format(const File* file, const std::vector<Comment>& comments) {
     if (!file) return {};
     Formatter f(comments, file);
     return f.run(file);
+}
+
+std::string formatExpr(const Expr* e) {
+    static const std::vector<Comment> kNoComments;
+    const File empty(Span{});
+    Formatter f(kNoComments, &empty);
+    return f.printExpr(e);
 }
 
 }  // namespace pgg

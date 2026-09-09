@@ -35,13 +35,23 @@ _INSTRUCTIONS = """neverwhere PGG MCP — итеративный цикл отл
 2. ``pgg_load`` (path до .pgg или source целиком) — статическая проверка без
    прогона: диагностики за миллисекунды, has_errors=false → файл валиден.
 3. ``pgg_render`` (node) — PNG кадра + статы ({kind, pts, tri, bbox, groups, ms})
-   и cache hits/misses в одном ответе; PNG потом читается как файл.
+   и cache hits/misses в одном ответе; PNG потом читается как файл. По
+   умолчанию кадр кропится до вьюпорта превью (без панели/графа); ``chrome="off"``
+   растягивает превью на всё окно, ``zoom``/``distance`` управляют дальностью
+   камеры (см. docstring инструмента).
 4. ``pgg_probe`` (spec вида "house:schema" / "house:stats") — инспектор-записи.
-5. Правка файла → снова ``pgg_load`` + ``pgg_render``: сессионный кэш
-   инвалидирует только downstream, повторный прогон заметно быстрее.
+5. Правка файла на диске → сразу ``pgg_render``/``pgg_probe``: F4 — сервер сам
+   перечитывает файл и его импорты по mtime (ответ render/probe/export тогда
+   содержит reloaded=true и load_diagnostics), явный ``pgg_load`` после правки
+   не нужен. Сессионный кэш инвалидирует только downstream, повторный прогон
+   заметно быстрее.
 
 Прочее: ``pgg_params`` (значения @param, переживают load), ``pgg_export``
-(OBJ узла), ``pgg_docs`` (карточка def'а: сигнатура + docstring).
+(OBJ узла), ``pgg_docs`` (карточка def'а: сигнатура + docstring),
+``pgg_diff`` (fp-diff outputs против baseline'а), ``pgg_reference``
+(side-by-side модель/референс + силуэтные метрики пропорций). Для ответа на
+«правка попала туда?» — ``pgg_render(node, compare="prev")``: diff-метрики и
+PNG-разница с предыдущим кадром того же вида.
 """
 
 mcp = FastMCP("neverwhere-pgg", instructions=_INSTRUCTIONS)
@@ -157,25 +167,40 @@ def pgg_status() -> dict:
     """Живость viewer'а и состояние сессии.
 
     Ответ data: {file, params, cache:{size,capacity,hits,misses},
-    preview:{target,has_value}, uptime_s}. Пример: pgg_status().
+    preview:{target,has_value}, profile:[{name,ms,field_evals,cache_hit}] (top-20
+    binding'ов последнего прогона по эксклюзивному ms) + profile_total_ms,
+    uptime_s}. Пример: pgg_status().
     """
     return _call("status")
 
 
 @mcp.tool()
 def pgg_load(path: Optional[str] = None, source: Optional[str] = None,
-             lib_roots: Optional[list[str]] = None) -> dict:
+             lib_roots: Optional[list[str]] = None,
+             snapshot: Optional[bool] = None) -> dict:
     """Загрузить .pgg-файл (ровно один из path/source обязателен).
 
     path — путь до .pgg (относительно cwd viewer'а = корня репо, или абсолютный);
     source — текст файла целиком (пишется в tmp/pgg_rpc_source/src_N.pgg, его
     каталог становится неявным import root); lib_roots — доп. корни импортов.
+    snapshot=true дополнительно прогоняет outputs и записывает их фингерпринты
+    как baseline для pgg_diff (в ответе snapshot=true; при ошибках файла
+    baseline не пишется, snapshot=false). Без snapshot=true снимок pgg_diff
+    создаст первый вызов pgg_diff (baseline_created=true); явный pgg_load
+    снимок СБРАСЫВАЕТ (новый контекст документа).
     Ответ — СТАТИЧЕСКАЯ проверка без прогона графа (невалидный файл отвечает
     за миллисекунды): {diagnostics:[{code,line,col,warning,message}],
     has_errors, ms, path}.
+    После pgg_load(path=...) правки файла (и его импортов из lib/) на диске
+    подхватываются АВТОМАТИЧЕСКИ следующим pgg_render/pgg_probe/pgg_export
+    (F4, авто-reload по mtime; в ответе reloaded=true + load_diagnostics) —
+    pgg_load нужен только для source, смены файла или немедленной статической
+    проверки. Исключение: файл, загруженный через source (temp-файл), не
+    отслеживается — новый текст передаётся новым pgg_load(source=...).
     Пример: pgg_load(path="resources/pgg/cottage.pgg") → has_errors=false.
     """
-    return _call("load", {"path": path, "source": source, "lib_roots": lib_roots})
+    return _call("load", {"path": path, "source": source, "lib_roots": lib_roots,
+                          "snapshot": snapshot})
 
 
 @mcp.tool()
@@ -195,25 +220,61 @@ def pgg_render(node: str, out: Optional[str] = None, orbit: Optional[list[float]
                highlight: Optional[str] = None, shading: Optional[str] = None,
                colors: Optional[bool] = None, size: Optional[list[float]] = None,
                target: Optional[str] = None, fit: Optional[str] = None,
-               ortho: Optional[str] = None, wire: Optional[bool] = None) -> dict:
+               ortho: Optional[str] = None, wire: Optional[bool] = None,
+               frame: Optional[str] = None, chrome: Optional[str] = None,
+               zoom: Optional[float] = None, distance: Optional[float] = None,
+               compare: Optional[str] = None) -> dict:
     """Синхронный прогон узла + PNG-кадр превью + статистика в одном ответе.
 
     node — имя binding/output'а; out — куда писать PNG (по умолчанию
-    tmp/pgg_rpc_shots/shot_N.png, каталог создаётся); orbit — [yaw, pitch]
-    или [yaw, pitch, zoom]; highlight — имя группы подсветки; shading —
-    "auto"|"flat"|"smooth"; colors — vertex colors on/off; size — [w, h]
-    превью-панели (двигает сплиттер, не ресайзит окно).
-    Камера (A2): target — "x,y,z" | "group:<имя>" | "binding:<путь>" (центр
-    орбиты; group — bbox группы свежего прогона, имя с доменом "faces:roof"
-    или голое; "" снимает ранее заданный target; без target сохраняется
-    прежний); fit — "all"|"target" (по умолчанию target, если задан target);
-    ortho — "front"|"side"|"top"|"off" (орто-проекция по оси, ракурс снапится:
-    front = камера на +Z, side = на +X, top = сверху); wire — тёмный
-    wireframe-оверлей рёбер поверх шейдинга.
-    Ответ data: {path, width, height, node, stats:{kind, pts, tri, bbox,
-    groups, ms}, camera:{center, radius, distance}, cache:{hits,misses}} —
-    PNG потом читается как файл.
-    Пример: pgg_render(node="house", target="group:faces:roof", ortho="front").
+    tmp/pgg_rpc_shots/shot_N.png, каталог создаётся).
+    Кадр (F1): frame — "preview"|"window", по умолчанию "preview": PNG
+    кропится до вьюпорта превью-панели (физические пиксели буфера; панель,
+    граф и строка тулбара панели в кадр НЕ попадают); "window" — весь кадр
+    окна. chrome — "on"|"off": off рисует один кадр без панели и графа —
+    превью-панель растягивается на всё окно (больше пикселей модели; окно
+    программно не ресайзится, это максимум разрешения). size — при
+    frame=preview целевой размер кропа в ПИКСЕЛЯХ PNG (центрируется на
+    вьюпорте; окно не ресайзится, поэтому запрос больше вьюпорта клампится
+    к фактическому rect'у и в ответе появляется size_clamped=true); при
+    frame=window — легаси [w, h] превью-панели в пунктах (двигает сплиттер,
+    не ресайзит окно).
+    Камера: orbit — [yaw, pitch] или [yaw, pitch, zoom]; yaw/pitch в градусах.
+    Третий компонент orbit и именованный zoom — МНОЖИТЕЛЬ fit-дистанции
+    (fit = radius*2.6*zoom): 1 = вписать цель в кадр, 0.5 = вдвое ближе,
+    3 = втрое дальше; zoom перекрывает orbit[2], когда заданы оба.
+    distance — дистанция камеры от центра орбиты в МЕТРАХ (перекрывает
+    zoom/orbit[2]; применяется после резолва target, т.е. от центра цели;
+    переживает рефиты как эквивалентный множитель fit-дистанции).
+    highlight — имя группы подсветки; shading — "auto"|"flat"|"smooth";
+    colors — vertex colors on/off.
+    Сравнение с предыдущим кадром (F3): compare="prev" — в ответ добавляется
+    compare:{available, changed_pct, change_bbox_px:[x0,y0,x1,y1] (x1/y1
+    exclusive), diff_png} — diff с ПРЕДЫДУЩИМ кадром ТОГО ЖЕ вида (узел +
+    эффективная камера + frame/chrome; значения params в ключ НЕ входят —
+    именно правку параметра/файла compare и показывает). available=false с
+    reason "no previous frame" (первый кадр вида) или "size mismatch (...)";
+    diff_png — tmp/pgg_rpc_shots/diff_N.png: затемнённый новый кадр, изменённые
+    пиксели подсвечены magenta (порог 8/255 на канал). Хранится ОДИН последний
+    кадр — его заменяет каждый успешный render (с compare или без).
+    Типовой цикл правки: pgg_render(node) → правка файла/params →
+    pgg_render(node, compare="prev") → changed_pct/bbox/diff_png показывают,
+    куда правка попала на экране.
+    Нацеливание (A2): target — "x,y,z" | "group:<имя>" | "binding:<путь>"
+    (центр орбиты; group — bbox группы свежего прогона, имя с доменом
+    "faces:roof" или голое; "" снимает ранее заданный target; без target
+    сохраняется прежний); fit — "all"|"target" (по умолчанию target, если
+    задан target); ortho — "front"|"side"|"top"|"off" (орто-проекция по оси,
+    ракурс снапится: front = камера на +Z, side = на +X, top = сверху);
+    wire — тёмный wireframe-оверлей рёбер поверх шейдинга.
+    Ответ data: {path, width, height (фактические размеры PNG), frame, chrome,
+    size_clamped?, node, stats:{kind, pts, tri, bbox, groups, ms},
+    camera:{center, radius, distance}, cache:{hits,misses}, reloaded,
+    load_diagnostics?} — PNG потом читается как файл. reloaded=true +
+    load_diagnostics означают, что перед прогоном сработал авто-reload по
+    mtime (правка файла/импортов на диске, F4).
+    Пример: pgg_render(node="house", target="group:faces:roof", ortho="front",
+    chrome="off").
     Грабли: прогон синхронный — тяжёлый граф блокирует окно viewer'а на всё
     время рендера; требуется UI-режим (с --no-ui — ошибка no_frame_loop);
     при залоченном/спящем экране macOS кадры не тикают, поэтому первый
@@ -224,7 +285,42 @@ def pgg_render(node: str, out: Optional[str] = None, orbit: Optional[list[float]
                             "highlight": highlight, "shading": shading,
                             "colors": colors, "size": size,
                             "target": target, "fit": fit, "ortho": ortho,
-                            "wire": wire})
+                            "wire": wire, "frame": frame, "chrome": chrome,
+                            "zoom": zoom, "distance": distance,
+                            "compare": compare})
+
+
+@mcp.tool()
+def pgg_reference(image: str, node: str, ortho: Optional[str] = None,
+                  orbit: Optional[list[float]] = None, zoom: Optional[float] = None,
+                  size: Optional[list[float]] = None) -> dict:
+    """Модель рядом с референсом (F3): side-by-side PNG + силуэтные метрики.
+
+    Прогон узла (как pgg_render) снимается орто-кадром (по умолчанию
+    ortho="front"; "side"|"top"|"off" — perspective; orbit/zoom — те же
+    множители, что у pgg_render; ракурс детерминирован: target сбрасывается,
+    fit=all по всей сцене) и склеивается в один PNG с референсом: слева кадр
+    модели, справа референс, ресайзнутый bilinear до высоты кадра (аспект
+    сохраняется), между ними разделитель 4px. Результат —
+    tmp/pgg_rpc_shots/ref_N.png (путь в ответе), читается как файл.
+    size — как у pgg_render frame=preview: целевой размер кропа модели в
+    пикселях (кламп к вьюпорту, size_clamped=true в ответе).
+    Силуэтные метрики (фон модели — известный clear-цвет превью; фон
+    референса — мажоритарный цвет 4 углов, ответ содержит
+    reference_background): model/reference = {bbox_frac:[x0,y0,x1,y1] силуэта
+    в долях кадра, w_over_h — отношение ширины bbox к высоте, rows — 10
+    горизонтальных полос сверху вниз, в каждой средняя доля ширины силуэта,
+    empty}. По rows модель vs референс сверяются пропорции без ручного счёта
+    пикселей; bbox_frac показывает сдвиг/масштаб силуэта.
+    Ответ data: {path, width, height, node, model:{...}, reference:{...},
+    reference_background:[r,g,b], ms, stats:{...}, camera:{...},
+    cache:{hits,misses}, reloaded, load_diagnostics?}.
+    Ошибки: image не читается — invalid_input; headless/без UI —
+    no_frame_loop; прогон — run_failed/run_errors как у render.
+    Пример: pgg_reference(image="tmp/bug.png", node="house", ortho="front").
+    """
+    return _call("reference", {"image": image, "node": node, "ortho": ortho,
+                               "orbit": orbit, "zoom": zoom, "size": size})
 
 
 @mcp.tool()
@@ -232,9 +328,16 @@ def pgg_probe(spec: str) -> dict:
     """Пробник-инспектор узла: probe-only прогон (outputs не считаются).
 
     spec — "путь:инспектор[параметры]", например "house:schema" (структура
-    значения) или "house:stats" (числа по доменам, bbox). Ответ data:
+    значения) или "house:stats" (числа по доменам, bbox). Инспекторы:
+    schema/stats/coverage/table — L0–L2; sample/slice — поле в точках и срез
+    (sdf и geo); check — здоровье меша; lattice[voxel=0.05] — решётка
+    mesh_from_sdf и предупреждения о гранях у плоскостей решётки (только sdf);
+    table[where=<expr>,limit=N] / find[where=<expr>] — фильтрация/сводка по
+    предикату над точками ("house:find[where=@ao < 0.9]"). Контракты — спека
+    §9.6. Ответ data:
     {records:[{origin,path,inspector,text}], diagnostics, has_errors, ms,
-    cache:{hits,misses}}.
+    cache:{hits,misses}, reloaded, load_diagnostics?} (reloaded=true — перед
+    прогоном сработал авто-reload по mtime, F4).
     Пример: pgg_probe(spec="house:schema").
     """
     return _call("probe", {"spec": spec})
@@ -248,20 +351,50 @@ def pgg_export(node: str, obj_path: str) -> dict:
     создаётся). instances экспортируются через realize (realized=true в
     ответе); sdf-значения не экспортируются — ошибка no_geometry («mesh them
     with mesh_from_sdf»). Ответ data: {path, realized, stats:{...},
-    cache:{hits,misses}}.
+    cache:{hits,misses}, reloaded, load_diagnostics?} (reloaded — авто-reload
+    по mtime, F4).
     Пример: pgg_export(node="house", obj_path="tmp/house.obj").
     """
     return _call("export", {"node": node, "obj_path": obj_path})
 
 
 @mcp.tool()
+def pgg_diff(update: Optional[bool] = None) -> dict:
+    """Diff outputs текущего файла против снимка fingerprints (C2, fp-level).
+
+    Сервер хранит снимок структурных фингерпринтов outputs последнего
+    baseline'а. Первый вызов (или вызов после явного pgg_load) снимок
+    СОЗДАЁТ и отвечает baseline_created=true (сравнения нет). Дальнейшие
+    вызовы прогоняют outputs текущего файла и сравнивают: outputs:[{name,
+    status: identical|changed|added|removed|skipped, fingerprint_prev,
+    fingerprint_now}], identical — сводный вердикт (skipped — sdf/field без
+    структурного fp, на вердикт не влияет; ΔP не считается — это fp-level
+    diff, таблица изменений — `PggTool diff` в CLI). Правка файла на диске
+    подхватывается авто-reload'ом ВНУТРИ diff (F4, reloaded=true) — снимок
+    она НЕ сбрасывает. Снимок обновляется только update=true
+    (snapshot_updated=true в ответе) или явным pgg_load — он снимок сбрасывает
+    (pgg_load(..., snapshot=True) записывает свежий baseline сразу, иначе его
+    запишет первый pgg_diff с baseline_created=true).
+    Ответ data: {baseline_created?|identical, outputs, snapshot_updated?,
+    reloaded, load_diagnostics?, ms, cache:{hits,misses}}.
+    Пример: pgg_diff() после правки cottage.pgg → changed по затронутым
+    outputs; pgg_diff(update=True) — принять новое состояние как baseline.
+    """
+    return _call("diff", {"update": update})
+
+
+@mcp.tool()
 def pgg_docs(symbol: str) -> dict:
-    """Карточка def'а: сигнатура + docstring (как `PggTool docs`).
+    """Карточка def'а или builtin'а (как `PggTool docs` / `docs builtin`).
 
     symbol — имя def'а; qualified имена (module.symbol) тоже работают через
-    module closure загруженного файла. Ответ data: {symbol, signature,
-    docstring}; если def не найден — ok=false с kind="not_found".
-    Пример: pgg_docs(symbol="make_roof").
+    module closure загруженного файла. Для builtin'а — `symbol="builtin:<name>"`
+    (например "builtin:clip"): сигнатура из живого реестра + группа + summary
+    + пример; работает и без загруженного файла.
+    Ответ data: {symbol, kind, signature, docstring} для def'а или
+    {symbol, kind, name, signature, group, summary, example} для builtin'а;
+    если символ не найден — ok=false с kind="not_found".
+    Пример: pgg_docs(symbol="make_roof"), pgg_docs(symbol="builtin:set_position").
     """
     return _call("docs", {"symbol": symbol})
 

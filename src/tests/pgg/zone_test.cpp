@@ -25,6 +25,12 @@ int countCode(const pgg::RunResult& r, const std::string& code) {
     return n;
 }
 
+bool hasMessage(const pgg::RunResult& r, const std::string& code, const std::string& needle) {
+    for (const pgg::Diagnostic& d : r.diagnostics)
+        if (d.code == code && d.message.find(needle) != std::string::npos) return true;
+    return false;
+}
+
 int countDocCode(const pgg::Document& doc, const std::string& code) {
     int n = 0;
     for (const pgg::Diagnostic& d : doc.diagnostics)
@@ -486,6 +492,27 @@ TEST(ZoneForeach, ValueAggregatorInsideFieldBindsToOnGeometry) {
         "output c\n");
     // Only `c` fails: @missing really is absent on p1 (reported once, by value()'s own check).
     EXPECT_EQ(countCode(r, "E302"), 1);
+}
+
+// D1 (agent_tooling_plan): the same failure through a def argument names the
+// flat binding under check and the §9.5 inline chain — which instance argument
+// the value came in through, its origin expression, and the geometry the
+// aggregator's field binds to.
+TEST(ZoneForeach, InlineChainInAggregatorArgError) {
+    pgg::RunResult r = runSrc(
+        "def bx(w: f32) -> (out: geo<mesh>) {\n"
+        "    out = set_position(box(size = vec3(1, 1, 1)), offset = @P * w)\n"
+        "}\n"
+        "p0 = mesh_line(count = 1, length = 1.0)\n"
+        "p1 = set(p0, \"wid\", 0.5)\n"
+        "b = bx(w = value(@missing, on = p1))\n"
+        "output b\n");
+    EXPECT_EQ(countCode(r, "E302"), 1);
+    EXPECT_TRUE(hasMessage(r, "E302", "[at bx[0].w]"));
+    EXPECT_TRUE(hasMessage(r, "E302", "[inline chain:"));
+    EXPECT_TRUE(hasMessage(r, "E302", "arg w of bx[0]"));
+    EXPECT_TRUE(hasMessage(r, "E302", "\xe2\x86\x90 value(@missing, on = p1)"));  // ←
+    EXPECT_TRUE(hasMessage(r, "E302", "binds to 'on' = p1"));
 }
 
 TEST(ZoneForeach, PieceIndexOutsideZoneIsE302) {

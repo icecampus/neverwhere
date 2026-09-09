@@ -2,7 +2,9 @@
 
 #include "engine.h"
 
+#include <chrono>
 #include <filesystem>
+#include <mutex>
 #include <unordered_set>
 
 #include "builtins.h"
@@ -59,6 +61,17 @@ bool cacheableValue(const Value& v) {
 
 bool cacheable(const TypedValue& tv) { return tv && !tv.field && cacheableValue(tv.value); }
 
+// Field evaluation buffer -> stored attribute column (types match 1:1) — the
+// same mapping set() uses (B6 --eval materializes its result as @__eval).
+ColumnData bufferToColumnData(const Buffer& buf) {
+    return std::visit(
+        [](const auto& v) -> ColumnData {
+            using VecT = std::decay_t<decltype(v)>;
+            return std::make_shared<const VecT>(v);
+        },
+        buf);
+}
+
 // --- E6 probe plumbing (spec §9) ------------------------------------------------
 
 // One pull root of a resolved probe: a flat binding plus an optional
@@ -80,7 +93,38 @@ struct ResolvedProbe {
     std::vector<ProbeTarget> targets;
 };
 
+// --- E-profile plumbing (agent_tooling_plan §5) -------------------------------
+
+// One in-flight binding evaluation on the profile stack. ms/fieldEvals of
+// nested binding pulls accumulate into childMs/childFields so the recorded row
+// stays exclusive (each binding's own time/fields only).
+struct ProfileFrame {
+    std::string name;
+    uint64_t startFields = 0;
+    uint64_t childFields = 0;
+    double childMs = 0.0;
+    std::chrono::steady_clock::time_point t0;
+};
+
+// evalBinding recurses (nested pulls via resolveIdent) and — in the foreach
+// piece loop — may run on pool worker threads, so the nesting stack is
+// per-thread; finished rows land in the engine's mutex-guarded vector.
+thread_local std::vector<ProfileFrame> t_profileStack;
+
+class Engine;
+
+// RAII scope of one binding evaluation; active only when RunParams::profile.
+struct ProfileGuard {
+    Engine& eng;
+    bool active = false;
+    bool cacheHit = false;
+    ProfileGuard(Engine& e, const std::string& name);
+    ~ProfileGuard();
+};
+
 class Engine {
+    friend struct ProfileGuard;  // drives profileBegin/profileEnd
+
 public:
     Engine(const FlatProgram& flat, const RunParams& params, RunResult& result,
            const std::vector<size_t>& runtimeContracts)
@@ -193,11 +237,16 @@ public:
             result_.pulled.push_back({t.recordPath, tv.value});
         }
 
+        // B6: ad-hoc `--eval` expressions, after outputs/probes/pulls (the
+        // declared outputs are computed as usual — evals never narrow a run).
+        for (const EvalSpec& e : params_.evals) executeEval(e);
+
         result_.stats.fieldsEvaluated = run_.fieldsEvaluated;
         result_.stats.cacheHits = cacheHits_;
         result_.stats.cacheMisses = cacheMisses_;
         result_.stats.threadsUsed = run_.threads;
         result_.stats.profileId = numericProfileId();
+        result_.stats.profile = std::move(profileRows_);
         for (const auto& [name, tv] : env_) {
             if (!tv.field) continue;
             auto it = run_.nodeEvals.find(tv.field->id);
@@ -222,6 +271,38 @@ private:
     std::vector<uint8_t> contractState_;  // 0 = untouched, 1 = expects done, 2 = done
     uint64_t cacheHits_ = 0;
     uint64_t cacheMisses_ = 0;
+    // E-profile: finished per-binding rows (mutex — the foreach piece loop may
+    // complete rows on pool workers); see ProfileGuard/ProfileFrame above.
+    std::mutex profileMu_;
+    std::vector<BindingProfile> profileRows_;
+
+    void profileBegin(ProfileGuard& g, const std::string& name) {
+        if (!params_.profile) return;
+        g.active = true;
+        t_profileStack.push_back(
+            ProfileFrame{name, run_.fieldsEvaluated, 0, 0.0, std::chrono::steady_clock::now()});
+    }
+
+    void profileEnd(ProfileGuard& g) {
+        if (!g.active) return;
+        const ProfileFrame f = t_profileStack.back();
+        t_profileStack.pop_back();
+        const double inclMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - f.t0).count();
+        const uint64_t inclFields = run_.fieldsEvaluated - f.startFields;
+        // Saturating subtraction: a row completed on a pool worker (foreach
+        // piece loop) reads the shared field counter concurrently, so the
+        // deltas can be inconsistent there — clamp instead of underflowing.
+        const uint64_t ownFields = inclFields > f.childFields ? inclFields - f.childFields : 0;
+        const double ownMs = inclMs > f.childMs ? inclMs - f.childMs : 0.0;
+        {
+            std::lock_guard<std::mutex> lk(profileMu_);
+            profileRows_.push_back(BindingProfile{f.name, ownMs, ownFields, g.cacheHit});
+        }
+        if (!t_profileStack.empty()) {
+            t_profileStack.back().childMs += inclMs;
+            t_profileStack.back().childFields += inclFields;
+        }
+    }
 
     TypedValue resolveIdent(const std::string& name, Span span) { return evalBinding(name, span); }
 
@@ -386,6 +467,15 @@ private:
             run_.report("E606", Span{}, "probe '" + spec.path + "': limit applies to the table and check inspectors");
             return;
         }
+        if (spec.inspector == "find") {
+            bool hasWhere = false;
+            for (const auto& [name, value] : spec.params) hasWhere |= name == "where";
+            if (!hasWhere) {
+                run_.report("E606", Span{},
+                            "probe '" + spec.path + "': find needs where=<bool field> (e.g. find[where=@ao < 0.9])");
+                return;
+            }
+        }
         std::vector<std::string> inspectors;
         if (spec.inspector.empty()) {
             inspectors = {"schema", "stats"};
@@ -428,6 +518,89 @@ private:
             addTap(t->label, t->hasLabel, pathText(t->path), t->span, out);
         }
         for (const FlatTap& ft : flat_.taps) addTap(ft.label, ft.hasLabel, ft.path, Span{}, out);
+    }
+
+    // B5 (§9.6): compiles the where= predicate of table/find. The expression
+    // is parsed as a synthetic binding (the param grammar keeps it whole:
+    // commas inside parens never split) and compiled against the shared
+    // environment — idents resolve to bindings, @attrs make it a field over
+    // the target's points domain. docKeepAlive holds the AST arena.
+    struct WherePlan {
+        const FieldNode* field = nullptr;  // nullptr = constant predicate
+        bool constValue = false;
+        std::string echo;
+    };
+
+    bool compileWherePredicate(const std::string& text, const std::string& specPath, Document& docKeepAlive,
+                               WherePlan& out) {
+        docKeepAlive = parse("__where__ = (" + text + ")\n");
+        const Binding* b = nullptr;
+        if (!docKeepAlive.hasErrors() && docKeepAlive.file)
+            for (const Node* item : docKeepAlive.file->items)
+                if (item->kind == NodeKind::Binding) {
+                    b = static_cast<const Binding*>(item);
+                    break;
+                }
+        if (!b || !b->value) {
+            std::string msg;
+            for (const Diagnostic& d : docKeepAlive.diagnostics)
+                if (!d.isWarning) {
+                    msg = d.message;
+                    break;
+                }
+            run_.report("E606", Span{}, "probe '" + specPath + "': bad where expression '" + text + "'" +
+                                            (msg.empty() ? "" : " (" + msg + ")"));
+            return false;
+        }
+        const size_t diagBefore = result_.diagnostics.size();
+        const TypedValue tv =
+            compileExpr(b->value, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
+        if (!tv) {
+            std::string msg;
+            for (size_t i = diagBefore; i < result_.diagnostics.size(); ++i)
+                if (!result_.diagnostics[i].isWarning) {
+                    msg = result_.diagnostics[i].message;
+                    break;
+                }
+            run_.report("E606", Span{}, "probe '" + specPath + "': where expression '" + text + "' failed" +
+                                            (msg.empty() ? "" : " (" + msg + ")"));
+            return false;
+        }
+        if (tv.field) {
+            out.field = tv.field;
+        } else {
+            if (valueBase(tv.value) != ScalarType::Bool) {
+                run_.report("E606", Span{},
+                            "probe '" + specPath + "': where must be a bool expression (got a " +
+                                std::string(scalarName(valueBase(tv.value))) + " constant)");
+                return false;
+            }
+            out.constValue = asBool(tv.value);
+        }
+        out.echo = text;
+        return true;
+    }
+
+    // The where mask of one target: the predicate field on the points domain
+    // (constant predicates broadcast). false = E606 already reported.
+    bool whereMask(const WherePlan& wp, const std::string& recordPath, const Geo& g, BoolColumn& out) {
+        const size_t n = g.pointCount();
+        if (!wp.field) {
+            out.assign(n, wp.constValue ? 1 : 0);
+            return true;
+        }
+        ConstBufferPtr buf = evalField(wp.field, g, Domain::Points, run_);
+        ConstBufferPtr asBoolBuf = buf ? convertBuffer(buf, ScalarType::Bool) : nullptr;
+        if (!asBoolBuf) {
+            run_.report("E606", Span{},
+                        "probe target '" + recordPath + "': where must evaluate to a bool field (got " +
+                            std::string(scalarName(buf ? bufferType(*buf) : ScalarType::None)) +
+                            "); wrap the value in a comparison, e.g. dot(@tint, (1, 0, 0)) > 0.5");
+            return false;
+        }
+        out = std::get<BoolBuf>(*asBoolBuf);
+        out.resize(n, 0);  // defensive: a short column never selects past its end
+        return true;
     }
 
     // Phase 2: pull the targets and evaluate the inspector. Per-target
@@ -590,19 +763,194 @@ private:
             return;
         }
 
-        // table
+        if (rp.inspector == "lattice") {
+            for (const Pulled& p : pulled) {
+                if (!p.target->terminal.empty()) {
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath +
+                                    "': lattice does not take attr terminals (probe the binding itself)");
+                    continue;
+                }
+                if (valueBase(p.value) != ScalarType::Sdf) {
+                    const std::string got =
+                        valueBase(p.value) == ScalarType::Geo
+                            ? "geo<" + std::string(geoKindName(asGeo(p.value)->kind)) + ">"
+                            : scalarName(valueBase(p.value));
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath + "': lattice needs an sdf value (target is " +
+                                    got + ")");
+                    continue;
+                }
+                std::string text, err;
+                if (!probeLattice(*asSdf(p.value), rp.params, text, err)) {
+                    run_.report("E606", Span{}, "probe target '" + p.target->recordPath + "': " + err);
+                    continue;
+                }
+                result_.probes.push_back({rp.origin, p.target->recordPath, rp.inspector, std::move(text)});
+            }
+            return;
+        }
+
+        // table / find — B5: the optional where=<expr> predicate compiles once
+        // per probe and evaluates per target on the points domain.
+        WherePlan wp;
+        bool hasWhere = false;
+        for (const auto& [name, value] : rp.params)
+            if (name == "where") hasWhere = true;
+        Document whereDoc;  // owns the predicate AST for the whole probe
+        if (hasWhere) {
+            std::string text;
+            for (const auto& [name, value] : rp.params)
+                if (name == "where") text = value;
+            if (!compileWherePredicate(text, rp.specPath, whereDoc, wp)) return;
+        }
         for (const Pulled& p : pulled) {
             if (valueBase(p.value) != ScalarType::Geo) {
-                run_.report("E606", Span{}, "probe target '" + p.target->recordPath + "': table needs a geo value");
+                run_.report("E606", Span{},
+                            "probe target '" + p.target->recordPath + "': " + rp.inspector + " needs a geo value");
                 continue;
             }
+            const Geo& g = *asGeo(p.value);
+            if (rp.inspector == "find") {
+                BoolColumn mask;
+                if (!whereMask(wp, p.target->recordPath, g, mask)) continue;
+                result_.probes.push_back({rp.origin, p.target->recordPath, rp.inspector, probeGeoFind(g, mask, wp.echo)});
+                continue;
+            }
+            BoolColumn mask;
+            const BoolColumn* maskPtr = nullptr;
+            if (hasWhere) {
+                if (!whereMask(wp, p.target->recordPath, g, mask)) continue;
+                maskPtr = &mask;
+            }
             result_.probes.push_back(
-                {rp.origin, p.target->recordPath, rp.inspector, probeGeoTable(*asGeo(p.value), rp.limit)});
+                {rp.origin, p.target->recordPath, rp.inspector, probeGeoTable(g, rp.limit, maskPtr, wp.echo)});
+        }
+    }
+
+    // B6 (agent_tooling_plan §2): `--eval '<expr>' --on <path>`. The
+    // expression compiles in the file's context (the same machinery as the
+    // B5 where predicate: synthetic binding, idents resolve to the file's
+    // bindings) and evaluates as a field on the points domain of each
+    // resolved on-target (a constant broadcasts to every point); the result
+    // is materialized as the @__eval attribute on a copy of the target and
+    // the stats inspector prints it. Records carry origin "eval".
+    void executeEval(const EvalSpec& spec) {
+        ResolvedProbe rp;  // only rp.targets is used
+        if (!resolveProbePath(spec.on, rp)) return;  // E606 already reported
+        for (const ProbeTarget& t : rp.targets) {
+            if (!t.terminal.empty()) {
+                run_.report("E606", Span{},
+                            "eval target '" + t.recordPath +
+                                "': --on names a geometry (a binding, an instance or a def), not an attribute");
+                return;
+            }
+        }
+        Document evalDoc = parse("__eval__ = (" + spec.expr + ")\n");  // owns the AST arena
+        const Binding* exprAst = nullptr;
+        if (!evalDoc.hasErrors() && evalDoc.file)
+            for (const Node* item : evalDoc.file->items)
+                if (item->kind == NodeKind::Binding) {
+                    exprAst = static_cast<const Binding*>(item);
+                    break;
+                }
+        if (!exprAst || !exprAst->value) {
+            std::string msg;
+            for (const Diagnostic& d : evalDoc.diagnostics)
+                if (!d.isWarning) {
+                    msg = d.message;
+                    break;
+                }
+            run_.report("E606", Span{}, "eval '" + spec.expr + "' on '" + spec.on + "': bad expression" +
+                                            (msg.empty() ? "" : " (" + msg + ")"));
+            return;
+        }
+        const size_t diagBefore = result_.diagnostics.size();
+        const TypedValue ev =
+            compileExpr(exprAst->value, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
+        if (!ev) {
+            std::string msg;
+            for (size_t i = diagBefore; i < result_.diagnostics.size(); ++i)
+                if (!result_.diagnostics[i].isWarning) {
+                    msg = result_.diagnostics[i].message;
+                    break;
+                }
+            run_.report("E606", Span{}, "eval '" + spec.expr + "' on '" + spec.on + "': expression failed" +
+                                            (msg.empty() ? "" : " (" + msg + ")"));
+            return;
+        }
+        if (!ev.field && !evalResultOk(valueBase(ev.value))) {
+            run_.report("E606", Span{},
+                        "eval '" + spec.expr + "' on '" + spec.on +
+                            "': the expression must be numeric or bool (got " +
+                            std::string(scalarName(valueBase(ev.value))) + ")");
+            return;
+        }
+        for (const ProbeTarget& t : rp.targets) {
+            const TypedValue tv = evalBinding(t.binding, Span{});
+            if (!tv) continue;  // the binding's own error was already reported
+            if (tv.field) {
+                run_.report("E606", Span{}, "eval target '" + t.recordPath + "' is a field, not a value");
+                continue;
+            }
+            if (valueBase(tv.value) != ScalarType::Geo) {
+                run_.report("E606", Span{},
+                            "eval target '" + t.recordPath + "' is " +
+                                std::string(scalarName(valueBase(tv.value))) + ", not a geo value");
+                continue;
+            }
+            const Geo& g = *asGeo(tv.value);
+            ConstBufferPtr buf = ev.field ? evalField(ev.field, g, Domain::Points, run_)
+                                          : makeConstBuffer(ev.value, g.pointCount());
+            const ScalarType bt = buf ? bufferType(*buf) : ScalarType::None;
+            if (!buf || !evalResultOk(bt)) {
+                run_.report("E606", Span{},
+                            "eval '" + spec.expr + "' on '" + t.recordPath +
+                                "': the expression must evaluate to a numeric or bool field (got " +
+                                std::string(scalarName(bt)) + ")");
+                continue;
+            }
+            // Materialize @__eval on a copy (points domain), then the stats
+            // inspector — the same code path as `probe <target>:stats`.
+            AttrSet attrs = g.pointAttrs ? *g.pointAttrs : AttrSet{};
+            attrs.columns["__eval"] = AttrColumn{bufferToColumnData(*buf), AttrTypeInfo::None};
+            const GeoPtr withEval =
+                withAttrs(g, Domain::Points, std::make_shared<const AttrSet>(std::move(attrs)));
+            std::vector<ProbeStatsEntry> entries;
+            std::string err;
+            if (!probeGeoStats(*withEval, "__eval", entries, err)) {
+                run_.report("E606", Span{}, "eval target '" + t.recordPath + "': " + err);
+                continue;
+            }
+            std::string text =
+                spec.expr + " = " + scalarName(bt) + " on " + std::to_string(g.pointCount()) + " pts";
+            for (const ProbeStatsEntry& e : entries) text += "\n" + formatProbeStats(e);
+            result_.probes.push_back({"eval", t.recordPath, "eval", std::move(text)});
+        }
+    }
+
+    // The --eval result types stats can report on (a string field has no
+    // meaningful mean; geo/sdf/rng/none never make sense as a per-point field).
+    static bool evalResultOk(ScalarType t) {
+        switch (t) {
+            case ScalarType::Bool:
+            case ScalarType::Int:
+            case ScalarType::F32:
+            case ScalarType::Vec2:
+            case ScalarType::Vec3:
+            case ScalarType::Vec4:
+                return true;
+            default:
+                return false;
         }
     }
 
     TypedValue evalBinding(const std::string& name, Span span) {
         if (auto it = env_.find(name); it != env_.end()) return it->second;
+        // E-profile: the guard covers everything below (contracts, params,
+        // zones, cache lookup, compileExpr); an env_ hit above is the free
+        // in-run memoization and never records a row.
+        ProfileGuard profileGuard(*this, name);
         // Instance outputs trigger the def contracts once per run (§7.4):
         // expects before the first pull, ensures after it.
         size_t inst = kNoInstance;
@@ -627,11 +975,13 @@ private:
             // a zone installs ALL its targets, so sibling targets memoize too.
             // Zone fingerprints are 0 (v0): the cross-run cache skips them.
             const IdentResolver topResolve = [this](const std::string& n, Span s) { return resolveIdent(n, s); };
+            run_.bindingStack.push_back(name);  // §9.5 context for header/body errors
             if (node->kind == NodeKind::RepeatZone) {
                 evalRepeatZone(static_cast<const RepeatZone*>(node), env_, topResolve, run_);
             } else {
                 evalForeachZone(static_cast<const ForeachZone*>(node), env_, topResolve, run_);
             }
+            run_.bindingStack.pop_back();
             auto eit = env_.find(name);
             return eit != env_.end() ? eit->second : TypedValue{};
         }
@@ -649,13 +999,16 @@ private:
             if (params_.cache->lookup(fp, tv)) {
                 ++cacheHits_;
                 hit = true;
+                profileGuard.cacheHit = true;
             } else {
                 ++cacheMisses_;
             }
         }
         if (!hit) {
             const size_t diagBefore = result_.diagnostics.size();
+            run_.bindingStack.push_back(name);  // §9.5: runtime errors name the binding
             tv = compileExpr(b->value, run_, [this](const std::string& n, Span s) { return resolveIdent(n, s); });
+            run_.bindingStack.pop_back();
             // Runtime diagnostics raised inside an instance carry the instance
             // path (basic §9.5 chain; nested frames append outward).
             if (auto bi = flat_.instanceOfBinding.find(name); bi != flat_.instanceOfBinding.end()) {
@@ -755,19 +1108,25 @@ private:
                             inst = oi->second;
                     const bool first = inst != kNoInstance && contractsStarted.insert(inst).second;
                     if (first) runContractsWith(inst, /*ensures=*/false, resolve, run);
+                    if (!b->targets.names.empty()) run.bindingStack.push_back(b->targets.names[0]);
                     TypedValue tv = compileExpr(b->value, run, resolve);
+                    if (!b->targets.names.empty()) run.bindingStack.pop_back();
                     installLocal(b, tv, localEnv);
                     if (first) runContractsWith(inst, /*ensures=*/true, resolve, run);
                     break;
                 }
                 case NodeKind::RepeatZone: {
                     const auto* z = static_cast<const RepeatZone*>(s);
+                    if (!z->targets.names.empty()) run.bindingStack.push_back(z->targets.names[0]);
                     evalRepeatZone(z, localEnv, resolve, run);
+                    if (!z->targets.names.empty()) run.bindingStack.pop_back();
                     break;
                 }
                 case NodeKind::ForeachZone: {
                     const auto* z = static_cast<const ForeachZone*>(s);
+                    run.bindingStack.push_back(z->target);
                     evalForeachZone(z, localEnv, resolve, run);
+                    run.bindingStack.pop_back();
                     break;
                 }
                 default:
@@ -1077,6 +1436,9 @@ private:
         return {};
     }
 };
+
+ProfileGuard::ProfileGuard(Engine& e, const std::string& name) : eng(e) { e.profileBegin(*this, name); }
+ProfileGuard::~ProfileGuard() { eng.profileEnd(*this); }
 
 }  // namespace
 

@@ -12,7 +12,13 @@
 // E6: RunParams carries probe specs and the debug flag (spec §9); a probe is
 // an extra lazy pull root — with probes present and no explicitly requested
 // outputs the declared outputs are not computed (probe-only run, §9.2).
+// E-profile/B6 (agent_tooling_plan §5): RunParams.profile turns on per-binding
+// wall-time accounting (RunStats.profile); RunParams.evals evaluates an
+// ad-hoc expression as a field on the points domain of a pulled geometry and
+// reports it as an "eval" probe record (the declared outputs are computed as
+// usual — evals never narrow the run).
 
+#include <algorithm>
 #include <unordered_map>
 
 #include "../ast.h"
@@ -24,6 +30,12 @@ namespace pgg {
 
 struct Document;  // pgg/pgg.h
 class MemoryCache;  // eval/cache.h
+
+// B6 `--eval '<expr>' --on <binding>` spec (see RunParams::evals).
+struct EvalSpec {
+    std::string expr;
+    std::string on;
+};
 
 struct RunParams {
     std::vector<std::pair<std::string, Value>> values;  // param name -> bound value
@@ -49,12 +61,43 @@ struct RunParams {
     // RunResult::pulled. Like probes, pulls are extra lazy roots and
     // suppress the declared outputs when none are requested explicitly.
     std::vector<std::string> pulls;
+    // E-profile (agent_tooling_plan §5): per-binding wall-time accounting
+    // into RunStats::profile. Off by default (zero chrono calls then).
+    bool profile = false;
+    // B6 (agent_tooling_plan §2): `--eval '<expr>' --on <binding>`. Each spec
+    // compiles expr in the file's context (idents -> bindings, @attrs -> a
+    // field over the on-geometry's points domain), materializes it as the
+    // @__eval attribute on a copy of the target and reports stats as an
+    // "eval" probe record. `on` uses the probe-path syntax. Evals never
+    // suppress the declared outputs.
+    std::vector<EvalSpec> evals;
 };
 
 struct RunOutput {
     std::string name;
     Value value;
 };
+
+// E-profile: one row per evaluated binding (flat name; zone sub-bindings are
+// not split out — the zone target row carries the zone's total). ms/fieldEvals
+// are EXCLUSIVE (nested binding pulls are subtracted and reported on their own
+// rows), so the column sums to the total evaluated-binding time. A cross-run
+// cache hit reports cacheHit=true, ~0 ms and 0 field evals (the value was not
+// recomputed); in-run memoization hits are free and produce no row.
+struct BindingProfile {
+    std::string name;
+    double ms = 0.0;
+    uint64_t fieldEvals = 0;
+    bool cacheHit = false;
+};
+
+// Deterministic profile order: ms descending, ties by name ascending.
+inline std::vector<BindingProfile> profileByTime(std::vector<BindingProfile> rows) {
+    std::sort(rows.begin(), rows.end(), [](const BindingProfile& a, const BindingProfile& b) {
+        return a.ms != b.ms ? a.ms > b.ms : a.name < b.name;
+    });
+    return rows;
+}
 
 struct RunStats {
     uint64_t fieldsEvaluated = 0;  // field-node evaluations (memoization misses) this run
@@ -67,6 +110,8 @@ struct RunStats {
     uint64_t cacheMisses = 0;
     unsigned threadsUsed = 1;    // resolved lane count (RunParams::threads 0 -> hardware)
     uint64_t profileId = 0;      // numeric profile of this run (spec §5.2)
+    // Per-binding wall times (RunParams::profile; empty when profiling is off).
+    std::vector<BindingProfile> profile;
 };
 
 struct RunResult {

@@ -15,11 +15,14 @@
 #include "pgg/eval.h"
 #include "pgg/src/eval/cache.h"
 #include "pgg/src/eval/sdf.h"
+#include "goldens_utils.h"
 #include "test_utils.h"
 
 namespace {
 
 const std::string kCorpus = std::string(PGG_CORPUS_DIR) + "/e4_sdf_rock.pgg";
+// The plain mesh_from_sdf sphere extraction the MeshFromSdf goldens pin.
+const std::string kSphereCorpus = std::string(PGG_CORPUS_DIR) + "/e4_mesh_sphere.pgg";
 
 pgg::SdfPtr sdfOutput(const pgg::RunResult& r, const std::string& name) {
     for (const auto& o : r.outputs)
@@ -278,24 +281,16 @@ TEST(SdfInstance, StampsReadThroughRun) {
 
 // --- 5. mesh_from_sdf --------------------------------------------------------------
 
-TEST(MeshFromSdf, SphereIsWatertightWithGoldenCounts) {
-    pgg::RunResult r = pgg::run(
-        "m = mesh_from_sdf(sdf_sphere(r = 1.0), voxel = 0.05)\n"
-        "output m\n");
+TEST(MeshFromSdf, SphereMatchesGoldenAndIsWatertight) {
+    pgg::RunResult r = pgg::runFile(kSphereCorpus);
     pggtest::expectNoErrors(r);
     pgg::GeoPtr m = pggtest::geoOutput(r, "m");
     ASSERT_TRUE(m);
-    // Golden counts of the current numeric profile.
-    EXPECT_EQ(m->pointCount(), 7572u);
-    EXPECT_EQ(m->cornerCount(), 45420u);
-    EXPECT_EQ(m->faceCount(), 15140u);
+    // Golden structural fingerprint of the current numeric profile
+    // (src/tests/pgg/goldens/e4_mesh_sphere.fp; re-record: PggTool run
+    // src/tests/pgg/corpus/e4_mesh_sphere.pgg --update-goldens).
+    pggtest::expectGolden("e4_mesh_sphere", r);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*m), 0u);
-    glm::vec3 mn, mx;
-    pgg::geoBBox(*m, mn, mx);
-    // Poles fall between lattice points (irrational lattice phase): the linear
-    // edge interpolation of the curved field undershoots by ~voxel^2/(2r).
-    pggtest::expectVec3Near(mn, glm::vec3(-1, -1, -1), 1e-3f);
-    pggtest::expectVec3Near(mx, glm::vec3(1, 1, 1), 1e-3f);
     // Attribute barrier: only @P (normals come from compute_normals).
     EXPECT_FALSE(m->normals);
     EXPECT_FALSE(m->pointAttrs);
@@ -318,7 +313,12 @@ TEST(MeshFromSdf, IsoShiftMovesSurface) {
     // the linear edge interpolation of the curved field is off by ~voxel^2/(2r).
     pggtest::expectVec3Near(mn, glm::vec3(-0.7f, -0.7f, -0.7f), 1e-3f);
     pggtest::expectVec3Near(mx, glm::vec3(0.7f, 0.7f, 0.7f), 1e-3f);
-    EXPECT_LT(m->pointCount(), 7572u);  // smaller sphere -> fewer vertices
+    // The smaller sphere has fewer vertices than the golden etalon's.
+    pgg::RunResult base = pgg::runFile(kSphereCorpus);
+    pggtest::expectNoErrors(base);
+    pgg::GeoPtr sphere = pggtest::geoOutput(base, "m");
+    ASSERT_TRUE(sphere);
+    EXPECT_LT(m->pointCount(), sphere->pointCount());
 }
 
 TEST(MeshFromSdf, ThreadCountInvariant) {
@@ -552,32 +552,21 @@ TEST(SdfCorpus, RockAndWallMatchGoldens) {
     pggtest::expectNoErrors(r);
     ASSERT_EQ(r.outputs.size(), 3u);
 
-    // Criterion 1: the SDF-pipeline rock (exact counts of the current profile).
+    // Golden structural fingerprints of both §15 criteria (rock = the
+    // SDF-pipeline criterion, wall = the instance-wall criterion):
+    // src/tests/pgg/goldens/e4_sdf_rock.fp; re-record: PggTool run
+    // src/tests/pgg/corpus/e4_sdf_rock.pgg --update-goldens.
+    pggtest::expectGolden("e4_sdf_rock", r);
     pgg::GeoPtr rock = pggtest::geoOutput(r, "rock");
     ASSERT_TRUE(rock);
-    EXPECT_EQ(rock->pointCount(), 12466u);
-    EXPECT_EQ(rock->cornerCount(), 74784u);
-    EXPECT_EQ(rock->faceCount(), 24928u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*rock), 0u);
-    glm::vec3 rmn, rmx;
-    pgg::geoBBox(*rock, rmn, rmx);
-    pggtest::expectVec3Near(rmn, glm::vec3(-1.211f, -1.2283f, -1.24293f), 1e-4f);
-    pggtest::expectVec3Near(rmx, glm::vec3(1.24757f, 1.24358f, 1.23663f), 1e-4f);
     ASSERT_TRUE(rock->normals);  // compute_normals ran after extraction
-
-    // Criterion 2: the instance wall.
     pgg::GeoPtr wall = pggtest::geoOutput(r, "wall");
     ASSERT_TRUE(wall);
-    EXPECT_EQ(wall->pointCount(), 13410u);
-    EXPECT_EQ(wall->cornerCount(), 80388u);
-    EXPECT_EQ(wall->faceCount(), 26796u);
     EXPECT_EQ(pgg::nonManifoldEdgeCount(*wall), 0u);
-    glm::vec3 wmn, wmx;
-    pgg::geoBBox(*wall, wmn, wmx);
-    pggtest::expectVec3Near(wmn, glm::vec3(-0.569595f, -0.603484f, 3.16706f), 1e-4f);
-    pggtest::expectVec3Near(wmx, glm::vec3(10.7637f, 0.605047f, 4.84354f), 1e-4f);
 
-    // The raw sdf output (§6.7 allows sdf roots; PggTool prints its summary).
+    // The raw sdf output (§6.7 allows sdf roots) has no structural
+    // fingerprint by design — it keeps literal checks.
     pgg::SdfPtr field = sdfOutput(r, "rock_field");
     ASSERT_TRUE(field);
     EXPECT_EQ(pgg::sdfNodeCount(*field), 7u);
