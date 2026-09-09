@@ -1,0 +1,324 @@
+param width: f32 = 7.0
+param depth: f32 = 6.0
+param plinth_h: f32 = 0.9
+param floor1_h: f32 = 3.0
+param floor2_h: f32 = 3.2
+param belt_h: f32 = 0.25
+param crown_h: f32 = 0.35
+param roof_h: f32 = 2.3
+param ris_w: f32 = 2.3
+param ris_p: f32 = 0.8
+param tower_w: f32 = 2.9
+param tower_h: f32 = 4.5
+param spire_h: f32 = 5.3
+param seed: int = 11
+
+import lib.parts
+import lib.architecture
+import lib.ironwork
+import lib.blockwork
+import lib.fixtures
+
+# Дом со шпилем в духе викторианской кирпичной архитектуры: два этажа красного
+# кирпича на тёмном каменном цоколе, светлые поясные карнизы и крупные квойны,
+# эркер-ризалит по центру фасада с парными арочными окнами и ступенчатым
+# «перевёрнутым» сходом, часовой ярус со звонницей над крышей и высокий
+# восьмискатный шиферный шпиль с двумя ярусами люкарн и финial'ом. Основная крыша —
+# крутая мансарда с плоской палубой, кованой решёткой и люкарной на правом скате.
+# Верх +Y, фасад +Z.
+#
+# Материалы — группы faces: brick (кирпич), stone (светлый камень: квойны, пояски,
+# обрамления окон, сход), plinth (тёмный цоколь), roof (шифер крыш и шпиля), glass
+# (тёмные стёкла и ниша), dial (циферблат), brass (обод и метки часов), iron
+# (ковка решётки, финial'ы, стрелки), wood (средники окон), edge (фаски боксов).
+
+root_rng = rng_from_seed(seed)
+
+# --- раскладка по высоте ------------------------------------------------------------
+plinth_top = plinth_h
+f1_top = plinth_top + floor1_h
+b1_top = f1_top + belt_h
+f2_top = b1_top + floor2_h
+crown_top = f2_top + crown_h
+deck_y = crown_top + roof_h
+tower_base = f2_top
+tower_top = tower_base + tower_h
+spire_base = tower_top + 0.3
+facade_z = depth * 0.5
+ris_front_z = facade_z + ris_p
+deck_hw = width * 0.5 - 0.8
+deck_hd = depth * 0.5 - 0.8
+
+# --- хелперы ------------------------------------------------------------------------
+def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
+    """Переметить грани из группы src в dst (ingroup-маска, затем снять src)."""
+    out = unmark(mark(g, dst, where = ingroup(src), domain = faces), src)
+}
+
+def belt(w: f32, d: f32, h: f32) -> (out: geo<mesh>) {
+    """Светлый поясной карниз по периметру w×d: две ступенчатые плиты (нижняя уже
+    и толще, верхняя шире и тоньше), центр в 0, низ на y = 0. Группа stone."""
+    lo = parts.piece(size = vec3(w + 0.14, h * 0.58, d + 0.14), pos = vec3(0, h * 0.29, 0), grp = "stone")
+    hi = parts.piece(size = vec3(w + 0.28, h * 0.42, d + 0.28), pos = vec3(0, h * 0.79, 0), grp = "stone")
+    out = merge(lo, hi)
+}
+
+def stone_arch_window(w: f32, h: f32) -> (out: geo<mesh>) {
+    """Арочное окно architecture.arch_window, но обрамление и подоконник — светлый
+    камень (латунь перемечена в stone), стекло и средники остаются."""
+    out = to_group(architecture.arch_window(w = w, h = h), src = "brass", dst = "stone")
+}
+
+def dentils(w: f32, d: f32, y: f32) -> (out: geo<mesh>) {
+    """Ряд зубчиков под карнизом по периметру w×d на высоте y: мелкие каменные
+    блоки с шагом ~0.24, инстансы на четырёх линиях (одна собирается, три — повороты)."""
+    blk = parts.piece(size = vec3(0.09, 0.12, 0.10), pos = vec3(0, 0.06, 0), grp = "stone")
+    nf = int((w - 0.3) / 0.24)
+    lf = mesh_line(count = nf, length = f32(nf - 1) * 0.24, dir = (1, 0, 0))
+    row_f = realize(instance_on_points(transform(lf, translate = vec3(0.0 - f32(nf - 1) * 0.12, y, d * 0.5 + 0.13)), source = blk))
+    row_b = transform(row_f, rotate = vec3(0, 180, 0))
+    ns = int((d - 0.3) / 0.24)
+    ls = mesh_line(count = ns, length = f32(ns - 1) * 0.24, dir = (1, 0, 0))
+    row_s = realize(instance_on_points(transform(ls, translate = vec3(0.0 - f32(ns - 1) * 0.12, y, w * 0.5 + 0.13)), source = blk))
+    row_sr = transform(row_s, rotate = vec3(0, 90, 0))
+    row_sl = transform(row_s, rotate = vec3(0, 270, 0))
+    out = merge(row_f, row_b, row_sr, row_sl)
+}
+
+def corbel(w: f32, d: f32, h: f32, steps: int) -> (out: geo<mesh>) {
+    """«Перевёрнутый» сход под эркером: steps каменных плит, ступенчато сужающихся
+    к низу (задняя грань каждой плиты остаётся в плоскости стены z = 0, перед
+    отступает), плюс капля-наконечник. Верх на y = 0, сход уходит вниз на h."""
+    expect steps >= 2: "corbel: минимум две ступени"
+    t = h / f32(steps)
+    s0 = parts.piece(size = vec3(w, t, d), pos = vec3(0, 0.0 - t * 0.5, d * 0.5), grp = "stone")
+    body = repeat (s0, iterations = steps - 1) |acc| {
+        ck = f32(@iteration) + 1.0
+        fk = 1.0 - 0.68 * ck / f32(steps)
+        dk = d * fk
+        sk = parts.piece(size = vec3(w * fk, t, dk), pos = vec3(0, 0.0 - (ck + 0.5) * t, dk * 0.5), grp = "stone")
+        acc = merge(acc, sk)
+    }
+    tip0 = fixtures.pyramid_cap(base = vec3(0, 0.0 - h, d * 0.16), half = w * 0.13, h = 0.0 - h * 0.24, tip = 0.015)
+    tip = to_group(tip0, src = "iron", dst = "stone")
+    out = merge(body, tip)
+}
+
+def octa_frustum(y0: f32, y1: f32, r0: f32, r1: f32, grp: string) -> (out: geo<mesh>) {
+    """Восьмигранный усечённый конус от y0 (радиус по вершинам r0) до y1 (r1): sweep
+    восьмиугольного профиля, повёрнутого на 22.5° — грани смотрят на оси. Плоские
+    нормали: скаты читаются гранями."""
+    prof = transform(circle(sides = 8, radius = 1.0), rotate = vec3(0, 0, 22.5))
+    path0 = mesh_line(count = 2, length = y1 - y0, dir = (0, 1, 0))
+    path = set(transform(path0, translate = vec3(0, y0, 0)), "profile_scale", @index == 0 ? vec2(r0, r0) : vec2(r1, r1))
+    out = mark(compute_normals(sweep(path, profile = prof), mode = flat), grp, where = true, domain = faces)
+}
+
+def cone_r(y: f32, r0: f32, h: f32) -> (out: f32) {
+    """Радиус вершин основного конуса шпиля на высоте y (конус идёт от y = 0.65 до h)."""
+    out = r0 - (r0 - 0.14) * (y - 0.65) / (h - 0.65)
+}
+
+def octa_ring(y: f32, r: f32) -> (out: geo<mesh>) {
+    """Восьмигранное кольцо-пояс ряда шифера на высоте y (вершины на радиусе r):
+    sweep тонкого шестигранного прута по замкнутому восьмиугольнику в XZ, повёрнутому
+    на 22.5° вокруг Y — вершины совпадают с вершинами конуса. Группа roof."""
+    loop0 = transform(transform(circle(sides = 8, radius = r), rotate = vec3(90, 0, 0)), rotate = vec3(0, 22.5, 0))
+    loop = transform(loop0, translate = vec3(0, y, 0))
+    out = mark(compute_normals(sweep(loop, profile = circle(sides = 6, radius = 0.02), closed = true), mode = auto, angle = 50), "roof", where = true, domain = faces)
+}
+
+def spire_lucarne(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
+    """Маленькая люкарна шпиля (центр x = 0, низ y = 0, лицо на z = +d/2, спина
+    утоплена в скат): шиферная коробка-щека, тёмное арочное окошко, шатёр."""
+    bx = parts.piece(size = vec3(w, h, d), pos = vec3(0, h * 0.5, 0), grp = "roof")
+    wn = transform(architecture.arch_panel(w = w * 0.42, h = h * 0.6, t = 0.05, grp = "glass"), translate = vec3(0, h * 0.2, d * 0.5 + 0.01))
+    rf = transform(architecture.pyramid(hw = w * 0.5 + 0.07, hd = d * 0.5 + 0.07, h = h * 0.55, top = 0.03, grp = "roof"), translate = vec3(0, h, 0))
+    out = merge(bx, wn, rf)
+}
+
+def roof_dormer(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
+    """Люкарна основной крыши (низ y = 0, лицо +Z): кирпичные щёки, арочное окно
+    в каменном обрамлении, шиферный шатёр."""
+    bx = parts.piece(size = vec3(w, h, d), pos = vec3(0, h * 0.5, 0), grp = "brick")
+    wn = transform(stone_arch_window(w = w * 0.52, h = h * 0.7), translate = vec3(0, h * 0.16, d * 0.5 + 0.03))
+    rf = transform(architecture.pyramid(hw = w * 0.5 + 0.09, hd = d * 0.5 + 0.09, h = h * 0.62, top = 0.03, grp = "roof"), translate = vec3(0, h, 0))
+    out = merge(bx, wn, rf)
+}
+
+def rail_run(len: f32, h: f32) -> (out: geo<mesh>) {
+    """Кованая решётка палубы крыши вдоль X (центр в 0, низ на y = 0): стойки с
+    копьями через ~0.5, верхний и нижний прогоны, X-раскосы в каждом пролёте
+    (инстансы пары диагональных прутьев)."""
+    expect len > 0.5: "rail_run: короче 0.5"
+    nb = int(len / 0.5)
+    pitch = len / f32(nb)
+    post = merge(parts.piece(size = vec3(0.06, h, 0.06), pos = vec3(0, h * 0.5, 0), grp = "iron"), ironwork.spearhead(base = vec3(0, h + 0.01, 0), h = 0.24, w = 0.1))
+    pp = transform(mesh_line(count = nb + 1, length = len, dir = (1, 0, 0)), translate = vec3(0.0 - len * 0.5, 0, 0))
+    posts = realize(instance_on_points(pp, source = post))
+    rail_t = parts.piece(size = vec3(len + 0.05, 0.055, 0.055), pos = vec3(0, h - 0.028, 0), grp = "iron")
+    rail_b = parts.piece(size = vec3(len + 0.05, 0.045, 0.045), pos = vec3(0, 0.14, 0), grp = "iron")
+    xa = 0.0 - pitch * 0.5 + 0.05
+    xb = pitch * 0.5 - 0.05
+    ya = 0.17
+    yb = h - 0.07
+    brace = merge(fixtures.rod(p0 = vec3(xa, ya, 0), p1 = vec3(mix(xa, xb, 0.33), mix(ya, yb, 0.33), 0), p2 = vec3(mix(xa, xb, 0.67), mix(ya, yb, 0.67), 0), p3 = vec3(xb, yb, 0), r = 0.016, n = 3), fixtures.rod(p0 = vec3(xa, yb, 0), p1 = vec3(mix(xa, xb, 0.33), mix(yb, ya, 0.33), 0), p2 = vec3(mix(xa, xb, 0.67), mix(yb, ya, 0.67), 0), p3 = vec3(xb, ya, 0), r = 0.016, n = 3))
+    bp = transform(mesh_line(count = nb, length = len - pitch, dir = (1, 0, 0)), translate = vec3(0.0 - (len - pitch) * 0.5, 0, 0))
+    braces = realize(instance_on_points(bp, source = brace))
+    out = merge(posts, rail_t, rail_b, braces)
+}
+
+def clock_tier(w: f32, h: f32, clock_r: f32) -> (out: geo<mesh>) {
+    """Часовой ярус над эркером (центр x/z в 0, низ y = 0, лицо +Z): кирпичная
+    коробка w×h×w, круглые часы на фасаде, парные высокие арочные проёмы звонницы
+    на боковых и тыльной гранях, угловые колоннетты, два пояска, зубчики и карниз."""
+    bx = parts.piece(size = vec3(w, h, w), pos = vec3(0, h * 0.5, 0), grp = "brick")
+    ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, h * 0.55, w * 0.5 + 0.03))
+    wn = stone_arch_window(w = 0.55, h = 2.45)
+    pair = merge(transform(wn, translate = vec3(0.0 - 0.45, 0, 0)), transform(wn, translate = vec3(0.45, 0, 0)))
+    hw = w * 0.5
+    side_r = transform(transform(pair, rotate = vec3(0, 90, 0)), translate = vec3(hw + 0.04, 1.3, 0))
+    side_l = transform(transform(pair, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - hw - 0.04, 1.3, 0))
+    back = transform(transform(pair, rotate = vec3(0, 180, 0)), translate = vec3(0, 1.3, 0.0 - hw - 0.04))
+    shaft = architecture.regroup(ironwork.spool(p0 = vec3(0, 0.10, 0), p1 = vec3(0, h - 0.10, 0), r0 = 0.07, r1 = 0.06, sides = 10), grp = "stone")
+    shafts = merge(transform(shaft, translate = vec3(hw, 0, hw)), transform(shaft, translate = vec3(0.0 - hw, 0, hw)), transform(shaft, translate = vec3(hw, 0, 0.0 - hw)), transform(shaft, translate = vec3(0.0 - hw, 0, 0.0 - hw)))
+    band_lo = transform(belt(w = w, d = w, h = 0.16), translate = vec3(0, 1.06, 0))
+    band_hi = transform(belt(w = w, d = w, h = 0.16), translate = vec3(0, h - 0.62, 0))
+    dt = dentils(w = w + 0.02, d = w + 0.02, y = h - 0.12)
+    top = transform(belt(w = w + 0.06, d = w + 0.06, h = 0.3), translate = vec3(0, h, 0))
+    out = merge(bx, ck, side_r, side_l, back, shafts, band_lo, band_hi, dt, top)
+}
+
+def roof_spire(h: f32, r0: f32) -> (out: geo<mesh>) {
+    """Шиферный шпиль (ось Y, низ на y = 0): юбка-раструб, основной восьмискатный
+    конус, пояса шиферных рядов (восьмигранные кольца), рёбра по вершинам (bezier-
+    прутья через точки профиля — совпадают с вершинами sweep), два яруса люкарн
+    по четырем граням, тёмный финial."""
+    skirt = octa_frustum(y0 = 0.0, y1 = 0.65, r0 = r0 * 1.15, r1 = r0, grp = "roof")
+    cone = octa_frustum(y0 = 0.65, y1 = h, r0 = r0, r1 = 0.14, grp = "roof")
+    rings = repeat (octa_ring(y = 0.82, r = cone_r(y = 0.82, r0 = r0, h = h) + 0.02), iterations = 9) |acc| {
+        rk = f32(@iteration) + 1.0
+        yk = 0.82 + rk * 0.45
+        acc = merge(acc, octa_ring(y = yk, r = cone_r(y = yk, r0 = r0, h = h) + 0.02))
+    }
+    rib_pts = transform(transform(circle(sides = 8, radius = 1.0), rotate = vec3(0, 0, 22.5)), rotate = vec3(90, 0, 0))
+    ribs0 = foreach v in rib_pts {
+        rd = value(@P, on = v)
+        v = fixtures.rod(p0 = rd * (r0 * 1.13) + vec3(0, 0.07, 0), p1 = rd * (r0 - 0.02) + vec3(0, 0.65, 0), p2 = rd * (cone_r(y = h * 0.55, r0 = r0, h = h) - 0.02) + vec3(0, h * 0.55, 0), p3 = rd * 0.17 + vec3(0, h - 0.08, 0), r = 0.028, n = 10)
+    }
+    ribs = to_group(ribs0, src = "iron", dst = "roof")
+    luc_lo = spire_lucarne(w = 0.62, h = 0.9, d = 0.85)
+    lz_lo = cone_r(y = 1.0, r0 = r0, h = h) * 0.92388 - 0.42
+    luc_lo_f = transform(luc_lo, translate = vec3(0, 1.0, lz_lo))
+    lucs_lo = merge(luc_lo_f, transform(luc_lo_f, rotate = vec3(0, 90, 0)), transform(luc_lo_f, rotate = vec3(0, 180, 0)), transform(luc_lo_f, rotate = vec3(0, 270, 0)))
+    luc_hi = spire_lucarne(w = 0.44, h = 0.62, d = 0.6)
+    lz_hi = cone_r(y = 3.05, r0 = r0, h = h) * 0.92388 - 0.3
+    luc_hi_f = transform(luc_hi, translate = vec3(0, 3.05, lz_hi))
+    lucs_hi = merge(luc_hi_f, transform(luc_hi_f, rotate = vec3(0, 90, 0)), transform(luc_hi_f, rotate = vec3(0, 180, 0)), transform(luc_hi_f, rotate = vec3(0, 270, 0)))
+    top = transform(to_group(architecture.finial(h = 1.9), src = "brass", dst = "iron"), translate = vec3(0, h - 0.05, 0))
+    out = merge(skirt, cone, rings, ribs, lucs_lo, lucs_hi, top)
+}
+
+def slope_courses(len0: f32, len1: f32, off0: f32, off1: f32, y0: f32, h: f32, n: int) -> (out: geo<mesh>) {
+    """Горизонтальные пояса шиферных рядов одного ската мансарды: n тонких планок
+    вдоль X, каждая на своей высоте, длине и выносе наружу (off — от оси ската);
+    планка наполовину утоплена в скат — читается тонкой ступенью."""
+    p0 = parts.piece(size = vec3(len0 - 0.25, 0.07, 0.15), pos = vec3(0, y0 + 0.35, off0 - (off0 - off1) * 0.35 / h - 0.04), grp = "roof")
+    out = repeat (p0, iterations = n - 1) |acc| {
+        kk = f32(@iteration) + 1.0
+        yy = y0 + 0.35 + kk * 0.38
+        tt = (yy - y0) / h
+        ss = parts.piece(size = vec3(len0 - (len0 - len1) * tt - 0.25, 0.07, 0.15), pos = vec3(0, yy, off0 - (off0 - off1) * tt - 0.04), grp = "roof")
+        acc = merge(acc, ss)
+    }
+}
+
+def mansard(hw0: f32, hd0: f32, hw1: f32, hd1: f32, h: f32) -> (out: geo<mesh>) {
+    """Мансардная крыша: усечённая пирамида от прямоугольника 2hw0×2hd0 (низ, y = 0)
+    к палубе 2hw1×2hd1 (верх, y = h) — sweep квадрата под 45° с @profile_scale,
+    верхняя крышка sweep — палуба. Группа roof."""
+    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
+    path = set(path0, "profile_scale", @index == 0 ? vec2(hw0 * 1.41421, hd0 * 1.41421) : vec2(hw1 * 1.41421, hd1 * 1.41421))
+    body = sweep(path, profile = transform(circle(sides = 4, radius = 1.0), rotate = vec3(0, 0, 45)))
+    out = mark(compute_normals(body, mode = flat), "roof", where = true, domain = faces)
+}
+
+# --- цоколь и стены ------------------------------------------------------------------
+plinth = parts.piece(size = vec3(width + 0.24, plinth_h - 0.08, depth + 0.24), pos = vec3(0, (plinth_h - 0.08) * 0.5, 0), grp = "plinth")
+plinth_cap = parts.piece(size = vec3(width + 0.38, 0.14, depth + 0.38), pos = vec3(0, plinth_h - 0.07, 0), grp = "plinth")
+brick_h = f2_top - plinth_top
+walls = parts.piece(size = vec3(width, brick_h, depth), pos = vec3(0, plinth_top + brick_h * 0.5, 0), grp = "brick")
+quoins = transform(blockwork.quoin_stack(w = width, d = depth, n_rows = 14, course_h = brick_h / 14.0, bricks = 1.5), translate = vec3(0, plinth_top, 0))
+belt1 = transform(belt(w = width, d = depth, h = belt_h), translate = vec3(0, f1_top, 0))
+crown = transform(belt(w = width, d = depth, h = crown_h), translate = vec3(0, f2_top, 0))
+crown_dt = dentils(w = width + 0.1, d = depth + 0.1, y = f2_top - 0.12)
+
+# --- окна стен и ниша ----------------------------------------------------------------
+win_side = stone_arch_window(w = 0.66, h = 2.15)
+f1_y = plinth_top + 0.35
+f2_y = b1_top + 0.35
+wz = facade_z + 0.05
+front_w = merge(transform(win_side, translate = vec3(0.0 - 2.35, f1_y, wz)), transform(win_side, translate = vec3(2.35, f1_y, wz)), transform(win_side, translate = vec3(0.0 - 2.35, f2_y, wz)), transform(win_side, translate = vec3(2.35, f2_y, wz)))
+niche = merge(transform(architecture.arch_panel(w = 0.55, h = 1.05, t = 0.05, grp = "glass"), translate = vec3(0.0 - 0.5, f1_y + 0.15, wz)), transform(architecture.arch_frame(w = 0.55, h = 1.05, bar = 0.09, depth = 0.12, grp = "stone"), translate = vec3(0.0 - 0.5, f1_y + 0.15, wz + 0.02)))
+side_pos = merge(transform(win_side, translate = vec3(0.0 - 1.5, f1_y, 0)), transform(win_side, translate = vec3(1.5, f1_y, 0)), transform(win_side, translate = vec3(0.0 - 1.5, f2_y, 0)), transform(win_side, translate = vec3(1.5, f2_y, 0)))
+side_r = transform(transform(side_pos, rotate = vec3(0, 90, 0)), translate = vec3(width * 0.5 + 0.05, 0, 0))
+side_l = transform(transform(side_pos, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - width * 0.5 - 0.05, 0, 0))
+back_w = transform(transform(side_pos, rotate = vec3(0, 180, 0)), translate = vec3(0, 0, 0.0 - facade_z - 0.05))
+windows_all = merge(front_w, niche, side_r, side_l, back_w)
+
+# --- эркер-ризалит со сходом ---------------------------------------------------------
+ris_h = f2_top - f1_top + 0.15
+ris_box = parts.piece(size = vec3(ris_w, ris_h, ris_p), pos = vec3(0, f1_top + ris_h * 0.5, facade_z + ris_p * 0.5), grp = "brick")
+ris_win = stone_arch_window(w = 0.55, h = 2.35)
+ris_wins = merge(transform(ris_win, translate = vec3(0.0 - 0.55, f1_top + 0.75, ris_front_z + 0.04)), transform(ris_win, translate = vec3(0.55, f1_top + 0.75, ris_front_z + 0.04)))
+ris_shaft = architecture.regroup(ironwork.spool(p0 = vec3(0, f1_top + 0.25, 0), p1 = vec3(0, f2_top + 0.05, 0), r0 = 0.065, r1 = 0.055, sides = 10), grp = "stone")
+ris_shafts = merge(transform(ris_shaft, translate = vec3(0.0 - ris_w * 0.5 + 0.02, 0, ris_front_z - 0.02)), transform(ris_shaft, translate = vec3(ris_w * 0.5 - 0.02, 0, ris_front_z - 0.02)))
+ris_base = transform(belt(w = ris_w, d = ris_p, h = 0.3), translate = vec3(0, f1_top + 0.15, facade_z + ris_p * 0.5))
+boss_pts = transform(mesh_line(count = 5, length = ris_w - 0.9, dir = (1, 0, 0)), translate = vec3(0.0 - (ris_w - 0.9) * 0.5, f1_top + 0.30, ris_front_z + 0.10))
+ris_bosses = to_group(ironwork.bolt_heads(boss_pts, r = 0.05), src = "iron", dst = "stone")
+ris_corbel = transform(corbel(w = ris_w * 0.96, d = ris_p, h = 1.45, steps = 5), translate = vec3(0, f1_top + 0.15, facade_z))
+risalit = merge(ris_box, ris_wins, ris_shafts, ris_base, ris_bosses, ris_corbel)
+
+# --- крыша: мансарда, палуба, решётка, люкарна, шпильки ------------------------------
+eave_hw = width * 0.5 + 0.35
+eave_hd = depth * 0.5 + 0.35
+roof = transform(mansard(hw0 = eave_hw, hd0 = eave_hd, hw1 = deck_hw, hd1 = deck_hd, h = roof_h), translate = vec3(0, crown_top, 0))
+courses_f = slope_courses(len0 = eave_hw * 2.0, len1 = deck_hw * 2.0, off0 = eave_hd, off1 = deck_hd, y0 = crown_top, h = roof_h, n = 5)
+courses_b = transform(courses_f, rotate = vec3(0, 180, 0))
+courses_r0 = slope_courses(len0 = eave_hd * 2.0, len1 = deck_hd * 2.0, off0 = eave_hw, off1 = deck_hw, y0 = crown_top, h = roof_h, n = 5)
+courses_r = transform(courses_r0, rotate = vec3(0, 90, 0))
+courses_l = transform(courses_r0, rotate = vec3(0, 270, 0))
+dormer_r = transform(transform(roof_dormer(w = 0.75, h = 0.95, d = 0.85), rotate = vec3(0, 90, 0)), translate = vec3(3.5, crown_top + 0.8, 0.0 - 0.7))
+rail_h = 0.95
+rail_bk = transform(rail_run(len = deck_hw * 2.0 - 0.3, h = rail_h), translate = vec3(0, deck_y, 0.0 - deck_hd + 0.15))
+rail_rt = transform(transform(rail_run(len = deck_hd * 2.0 - 0.3, h = rail_h), rotate = vec3(0, 90, 0)), translate = vec3(deck_hw - 0.15, deck_y, 0))
+rail_lt = transform(transform(rail_run(len = deck_hd * 2.0 - 0.3, h = rail_h), rotate = vec3(0, 90, 0)), translate = vec3(0.0 - deck_hw + 0.15, deck_y, 0))
+eave_fin = merge(parts.piece(size = vec3(0.07, 0.3, 0.07), pos = vec3(0, 0.15, 0), grp = "iron"), ironwork.spearhead(base = vec3(0, 0.3, 0), h = 0.4, w = 0.12))
+eave_fins = merge(transform(eave_fin, translate = vec3(eave_hw - 0.10, crown_top - 0.05, eave_hd - 0.10)), transform(eave_fin, translate = vec3(0.0 - eave_hw + 0.10, crown_top - 0.05, eave_hd - 0.10)), transform(eave_fin, translate = vec3(eave_hw - 0.10, crown_top - 0.05, 0.0 - eave_hd + 0.10)), transform(eave_fin, translate = vec3(0.0 - eave_hw + 0.10, crown_top - 0.05, 0.0 - eave_hd + 0.10)))
+roof_all = merge(roof, courses_f, courses_b, courses_r, courses_l, dormer_r, rail_bk, rail_rt, rail_lt, eave_fins)
+
+# --- часовой ярус и шпиль ------------------------------------------------------------
+tower = transform(clock_tier(w = tower_w, h = tower_h, clock_r = 0.95), translate = vec3(0, tower_base, ris_front_z - tower_w * 0.5))
+spire = transform(roof_spire(h = spire_h, r0 = 1.95), translate = vec3(0, spire_base, ris_front_z - tower_w * 0.5))
+
+house_raw = merge(plinth, plinth_cap, walls, quoins, belt1, crown, crown_dt, windows_all, risalit, roof_all, tower, spire)
+
+# --- окраска: @Cd по группам (faces) --------------------------------------------------
+paint_rng = split_rng(root_rng, key = "paint")
+brick_col = mix(vec3(0.27, 0.095, 0.055), vec3(0.165, 0.058, 0.04), fbm(scale = 1.4, octaves = 3, rng = split_rng(paint_rng, key = "brick")))
+stone_col = mix(vec3(0.38, 0.335, 0.275), vec3(0.26, 0.23, 0.195), fbm(scale = 2.0, octaves = 3, rng = split_rng(paint_rng, key = "stone")))
+plinth_col = mix(vec3(0.155, 0.15, 0.145), vec3(0.095, 0.09, 0.088), fbm(scale = 1.8, octaves = 3, rng = split_rng(paint_rng, key = "plinth")))
+roof_col = mix(vec3(0.075, 0.085, 0.105), vec3(0.038, 0.043, 0.055), fbm(scale = 2.2, octaves = 3, rng = split_rng(paint_rng, key = "roof")))
+c1 = ingroup("brick") ? brick_col : vec3(1.0, 0.0, 1.0)
+c2 = ingroup("stone") ? stone_col : c1
+c3 = ingroup("plinth") ? plinth_col : c2
+c4 = ingroup("roof") ? roof_col : c3
+c5 = ingroup("glass") ? vec3(0.045, 0.055, 0.075) : c4
+c6 = ingroup("dial") ? vec3(0.88, 0.82, 0.66) : c5
+c7 = ingroup("brass") ? vec3(0.48, 0.35, 0.14) : c6
+c8 = ingroup("iron") ? vec3(0.035, 0.035, 0.04) : c7
+c9 = ingroup("wood") ? vec3(0.09, 0.06, 0.04) * @tint : c8
+edge_mul = ingroup("edge") ? vec3(1.4, 1.38, 1.3) : vec3(1.0)
+house_col = set(house_raw, "Cd", c9 * edge_mul, domain = faces)
+house = bake_ao(house_col, rays = 12, distance = 1.2, rng = split_rng(root_rng, key = "ao"), domain = points)
+output house
