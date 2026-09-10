@@ -8,7 +8,7 @@ def assemble(ground: geo<mesh>, upper: geo<mesh>, bay_unit: geo<mesh>, porch_uni
     raw = merge(ground, upper, bay_unit, porch_unit, door_unit, windows_all, roof_all, tower_all)
     # Окраска: @Cd по группам (faces)
     paint_rng = split_rng(root_rng, key = "paint")
-    brick_col = mix(vec3(0.27, 0.095, 0.055), vec3(0.165, 0.058, 0.04), fbm(scale = 1.4, octaves = 3, rng = split_rng(paint_rng, key = "brick")))
+    brick_col = mix(vec3(0.27, 0.095, 0.055), vec3(0.165, 0.058, 0.04), fbm(scale = 1.4, octaves = 3, rng = split_rng(paint_rng, key = "brick"))) * @tint
     stone_col = mix(vec3(0.38, 0.335, 0.275), vec3(0.26, 0.23, 0.195), fbm(scale = 2.0, octaves = 3, rng = split_rng(paint_rng, key = "stone")))
     plinth_col = mix(vec3(0.155, 0.15, 0.145), vec3(0.095, 0.09, 0.088), fbm(scale = 1.8, octaves = 3, rng = split_rng(paint_rng, key = "plinth")))
     roof_col = mix(vec3(0.075, 0.085, 0.105), vec3(0.038, 0.043, 0.055), fbm(scale = 2.2, octaves = 3, rng = split_rng(paint_rng, key = "roof")))

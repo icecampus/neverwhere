@@ -67,14 +67,14 @@ wing_x = (tower_half + width * 0.5 - quoin_in) * 0.5
 door_x = wing_x
 
 # Изолированные компоненты (доступны по именам в pgg_render / PggViewer):
-ground = ground_floor.ground_floor(width = width, depth = depth, plinth_h = plinth_h, floor1_h = floor1_h, belt_h = belt_h)
-upper = upper_floor.upper_floor(width = width, depth = depth, b1_top = b1_top, floor2_h = floor2_h, crown_h = crown_h)
-bay_unit = bay.bay_window(facade_z = facade_z, f1_top = f1_top, b1_top = b1_top, f2_top = f2_top, f2_y = f2_y, crown_h = crown_h, tower_w = tower_w, tower_z = tower_z)
+ground = ground_floor.ground_floor(width = width, depth = depth, plinth_h = plinth_h, floor1_h = floor1_h, belt_h = belt_h, wing_x = wing_x, door_x = door_x, rng = split_rng(root_rng, key = "ground"))
+upper = upper_floor.upper_floor(width = width, depth = depth, b1_top = b1_top, floor2_h = floor2_h, crown_h = crown_h, wing_x = wing_x, rng = split_rng(root_rng, key = "upper"))
+bay_unit = bay.bay_window(facade_z = facade_z, f1_top = f1_top, b1_top = b1_top, f2_top = f2_top, f2_y = f2_y, crown_h = crown_h, rng = split_rng(root_rng, key = "bay"), tower_w = tower_w, tower_z = tower_z)
 porch_unit = porch.entrance_porch(door_x = door_x, facade_z = facade_z, plinth_h = plinth_h)
 door_unit = door.entrance_door(door_x = door_x, facade_z = facade_z, plinth_h = plinth_h, rng = split_rng(root_rng, key = "door"))
 windows_all = windows.wall_windows(width = width, depth = depth, facade_z = facade_z, f1_y = f1_y, f2_y = f2_y, wing_x = wing_x)
 roof_all = roof.mansard_roof(width = width, depth = depth, crown_top = crown_top, roof_h = roof_h, deck_hw = deck_hw, deck_hd = deck_hd, rng = split_rng(root_rng, key = "roof"))
-tower_all = tower.clock_tower(tower_w = tower_w, tower_h = floor2_h, spire_h = spire_h, tower_base = tower_base, spire_base = spire_base, tower_z = tower_z, crown_h = crown_h)
+tower_all = tower.clock_tower(tower_w = tower_w, tower_h = floor2_h, spire_h = spire_h, tower_base = tower_base, spire_base = spire_base, tower_z = tower_z, crown_h = crown_h, rng = split_rng(root_rng, key = "tower"))
 
 # Полная сборка с окраской и запеканием AO
 house = assemble.assemble(ground = ground, upper = upper, bay_unit = bay_unit, porch_unit = porch_unit, door_unit = door_unit, windows_all = windows_all, roof_all = roof_all, tower_all = tower_all, root_rng = root_rng)

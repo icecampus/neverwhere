@@ -1,6 +1,7 @@
 # Общие вспомогательные элементы и геометрические примитивы для spire_house:
 # карнизы, дентикулы, ступенчатый корбель, восьмигранные тела, люкарны шпиля и решётки.
 import lib.parts
+import lib.blockwork
 
 def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     """Переметить грани из группы src в dst (ingroup-маска, затем снять src)."""
@@ -10,9 +11,66 @@ def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
 def brick_prism(w: f32, d: f32, h: f32, y0: f32) -> (out: geo<mesh>) {
     """Прямой кирпичный объём w×d высотой h, низ на y0. Без фаски: `piece`/`cbox`
     скос считает от min(размера), и на этаже это ~0.12·h ≈ 40 см — грани
-    визуально загибаются внутрь у карниза и цоколя."""
+    визуально загибаются внутрь у карниза и цоколя. Сердцевина под облицовкой
+    brick_rows (раствор в швах)."""
     body = compute_normals(box(size = vec3(w, h, d)), mode = flat)
     out = mark(transform(body, translate = vec3(0, y0 + h * 0.5, 0)), "brick", where = true, domain = faces)
+}
+
+def brick_rows(len: f32, h: f32) -> (out: geo<points>) {
+    """Якоря мелкой кирпичной кладки вразбежку: ложок L=0.17, ряд 0.12
+    (квойн 0.62×~0.46 — в 3.5–4 раза крупнее). Локально: x вдоль, низ y=0,
+    лицо +Z, вынос z=0.03. Проёмы — delete якорей до brick_from_rows."""
+    L = 0.17
+    ch = 0.12
+    n_rows = int(h / ch)
+    out = blockwork.coursed_wall_anchors(S = len, n_rows = n_rows, course_h = ch, y0 = 0.0, z = 0.03, L = L, g0 = 0.008)
+}
+
+def brick_from_rows(rows: geo<points>, rng: rng) -> (out: geo<mesh>) {
+    """Мелкие кирпичи по якорям brick_rows: ¼/½/¾/полный ложок, лёгкий @tint
+    и джиттер, группа brick. Фаска k=0.14 — светлая кромка edge."""
+    L = 0.17
+    bh = 0.104
+    t = 0.046
+    a0 = parts.cbox(size = vec3(L * 0.25, bh, t), k = 0.14)
+    a1 = parts.cbox(size = vec3(L * 0.5, bh, t), k = 0.14)
+    a2 = parts.cbox(size = vec3(L * 0.75, bh, t), k = 0.14)
+    a3 = parts.cbox(size = vec3(L, bh, t), k = 0.14)
+    shade = random(lo = 0.84, hi = 1.16, rng = split_rng(rng, key = "tint"))
+    p1 = set(rows, "tint", vec3(shade * 1.06, shade * 0.98, shade * 0.92))
+    p2 = set_position(p1, offset = random_vec(lo = vec3(-0.003, -0.002, -0.003), hi = vec3(0.003, 0.002, 0.006), rng = split_rng(rng, key = "jit")))
+    out = mark(realize(instance_on_points(p2, source = a3, variants = [a0, a1, a2, a3])), "brick", where = true, domain = faces)
+}
+
+def brick_box_veneer(w: f32, d: f32, h: f32, y0: f32, wing_x: f32, wing_z: f32, door_x: f32, has_door: int, rng: rng) -> (out: geo<mesh>) {
+    """Облицовка четырёх стен дома мелким кирпичом между квойнами (inset 0.74
+    как у cottage, bricks=1.5). has_door=1 — на фасаде справа дверь вместо окна."""
+    inset = 0.74
+    span_f = w - 2.0 * inset
+    span_s = d - 2.0 * inset
+    y_lo = 0.28
+    y_hi = 2.58
+    hw = 0.50
+    rf0 = brick_rows(len = span_f, h = h)
+    rf_f = delete(rf0, where = ((abs(dot(@P, (1, 0, 0)) + wing_x) < hw) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi)) | (has_door == 1 ? ((abs(dot(@P, (1, 0, 0)) - door_x) < 0.68) & (dot(@P, (0, 1, 0)) < 2.55)) : ((abs(dot(@P, (1, 0, 0)) - wing_x) < hw) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))))
+    rf_b = delete(rf0, where = ((abs(dot(@P, (1, 0, 0)) + wing_x) < hw) | (abs(dot(@P, (1, 0, 0)) - wing_x) < hw)) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))
+    rs0 = brick_rows(len = span_s, h = h)
+    rs = delete(rs0, where = ((abs(dot(@P, (1, 0, 0)) - wing_z) < hw) | (abs(dot(@P, (1, 0, 0)) + wing_z) < hw)) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))
+    wall_f = transform(brick_from_rows(rf_f, rng = split_rng(rng, key = "f")), translate = vec3(0, y0, d * 0.5))
+    wall_b = transform(transform(brick_from_rows(rf_b, rng = split_rng(rng, key = "b")), rotate = vec3(0, 180, 0)), translate = vec3(0, y0, 0.0 - d * 0.5))
+    wall_r = transform(transform(brick_from_rows(rs, rng = split_rng(rng, key = "r")), rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5, y0, 0))
+    wall_l = transform(transform(brick_from_rows(rs, rng = split_rng(rng, key = "l")), rotate = vec3(0, 270, 0)), translate = vec3(0.0 - w * 0.5, y0, 0))
+    out = merge(wall_f, wall_b, wall_r, wall_l)
+}
+
+def hexa_brick_face(h: f32, r_in: f32, r_out: f32, y_lo: f32, y_hi: f32, hw: f32, rng: rng) -> (out: geo<mesh>) {
+    """Кладка одной грани шестигранника (лицо +Z, низ y=0): пролёт r_out − 0.16
+    (отступ от колоннетт), проём в центре грани."""
+    span = r_out - 0.16
+    rows0 = brick_rows(len = span, h = h)
+    rows = delete(rows0, where = (abs(dot(@P, (1, 0, 0))) < hw) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))
+    out = transform(brick_from_rows(rows, rng = rng), translate = vec3(0, 0, r_in))
 }
 
 def belt(w: f32, d: f32, h: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {

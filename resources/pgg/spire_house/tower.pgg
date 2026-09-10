@@ -8,7 +8,7 @@ import lib.fixtures
 import spire_house.common as common
 import spire_house.windows as windows
 
-def clock_tier(w: f32, h: f32, clock_r: f32, crown_h: f32) -> (out: geo<mesh>) {
+def clock_tier(w: f32, h: f32, clock_r: f32, crown_h: f32, rng: rng) -> (out: geo<mesh>) {
     """Часовой ярус башни (центр x/z в 0, низ y = 0, лицо +Z):
     - Правильный шестигранный кирпичный корпус (плоская грань на фасаде +Z);
     - Круглые часы architecture.clock_face на передней грани;
@@ -24,6 +24,17 @@ def clock_tier(w: f32, h: f32, clock_r: f32, crown_h: f32) -> (out: geo<mesh>) {
     win_h = 2.15
     # Шестигранный кирпичный корпус яруса
     bx = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r_out, r1 = r_out, grp = "brick")
+    # Мелкая кладка по всем шести граням, проём под часы/окна звонницы
+    hw_clk = 0.48
+    y_lo = sill - 0.08
+    y_hi = sill + win_h + 0.12
+    bf0 = common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t0"))
+    bf60 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t60")), rotate = vec3(0, 60, 0))
+    bf120 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t120")), rotate = vec3(0, 120, 0))
+    bf180 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t180")), rotate = vec3(0, 180, 0))
+    bf240 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t240")), rotate = vec3(0, 240, 0))
+    bf300 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t300")), rotate = vec3(0, 300, 0))
+    bx_bricks = merge(bf0, bf60, bf120, bf180, bf240, bf300)
     # Часы на передней грани (+Z): центр на середине арочных окон яруса
     ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, sill + win_h * 0.5, r_in + 0.03))
     # Арочные окна звонницы на остальных пяти гранях
@@ -48,7 +59,7 @@ def clock_tier(w: f32, h: f32, clock_r: f32, crown_h: f32) -> (out: geo<mesh>) {
     # Верх яруса: сухарики и венчающий карниз (низ яруса — crown эркера на f2_top)
     dt = common.hexa_dentils(y = h - 0.14, r_in = r_in)
     top = common.hexa_crown(y = h, h = 0.32, r = r_out)
-    out = merge(bx, ck, belfry, shafts, dt, top)
+    out = merge(bx, bx_bricks, ck, belfry, shafts, dt, top)
 }
 
 def roof_spire(h: f32, r0: f32) -> (out: geo<mesh>) {
@@ -101,12 +112,12 @@ def roof_spire(h: f32, r0: f32) -> (out: geo<mesh>) {
     out = merge(skirt, cone_tiers, rings, ribs, lucs_lo, lucs_hi, top)
 }
 
-def clock_tower(tower_w: f32, tower_h: f32, spire_h: f32, tower_base: f32, spire_base: f32, tower_z: f32, crown_h: f32) -> (out: geo<mesh>) {
+def clock_tower(tower_w: f32, tower_h: f32, spire_h: f32, tower_base: f32, spire_base: f32, tower_z: f32, crown_h: f32, rng: rng) -> (out: geo<mesh>) {
     """Полная композиция шестигранной центральной башни со шпилем:
     - Шестигранный часовой ярус на высоте tower_base;
     - Шестигранный черепичный шпиль на высоте spire_base.
     Венчающий карниз дома (crown_h) кольцом обнимает низ яруса — см. bay_window."""
-    tier = transform(clock_tier(w = tower_w, h = tower_h, clock_r = 0.52, crown_h = crown_h), translate = vec3(0, tower_base, tower_z))
+    tier = transform(clock_tier(w = tower_w, h = tower_h, clock_r = 0.52, crown_h = crown_h, rng = rng), translate = vec3(0, tower_base, tower_z))
     sp = transform(roof_spire(h = spire_h, r0 = 1.65), translate = vec3(0, spire_base, tower_z))
     out = merge(tier, sp)
 }
