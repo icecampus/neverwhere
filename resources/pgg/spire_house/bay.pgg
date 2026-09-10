@@ -28,9 +28,9 @@ def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, 
     # 3b. Мелкая кирпичная облицовка трёх выступающих граней
     bay_h = f2_top - b1_top
     sill = f2_y - b1_top
-    bf0 = common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_lo = sill - 0.08, y_hi = sill + 2.28, hw = 0.40, rng = split_rng(rng, key = "bf0"))
-    bf60 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_lo = sill - 0.08, y_hi = sill + 2.28, hw = 0.40, rng = split_rng(rng, key = "bf60")), rotate = vec3(0, 60, 0))
-    bf300 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_lo = sill - 0.08, y_hi = sill + 2.28, hw = 0.40, rng = split_rng(rng, key = "bf300")), rotate = vec3(0, 300, 0))
+    bf0 = common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf0"))
+    bf60 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf60")), rotate = vec3(0, 60, 0))
+    bf300 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf300")), rotate = vec3(0, 300, 0))
     bay_bricks = transform(merge(bf0, bf60, bf300), translate = vec3(0, b1_top, tower_z))
     # 4. Арочные окна 2-го этажа: по одному в центре каждой из трёх выступающих граней
     win2 = windows.stone_arch_window(w = 0.46, h = 2.15)

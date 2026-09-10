@@ -20,7 +20,8 @@ def brick_prism(w: f32, d: f32, h: f32, y0: f32) -> (out: geo<mesh>) {
 def brick_rows(len: f32, h: f32) -> (out: geo<points>) {
     """Якоря мелкой кирпичной кладки вразбежку: ложок L=0.17, ряд 0.12
     (квойн 0.62×~0.46 — в 3.5–4 раза крупнее). Локально: x вдоль, низ y=0,
-    лицо +Z, вынос z=0.03. Проёмы — delete якорей до brick_from_rows."""
+    лицо +Z, вынос z=0.03. Проёмы не дырявят якоря: сплошной ряд, затем
+    clip_arch_hole / clip_circle_hole подрезает кирпичи по контуру."""
     L = 0.17
     ch = 0.12
     n_rows = int(h / ch)
@@ -43,34 +44,122 @@ def brick_from_rows(rows: geo<points>, rng: rng) -> (out: geo<mesh>) {
     out = mark(realize(instance_on_points(p2, source = a3, variants = [a0, a1, a2, a3])), "brick", where = true, domain = faces)
 }
 
+def clip_wedge_out(g: geo<mesh>, cx: f32, cy: f32, R: f32, deg0: f32, deg1: f32) -> (out: geo<mesh>) {
+    """Сектор [deg0, deg1] снаружи окружности (cx, cy, R): между лучами и за
+    касательной на биссектрисе. Крышка среза — brick (торец подрезанного ложка)."""
+    th0 = radians(deg0)
+    th1 = radians(deg1)
+    c0 = cos(th0)
+    s0 = sin(th0)
+    c1 = cos(th1)
+    s1 = sin(th1)
+    g1 = clip(g, origin = vec3(cx, cy, 0), normal = vec3(0.0 - s0, c0, 0))
+    g2 = clip(g1, origin = vec3(cx, cy, 0), normal = vec3(s1, 0.0 - c1, 0))
+    thm = (th0 + th1) * 0.5
+    nmx = cos(thm)
+    nmy = sin(thm)
+    out = clip(g2, origin = vec3(cx + R * nmx, cy + R * nmy, 0), normal = vec3(nmx, nmy, 0), cap_group = "brick")
+}
+
+def clip_arch_hole(g: geo<mesh>, cx: f32, y_bot: f32, win_w: f32, win_h: f32, bar: f32, gap: f32) -> (out: geo<mesh>) {
+    """Вырезать из кладки (локально: x вдоль, y вверх) стадион окна: прямоугольник
+    косяков + верхняя полуокружность. Контур = наружный силуэт arch_frame
+    (полуширина r+bar) плюс зазор gap. Кирпичи снаружи целые, на контуре
+    подрезаны; внутри проёма удалены."""
+    r = win_w * 0.5
+    R = r + bar + gap
+    straight = win_h - r
+    cy = y_bot + straight
+    y_sill = y_bot - gap
+    y_top = cy + R + 0.10
+    left = clip(g, origin = vec3(cx - R, 0, 0), normal = vec3(-1, 0, 0), cap_group = "brick")
+    right = clip(g, origin = vec3(cx + R, 0, 0), normal = vec3(1, 0, 0), cap_group = "brick")
+    m0 = clip(g, origin = vec3(cx - R, 0, 0), normal = vec3(1, 0, 0))
+    mid = clip(m0, origin = vec3(cx + R, 0, 0), normal = vec3(-1, 0, 0))
+    bot = clip(mid, origin = vec3(0, y_sill, 0), normal = vec3(0, -1, 0), cap_group = "brick")
+    top = clip(mid, origin = vec3(0, y_top, 0), normal = vec3(0, 1, 0), cap_group = "brick")
+    ah0 = clip(mid, origin = vec3(0, cy, 0), normal = vec3(0, 1, 0))
+    ah = clip(ah0, origin = vec3(0, y_top, 0), normal = vec3(0, -1, 0))
+    w0 = clip_wedge_out(ah, cx = cx, cy = cy, R = R, deg0 = 0.0, deg1 = 15.0)
+    wedges = repeat (w0, iterations = 11) |acc| {
+        i = f32(@iteration) + 1.0
+        d0 = i * 15.0
+        acc = merge(acc, clip_wedge_out(ah, cx = cx, cy = cy, R = R, deg0 = d0, deg1 = d0 + 15.0))
+    }
+    out = compute_normals(merge(left, right, bot, top, wedges), mode = flat)
+}
+
+def clip_circle_hole(g: geo<mesh>, cx: f32, cy: f32, R: f32) -> (out: geo<mesh>) {
+    """Вырезать диск (cx, cy, R) из кладки: 12 секторов по 30° снаружи окружности."""
+    w0 = clip_wedge_out(g, cx = cx, cy = cy, R = R, deg0 = 0.0, deg1 = 30.0)
+    wedges = repeat (w0, iterations = 11) |acc| {
+        i = f32(@iteration) + 1.0
+        d0 = i * 30.0
+        acc = merge(acc, clip_wedge_out(g, cx = cx, cy = cy, R = R, deg0 = d0, deg1 = d0 + 30.0))
+    }
+    out = compute_normals(wedges, mode = flat)
+}
+
 def brick_box_veneer(w: f32, d: f32, h: f32, y0: f32, wing_x: f32, wing_z: f32, door_x: f32, has_door: int, rng: rng) -> (out: geo<mesh>) {
     """Облицовка четырёх стен дома мелким кирпичом между квойнами (inset 0.74
-    как у cottage, bricks=1.5). has_door=1 — на фасаде справа дверь вместо окна."""
+    как у cottage, bricks=1.5). Сплошная кладка, проёмы — clip_arch_hole по
+    силуэту stone_arch_window / arch_frame (зазор 3 см). has_door=1 — на
+    фасаде справа дверь вместо окна."""
     inset = 0.74
     span_f = w - 2.0 * inset
     span_s = d - 2.0 * inset
-    y_lo = 0.28
-    y_hi = 2.58
-    hw = 0.50
+    win_w = 0.72
+    win_h = 2.15
+    win_bar = 0.11
+    win_y = 0.35
+    gap = 0.03
+    door_w = 1.05
+    door_h = 2.35
+    door_bar = 0.14
     rf0 = brick_rows(len = span_f, h = h)
-    rf_f = delete(rf0, where = ((abs(dot(@P, (1, 0, 0)) + wing_x) < hw) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi)) | (has_door == 1 ? ((abs(dot(@P, (1, 0, 0)) - door_x) < 0.68) & (dot(@P, (0, 1, 0)) < 2.55)) : ((abs(dot(@P, (1, 0, 0)) - wing_x) < hw) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))))
-    rf_b = delete(rf0, where = ((abs(dot(@P, (1, 0, 0)) + wing_x) < hw) | (abs(dot(@P, (1, 0, 0)) - wing_x) < hw)) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))
     rs0 = brick_rows(len = span_s, h = h)
-    rs = delete(rs0, where = ((abs(dot(@P, (1, 0, 0)) - wing_z) < hw) | (abs(dot(@P, (1, 0, 0)) + wing_z) < hw)) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))
-    wall_f = transform(brick_from_rows(rf_f, rng = split_rng(rng, key = "f")), translate = vec3(0, y0, d * 0.5))
-    wall_b = transform(transform(brick_from_rows(rf_b, rng = split_rng(rng, key = "b")), rotate = vec3(0, 180, 0)), translate = vec3(0, y0, 0.0 - d * 0.5))
-    wall_r = transform(transform(brick_from_rows(rs, rng = split_rng(rng, key = "r")), rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5, y0, 0))
-    wall_l = transform(transform(brick_from_rows(rs, rng = split_rng(rng, key = "l")), rotate = vec3(0, 270, 0)), translate = vec3(0.0 - w * 0.5, y0, 0))
+    raw_f = brick_from_rows(rf0, rng = split_rng(rng, key = "f"))
+    p_f0 = clip_arch_hole(raw_f, cx = 0.0 - wing_x, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    cx2 = has_door == 1 ? door_x : wing_x
+    y2 = has_door == 1 ? 0.0 : win_y
+    w2 = has_door == 1 ? door_w : win_w
+    h2 = has_door == 1 ? door_h : win_h
+    bar2 = has_door == 1 ? door_bar : win_bar
+    p_f = clip_arch_hole(p_f0, cx = cx2, y_bot = y2, win_w = w2, win_h = h2, bar = bar2, gap = gap)
+    raw_b = brick_from_rows(rf0, rng = split_rng(rng, key = "b"))
+    p_b0 = clip_arch_hole(raw_b, cx = 0.0 - wing_x, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    p_b = clip_arch_hole(p_b0, cx = wing_x, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    raw_r = brick_from_rows(rs0, rng = split_rng(rng, key = "r"))
+    p_r0 = clip_arch_hole(raw_r, cx = wing_z, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    p_r = clip_arch_hole(p_r0, cx = 0.0 - wing_z, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    raw_l = brick_from_rows(rs0, rng = split_rng(rng, key = "l"))
+    p_l0 = clip_arch_hole(raw_l, cx = wing_z, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    p_l = clip_arch_hole(p_l0, cx = 0.0 - wing_z, y_bot = win_y, win_w = win_w, win_h = win_h, bar = win_bar, gap = gap)
+    wall_f = transform(p_f, translate = vec3(0, y0, d * 0.5))
+    wall_b = transform(transform(p_b, rotate = vec3(0, 180, 0)), translate = vec3(0, y0, 0.0 - d * 0.5))
+    wall_r = transform(transform(p_r, rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5, y0, 0))
+    wall_l = transform(transform(p_l, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - w * 0.5, y0, 0))
     out = merge(wall_f, wall_b, wall_r, wall_l)
 }
 
-def hexa_brick_face(h: f32, r_in: f32, r_out: f32, y_lo: f32, y_hi: f32, hw: f32, rng: rng) -> (out: geo<mesh>) {
+def hexa_brick_face(h: f32, r_in: f32, r_out: f32, y_bot: f32, win_w: f32, win_h: f32, rng: rng) -> (out: geo<mesh>) {
     """Кладка одной грани шестигранника (лицо +Z, низ y=0): пролёт r_out − 0.16
-    (отступ от колоннетт), проём в центре грани."""
+    (отступ от колоннетт). Сплошной ряд, проём — clip_arch_hole по окну
+    win_w×win_h (bar=0.11, зазор 3 см)."""
     span = r_out - 0.16
-    rows0 = brick_rows(len = span, h = h)
-    rows = delete(rows0, where = (abs(dot(@P, (1, 0, 0))) < hw) & (dot(@P, (0, 1, 0)) > y_lo) & (dot(@P, (0, 1, 0)) < y_hi))
-    out = transform(brick_from_rows(rows, rng = rng), translate = vec3(0, 0, r_in))
+    rows = brick_rows(len = span, h = h)
+    raw = brick_from_rows(rows, rng = rng)
+    punched = clip_arch_hole(raw, cx = 0.0, y_bot = y_bot, win_w = win_w, win_h = win_h, bar = 0.11, gap = 0.03)
+    out = transform(punched, translate = vec3(0, 0, r_in))
+}
+
+def hexa_brick_clock_face(h: f32, r_in: f32, r_out: f32, cy: f32, circ_r: f32, rng: rng) -> (out: geo<mesh>) {
+    """Кладка грани с круглым вырезом под циферблат (радиус circ_r + 3 см)."""
+    span = r_out - 0.16
+    rows = brick_rows(len = span, h = h)
+    raw = brick_from_rows(rows, rng = rng)
+    punched = clip_circle_hole(raw, cx = 0.0, cy = cy, R = circ_r + 0.03)
+    out = transform(punched, translate = vec3(0, 0, r_in))
 }
 
 def belt(w: f32, d: f32, h: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {

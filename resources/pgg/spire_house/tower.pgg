@@ -24,16 +24,13 @@ def clock_tier(w: f32, h: f32, clock_r: f32, crown_h: f32, rng: rng) -> (out: ge
     win_h = 2.15
     # Шестигранный кирпичный корпус яруса
     bx = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r_out, r1 = r_out, grp = "brick")
-    # Мелкая кладка по всем шести граням, проём под часы/окна звонницы
-    hw_clk = 0.48
-    y_lo = sill - 0.08
-    y_hi = sill + win_h + 0.12
-    bf0 = common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t0"))
-    bf60 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t60")), rotate = vec3(0, 60, 0))
-    bf120 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t120")), rotate = vec3(0, 120, 0))
-    bf180 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t180")), rotate = vec3(0, 180, 0))
-    bf240 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t240")), rotate = vec3(0, 240, 0))
-    bf300 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_lo = y_lo, y_hi = y_hi, hw = hw_clk, rng = split_rng(rng, key = "t300")), rotate = vec3(0, 300, 0))
+    # Мелкая кладка по всем шести граням: диск под часы, арка под окна звонницы
+    bf0 = common.hexa_brick_clock_face(h = h, r_in = r_in, r_out = r_out, cy = sill + win_h * 0.5, circ_r = clock_r, rng = split_rng(rng, key = "t0"))
+    bf60 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t60")), rotate = vec3(0, 60, 0))
+    bf120 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t120")), rotate = vec3(0, 120, 0))
+    bf180 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t180")), rotate = vec3(0, 180, 0))
+    bf240 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t240")), rotate = vec3(0, 240, 0))
+    bf300 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t300")), rotate = vec3(0, 300, 0))
     bx_bricks = merge(bf0, bf60, bf120, bf180, bf240, bf300)
     # Часы на передней грани (+Z): центр на середине арочных окон яруса
     ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, sill + win_h * 0.5, r_in + 0.03))
