@@ -1,4 +1,4 @@
-param width: f32 = 6.4
+param width: f32 = 7.8
 param depth: f32 = 5.2
 param plinth_h: f32 = 0.90
 param floor1_h: f32 = 3.25
@@ -58,7 +58,13 @@ deck_hw = width * 0.5 - 0.8
 deck_hd = depth * 0.5 - 0.8
 f1_y = plinth_top + 0.35
 f2_y = b1_top + 0.35
-door_x = 2.25
+# Ось окна/двери на фасаде: середина простенка между визуальным краем эркера
+# (колоннетта на 90° — правый край 60° грани) и внутренним краем квойнов
+# (quoin_stack bricks=1.5: лицо 0.94, выпуск p = 0.2 → 0.74 от торца стены).
+quoin_in = 0.74
+tower_half = tower_w * 0.5 * 1.1547 + 0.065
+wing_x = (tower_half + width * 0.5 - quoin_in) * 0.5
+door_x = wing_x
 
 # Изолированные компоненты (доступны по именам в pgg_render / PggViewer):
 ground = ground_floor.ground_floor(width = width, depth = depth, plinth_h = plinth_h, floor1_h = floor1_h, belt_h = belt_h)
@@ -66,7 +72,7 @@ upper = upper_floor.upper_floor(width = width, depth = depth, b1_top = b1_top, f
 bay_unit = bay.bay_window(facade_z = facade_z, f1_top = f1_top, b1_top = b1_top, f2_top = f2_top, f2_y = f2_y, tower_w = tower_w, tower_z = tower_z)
 porch_unit = porch.entrance_porch(door_x = door_x, facade_z = facade_z, plinth_h = plinth_h)
 door_unit = door.entrance_door(door_x = door_x, facade_z = facade_z, plinth_h = plinth_h, rng = split_rng(root_rng, key = "door"))
-windows_all = windows.wall_windows(width = width, depth = depth, facade_z = facade_z, f1_y = f1_y, f2_y = f2_y)
+windows_all = windows.wall_windows(width = width, depth = depth, facade_z = facade_z, f1_y = f1_y, f2_y = f2_y, wing_x = wing_x)
 roof_all = roof.mansard_roof(width = width, depth = depth, crown_top = crown_top, roof_h = roof_h, deck_hw = deck_hw, deck_hd = deck_hd, rng = split_rng(root_rng, key = "roof"))
 tower_all = tower.clock_tower(tower_w = tower_w, tower_h = floor2_h, spire_h = spire_h, tower_base = tower_base, spire_base = spire_base, tower_z = tower_z)
 

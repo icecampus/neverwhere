@@ -106,11 +106,16 @@ def hexa_corbel(y_top: f32, h: f32, r_top: f32, steps: int = 3) -> (out: geo<mes
 def hexa_belt(y: f32, h: f32, r: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
     """Шестигранный двухступенчатый карниз: тот же разрез, что у belt (низ 0.58·h /
     вынос over_lo, верх 0.42·h / over_hi). r — описанный радиус грани корпуса
-    (hexa_frustum); over_* — вынос от грани на сторону, в описанный радиус через 2/√3."""
+    (hexa_frustum); over_* — вынос от грани на сторону, в описанный радиус через 2/√3.
+    Фаска как у belt/cbox: ширина k=0.12 от высоты полки, грани в группе edge."""
     k = 1.1547
-    lo = hexa_frustum(y0 = y, y1 = y + h * 0.58, r0 = r + over_lo * k, r1 = r + over_lo * k, grp = "stone")
-    hi = hexa_frustum(y0 = y + h * 0.58, y1 = y + h, r0 = r + over_hi * k, r1 = r + over_hi * k, grp = "stone")
-    out = merge(lo, hi)
+    lo_h = h * 0.58
+    hi_h = h * 0.42
+    lo = hexa_frustum(y0 = y, y1 = y + lo_h, r0 = r + over_lo * k, r1 = r + over_lo * k, grp = "stone")
+    hi = hexa_frustum(y0 = y + lo_h, y1 = y + h, r0 = r + over_hi * k, r1 = r + over_hi * k, grp = "stone")
+    lo_b = compute_normals(mark(bevel(lo, width = 0.12 * lo_h, bevel_group = "edge"), "stone", where = true, domain = faces), mode = flat)
+    hi_b = compute_normals(mark(bevel(hi, width = 0.12 * hi_h, bevel_group = "edge"), "stone", where = true, domain = faces), mode = flat)
+    out = merge(lo_b, hi_b)
 }
 
 def hexa_crown(y: f32, h: f32, r: f32) -> (out: geo<mesh>) {
