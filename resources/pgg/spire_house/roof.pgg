@@ -1,5 +1,5 @@
 # Мансардная крыша: настил-пирамида, 4 черепичных ската со смещением и нахлёстом,
-# валики вальм, слуховая люкарна, кованая решётка палубы и угловые пики.
+# коньковые уголки по рёбрам вальм, кованая решётка палубы и угловые пики.
 import lib.parts
 import lib.ironwork
 import spire_house.common as common
@@ -37,30 +37,53 @@ def mansard_tile_slope(len_bot: f32, len_top: f32, slope_len: f32, n_rows: int, 
 }
 
 def mansard(hw0: f32, hd0: f32, hw1: f32, hd1: f32, h: f32) -> (out: geo<mesh>) {
-    """Мансардная основа под настил: усечённая пирамида от прямоугольника 2hw0×2hd0 к 2hw1×2hd1."""
+    """Мансардная основа под настил: усечённая пирамида от прямоугольника 2hw0×2hd0 к 2hw1×2hd1.
+    Вертикальный sweep: X профиля → мир +Z, Y профиля → мир +X, поэтому в @profile_scale
+    глубина и ширина стоят наоборот. Поворот 45° — грани по осям, не ромб."""
     path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
-    path = set(path0, "profile_scale", @index == 0 ? vec2(hw0 * 1.41421, hd0 * 1.41421) : vec2(hw1 * 1.41421, hd1 * 1.41421))
+    path = set(path0, "profile_scale", @index == 0 ? vec2(hd0 * 1.41421, hw0 * 1.41421) : vec2(hd1 * 1.41421, hw1 * 1.41421))
     body = sweep(path, profile = transform(circle(sides = 4, radius = 1.0), rotate = vec3(0, 0, 45)))
     out = mark(compute_normals(body, mode = flat), "roof", where = true, domain = faces)
 }
 
-def hip_roll(p0: vec3, p1: vec3) -> (out: geo<mesh>) {
-    """Валик углового ребра вальмы (hip roll) между точками p0 и p1."""
+def hip_caps(p0: vec3, p1: vec3, rng: rng) -> (out: geo<mesh>) {
+    """Конёк вальмы: согнутые черепичные уголки вдоль ребра p0→p1, каждый
+    накрывает предыдущий. Два крыла раскрыты чуть положе скатов (~84°), чтобы
+    лежать сверху полевой черепицы, а не в ендове ребра. Смещение вдоль биссектрисы
+    (+Y) поднимает уголок над настилом. Низ и верх подрезаются плоскостями карниза
+    и палубы. Локально ребро вдоль +Z; в мир — pitch, yaw."""
     d = p1 - p0
     len = length(d)
-    path0 = mesh_line(count = 2, length = len, dir = normalize(d))
-    path = transform(path0, translate = p0)
-    prof = circle(sides = 8, radius = 0.065)
-    roll = sweep(path, profile = prof)
-    out = mark(compute_normals(roll, mode = auto, angle = 45), "roof", where = true, domain = faces)
+    horiz = length(vec3(dot(d, (1, 0, 0)), 0.0, dot(d, (0, 0, 1))))
+    pitch = 0.0 - degrees(atan2(dot(d, (0, 1, 0)), horiz))
+    yaw = degrees(atan2(dot(d, (1, 0, 0)), dot(d, (0, 0, 1))))
+    w = 0.42
+    th = 0.040
+    cl = 0.46
+    half = 42.0
+    right = transform(parts.piece(size = vec3(w, th, cl), pos = vec3(w * 0.5, 0, 0), grp = "roof"), rotate = vec3(0, 0, 0.0 - half))
+    left = transform(parts.piece(size = vec3(w, th, cl), pos = vec3(0.0 - w * 0.5, 0, 0), grp = "roof"), rotate = vec3(0, 0, half))
+    cap = merge(left, right)
+    n = 10
+    span = len - 0.18
+    pts0 = mesh_line(count = n, length = span, dir = (0, 0, 1))
+    pts1 = set_position(pts0, offset = vec3(0.0, 0.12 + f32(@index) * 0.008, 0.20))
+    shade = random(lo = 0.82, hi = 1.18, rng = split_rng(rng, key = "tint"))
+    pts = set(pts1, "tint", vec3(shade * 0.97, shade, shade * 1.05))
+    local = mark(realize(instance_on_points(pts, source = cap)), "roof", where = true, domain = faces)
+    pitched = transform(local, rotate = vec3(pitch, 0, 0))
+    world = transform(pitched, rotate = vec3(0, yaw, 0), translate = p0)
+    # Подрезка по горизонтальным плоскостям карниза (y = p0) и палубы (y = p1).
+    lo = clip(world, origin = p0, normal = vec3(0, 1, 0), cap_group = "roof")
+    hi = clip(lo, origin = p1, normal = vec3(0, -1, 0), cap_group = "roof")
+    out = compute_normals(mark(hi, "roof", where = true, domain = faces), mode = flat)
 }
 
 def mansard_roof(width: f32, depth: f32, crown_top: f32, roof_h: f32, deck_hw: f32, deck_hd: f32, rng: rng) -> (out: geo<mesh>) {
     """Мансардная крыша здания:
     - Пирамидальное основание;
     - 4 честных черепичных ската со смещением рядов и нахлёстом (угол 63.435°);
-    - Валики вальм (hip rolls) по 4 угловым рёбрам;
-    - Слуховая люкарна на правом скате с вырезом под проём;
+    - Коньковые уголки (hip caps) по 4 угловым рёбрам вальм;
     - Кованая ограда палубы (чугунный гребень);
     - Угловые карнизные финиалы-пики."""
     eave_hw = width * 0.5 + 0.35
@@ -74,18 +97,15 @@ def mansard_roof(width: f32, depth: f32, crown_top: f32, roof_h: f32, deck_hw: f
     slope_b0 = mansard_tile_slope(len_bot = eave_hw * 2.0, len_top = deck_hw * 2.0, slope_len = slope_len, n_rows = 9, rng = split_rng(rng, key = "slope_b"))
     slope_b = transform(transform(transform(slope_b0, rotate = vec3(63.435, 0, 0)), translate = vec3(0, crown_top, eave_hd)), rotate = vec3(0, 180, 0))
     slope_r0 = mansard_tile_slope(len_bot = eave_hd * 2.0, len_top = deck_hd * 2.0, slope_len = slope_len, n_rows = 9, rng = split_rng(rng, key = "slope_r"))
-    slope_r_del = delete(slope_r0, where = (abs(dot(@P, (1, 0, 0)) - (0.0 - 1.50)) < 0.45) & (abs(dot(@P, (0, 0, 1)) + 0.89) < 0.50))
-    slope_r = transform(transform(transform(slope_r_del, rotate = vec3(63.435, 0, 0)), translate = vec3(0, crown_top, eave_hw)), rotate = vec3(0, 90, 0))
+    slope_r = transform(transform(transform(slope_r0, rotate = vec3(63.435, 0, 0)), translate = vec3(0, crown_top, eave_hw)), rotate = vec3(0, 90, 0))
     slope_l0 = mansard_tile_slope(len_bot = eave_hd * 2.0, len_top = deck_hd * 2.0, slope_len = slope_len, n_rows = 9, rng = split_rng(rng, key = "slope_l"))
     slope_l = transform(transform(transform(slope_l0, rotate = vec3(63.435, 0, 0)), translate = vec3(0, crown_top, eave_hw)), rotate = vec3(0, 270, 0))
-    # Валики вальм
-    hip_fr = hip_roll(p0 = vec3(eave_hw, crown_top, eave_hd), p1 = vec3(deck_hw, deck_y, deck_hd))
-    hip_fl = hip_roll(p0 = vec3(0.0 - eave_hw, crown_top, eave_hd), p1 = vec3(0.0 - deck_hw, deck_y, deck_hd))
-    hip_br = hip_roll(p0 = vec3(eave_hw, crown_top, 0.0 - eave_hd), p1 = vec3(deck_hw, deck_y, 0.0 - deck_hd))
-    hip_bl = hip_roll(p0 = vec3(0.0 - eave_hw, crown_top, 0.0 - eave_hd), p1 = vec3(0.0 - deck_hw, deck_y, 0.0 - deck_hd))
+    # Коньковые уголки по рёбрам вальм
+    hip_fr = hip_caps(p0 = vec3(eave_hw, crown_top, eave_hd), p1 = vec3(deck_hw, deck_y, deck_hd), rng = split_rng(rng, key = "hip_fr"))
+    hip_fl = hip_caps(p0 = vec3(0.0 - eave_hw, crown_top, eave_hd), p1 = vec3(0.0 - deck_hw, deck_y, deck_hd), rng = split_rng(rng, key = "hip_fl"))
+    hip_br = hip_caps(p0 = vec3(eave_hw, crown_top, 0.0 - eave_hd), p1 = vec3(deck_hw, deck_y, 0.0 - deck_hd), rng = split_rng(rng, key = "hip_br"))
+    hip_bl = hip_caps(p0 = vec3(0.0 - eave_hw, crown_top, 0.0 - eave_hd), p1 = vec3(0.0 - deck_hw, deck_y, 0.0 - deck_hd), rng = split_rng(rng, key = "hip_bl"))
     hips = merge(hip_fr, hip_fl, hip_br, hip_bl)
-    # Слуховое окно-люкарна
-    dormer_r = transform(transform(common.roof_dormer(w = 0.75, h = 0.95, d = 0.85), rotate = vec3(0, 90, 0)), translate = vec3(width * 0.5, crown_top + 0.8, 1.50))
     # Решётка палубы
     rail_h = 0.95
     rail_bk = transform(common.rail_run(len = deck_hw * 2.0 - 0.3, h = rail_h), translate = vec3(0, deck_y, 0.0 - deck_hd + 0.15))
@@ -94,5 +114,5 @@ def mansard_roof(width: f32, depth: f32, crown_top: f32, roof_h: f32, deck_hw: f
     # Угловые пики-финиалы карниза
     eave_fin = merge(parts.piece(size = vec3(0.07, 0.3, 0.07), pos = vec3(0, 0.15, 0), grp = "iron"), ironwork.spearhead(base = vec3(0, 0.3, 0), h = 0.4, w = 0.12))
     eave_fins = merge(transform(eave_fin, translate = vec3(eave_hw - 0.10, crown_top - 0.05, eave_hd - 0.10)), transform(eave_fin, translate = vec3(0.0 - eave_hw + 0.10, crown_top - 0.05, eave_hd - 0.10)), transform(eave_fin, translate = vec3(eave_hw - 0.10, crown_top - 0.05, 0.0 - eave_hd + 0.10)), transform(eave_fin, translate = vec3(0.0 - eave_hw + 0.10, crown_top - 0.05, 0.0 - eave_hd + 0.10)))
-    out = merge(roof_deck, slope_f, slope_b, slope_r, slope_l, hips, dormer_r, rail_bk, rail_rt, rail_lt, eave_fins)
+    out = merge(roof_deck, slope_f, slope_b, slope_r, slope_l, hips, rail_bk, rail_rt, rail_lt, eave_fins)
 }

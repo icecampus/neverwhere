@@ -1,8 +1,6 @@
 # Общие вспомогательные элементы и геометрические примитивы для spire_house:
-# карнизы, дентикулы, ступенчатый корбель, восьмигранные тела, люкарны и решётки.
+# карнизы, дентикулы, ступенчатый корбель, восьмигранные тела, люкарны шпиля и решётки.
 import lib.parts
-import lib.architecture
-import lib.ironwork
 
 def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     """Переметить грани из группы src в dst (ingroup-маска, затем снять src)."""
@@ -158,16 +156,6 @@ def spire_lucarne(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
     arch = parts.piece(size = vec3(w * 0.65, h * 0.22, 0.06), pos = vec3(0, h * 0.72, 0.03), grp = "stone")
     roof_w = parts.piece(size = vec3(w + 0.08, 0.08, d + 0.06), pos = vec3(0, h * 0.88, 0.0 - d * 0.5), grp = "roof")
     out = merge(box_w, win, arch, roof_w)
-}
-
-def roof_dormer(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
-    """Слуховое окно-люкарна мансардной крыши."""
-    body = parts.piece(size = vec3(w, h * 0.75, d), pos = vec3(0, h * 0.375, d * 0.5), grp = "brick")
-    frame = transform(architecture.arch_frame(w = w * 0.75, h = h * 0.75, bar = 0.08, depth = 0.12, grp = "stone"), translate = vec3(0, 0.05, 0.06))
-    gl = parts.piece(size = vec3(w * 0.55, h * 0.55, 0.04), pos = vec3(0, h * 0.4, 0.04), grp = "glass")
-    gable = parts.piece(size = vec3(w + 0.16, 0.12, d + 0.12), pos = vec3(0, h * 0.82, d * 0.5), grp = "roof")
-    ridge = parts.piece(size = vec3(0.08, 0.12, d + 0.14), pos = vec3(0, h * 0.92, d * 0.5), grp = "stone")
-    out = merge(body, frame, gl, gable, ridge)
 }
 
 def rail_run(len: f32, h: f32) -> (out: geo<mesh>) {
