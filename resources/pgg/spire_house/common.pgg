@@ -1,0 +1,171 @@
+# Общие вспомогательные элементы и геометрические примитивы для spire_house:
+# карнизы, дентикулы, ступенчатый корбель, восьмигранные тела, люкарны и решётки.
+import lib.parts
+import lib.architecture
+import lib.ironwork
+
+def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
+    """Переметить грани из группы src в dst (ingroup-маска, затем снять src)."""
+    out = unmark(mark(g, dst, where = ingroup(src), domain = faces), src)
+}
+
+def belt(w: f32, d: f32, h: f32) -> (out: geo<mesh>) {
+    """Светлый поясной карниз по периметру w×d: две ступенчатые плиты (нижняя уже
+    и толще, верхняя шире и тоньше), центр в 0, низ на y = 0. Группа stone."""
+    lo = parts.piece(size = vec3(w + 0.14, h * 0.58, d + 0.14), pos = vec3(0, h * 0.29, 0), grp = "stone")
+    hi = parts.piece(size = vec3(w + 0.28, h * 0.42, d + 0.28), pos = vec3(0, h * 0.79, 0), grp = "stone")
+    out = merge(lo, hi)
+}
+
+def dentils(w: f32, d: f32, y: f32) -> (out: geo<mesh>) {
+    """Ряд мелких сухариков (дентикулов) под венчающим карнизом по периметру w×d."""
+    s = 0.18
+    nx = int(w / s)
+    nz = int(d / s)
+    pts_fx = transform(mesh_line(count = nx, length = f32(nx - 1) * s, dir = (1, 0, 0)), translate = vec3(0.0 - f32(nx - 1) * s * 0.5, y, d * 0.5 + 0.05))
+    pts_bx = transform(mesh_line(count = nx, length = f32(nx - 1) * s, dir = (1, 0, 0)), translate = vec3(0.0 - f32(nx - 1) * s * 0.5, y, 0.0 - d * 0.5 - 0.05))
+    pts_lz = transform(mesh_line(count = nz, length = f32(nz - 1) * s, dir = (0, 0, 1)), translate = vec3(0.0 - w * 0.5 - 0.05, y, 0.0 - f32(nz - 1) * s * 0.5))
+    pts_rz = transform(mesh_line(count = nz, length = f32(nz - 1) * s, dir = (0, 0, 1)), translate = vec3(w * 0.5 + 0.05, y, 0.0 - f32(nz - 1) * s * 0.5))
+    all_pts = merge(pts_fx, pts_bx, pts_lz, pts_rz)
+    dent = mark(compute_normals(box(size = vec3(0.09, 0.08, 0.09)), mode = flat), "stone", where = true, domain = faces)
+    out = realize(instance_on_points(all_pts, source = dent))
+}
+
+def corbel(w: f32, d: f32, h: f32, steps: int = 5) -> (out: geo<mesh>) {
+    """Ступенчатый каменный консольный сход под эркером: n ступеней сверху вниз,
+    каждая следующая уже и ближе к стене. Верх консоли на y = h, низ на y = 0."""
+    st_h = h / f32(steps)
+    st0_frac = 1.0
+    st0_w = w * st0_frac
+    st0_d = d * st0_frac
+    st0_y = h - st_h * 0.5
+    st0_z = d * 0.5 - (d - st0_d) * 0.5
+    b0 = parts.piece(size = vec3(st0_w, st_h * 0.95, st0_d), pos = vec3(0, st0_y, st0_z), grp = "stone")
+    out = repeat (b0, iterations = steps - 1) |acc| {
+        k = f32(@iteration) + 1.0
+        frac = 1.0 - k * (0.62 / f32(steps))
+        sw = w * frac
+        sd = d * frac
+        sy = h - (k + 0.5) * st_h
+        sz = d * 0.5 - (d - sd) * 0.5
+        acc = merge(acc, parts.piece(size = vec3(sw, st_h * 0.95, sd), pos = vec3(0, sy, sz), grp = "stone"))
+    }
+}
+
+def octa_frustum(y0: f32, y1: f32, r0: f32, r1: f32, grp: string) -> (out: geo<mesh>) {
+    """Правильная восьмигранная усечённая пирамида (frustum) от y0 до y1."""
+    h = y1 - y0
+    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
+    path = set(path0, "profile_scale", @index == 0 ? vec2(r0, r0) : vec2(r1, r1))
+    prof = transform(circle(sides = 8, radius = 1.0), rotate = vec3(0, 0, 22.5))
+    sw = sweep(path, profile = prof)
+    sw_y = transform(sw, translate = vec3(0, y0, 0))
+    out = mark(compute_normals(sw_y, mode = flat), grp, where = true, domain = faces)
+}
+
+def hexa_frustum(y0: f32, y1: f32, r0: f32, r1: f32, grp: string) -> (out: geo<mesh>) {
+    """Правильная шестигранная усечённая призма/пирамида от y0 до y1 (грань на +Z)."""
+    h = y1 - y0
+    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
+    path = set(path0, "profile_scale", @index == 0 ? vec2(r0, r0) : vec2(r1, r1))
+    prof = transform(circle(sides = 6, radius = 1.0), rotate = vec3(0, 0, 30.0))
+    sw = sweep(path, profile = prof)
+    sw_y = transform(sw, translate = vec3(0, y0, 0))
+    out = mark(compute_normals(sw_y, mode = flat), grp, where = true, domain = faces)
+}
+
+def hexa_ring(y: f32, r: f32) -> (out: geo<mesh>) {
+    """Тонкое шестигранное профилированное кольцо-поясок вокруг шпиля."""
+    prof = transform(circle(sides = 6, radius = r), rotate = vec3(0, 0, 30.0))
+    path = mesh_line(count = 2, length = 0.06, dir = (0, 1, 0))
+    sw = sweep(path, profile = prof)
+    sw_y = transform(sw, translate = vec3(0, y, 0))
+    out = mark(compute_normals(sw_y, mode = flat), "stone", where = true, domain = faces)
+}
+
+def hexa_corbel(y_top: f32, h: f32, r_top: f32, steps: int = 3) -> (out: geo<mesh>) {
+    """Ступенчатый каменный консольный сход под шестигранным эркером:
+    наклонные шестигранные усечённые пирамиды (frustums) с каменными полочками-выступами."""
+    st_h = h / 3.0
+    # Верхняя ступень (наиболее широкая, наклон граней внутрь)
+    s0 = hexa_frustum(y0 = y_top - st_h, y1 = y_top, r0 = r_top * 0.82, r1 = r_top * 1.04, grp = "stone")
+    # Средняя ступень
+    s1 = hexa_frustum(y0 = y_top - st_h * 2.0, y1 = y_top - st_h, r0 = r_top * 0.54, r1 = r_top * 0.85, grp = "stone")
+    # Нижняя ступень
+    s2 = hexa_frustum(y0 = y_top - h, y1 = y_top - st_h * 2.0, r0 = r_top * 0.28, r1 = r_top * 0.57, grp = "stone")
+    # Каплевидный наконечник-финиал
+    y_bot = y_top - h
+    drop_cone = hexa_frustum(y0 = y_bot - 0.24, y1 = y_bot, r0 = 0.05, r1 = r_top * 0.30, grp = "stone")
+    drop_ball = mark(compute_normals(transform(ico_sphere(subdiv = 1, radius = 0.07), translate = vec3(0, y_bot - 0.28, 0)), mode = auto), "stone", where = true, domain = faces)
+    out = merge(s0, s1, s2, drop_cone, drop_ball)
+}
+
+def hexa_belt(y: f32, h: f32, r: f32) -> (out: geo<mesh>) {
+    """Шестигранный двухступенчатый каменный поясной карниз (каменные полочки)."""
+    lo = hexa_frustum(y0 = y, y1 = y + h * 0.55, r0 = r + 0.04, r1 = r + 0.04, grp = "stone")
+    hi = hexa_frustum(y0 = y + h * 0.55, y1 = y + h, r0 = r + 0.09, r1 = r + 0.09, grp = "stone")
+    out = merge(lo, hi)
+}
+
+def hexa_crown(y: f32, h: f32, r: f32) -> (out: geo<mesh>) {
+    """Шестигранный венчающий профилированный карниз из 3 ступеней."""
+    s1 = hexa_frustum(y0 = y, y1 = y + h * 0.35, r0 = r + 0.05, r1 = r + 0.07, grp = "stone")
+    s2 = hexa_frustum(y0 = y + h * 0.35, y1 = y + h * 0.70, r0 = r + 0.12, r1 = r + 0.14, grp = "stone")
+    s3 = hexa_frustum(y0 = y + h * 0.70, y1 = y + h, r0 = r + 0.20, r1 = r + 0.20, grp = "stone")
+    out = merge(s1, s2, s3)
+}
+
+def hexa_dentils(y: f32, r_in: f32) -> (out: geo<mesh>) {
+    """Ряд сухариков (дентикулов) под венчающим карнизом шестигранной башни."""
+    d0 = parts.piece(size = vec3(0.08, 0.07, 0.08), pos = vec3(0.0 - 0.36, y, r_in + 0.03), grp = "stone")
+    d1 = parts.piece(size = vec3(0.08, 0.07, 0.08), pos = vec3(0.0 - 0.12, y, r_in + 0.03), grp = "stone")
+    d2 = parts.piece(size = vec3(0.08, 0.07, 0.08), pos = vec3(0.12, y, r_in + 0.03), grp = "stone")
+    d3 = parts.piece(size = vec3(0.08, 0.07, 0.08), pos = vec3(0.36, y, r_in + 0.03), grp = "stone")
+    face_d = merge(d0, d1, d2, d3)
+    out = merge(face_d, transform(face_d, rotate = vec3(0, 60, 0)), transform(face_d, rotate = vec3(0, 120, 0)), transform(face_d, rotate = vec3(0, 180, 0)), transform(face_d, rotate = vec3(0, 240, 0)), transform(face_d, rotate = vec3(0, 300, 0)))
+}
+
+def octa_ring(y: f32, r: f32) -> (out: geo<mesh>) {
+    """Тонкое восьмигранное профилированное кольцо-поясок вокруг шпиля."""
+    prof = circle(sides = 8, radius = r)
+    path = mesh_line(count = 2, length = 0.06, dir = (0, 1, 0))
+    sw = sweep(path, profile = prof)
+    sw_y = transform(sw, translate = vec3(0, y, 0))
+    out = mark(compute_normals(sw_y, mode = flat), "stone", where = true, domain = faces)
+}
+
+def cone_r(y: f32, r0: f32, h: f32) -> (out: f32) {
+    """Радиус описанной окружности конуса шпиля на высоте y (линейный спад от r0 до 0.05)."""
+    t = y / h
+    out = r0 * (1.0 - t) + 0.05 * t
+}
+
+def spire_lucarne(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
+    """Маленькая слуховая люкарна шпиля: фасад смотрит на +Z, глубина d уходит внутрь шпиля в -Z."""
+    box_w = parts.piece(size = vec3(w, h * 0.7, d), pos = vec3(0, h * 0.35, 0.0 - d * 0.5), grp = "stone")
+    win = parts.piece(size = vec3(w * 0.55, h * 0.5, 0.04), pos = vec3(0, h * 0.4, 0.02), grp = "glass")
+    arch = parts.piece(size = vec3(w * 0.65, h * 0.22, 0.06), pos = vec3(0, h * 0.72, 0.03), grp = "stone")
+    roof_w = parts.piece(size = vec3(w + 0.08, 0.08, d + 0.06), pos = vec3(0, h * 0.88, 0.0 - d * 0.5), grp = "roof")
+    out = merge(box_w, win, arch, roof_w)
+}
+
+def roof_dormer(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
+    """Слуховое окно-люкарна мансардной крыши."""
+    body = parts.piece(size = vec3(w, h * 0.75, d), pos = vec3(0, h * 0.375, d * 0.5), grp = "brick")
+    frame = transform(architecture.arch_frame(w = w * 0.75, h = h * 0.75, bar = 0.08, depth = 0.12, grp = "stone"), translate = vec3(0, 0.05, 0.06))
+    gl = parts.piece(size = vec3(w * 0.55, h * 0.55, 0.04), pos = vec3(0, h * 0.4, 0.04), grp = "glass")
+    gable = parts.piece(size = vec3(w + 0.16, 0.12, d + 0.12), pos = vec3(0, h * 0.82, d * 0.5), grp = "roof")
+    ridge = parts.piece(size = vec3(0.08, 0.12, d + 0.14), pos = vec3(0, h * 0.92, d * 0.5), grp = "stone")
+    out = merge(body, frame, gl, gable, ridge)
+}
+
+def rail_run(len: f32, h: f32) -> (out: geo<mesh>) {
+    """Кованое ограждение террасы/палубы заданной длины."""
+    top_r = parts.piece(size = vec3(len, 0.04, 0.04), pos = vec3(0, h, 0), grp = "iron")
+    bot_r = parts.piece(size = vec3(len, 0.04, 0.04), pos = vec3(0, 0.08, 0), grp = "iron")
+    n_p = int(len / 0.32)
+    pts = transform(mesh_line(count = n_p, length = f32(n_p - 1) * 0.32, dir = (1, 0, 0)), translate = vec3(0.0 - f32(n_p - 1) * 0.32 * 0.5, 0, 0))
+    picket = parts.piece(size = vec3(0.025, h - 0.08, 0.025), pos = vec3(0, (h + 0.08) * 0.5, 0), grp = "iron")
+    pickets = realize(instance_on_points(pts, source = picket))
+    out = merge(top_r, bot_r, pickets)
+}

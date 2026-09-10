@@ -1,0 +1,58 @@
+# Шестигранный эркер-ризалит 2-го этажа (нижняя часть башни, опирающаяся на консольный сход):
+# - Ступенчатый шестигранный каменный консольный сход (corbel) под эркером на высоте 2-го этажа;
+# - Межэтажный шестигранный поясной карниз с розетками (bosses);
+# - Шестигранный кирпичный корпус 2-го этажа;
+# - Арочные окна stone_arch_window на трёх выступающих гранях (фасадная и две угловые);
+# - Каменные угловые колоннетты на видимых рёбрах шестигранника;
+# - Верхний поясок под часовым ярусом на отметке f2_top.
+import lib.parts
+import lib.ironwork
+import lib.architecture
+import spire_house.common as common
+import spire_house.windows as windows
+
+def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, tower_w: f32 = 2.50, tower_z: f32 = 2.60, ris_w: f32 = 2.40, ris_p: f32 = 1.25) -> (out: geo<mesh>) {
+    """Шестигранный эркер второго этажа (основание башни):
+    башня заканчивается на втором этаже и опирается на шестигранный консольный сход."""
+    r_in = tower_w * 0.5
+    r_out = r_in * 1.1547
+    # 1. Ступенчатый шестигранный консольный сход под эркером (опирается на отметку b1_top)
+    corb0 = common.hexa_corbel(y_top = b1_top, h = 0.85, r_top = r_out)
+    tower_corbel = transform(corb0, translate = vec3(0, 0, tower_z))
+    # 2. Нижний шестигранный поясной карниз эркера (y: b1_top -> b1_top + 0.22)
+    bay_belt0 = common.hexa_belt(y = b1_top, h = 0.22, r = r_out + 0.04)
+    bay_belt = transform(bay_belt0, translate = vec3(0, 0, tower_z))
+    # Каменные декоративные розетки/бобышки на пояске эркера
+    boss = parts.piece(size = vec3(0.08, 0.08, 0.07), pos = vec3(0, b1_top + 0.11, r_in + 0.08), grp = "stone")
+    b_f0 = transform(boss, translate = vec3(0.0 - 0.36, 0, 0))
+    b_f1 = boss
+    b_f2 = transform(boss, translate = vec3(0.36, 0, 0))
+    b_front = merge(b_f0, b_f1, b_f2)
+    b_r = transform(boss, rotate = vec3(0, 60, 0))
+    b_l = transform(boss, rotate = vec3(0, 300, 0))
+    belt_bosses = transform(merge(b_front, b_r, b_l), translate = vec3(0, 0, tower_z))
+    # 3. Шестигранный кирпичный корпус 2-го этажа (y: b1_top + 0.22 -> f2_top)
+    body2 = common.hexa_frustum(y0 = b1_top + 0.22, y1 = f2_top, r0 = r_out, r1 = r_out, grp = "brick")
+    f2_body = transform(body2, translate = vec3(0, 0, tower_z))
+    # 4. Арочные окна 2-го этажа на 3 гранях шестигранника
+    win2_f = windows.stone_arch_window(w = 0.46, h = 2.15)
+    w2_f0 = transform(win2_f, translate = vec3(0.0 - 0.34, f2_y, tower_z + r_in + 0.02))
+    w2_f1 = transform(win2_f, translate = vec3(0.34, f2_y, tower_z + r_in + 0.02))
+    win2_side = windows.stone_arch_window(w = 0.46, h = 2.15)
+    w2_s_base = transform(win2_side, translate = vec3(0, f2_y, r_in + 0.02))
+    w2_r = transform(transform(w2_s_base, rotate = vec3(0, 60, 0)), translate = vec3(0, 0, tower_z))
+    w2_l = transform(transform(w2_s_base, rotate = vec3(0, 300, 0)), translate = vec3(0, 0, tower_z))
+    f2_wins = merge(w2_f0, w2_f1, w2_r, w2_l)
+    # 5. Угловые каменные колоннетты на видимых рёбрах шестигранника 2-го этажа
+    shaft2 = architecture.regroup(ironwork.spool(p0 = vec3(0, b1_top + 0.22, 0), p1 = vec3(0, f2_top - 0.05, 0), r0 = 0.065, r1 = 0.055, sides = 8), grp = "stone")
+    sh2_base = transform(shaft2, translate = vec3(0, 0, r_out))
+    sh2_r = transform(sh2_base, rotate = vec3(0, 30, 0))
+    sh2_l = transform(sh2_base, rotate = vec3(0, 330, 0))
+    sh2_wr = transform(sh2_base, rotate = vec3(0, 90, 0))
+    sh2_wl = transform(sh2_base, rotate = vec3(0, 270, 0))
+    shafts_2 = transform(merge(sh2_r, sh2_l, sh2_wr, sh2_wl), translate = vec3(0, 0, tower_z))
+    # 6. Верхний переходный поясок под часовым ярусом
+    top_belt0 = common.hexa_belt(y = f2_top - 0.18, h = 0.20, r = r_out + 0.03)
+    bay_top_belt = transform(top_belt0, translate = vec3(0, 0, tower_z))
+    out = merge(tower_corbel, bay_belt, belt_bosses, f2_body, f2_wins, shafts_2, bay_top_belt)
+}

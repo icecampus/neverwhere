@@ -1,0 +1,110 @@
+# Центральная башня: часовой ярус с часами architecture.clock_face, арочными окнами
+# звонницы на трёх фасадах, угловыми колоннеттами и карнизом;
+# восьмигранный черепичный ярусный шпиль с кольцами, рёбрами, люкарнами и финиалом.
+import lib.parts
+import lib.architecture
+import lib.ironwork
+import lib.fixtures
+import spire_house.common as common
+import spire_house.windows as windows
+
+def clock_tier(w: f32, h: f32, clock_r: f32) -> (out: geo<mesh>) {
+    """Часовой ярус башни (центр x/z в 0, низ y = 0, лицо +Z):
+    - Правильный шестигранный кирпичный корпус (плоская грань на фасаде +Z);
+    - Круглые часы architecture.clock_face на передней грани;
+    - 5 арочных проёмов звонницы на остальных пяти гранях;
+    - 6 угловых каменных колоннетт на рёбрах шестигранника;
+    - Два шестигранных каменных пояска;
+    - Ряд сухариков (дентикулов) под карнизом;
+    - Венчающий трёхступенчатый шестигранный карниз."""
+    r_in = w * 0.5
+    r_out = r_in * 1.1547
+    # Шестигранный кирпичный корпус яруса
+    bx = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r_out, r1 = r_out, grp = "brick")
+    # Часы на передней грани (+Z)
+    ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, h * 0.54, r_in + 0.03))
+    # Арочные окна звонницы на остальных пяти гранях
+    wn = windows.stone_arch_window(w = 0.55, h = 2.05)
+    wn_base = transform(wn, translate = vec3(0, 1.02, r_in + 0.015))
+    w_60 = transform(wn_base, rotate = vec3(0, 60, 0))
+    w_120 = transform(wn_base, rotate = vec3(0, 120, 0))
+    w_180 = transform(wn_base, rotate = vec3(0, 180, 0))
+    w_240 = transform(wn_base, rotate = vec3(0, 240, 0))
+    w_300 = transform(wn_base, rotate = vec3(0, 300, 0))
+    belfry = merge(w_60, w_120, w_180, w_240, w_300)
+    # 6 угловых колоннетт на рёбрах шестигранника
+    shaft = architecture.regroup(ironwork.spool(p0 = vec3(0, 0.08, 0), p1 = vec3(0, h - 0.08, 0), r0 = 0.07, r1 = 0.06, sides = 8), grp = "stone")
+    sh_base = transform(shaft, translate = vec3(0, 0, r_out))
+    sh0 = transform(sh_base, rotate = vec3(0, 30, 0))
+    sh1 = transform(sh_base, rotate = vec3(0, 90, 0))
+    sh2 = transform(sh_base, rotate = vec3(0, 150, 0))
+    sh3 = transform(sh_base, rotate = vec3(0, 210, 0))
+    sh4 = transform(sh_base, rotate = vec3(0, 270, 0))
+    sh5 = transform(sh_base, rotate = vec3(0, 330, 0))
+    shafts = merge(sh0, sh1, sh2, sh3, sh4, sh5)
+    # Пояски, сухарики и венчающий карниз
+    band_lo = common.hexa_belt(y = 0.88, h = 0.16, r = r_out)
+    band_hi = common.hexa_belt(y = h - 0.52, h = 0.16, r = r_out)
+    dt = common.hexa_dentils(y = h - 0.14, r_in = r_in)
+    top = common.hexa_crown(y = h, h = 0.32, r = r_out)
+    out = merge(bx, ck, belfry, shafts, band_lo, band_hi, dt, top)
+}
+
+def roof_spire(h: f32, r0: f32) -> (out: geo<mesh>) {
+    """Шестигранный сланцевый шпиль:
+    - Переходная пологая шестигранная юбка в основании;
+    - 8 перекрывающихся ступенчатых ярусов сланцевой черепицы;
+    - Шестигранные пояски-кольца;
+    - 6 угловых кованых прутьев-рёбер;
+    - Слуховые люкарны нижнего и верхнего ярусов в шахматном порядке;
+    - Кованый финиал со шпилем наверху."""
+    skirt = common.hexa_frustum(y0 = 0.0, y1 = 0.65, r0 = r0 * 1.14, r1 = r0, grp = "roof")
+    n_tiers = 8
+    tier_dy = (h - 0.65) / f32(n_tiers)
+    tier0_y0 = 0.65
+    tier0_y1 = tier0_y0 + tier_dy + 0.04
+    tier0_r0 = common.cone_r(y = tier0_y0, r0 = r0, h = h) + 0.02
+    tier0_r1 = common.cone_r(y = tier0_y1, r0 = r0, h = h)
+    tier0 = common.hexa_frustum(y0 = tier0_y0, y1 = tier0_y1, r0 = tier0_r0, r1 = tier0_r1, grp = "roof")
+    cone_tiers = repeat (tier0, iterations = n_tiers - 1) |acc| {
+        tk = f32(@iteration) + 1.0
+        yk0 = 0.65 + tk * tier_dy
+        yk1 = min(yk0 + tier_dy + 0.04, h)
+        rk0 = common.cone_r(y = yk0, r0 = r0, h = h) + 0.02
+        rk1 = common.cone_r(y = yk1, r0 = r0, h = h)
+        tier_k = common.hexa_frustum(y0 = yk0, y1 = yk1, r0 = rk0, r1 = rk1, grp = "roof")
+        acc = merge(acc, tier_k)
+    }
+    rings = repeat (common.hexa_ring(y = 0.82, r = common.cone_r(y = 0.82, r0 = r0, h = h) + 0.03), iterations = 9) |acc| {
+        rk = f32(@iteration) + 1.0
+        yk = 0.82 + rk * 0.45
+        acc = merge(acc, common.hexa_ring(y = yk, r = common.cone_r(y = yk, r0 = r0, h = h) + 0.03))
+    }
+    rib_pts = transform(transform(circle(sides = 6, radius = 1.0), rotate = vec3(0, 0, 30.0)), rotate = vec3(90, 0, 0))
+    ribs0 = foreach v in rib_pts {
+        rd = value(@P, on = v)
+        v = fixtures.rod(p0 = rd * (r0 * 1.13) + vec3(0, 0.07, 0), p1 = rd * (r0 - 0.02) + vec3(0, 0.65, 0), p2 = rd * (common.cone_r(y = h * 0.55, r0 = r0, h = h) - 0.02) + vec3(0, h * 0.55, 0), p3 = rd * 0.17 + vec3(0, h - 0.08, 0), r = 0.028, n = 10)
+    }
+    ribs = common.to_group(ribs0, src = "iron", dst = "roof")
+    # Слуховые люкарны нижнего яруса (на 3 гранях: фасад, зад-право, зад-лево)
+    luc_lo = common.spire_lucarne(w = 0.50, h = 0.80, d = 0.60)
+    rf_lo = common.cone_r(y = 1.05, r0 = r0, h = h) * 0.866025
+    luc_lo_f = transform(luc_lo, translate = vec3(0, 1.05, rf_lo + 0.01))
+    lucs_lo = merge(luc_lo_f, transform(luc_lo_f, rotate = vec3(0, 120, 0)), transform(luc_lo_f, rotate = vec3(0, 240, 0)))
+    # Слуховые люкарны верхнего яруса (на 3 других гранях в шахматном порядке: 60, 180, 300)
+    luc_hi = common.spire_lucarne(w = 0.38, h = 0.58, d = 0.45)
+    rf_hi = common.cone_r(y = 3.10, r0 = r0, h = h) * 0.866025
+    luc_hi_f = transform(luc_hi, translate = vec3(0, 3.10, rf_hi + 0.01))
+    lucs_hi = merge(transform(luc_hi_f, rotate = vec3(0, 60, 0)), transform(luc_hi_f, rotate = vec3(0, 180, 0)), transform(luc_hi_f, rotate = vec3(0, 300, 0)))
+    top = transform(common.to_group(architecture.finial(h = 1.9), src = "brass", dst = "iron"), translate = vec3(0, h - 0.05, 0))
+    out = merge(skirt, cone_tiers, rings, ribs, lucs_lo, lucs_hi, top)
+}
+
+def clock_tower(tower_w: f32, tower_h: f32, spire_h: f32, tower_base: f32, spire_base: f32, tower_z: f32) -> (out: geo<mesh>) {
+    """Полная композиция шестигранной центральной башни со шпилем:
+    - Шестигранный часовой ярус на высоте tower_base;
+    - Шестигранный черепичный шпиль на высоте spire_base."""
+    tier = transform(clock_tier(w = tower_w, h = tower_h, clock_r = 0.52), translate = vec3(0, tower_base, tower_z))
+    sp = transform(roof_spire(h = spire_h, r0 = 1.65), translate = vec3(0, spire_base, tower_z))
+    out = merge(tier, sp)
+}
