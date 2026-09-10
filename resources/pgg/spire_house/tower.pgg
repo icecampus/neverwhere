@@ -21,11 +21,11 @@ def clock_tier(w: f32, h: f32, clock_r: f32) -> (out: geo<mesh>) {
     r_out = r_in * 1.1547
     # Шестигранный кирпичный корпус яруса
     bx = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r_out, r1 = r_out, grp = "brick")
-    # Часы на передней грани (+Z)
-    ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, h * 0.54, r_in + 0.03))
-    # Арочные окна звонницы на остальных пяти гранях
-    wn = windows.stone_arch_window(w = 0.55, h = 2.05)
-    wn_base = transform(wn, translate = vec3(0, 1.02, r_in + 0.015))
+    # Часы на передней грани (+Z): центр на той же отметке, что середина окон дома
+    ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, 0.35 + 2.15 * 0.5, r_in + 0.03))
+    # Арочные окна звонницы на остальных пяти гранях: тот же подоконник и высота, что у дома
+    wn = windows.stone_arch_window(w = 0.55, h = 2.15)
+    wn_base = transform(wn, translate = vec3(0, 0.35, r_in + 0.015))
     w_60 = transform(wn_base, rotate = vec3(0, 60, 0))
     w_120 = transform(wn_base, rotate = vec3(0, 120, 0))
     w_180 = transform(wn_base, rotate = vec3(0, 180, 0))
@@ -43,8 +43,8 @@ def clock_tier(w: f32, h: f32, clock_r: f32) -> (out: geo<mesh>) {
     sh5 = transform(sh_base, rotate = vec3(0, 330, 0))
     shafts = merge(sh0, sh1, sh2, sh3, sh4, sh5)
     # Пояски, сухарики и венчающий карниз
-    band_lo = common.hexa_belt(y = 0.88, h = 0.16, r = r_out)
-    band_hi = common.hexa_belt(y = h - 0.52, h = 0.16, r = r_out)
+    band_lo = common.hexa_belt(y = 0.16, h = 0.16, r = r_out, over_lo = 0.04, over_hi = 0.09)
+    band_hi = common.hexa_belt(y = h - 0.40, h = 0.16, r = r_out, over_lo = 0.04, over_hi = 0.09)
     dt = common.hexa_dentils(y = h - 0.14, r_in = r_in)
     top = common.hexa_crown(y = h, h = 0.32, r = r_out)
     out = merge(bx, ck, belfry, shafts, band_lo, band_hi, dt, top)

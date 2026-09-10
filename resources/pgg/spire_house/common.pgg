@@ -9,11 +9,14 @@ def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     out = unmark(mark(g, dst, where = ingroup(src), domain = faces), src)
 }
 
-def belt(w: f32, d: f32, h: f32) -> (out: geo<mesh>) {
+def belt(w: f32, d: f32, h: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
     """Светлый поясной карниз по периметру w×d: две ступенчатые плиты (нижняя уже
-    и толще, верхняя шире и тоньше), центр в 0, низ на y = 0. Группа stone."""
-    lo = parts.piece(size = vec3(w + 0.14, h * 0.58, d + 0.14), pos = vec3(0, h * 0.29, 0), grp = "stone")
-    hi = parts.piece(size = vec3(w + 0.28, h * 0.42, d + 0.28), pos = vec3(0, h * 0.79, 0), grp = "stone")
+    и толще, верхняя шире и тоньше), центр в 0, низ на y = 0. over_lo / over_hi —
+    вынос каждой ступени от стены на сторону (квойны quoin_stack выпускаются на
+    0.20: межэтажный пояс должен чуть перекрывать их, венчающий — ещё на шаг).
+    Группа stone."""
+    lo = parts.piece(size = vec3(w + over_lo * 2.0, h * 0.58, d + over_lo * 2.0), pos = vec3(0, h * 0.29, 0), grp = "stone")
+    hi = parts.piece(size = vec3(w + over_hi * 2.0, h * 0.42, d + over_hi * 2.0), pos = vec3(0, h * 0.79, 0), grp = "stone")
     out = merge(lo, hi)
 }
 
@@ -100,10 +103,13 @@ def hexa_corbel(y_top: f32, h: f32, r_top: f32, steps: int = 3) -> (out: geo<mes
     out = merge(s0, s1, s2, drop_cone, drop_ball)
 }
 
-def hexa_belt(y: f32, h: f32, r: f32) -> (out: geo<mesh>) {
-    """Шестигранный двухступенчатый каменный поясной карниз (каменные полочки)."""
-    lo = hexa_frustum(y0 = y, y1 = y + h * 0.55, r0 = r + 0.04, r1 = r + 0.04, grp = "stone")
-    hi = hexa_frustum(y0 = y + h * 0.55, y1 = y + h, r0 = r + 0.09, r1 = r + 0.09, grp = "stone")
+def hexa_belt(y: f32, h: f32, r: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
+    """Шестигранный двухступенчатый карниз: тот же разрез, что у belt (низ 0.58·h /
+    вынос over_lo, верх 0.42·h / over_hi). r — описанный радиус грани корпуса
+    (hexa_frustum); over_* — вынос от грани на сторону, в описанный радиус через 2/√3."""
+    k = 1.1547
+    lo = hexa_frustum(y0 = y, y1 = y + h * 0.58, r0 = r + over_lo * k, r1 = r + over_lo * k, grp = "stone")
+    hi = hexa_frustum(y0 = y + h * 0.58, y1 = y + h, r0 = r + over_hi * k, r1 = r + over_hi * k, grp = "stone")
     out = merge(lo, hi)
 }
 

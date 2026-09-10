@@ -15,7 +15,7 @@ def upper_floor(width: f32, depth: f32, b1_top: f32, floor2_h: f32, crown_h: f32
     n_rows_2 = 7
     course_h_2 = floor2_h / f32(n_rows_2)
     quoins_2 = transform(blockwork.quoin_stack(w = width, d = depth, n_rows = n_rows_2, course_h = course_h_2, bricks = 1.5), translate = vec3(0, b1_top, 0))
-    crown = transform(common.belt(w = width, d = depth, h = crown_h), translate = vec3(0, f2_top, 0))
+    crown = transform(common.belt(w = width, d = depth, h = crown_h, over_lo = 0.26, over_hi = 0.36), translate = vec3(0, f2_top, 0))
     crown_dt = common.dentils(w = width + 0.1, d = depth + 0.1, y = f2_top - 0.12)
     out = merge(wall_2, quoins_2, crown, crown_dt)
 }
