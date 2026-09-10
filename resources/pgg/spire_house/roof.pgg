@@ -5,31 +5,29 @@ import lib.ironwork
 import spire_house.common as common
 
 def mansard_tile_slope(len_bot: f32, len_top: f32, slope_len: f32, n_rows: int, rng: rng) -> (out: geo<mesh>) {
-    """Черепичный скат мансарды рядами плиток вразбежку:
-    len_bot — ширина внизу, len_top — ширина вверху, slope_len — длина ската.
-    Каждый ряд k смещён на полшага от соседа (вразбежку), приподнят по Y (нахлёст),
-    получает subtle @tint вариацию."""
+    """Черепичный скат мансарды рядами вразбежку, как кирпичная кладка:
+    общая колоночная сетка с шагом pu, нечётный ряд сдвинут на полплитки (pu/2)
+    относительно предыдущего. Ширина ряда сужается к палубе — лишние якоря
+    по бокам снимаются, чтобы не пересчитывать сетку и не сбивать перевязку.
+    Нахлёст — подъём ряда по Y; @tint — лёгкая тональная вариация."""
     pv = slope_len / f32(n_rows)
     tw = 0.28
     tl = pv + 0.09
     th = 0.035
     pu = 0.31
     tile = compute_normals(box(size = vec3(tw, th, tl)), mode = flat)
-    # Ряд 0
-    w0 = len_bot - 0.28
-    n0 = int(w0 / pu)
-    r0_len = f32(n0 - 1) * pu
-    p0_line = transform(mesh_line(count = n0, length = r0_len, dir = (1, 0, 0)), translate = vec3(0.0 - r0_len * 0.5, th * 0.5, 0.0 - pv * 0.35))
-    anchors = repeat (p0_line, iterations = n_rows - 1) |acc| {
-        k = f32(@iteration) + 1.0
+    n_cols = int(len_bot / pu)
+    empty = mesh_line(count = 0, length = 0.0)
+    anchors_all = repeat (empty, iterations = n_rows) |acc| {
+        k = f32(@iteration)
+        odd = f32(@iteration % 2)
         vk = k * pv + pv * 0.35
-        wk = len_bot - (len_bot - len_top) * (vk / slope_len) - 0.28
-        nk = int(wk / pu)
-        rlk = f32(nk - 1) * pu
-        odd = (k - 2.0 * floor(k * 0.5)) * (pu * 0.5)
-        rk_line = transform(mesh_line(count = nk, length = rlk, dir = (1, 0, 0)), translate = vec3(0.0 - rlk * 0.5 + odd, th * 0.5 + k * 0.010, 0.0 - vk))
-        acc = merge(acc, rk_line)
+        row0 = mesh_line(count = n_cols + 2, length = f32(n_cols + 1) * pu, dir = (1, 0, 0))
+        row = transform(row0, translate = vec3(0.0 - len_bot * 0.5 - pu * 0.5 + odd * pu * 0.5, th * 0.5 + k * 0.010, 0.0 - vk))
+        acc = merge(acc, row)
     }
+    # Полуширина ската на этой высоте (трапеция), с запасом на полплитки у вальм.
+    anchors = delete(anchors_all, where = abs(dot(@P, (1, 0, 0))) > (len_bot - (len_bot - len_top) * ((0.0 - dot(@P, (0, 0, 1))) / slope_len) - 0.28) * 0.5)
     t_jit = set_position(anchors, offset = random_vec(lo = vec3(-0.005, 0, -0.005), hi = vec3(0.005, 0.003, 0.005), rng = split_rng(rng, key = "jit")))
     shade = random(lo = 0.80, hi = 1.20, rng = split_rng(rng, key = "tint"))
     p_tint = set(t_jit, "tint", vec3(shade * 0.97, shade, shade * 1.05))
@@ -82,7 +80,7 @@ def hip_caps(p0: vec3, p1: vec3, rng: rng) -> (out: geo<mesh>) {
 def mansard_roof(width: f32, depth: f32, crown_top: f32, roof_h: f32, deck_hw: f32, deck_hd: f32, rng: rng) -> (out: geo<mesh>) {
     """Мансардная крыша здания:
     - Пирамидальное основание;
-    - 4 честных черепичных ската со смещением рядов и нахлёстом (угол 63.435°);
+    - 4 черепичных ската, ряды вразбежку на полплитки (угол 63.435°);
     - Коньковые уголки (hip caps) по 4 угловым рёбрам вальм;
     - Кованая ограда палубы (чугунный гребень);
     - Угловые карнизные финиалы-пики."""

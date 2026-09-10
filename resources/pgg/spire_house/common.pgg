@@ -7,6 +7,14 @@ def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     out = unmark(mark(g, dst, where = ingroup(src), domain = faces), src)
 }
 
+def brick_prism(w: f32, d: f32, h: f32, y0: f32) -> (out: geo<mesh>) {
+    """Прямой кирпичный объём w×d высотой h, низ на y0. Без фаски: `piece`/`cbox`
+    скос считает от min(размера), и на этаже это ~0.12·h ≈ 40 см — грани
+    визуально загибаются внутрь у карниза и цоколя."""
+    body = compute_normals(box(size = vec3(w, h, d)), mode = flat)
+    out = mark(transform(body, translate = vec3(0, y0 + h * 0.5, 0)), "brick", where = true, domain = faces)
+}
+
 def belt(w: f32, d: f32, h: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
     """Светлый поясной карниз по периметру w×d: две ступенчатые плиты (нижняя уже
     и толще, верхняя шире и тоньше), центр в 0, низ на y = 0. over_lo / over_hi —

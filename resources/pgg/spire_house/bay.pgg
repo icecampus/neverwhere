@@ -4,13 +4,13 @@
 # - Шестигранный кирпичный корпус 2-го этажа;
 # - Арочные окна stone_arch_window: по одному в центре трёх выступающих граней;
 # - Каменные угловые колоннетты на видимых рёбрах шестигранника;
-# - Верхний поясок под часовым ярусом на отметке f2_top.
+# - Венчающий карниз на f2_top: тот же разрез и фаски, что crown дома (один пояс).
 import lib.ironwork
 import lib.architecture
 import spire_house.common as common
 import spire_house.windows as windows
 
-def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, tower_w: f32 = 2.50, tower_z: f32 = 2.60, ris_w: f32 = 2.40, ris_p: f32 = 1.25) -> (out: geo<mesh>) {
+def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, crown_h: f32, tower_w: f32 = 2.50, tower_z: f32 = 2.60, ris_w: f32 = 2.40, ris_p: f32 = 1.25) -> (out: geo<mesh>) {
     """Шестигранный эркер второго этажа (основание башни):
     башня заканчивается на втором этаже и опирается на шестигранный консольный сход."""
     r_in = tower_w * 0.5
@@ -40,8 +40,11 @@ def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, 
     sh2_wr = transform(sh2_base, rotate = vec3(0, 90, 0))
     sh2_wl = transform(sh2_base, rotate = vec3(0, 270, 0))
     shafts_2 = transform(merge(sh2_r, sh2_l, sh2_wr, sh2_wl), translate = vec3(0, 0, tower_z))
-    # 6. Верхний переходный поясок под часовым ярусом
-    top_belt0 = common.hexa_belt(y = f2_top - 0.18, h = 0.20, r = r_out, over_lo = 0.04, over_hi = 0.09)
+    # 6. Венчающий карниз башни — тот же разрез, вынос и фаски, что crown дома
+    # (over_lo=0.26 / over_hi=0.36, h=crown_h), низ на f2_top. Сухарики на той же
+    # отметке, что у дома (f2_top − 0.12), чтобы пояс читался одним элементом.
+    top_belt0 = common.hexa_belt(y = f2_top, h = crown_h, r = r_out, over_lo = 0.26, over_hi = 0.36)
     bay_top_belt = transform(top_belt0, translate = vec3(0, 0, tower_z))
-    out = merge(tower_corbel, bay_belt, f2_body, f2_wins, shafts_2, bay_top_belt)
+    bay_crown_dt = transform(common.hexa_dentils(y = f2_top - 0.12, r_in = r_in), translate = vec3(0, 0, tower_z))
+    out = merge(tower_corbel, bay_belt, f2_body, f2_wins, shafts_2, bay_top_belt, bay_crown_dt)
 }

@@ -1,5 +1,5 @@
 # Первый этаж здания: гранитный цоколь с профилированной плитой,
-# кирпичные стены первого этажа, рустованные угловые квойны и межэтажный карниз.
+# прямые кирпичные стены первого этажа, рустованные угловые квойны и межэтажный карниз.
 import lib.parts
 import lib.blockwork
 import spire_house.common as common
@@ -7,13 +7,13 @@ import spire_house.common as common
 def ground_floor(width: f32, depth: f32, plinth_h: f32, floor1_h: f32, belt_h: f32) -> (out: geo<mesh>) {
     """Первый этаж здания:
     - Гранитный массивный цоколь с каменной крышкой-отливом;
-    - Кирпичные стены 1-го этажа (от цоколя до межэтажного пояска);
+    - Кирпичные стены 1-го этажа (прямой объём без фаски, от цоколя до пояска);
     - Угловые рустованные квойны первого этажа;
     - Межэтажный профилированный поясной карниз (belt)."""
     p_base = parts.piece(size = vec3(width + 0.24, plinth_h - 0.08, depth + 0.24), pos = vec3(0, (plinth_h - 0.08) * 0.5, 0), grp = "plinth")
     p_cap = parts.piece(size = vec3(width + 0.38, 0.14, depth + 0.38), pos = vec3(0, plinth_h - 0.07, 0), grp = "plinth")
     f1_top = plinth_h + floor1_h
-    wall_1 = parts.piece(size = vec3(width, floor1_h, depth), pos = vec3(0, plinth_h + floor1_h * 0.5, 0), grp = "brick")
+    wall_1 = common.brick_prism(w = width, d = depth, h = floor1_h, y0 = plinth_h)
     n_rows_1 = 7
     course_h_1 = floor1_h / f32(n_rows_1)
     quoins_1 = transform(blockwork.quoin_stack(w = width, d = depth, n_rows = n_rows_1, course_h = course_h_1, bricks = 1.5), translate = vec3(0, plinth_h, 0))
