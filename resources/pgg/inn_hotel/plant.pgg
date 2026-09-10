@@ -1,0 +1,115 @@
+# Стимпанк-установка на кровле: медный куб-аламбик с купольной шапкой, три
+# медные дымовые трубы с гуськами, два манометра на кронштейнах и серый машинный
+# кожух с ограждением. Тела вращения — ironwork.spool, гнутые трубы — fixtures.rod.
+import lib.parts
+import lib.fixtures
+import lib.ironwork
+import inn_hotel.common as common
+
+def cu(g: geo<mesh>) -> (out: geo<mesh>) {
+    """Точёная деталь ironwork приходит в группе iron — перекрасить в медь."""
+    out = common.to_group(g, src = "iron", dst = "copper")
+}
+
+def br(g: geo<mesh>) -> (out: geo<mesh>) {
+    """Точёная деталь ironwork в латунь."""
+    out = common.to_group(g, src = "iron", dst = "brass")
+}
+
+def still(y0: f32, r: f32) -> (out: geo<mesh>) {
+    """Медный аламбик: клёпаное основание, цилиндрический котёл с двумя латунными
+    обручами, покатое плечо, купол, шейка-лебединая и навершие-шарик. Низ на y0."""
+    expect r > 0.2: "still: котёл меньше 0.2 м — не читается"
+    foot = br(ironwork.spool(p0 = vec3(0, y0, 0), p1 = vec3(0, y0 + 0.12, 0), r0 = r * 1.08, r1 = r * 1.02, sides = 20))
+    body = cu(ironwork.spool(p0 = vec3(0, y0 + 0.12, 0), p1 = vec3(0, y0 + r * 1.92, 0), r0 = r, r1 = r, sides = 20))
+    hoop_lo = br(ironwork.spool(p0 = vec3(0, y0 + r * 0.46, 0), p1 = vec3(0, y0 + r * 0.60, 0), r0 = r * 1.05, r1 = r * 1.05, sides = 20))
+    hoop_hi = br(ironwork.spool(p0 = vec3(0, y0 + r * 1.56, 0), p1 = vec3(0, y0 + r * 1.70, 0), r0 = r * 1.05, r1 = r * 1.05, sides = 20))
+    shoulder = cu(ironwork.spool(p0 = vec3(0, y0 + r * 1.92, 0), p1 = vec3(0, y0 + r * 2.42, 0), r0 = r, r1 = r * 0.58, sides = 20))
+    dome = cu(ironwork.spool(p0 = vec3(0, y0 + r * 2.42, 0), p1 = vec3(0, y0 + r * 2.76, 0), r0 = r * 0.58, r1 = r * 0.18, sides = 20))
+    neck = br(ironwork.spool(p0 = vec3(0, y0 + r * 2.76, 0), p1 = vec3(0, y0 + r * 2.96, 0), r0 = r * 0.13, r1 = r * 0.11, sides = 12))
+    knob = mark(transform(ico_sphere(subdiv = 2, radius = r * 0.14), translate = vec3(0, y0 + r * 3.06, 0)), "brass", where = true, domain = faces)
+    rivets = ironwork.bolt_heads(transform(circle(sides = 12, radius = r * 1.03), rotate = vec3(90, 0, 0), translate = vec3(0, y0 + r * 0.53, 0)), r = r * 0.045)
+    out = merge(foot, body, hoop_lo, hoop_hi, shoulder, dome, neck, knob, br(rivets))
+}
+
+def stack(base: vec3, h: f32, reach: f32, yaw_deg: f32, r: f32) -> (out: geo<mesh>) {
+    """Медная дымовая труба: прямой вертикальный ствол высотой h, колено в 90° и
+    сопло на reach в сторону yaw_deg; латунные фланцы у основания, посередине, на
+    колене и на срезе.
+
+    Ствол и сопло — прямые spool, колено — отдельная короткая Безье радиуса er
+    (четверть окружности, плечи 0.5523·er). Одной Безье на всю трубу обойтись не
+    выходит: её кривизна размазывается по всей длине и труба выходит дугой-щупальцем
+    вместо промышленной трубы. Стыки прикрыты фланцами — как у настоящих труб."""
+    expect h > 0.9: "stack: труба короче 0.9 м — колено не помещается"
+    expect reach > r * 2.5: "stack: вылет сопла меньше диаметра колена"
+    ay = radians(yaw_deg)
+    dir = vec3(sin(ay), 0, cos(ay))
+    er = min(r * 2.2, min(h * 0.30, reach * 0.72))
+    a = base + vec3(0, h - er, 0)
+    b = base + vec3(0, h, 0) + dir * er
+    k = er * 0.5523
+    shaft = cu(ironwork.spool(p0 = base, p1 = a, r0 = r, r1 = r, sides = 14))
+    elbow = cu(fixtures.rod(p0 = a, p1 = a + vec3(0, k, 0), p2 = b - dir * k, p3 = b, r = r, n = 8))
+    nozzle = cu(ironwork.spool(p0 = b, p1 = base + vec3(0, h, 0) + dir * reach, r0 = r, r1 = r * 0.96, sides = 14))
+    tip = base + vec3(0, h, 0) + dir * reach
+    fl_base = br(ironwork.spool(p0 = base + vec3(0, 0.02, 0), p1 = base + vec3(0, 0.18, 0), r0 = r * 1.44, r1 = r * 1.34, sides = 14))
+    fl_mid = br(ironwork.spool(p0 = base + vec3(0, h * 0.42, 0), p1 = base + vec3(0, h * 0.42 + 0.12, 0), r0 = r * 1.30, r1 = r * 1.30, sides = 14))
+    fl_knee = br(ironwork.spool(p0 = a - vec3(0, 0.10, 0), p1 = a + vec3(0, 0.04, 0), r0 = r * 1.32, r1 = r * 1.32, sides = 14))
+    mouth = br(ironwork.spool(p0 = tip - dir * 0.15, p1 = tip + dir * 0.06, r0 = r * 1.32, r1 = r * 1.48, sides = 14))
+    out = merge(shaft, elbow, nozzle, fl_base, fl_mid, fl_knee, mouth)
+}
+
+def gauge(at: vec3, r: f32, yaw_deg: f32, post_h: f32) -> (out: geo<mesh>) {
+    """Манометр на стойке: латунная стойка высотой post_h от at, белый циферблат с
+    латунным ободом, метками и стрелкой; лицо смотрит по yaw_deg."""
+    post = br(ironwork.spool(p0 = at, p1 = at + vec3(0, post_h, 0), r0 = r * 0.16, r1 = r * 0.13, sides = 10))
+    face_c = vec3(0, post_h + r * 0.92, 0)
+    dial = br(ironwork.spool(p0 = face_c + vec3(0, 0, -0.05), p1 = face_c + vec3(0, 0, 0.03), r0 = r, r1 = r, sides = 24))
+    plate = parts.piece(size = vec3(r * 1.62, r * 1.62, 0.02), pos = face_c + vec3(0, 0, 0.045), grp = "dial")
+    rim = br(fixtures.ring(center = face_c + vec3(0, 0, 0.035), radius = r * 0.98, r = r * 0.11, yaw_deg = 0))
+    ticks = br(ironwork.bolt_heads(transform(circle(sides = 8, radius = r * 0.68), translate = face_c + vec3(0, 0, 0.06)), r = r * 0.055))
+    needle = transform(parts.piece(size = vec3(r * 0.10, r * 0.78, 0.03), pos = face_c + vec3(0, r * 0.30, 0.075), grp = "iron"), rotate = vec3(0, 0, 34))
+    hub = mark(transform(ico_sphere(subdiv = 1, radius = r * 0.11), translate = face_c + vec3(0, 0, 0.085)), "brass", where = true, domain = faces)
+    unit = merge(dial, plate, rim, ticks, needle, hub)
+    out = merge(post, transform(transform(unit, rotate = vec3(0, yaw_deg, 0)), translate = at))
+}
+
+def machine_box(at: vec3, w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
+    """Серый машинный кожух: клёпаный корпус, приподнятая крышка с бортиком, тёмная
+    решётка на лицевой стороне (+Z) и низкое ограждение по трём сторонам крышки."""
+    body = parts.piece(size = vec3(w, h, d), pos = vec3(0, h * 0.5, 0), grp = "machine")
+    lid = parts.piece(size = vec3(w + 0.10, 0.10, d + 0.10), pos = vec3(0, h + 0.05, 0), grp = "machine")
+    grille = parts.piece(size = vec3(w * 0.62, h * 0.46, 0.05), pos = vec3(0, h * 0.52, d * 0.5 + 0.01), grp = "frame")
+    slat = parts.piece(size = vec3(w * 0.60, 0.035, 0.04), pos = (0, 0, 0), grp = "iron")
+    slat_pts = transform(mesh_line(count = 4, length = h * 0.30, dir = (0, 1, 0)), translate = vec3(0, h * 0.37, d * 0.5 + 0.04))
+    slats = mark(realize(instance_on_points(slat_pts, source = slat)), "iron", where = true, domain = faces)
+    rivets = ironwork.bolt_heads(merge(transform(mesh_line(count = 4, length = w - 0.20, dir = (1, 0, 0)), translate = vec3(0.0 - (w - 0.20) * 0.5, h - 0.10, d * 0.5 + 0.02)), transform(mesh_line(count = 4, length = w - 0.20, dir = (1, 0, 0)), translate = vec3(0.0 - (w - 0.20) * 0.5, 0.12, d * 0.5 + 0.02))), r = 0.022)
+    rail_f = transform(common.rail_run(len = w - 0.06, h = 0.34), translate = vec3(0, h + 0.10, d * 0.5 - 0.02))
+    rail_l = transform(transform(common.rail_run(len = d - 0.06, h = 0.34), rotate = vec3(0, 90, 0)), translate = vec3(0.0 - w * 0.5 + 0.02, h + 0.10, 0))
+    rail_r = transform(transform(common.rail_run(len = d - 0.06, h = 0.34), rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5 - 0.02, h + 0.10, 0))
+    unit = merge(body, lid, grille, slats, rivets, rail_f, rail_l, rail_r)
+    out = transform(unit, translate = at)
+}
+
+def rooftop_plant(bw: f32, bd: f32, cr: f32, deck_y: f32) -> (out: geo<mesh>) {
+    """Установка на палубе: аламбик над круглым углом, три толстые трубы с гуськами
+    разной высоты, два манометра и машинный кожух. Всё смещено в видимую от
+    круглого угла половину палубы — на дальней половине это не читалось бы."""
+    cx = bw * 0.5 - cr
+    cz = bd * 0.5 - cr
+    # Аламбик — по диагонали от круглого угла, на низком клёпаном постаменте.
+    st_x = cx + cr * 0.16
+    st_z = cz + cr * 0.16
+    pad = parts.piece(size = vec3(2.20, 0.16, 2.20), pos = vec3(st_x, deck_y + 0.08, st_z), grp = "machine")
+    boiler = transform(still(y0 = deck_y + 0.16, r = 1.02), translate = vec3(st_x, 0, st_z))
+    # Три трубы вокруг аламбика: гуськи развёрнуты наружу, к уличным фасадам.
+    p_a = stack(base = vec3(st_x - 1.74, deck_y + 0.10, st_z + 0.58), h = 3.58, reach = 0.86, yaw_deg = 108.0, r = 0.225)
+    p_b = stack(base = vec3(st_x + 0.62, deck_y + 0.10, st_z - 1.72), h = 4.24, reach = 0.94, yaw_deg = 358.0, r = 0.210)
+    p_c = stack(base = vec3(st_x - 1.22, deck_y + 0.10, st_z - 1.36), h = 2.96, reach = 0.78, yaw_deg = 172.0, r = 0.190)
+    # Манометры: один перед аламбиком лицом к круглому углу, один у кожуха.
+    g_a = gauge(at = vec3(st_x + 1.46, deck_y, st_z - 1.02), r = 0.34, yaw_deg = 20.0, post_h = 1.34)
+    g_b = gauge(at = vec3(st_x - 2.42, deck_y, st_z - 0.42), r = 0.30, yaw_deg = 78.0, post_h = 1.52)
+    box = machine_box(at = vec3(st_x - 2.60, deck_y, st_z + 1.30), w = 1.75, h = 1.00, d = 1.30)
+    out = merge(pad, boiler, p_a, p_b, p_c, g_a, g_b, box)
+}

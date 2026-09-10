@@ -1,0 +1,67 @@
+# Сборка и окраска углового отеля: подошва квартала, первый этаж с витриной,
+# жилая оболочка, окна, венчание, стимпанк-установка и неоновая вывеска.
+#
+# Окраска — @Cd по группам faces с микро-шумом fbm на «материальных» поверхностях
+# (кирпич, камень, штукатурка, плитка, булыжник) и ровным цветом на металле,
+# стекле и неоне. Светящиеся группы (warm / lamp / bulb / neon / screen) взяты
+# ярче единицы — ночная сцена референса читается свечением проёмов.
+def assemble(street: geo<mesh>, ground: geo<mesh>, upper: geo<mesh>, wins: geo<mesh>, top: geo<mesh>, plant: geo<mesh>, sign: geo<mesh>, root_rng: rng) -> (out: geo<mesh>) {
+    """Сливает компоненты отеля, красит @Cd по 22 группам faces и запекает AO."""
+    raw = merge(street, ground, upper, wins, top, plant, sign)
+    pr = split_rng(root_rng, key = "paint")
+
+    brick_col = mix(vec3(0.475, 0.192, 0.110), vec3(0.300, 0.108, 0.066), fbm(scale = 1.6, octaves = 3, rng = split_rng(pr, key = "brick")))
+    # Штукатурка и камень отделки — почти ровные: на гнутых оболочках сильный fbm
+    # даёт по цвету на грань, и дуга рассыпается в блочную мозаику. Светлота взята
+    # у верхней границы: основная площадь отделки — вертикальные поверхности эркера
+    # и лопаток, а их направленный свет превью гасит примерно вдвое против полок.
+    trim_col = mix(vec3(1.020, 1.005, 0.958), vec3(0.940, 0.925, 0.878), fbm(scale = 2.1, octaves = 3, rng = split_rng(pr, key = "trim")))
+    stucco_col = mix(vec3(1.045, 1.022, 0.958), vec3(0.966, 0.945, 0.884), fbm(scale = 1.3, octaves = 3, rng = split_rng(pr, key = "stucco")))
+    roof_col = mix(vec3(0.118, 0.135, 0.175), vec3(0.062, 0.072, 0.100), fbm(scale = 2.4, octaves = 3, rng = split_rng(pr, key = "roof")))
+    stone_col = mix(vec3(0.575, 0.575, 0.560), vec3(0.435, 0.437, 0.432), fbm(scale = 1.9, octaves = 3, rng = split_rng(pr, key = "stone")))
+    cobble_col = mix(vec3(0.455, 0.452, 0.468), vec3(0.310, 0.310, 0.325), fbm(scale = 3.2, octaves = 3, rng = split_rng(pr, key = "cobble")))
+    apron_col = mix(vec3(0.660, 0.492, 0.318), vec3(0.512, 0.372, 0.232), fbm(scale = 2.6, octaves = 3, rng = split_rng(pr, key = "apron")))
+    copper_col = mix(vec3(0.620, 0.318, 0.150), vec3(0.480, 0.238, 0.112), fbm(scale = 2.8, octaves = 2, rng = split_rng(pr, key = "copper")))
+
+    # Кладка и камень
+    c01 = ingroup("brick") ? brick_col : vec3(1.0, 0.0, 1.0)
+    c02 = ingroup("trim") ? trim_col : c01
+    c03 = ingroup("stucco") ? stucco_col : c02
+    c04 = ingroup("stone") ? stone_col : c03
+    c05 = ingroup("cobble") ? cobble_col * @tint : c04
+    c06 = ingroup("apron") ? apron_col * @tint : c05
+    c07 = ingroup("roof") ? roof_col * @tint : c06
+    # Металл
+    c08 = ingroup("copper") ? copper_col : c07
+    c09 = ingroup("brass") ? vec3(0.520, 0.382, 0.152) : c08
+    c10 = ingroup("machine") ? vec3(0.285, 0.305, 0.345) : c09
+    c11 = ingroup("iron") ? vec3(0.048, 0.048, 0.058) : c10
+    c12 = ingroup("frame") ? vec3(0.098, 0.062, 0.046) : c11
+    # Дерево и мягкие поверхности
+    c13 = ingroup("wood") ? vec3(0.152, 0.082, 0.046) * @tint : c12
+    c14 = ingroup("furn") ? vec3(0.420, 0.238, 0.122) * @tint : c13
+    # Стекло, свет, вывеска. Светящиеся цвета держим в пределах единицы: превью
+    # клампит канал, и «пересвеченный» янтарь (1.7, 1.1, 0.5) вырождается в бледно-
+    # жёлтый. Яркость даёт вынос этих групп из AO, а не значение выше 1.
+    c15 = ingroup("canopy") ? vec3(0.325, 0.395, 0.455) : c14
+    c16 = ingroup("board") ? vec3(0.062, 0.072, 0.112) : c15
+    c17 = ingroup("dial") ? vec3(0.930, 0.905, 0.820) : c16
+    c18 = ingroup("screen") ? vec3(0.255, 0.880, 0.945) : c17
+    c19 = ingroup("curtain") ? vec3(0.985, 0.855, 0.605) * @tint : c18
+    c20 = ingroup("warm") ? vec3(1.000, 0.690, 0.302) : c19
+    c21 = ingroup("lamp") ? vec3(1.000, 0.795, 0.352) : c20
+    c22 = ingroup("neon") ? vec3(1.000, 0.418, 0.128) * @tint : c21
+
+    edge_mul = ingroup("edge") ? vec3(1.32, 1.30, 1.24) : vec3(1.0)
+    painted = set(raw, "Cd", c22 * edge_mul, domain = faces)
+
+    # Светящиеся поверхности выносятся из запекания: они сидят в глубине проёмов,
+    # и AO гасил бы их в темноту — именно они должны пробивать ночную сцену.
+    # `merge` подставляет уходящему без @ao свечению нейтраль 1.0.
+    glow, solid = separate(painted, where = ingroup("warm") | ingroup("curtain") | ingroup("lamp") | ingroup("neon") | ingroup("screen"), domain = faces)
+    # Радиус AO короткий намеренно: пояски выступают на 0.26, и при distance ~1 они
+    # затеняли простенки эркера целиком — сливочная штукатурка уходила в серый.
+    # Нужны только тени в стыках, а не общее притемнение фасада.
+    baked = bake_ao(solid, rays = 16, distance = 0.46, rng = split_rng(root_rng, key = "ao"), domain = points)
+    out = merge(baked, glow)
+}

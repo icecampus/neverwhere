@@ -1,0 +1,44 @@
+# Венчание отеля: профилированный светлый карниз с круглым углом, плитчатая
+# кровельная палуба и кованое ограждение по её краю (дуга + четыре прямых пролёта).
+import inn_hotel.common as common
+
+def cornice(bw: f32, bd: f32, cr: f32, y: f32, h: f32) -> (out: geo<mesh>) {
+    """Венчающий карниз: тонкая шейка, две ступени с нарастающим выносом, мощный
+    венчающий валик и плита-надкарнизник с обратным свесом. Все ступени огибают
+    круглый угол — в референсе это самая заметная белая линия силуэта, поэтому
+    вынос взят вдвое больше выноса межэтажных поясков."""
+    neck = common.plan_prism(w = bw + 0.16, d = bd + 0.16, r = cr + 0.08, y0 = y, y1 = y + h * 0.18, grp = "trim")
+    torus = common.roll(w = bw + 0.16, d = bd + 0.16, r = cr + 0.08, y = y + h * 0.18, h = h * 0.70, p = 0.52, grp = "trim", n = 6)
+    cap = common.plan_prism(w = bw + 0.46, d = bd + 0.46, r = cr + 0.23, y0 = y + h * 0.88, y1 = y + h, grp = "trim")
+    out = merge(neck, torus, cap)
+}
+
+def deck_rail(bw: f32, bd: f32, cr: f32, y: f32, h: f32, inset: f32) -> (out: geo<mesh>) {
+    """Кованое ограждение по краю палубы: гнутый пролёт по круглому углу и четыре
+    прямых пролёта по прямым участкам плана."""
+    xs = bw * 0.5 - inset
+    zs = bd * 0.5 - inset
+    cx = bw * 0.5 - cr
+    cz = bd * 0.5 - cr
+    arc = common.rail_arc(cx = cx, cz = cz, r = cr - inset, y = y, h = h, a0 = 0.0, a1 = 90.0, n = 9)
+    # Прямой участок фасада +X: вдоль Z от −zs до cz.
+    len_x = cz + zs
+    run_x = transform(transform(common.rail_run(len = len_x, h = h), rotate = vec3(0, 90, 0)), translate = vec3(xs, y, (cz - zs) * 0.5))
+    # Прямой участок фасада +Z: вдоль X от −xs до cx.
+    len_z = cx + xs
+    run_z = transform(common.rail_run(len = len_z, h = h), translate = vec3((cx - xs) * 0.5, y, zs))
+    # Дальние стороны.
+    run_bx = transform(transform(common.rail_run(len = 2.0 * zs, h = h), rotate = vec3(0, 90, 0)), translate = vec3(0.0 - xs, y, 0))
+    run_bz = transform(common.rail_run(len = 2.0 * xs, h = h), translate = vec3(0, y, 0.0 - zs))
+    out = merge(arc, run_x, run_z, run_bx, run_bz)
+}
+
+def roof_top(bw: f32, bd: f32, cr: f32, corn_y: f32, corn_h: f32, rng: rng) -> (out: geo<mesh>) {
+    """Сборка венчания: карниз, плитчатая палуба на его отметке и ограждение."""
+    corn = cornice(bw = bw, bd = bd, cr = cr, y = corn_y, h = corn_h)
+    deck_y = corn_y + corn_h * 0.62
+    inset = 0.30
+    tiles = common.tile_deck(w = bw - 2.0 * inset, d = bd - 2.0 * inset, r = cr - inset, y = deck_y, pitch = 0.46, rng = split_rng(rng, key = "tiles"))
+    rail = deck_rail(bw = bw, bd = bd, cr = cr, y = deck_y + 0.03, h = 0.62, inset = inset)
+    out = merge(corn, tiles, rail)
+}
