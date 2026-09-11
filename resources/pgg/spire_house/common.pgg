@@ -9,12 +9,12 @@ def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
 }
 
 def brick_prism(w: f32, d: f32, h: f32, y0: f32) -> (out: geo<mesh>) {
-    """Прямой кирпичный объём w×d высотой h, низ на y0. Без фаски: `piece`/`cbox`
+    """Прямой объём w×d высотой h, низ на y0. Без фаски: `piece`/`cbox`
     скос считает от min(размера), и на этаже это ~0.12·h ≈ 40 см — грани
     визуально загибаются внутрь у карниза и цоколя. Сердцевина под облицовкой
-    brick_rows (раствор в швах)."""
+    brick_rows — группа mortar (раствор в швах между кирпичами)."""
     body = compute_normals(box(size = vec3(w, h, d)), mode = flat)
-    out = mark(transform(body, translate = vec3(0, y0 + h * 0.5, 0)), "brick", where = true, domain = faces)
+    out = mark(transform(body, translate = vec3(0, y0 + h * 0.5, 0)), "mortar", where = true, domain = faces)
 }
 
 def brick_rows(len: f32, h: f32) -> (out: geo<points>) {

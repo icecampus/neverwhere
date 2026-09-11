@@ -9,7 +9,8 @@ def mansard_tile_slope(len_bot: f32, len_top: f32, slope_len: f32, n_rows: int, 
     общая колоночная сетка с шагом pu, нечётный ряд сдвинут на полплитки (pu/2)
     относительно предыдущего. Ширина ряда сужается к палубе — лишние якоря
     по бокам снимаются, чтобы не пересчитывать сетку и не сбивать перевязку.
-    Нахлёст — подъём ряда по Y; @tint — лёгкая тональная вариация."""
+    Все ряды в одной плоскости, параллельной скату (зазор th по нормали);
+    нахлёст — шаг pv < длина плитки, не накопление по Y."""
     pv = slope_len / f32(n_rows)
     tw = 0.28
     tl = pv + 0.09
@@ -23,12 +24,12 @@ def mansard_tile_slope(len_bot: f32, len_top: f32, slope_len: f32, n_rows: int, 
         odd = f32(@iteration % 2)
         vk = k * pv + pv * 0.35
         row0 = mesh_line(count = n_cols + 2, length = f32(n_cols + 1) * pu, dir = (1, 0, 0))
-        row = transform(row0, translate = vec3(0.0 - len_bot * 0.5 - pu * 0.5 + odd * pu * 0.5, th * 0.5 + k * 0.010, 0.0 - vk))
+        row = transform(row0, translate = vec3(0.0 - len_bot * 0.5 - pu * 0.5 + odd * pu * 0.5, th * 0.5 + 0.012, 0.0 - vk))
         acc = merge(acc, row)
     }
     # Полуширина ската на этой высоте (трапеция), с запасом на полплитки у вальм.
     anchors = delete(anchors_all, where = abs(dot(@P, (1, 0, 0))) > (len_bot - (len_bot - len_top) * ((0.0 - dot(@P, (0, 0, 1))) / slope_len) - 0.28) * 0.5)
-    t_jit = set_position(anchors, offset = random_vec(lo = vec3(-0.005, 0, -0.005), hi = vec3(0.005, 0.003, 0.005), rng = split_rng(rng, key = "jit")))
+    t_jit = set_position(anchors, offset = random_vec(lo = vec3(-0.005, -0.001, -0.005), hi = vec3(0.005, 0.001, 0.005), rng = split_rng(rng, key = "jit")))
     shade = random(lo = 0.80, hi = 1.20, rng = split_rng(rng, key = "tint"))
     p_tint = set(t_jit, "tint", vec3(shade * 0.97, shade, shade * 1.05))
     out = mark(realize(instance_on_points(p_tint, source = tile)), "roof", where = true, domain = faces)
@@ -44,37 +45,67 @@ def mansard(hw0: f32, hd0: f32, hw1: f32, hd1: f32, h: f32) -> (out: geo<mesh>) 
     out = mark(compute_normals(body, mode = flat), "roof", where = true, domain = faces)
 }
 
-def hip_caps(p0: vec3, p1: vec3, rng: rng) -> (out: geo<mesh>) {
-    """Конёк вальмы: согнутые черепичные уголки вдоль ребра p0→p1, каждый
-    накрывает предыдущий. Два крыла раскрыты чуть положе скатов (~84°), чтобы
-    лежать сверху полевой черепицы, а не в ендове ребра. Смещение вдоль биссектрисы
-    (+Y) поднимает уголок над настилом. Низ и верх подрезаются плоскостями карниза
-    и палубы. Локально ребро вдоль +Z; в мир — pitch, yaw."""
+def hip_caps(p0: vec3, p1: vec3, rng: rng, half: f32 = 42.0, lift: f32 = 0.12, cap_w: f32 = 0.42, cap_l: f32 = 0.46, y_step: f32 = 0.012) -> (out: geo<mesh>) {
+    """Конёк вальмы: согнутые черепичные уголки вдоль ребра p0→p1.
+    Нахлёст как у ската: шаг вдоль ребра короче длины уголка, каждый следующий
+    чуть выше по биссектрисе (y_step), чтобы накрывать предыдущий, а не сливаться
+    в одну плоскость. Крылья — угол half от горизонтали сечения. Карниз не
+    режется в ноль: клип на 0.2 ниже p0, чтобы не вырезать треугольник у свеса."""
     d = p1 - p0
     len = length(d)
     horiz = length(vec3(dot(d, (1, 0, 0)), 0.0, dot(d, (0, 0, 1))))
     pitch = 0.0 - degrees(atan2(dot(d, (0, 1, 0)), horiz))
     yaw = degrees(atan2(dot(d, (1, 0, 0)), dot(d, (0, 0, 1))))
-    w = 0.42
     th = 0.040
-    cl = 0.46
-    half = 42.0
-    right = transform(parts.piece(size = vec3(w, th, cl), pos = vec3(w * 0.5, 0, 0), grp = "roof"), rotate = vec3(0, 0, 0.0 - half))
-    left = transform(parts.piece(size = vec3(w, th, cl), pos = vec3(0.0 - w * 0.5, 0, 0), grp = "roof"), rotate = vec3(0, 0, half))
+    right = transform(parts.piece(size = vec3(cap_w, th, cap_l), pos = vec3(cap_w * 0.5, 0, 0), grp = "roof"), rotate = vec3(0, 0, 0.0 - half))
+    left = transform(parts.piece(size = vec3(cap_w, th, cap_l), pos = vec3(0.0 - cap_w * 0.5, 0, 0), grp = "roof"), rotate = vec3(0, 0, half))
     cap = merge(left, right)
-    n = 10
-    span = len - 0.18
+    n = int(max(len / 0.30, 4.0))
+    span = max(len - 0.08, cap_l)
     pts0 = mesh_line(count = n, length = span, dir = (0, 0, 1))
-    pts1 = set_position(pts0, offset = vec3(0.0, 0.12 + f32(@index) * 0.008, 0.20))
+    pts1 = set_position(pts0, offset = vec3(0.0, lift + f32(@index) * y_step, cap_l * 0.40))
     shade = random(lo = 0.82, hi = 1.18, rng = split_rng(rng, key = "tint"))
     pts = set(pts1, "tint", vec3(shade * 0.97, shade, shade * 1.05))
     local = mark(realize(instance_on_points(pts, source = cap)), "roof", where = true, domain = faces)
     pitched = transform(local, rotate = vec3(pitch, 0, 0))
     world = transform(pitched, rotate = vec3(0, yaw, 0), translate = p0)
-    # Подрезка по горизонтальным плоскостям карниза (y = p0) и палубы (y = p1).
-    lo = clip(world, origin = p0, normal = vec3(0, 1, 0), cap_group = "roof")
-    hi = clip(lo, origin = p1, normal = vec3(0, -1, 0), cap_group = "roof")
-    out = compute_normals(mark(hi, "roof", where = true, domain = faces), mode = flat)
+    lo = clip(world, origin = p0 - vec3(0, 0.05, 0), normal = vec3(0, 1, 0), cap_group = "roof")
+    hi = clip(lo, origin = p1 + vec3(0, 0.08, 0), normal = vec3(0, -1, 0), cap_group = "roof")
+    end = clip(hi, origin = p1, normal = p0 - p1, cap_group = "roof")
+    out = compute_normals(mark(end, "roof", where = true, domain = faces), mode = flat)
+}
+
+def spire_tile_face(r0: f32, r1: f32, slope_len: f32, rng: rng) -> (out: geo<mesh>) {
+    """Черепица одной грани шестигранного шпиля. Локально: x поперёк, −Z к
+    вершине, низ грани на z = 0 (ширина r0), верх на z = −slope_len (ширина r1).
+    Сплошные ряды вразбежку, затем clip по двум боковым рёбрам треугольника
+    и под вершиной — ложки на контуре подрезаны."""
+    tw = 0.24
+    tl = 0.30
+    th = 0.032
+    pu = 0.228
+    pv = 0.175
+    tile = compute_normals(box(size = vec3(tw, th, tl)), mode = flat)
+    n_rows = int(slope_len / pv) + 2
+    n_cols = int(r0 / pu) + 4
+    empty = mesh_line(count = 0, length = 0.0)
+    anchors_all = repeat (empty, iterations = n_rows) |acc| {
+        k = f32(@iteration)
+        odd = f32(@iteration % 2)
+        vk = k * pv + pv * 0.20
+        row0 = mesh_line(count = n_cols, length = f32(n_cols - 1) * pu, dir = (1, 0, 0))
+        row = transform(row0, translate = vec3(0.0 - f32(n_cols - 1) * pu * 0.5 + odd * pu * 0.5, th * 0.5 + 0.020, 0.0 - vk))
+        acc = merge(acc, row)
+    }
+    anchors = delete(anchors_all, where = (abs(dot(@P, (1, 0, 0))) > 0.5 * (r0 + (r1 - r0) * ((0.0 - dot(@P, (0, 0, 1))) / slope_len)) + 0.18) | (dot(@P, (0, 0, 1)) < 0.08 - slope_len))
+    t_jit = set_position(anchors, offset = random_vec(lo = vec3(-0.004, -0.001, -0.004), hi = vec3(0.004, 0.001, 0.004), rng = split_rng(rng, key = "jit")))
+    shade = random(lo = 0.80, hi = 1.22, rng = split_rng(rng, key = "tint"))
+    p_tint = set(t_jit, "tint", vec3(shade * 0.97, shade, shade * 1.05))
+    raw = realize(instance_on_points(p_tint, source = tile))
+    c_l = clip(raw, origin = vec3(0.0 - r0 * 0.5, 0, 0), normal = vec3(slope_len, 0, (r0 - r1) * 0.5), cap_group = "roof")
+    c_r = clip(c_l, origin = vec3(r0 * 0.5, 0, 0), normal = vec3(0.0 - slope_len, 0, (r0 - r1) * 0.5), cap_group = "roof")
+    c_top = clip(c_r, origin = vec3(0, 0, 0.18 - slope_len), normal = vec3(0, 0, 1), cap_group = "roof")
+    out = mark(compute_normals(c_top, mode = flat), "roof", where = true, domain = faces)
 }
 
 def mansard_roof(width: f32, depth: f32, crown_top: f32, roof_h: f32, deck_hw: f32, deck_hd: f32, rng: rng) -> (out: geo<mesh>) {

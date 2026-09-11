@@ -23,7 +23,7 @@ def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, 
     bay_belt0 = common.hexa_belt(y = f1_top, h = belt_h, r = r_out)
     bay_belt = transform(bay_belt0, translate = vec3(0, 0, tower_z))
     # 3. Шестигранный кирпичный корпус 2-го этажа (y: b1_top -> f2_top)
-    body2 = common.hexa_frustum(y0 = b1_top, y1 = f2_top, r0 = r_out, r1 = r_out, grp = "brick")
+    body2 = common.hexa_frustum(y0 = b1_top, y1 = f2_top, r0 = r_out, r1 = r_out, grp = "mortar")
     f2_body = transform(body2, translate = vec3(0, 0, tower_z))
     # 3b. Мелкая кирпичная облицовка трёх выступающих граней
     bay_h = f2_top - b1_top

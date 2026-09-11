@@ -1,19 +1,21 @@
 # Общая сборка и окраска викторианского дома:
 # первый этаж, второй этаж, центральный эркер, башня с часами и шпилем,
 # черепичная мансарда, окна всех фасадов, парадное крыльцо и дверь.
-# Материалы — 11 групп faces: brick, stone, plinth, roof, glass, dial, brass, iron, wood, lamp, edge.
+# Материалы — 12 групп faces: brick, mortar, stone, plinth, roof, glass, dial, brass, iron, wood, lamp, edge.
 def assemble(ground: geo<mesh>, upper: geo<mesh>, bay_unit: geo<mesh>, porch_unit: geo<mesh>, door_unit: geo<mesh>, windows_all: geo<mesh>, roof_all: geo<mesh>, tower_all: geo<mesh>, root_rng: rng) -> (out: geo<mesh>) {
-    """Собирает компоненты дома воедино, применяет текстурную окраску @Cd по 11 группам
+    """Собирает компоненты дома воедино, применяет текстурную окраску @Cd по 12 группам
     faces с микро-шумом fbm и запекает ambient occlusion (AO)."""
     raw = merge(ground, upper, bay_unit, porch_unit, door_unit, windows_all, roof_all, tower_all)
     # Окраска: @Cd по группам (faces)
     paint_rng = split_rng(root_rng, key = "paint")
     brick_col = mix(vec3(0.27, 0.095, 0.055), vec3(0.165, 0.058, 0.04), fbm(scale = 1.4, octaves = 3, rng = split_rng(paint_rng, key = "brick"))) * @tint
+    mortar_col = mix(vec3(0.12, 0.118, 0.112), vec3(0.07, 0.068, 0.065), fbm(scale = 3.2, octaves = 2, rng = split_rng(paint_rng, key = "mortar")))
     stone_col = mix(vec3(0.38, 0.335, 0.275), vec3(0.26, 0.23, 0.195), fbm(scale = 2.0, octaves = 3, rng = split_rng(paint_rng, key = "stone")))
     plinth_col = mix(vec3(0.155, 0.15, 0.145), vec3(0.095, 0.09, 0.088), fbm(scale = 1.8, octaves = 3, rng = split_rng(paint_rng, key = "plinth")))
     roof_col = mix(vec3(0.075, 0.085, 0.105), vec3(0.038, 0.043, 0.055), fbm(scale = 2.2, octaves = 3, rng = split_rng(paint_rng, key = "roof")))
     c1 = ingroup("brick") ? brick_col : vec3(1.0, 0.0, 1.0)
-    c2 = ingroup("stone") ? stone_col : c1
+    c1m = ingroup("mortar") ? mortar_col : c1
+    c2 = ingroup("stone") ? stone_col : c1m
     c3 = ingroup("plinth") ? plinth_col : c2
     c4 = ingroup("roof") ? roof_col * @tint : c3
     c5 = ingroup("glass") ? vec3(0.045, 0.055, 0.075) : c4
