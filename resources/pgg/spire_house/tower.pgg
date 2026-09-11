@@ -4,6 +4,7 @@
 import lib.parts
 import lib.architecture
 import lib.ironwork
+import lib.shapes as shapes
 import spire_house.common as common
 import spire_house.windows as windows
 import spire_house.roof as roof
@@ -18,44 +19,29 @@ def clock_tier(w: f32, h: f32, clock_r: f32, crown_h: f32, rng: rng) -> (out: ge
     - Венчающий трёхступенчатый шестигранный карниз.
     Нижний пояс яруса — не здесь: это crown дома/эркера на f2_top (высота crown_h)."""
     r_in = w * 0.5
-    r_out = r_in * 1.1547
+    r_circ = shapes.ngon_circumradius(r_in, 6)
     # Подоконник над венчающим карнизом дома, который кольцом сидит на низе яруса.
     sill = crown_h + 0.10
     win_h = 2.15
-    # Шестигранный кирпичный корпус яруса
-    bx = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r_out, r1 = r_out, grp = "mortar")
-    # Мелкая кладка по всем шести граням: диск под часы, арка под окна звонницы
-    bf0 = common.hexa_brick_clock_face(h = h, r_in = r_in, r_out = r_out, cy = sill + win_h * 0.5, circ_r = clock_r, rng = split_rng(rng, key = "t0"))
-    bf60 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t60")), rotate = vec3(0, 60, 0))
-    bf120 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t120")), rotate = vec3(0, 120, 0))
-    bf180 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t180")), rotate = vec3(0, 180, 0))
-    bf240 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t240")), rotate = vec3(0, 240, 0))
-    bf300 = transform(common.hexa_brick_face(h = h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t300")), rotate = vec3(0, 300, 0))
-    bx_bricks = merge(bf0, bf60, bf120, bf180, bf240, bf300)
+    # Шестигранный кирпичный корпус яруса (апофема = r_in)
+    bx = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r_in, r1 = r_in, grp = "mortar")
+    # Мелкая кладка: диск под часы на +Z, арки звонницы — polar_array остальных пяти граней
+    bf0 = common.hexa_brick_clock_face(h = h, r_in = r_in, cy = sill + win_h * 0.5, circ_r = clock_r, rng = split_rng(rng, key = "t0"))
+    bf_plain = common.hexa_brick_face(h = h, r_in = r_in, y_bot = sill, win_w = 0.55, win_h = win_h, rng = split_rng(rng, key = "t_plain"))
+    bx_bricks = merge(bf0, shapes.polar_array(transform(bf_plain, rotate = vec3(0, 60, 0)), n = 5, step_deg = 60))
     # Часы на передней грани (+Z): центр на середине арочных окон яруса
     ck = transform(architecture.clock_face(r = clock_r), translate = vec3(0, sill + win_h * 0.5, r_in + 0.03))
     # Арочные окна звонницы на остальных пяти гранях
     wn = windows.stone_arch_window(w = 0.55, h = win_h)
     wn_base = transform(wn, translate = vec3(0, sill, r_in + 0.015))
-    w_60 = transform(wn_base, rotate = vec3(0, 60, 0))
-    w_120 = transform(wn_base, rotate = vec3(0, 120, 0))
-    w_180 = transform(wn_base, rotate = vec3(0, 180, 0))
-    w_240 = transform(wn_base, rotate = vec3(0, 240, 0))
-    w_300 = transform(wn_base, rotate = vec3(0, 300, 0))
-    belfry = merge(w_60, w_120, w_180, w_240, w_300)
-    # 6 угловых колоннетт на рёбрах шестигранника
+    belfry = shapes.polar_array(transform(wn_base, rotate = vec3(0, 60, 0)), n = 5, step_deg = 60)
+    # 6 угловых колоннетт на вершинах шестигранника (описанный радиус)
     shaft = architecture.regroup(ironwork.spool(p0 = vec3(0, crown_h + 0.04, 0), p1 = vec3(0, h - 0.08, 0), r0 = 0.07, r1 = 0.06, sides = 8), grp = "stone")
-    sh_base = transform(shaft, translate = vec3(0, 0, r_out))
-    sh0 = transform(sh_base, rotate = vec3(0, 30, 0))
-    sh1 = transform(sh_base, rotate = vec3(0, 90, 0))
-    sh2 = transform(sh_base, rotate = vec3(0, 150, 0))
-    sh3 = transform(sh_base, rotate = vec3(0, 210, 0))
-    sh4 = transform(sh_base, rotate = vec3(0, 270, 0))
-    sh5 = transform(sh_base, rotate = vec3(0, 330, 0))
-    shafts = merge(sh0, sh1, sh2, sh3, sh4, sh5)
+    sh_base = transform(shaft, translate = vec3(0, 0, r_circ))
+    shafts = shapes.polar_array(transform(sh_base, rotate = vec3(0, 30, 0)), n = 6, step_deg = 60)
     # Верх яруса: сухарики и венчающий карниз (низ яруса — crown эркера на f2_top)
     dt = common.hexa_dentils(y = h - 0.14, r_in = r_in)
-    top = common.hexa_crown(y = h, h = 0.32, r = r_out)
+    top = common.hexa_crown(y = h, h = 0.32, r = r_in)
     out = merge(bx, bx_bricks, ck, belfry, shafts, dt, top)
 }
 
@@ -68,7 +54,7 @@ def roof_spire(h: f32, r0: f32, rng: rng) -> (out: geo<mesh>) {
     a1 = r_top * k
     slope_len = sqrt(h * h + (a0 - a1) * (a0 - a1))
     pitch = degrees(atan2(h, a0 - a1))
-    body = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = r0, r1 = r_top, grp = "roof")
+    body = common.hexa_frustum(y0 = 0.0, y1 = h, r0 = a0, r1 = a1, grp = "roof")
     face0 = roof.spire_tile_face(r0 = r0, r1 = r_top, slope_len = slope_len, rng = split_rng(rng, key = "face"))
     face_on = transform(transform(face0, rotate = vec3(pitch, 0, 0)), translate = vec3(0, 0, a0))
     tiles = merge(face_on, transform(face_on, rotate = vec3(0, 60, 0)), transform(face_on, rotate = vec3(0, 120, 0)), transform(face_on, rotate = vec3(0, 180, 0)), transform(face_on, rotate = vec3(0, 240, 0)), transform(face_on, rotate = vec3(0, 300, 0)))
@@ -77,7 +63,7 @@ def roof_spire(h: f32, r0: f32, rng: rng) -> (out: geo<mesh>) {
     p1 = vec3(r_top * 0.5, h, a1)
     cap0 = roof.hip_caps(p0 = p0, p1 = p1, rng = split_rng(rng, key = "hip"), half = 38.0, lift = 0.12, cap_w = 0.30, cap_l = 0.38, y_step = 0.005)
     caps = merge(cap0, transform(cap0, rotate = vec3(0, 60, 0)), transform(cap0, rotate = vec3(0, 120, 0)), transform(cap0, rotate = vec3(0, 180, 0)), transform(cap0, rotate = vec3(0, 240, 0)), transform(cap0, rotate = vec3(0, 300, 0)))
-    tip = common.hexa_frustum(y0 = h - 0.06, y1 = h + 0.28, r0 = 0.09, r1 = 0.012, grp = "roof")
+    tip = common.hexa_frustum(y0 = h - 0.06, y1 = h + 0.28, r0 = 0.09 * k, r1 = 0.012 * k, grp = "roof")
     out = merge(body, tiles, caps, tip)
 }
 

@@ -84,6 +84,53 @@ TEST(Eval, LazinessUnusedBindingNotEvaluated) {
     EXPECT_EQ(mid.stats.fieldsEvaluated, 0u);
 }
 
+TEST(Eval, EmptyMeshAndPoints) {
+    pgg::RunResult m = pgg::run("g = empty_mesh()\noutput g\n");
+    expectNoErrors(m);
+    ASSERT_EQ(m.outputs.size(), 1u);
+    ASSERT_TRUE(pgg::asGeo(m.outputs[0].value));
+    EXPECT_EQ(pgg::asGeo(m.outputs[0].value)->kind, pgg::GeoKind::Mesh);
+    EXPECT_EQ(pgg::asGeo(m.outputs[0].value)->pointCount(), 0u);
+    EXPECT_EQ(pgg::asGeo(m.outputs[0].value)->faceCount(), 0u);
+
+    pgg::RunResult p = pgg::run("g = empty_points()\noutput g\n");
+    expectNoErrors(p);
+    ASSERT_TRUE(pgg::asGeo(p.outputs[0].value));
+    EXPECT_EQ(pgg::asGeo(p.outputs[0].value)->kind, pgg::GeoKind::Points);
+    EXPECT_EQ(pgg::asGeo(p.outputs[0].value)->pointCount(), 0u);
+}
+
+TEST(Eval, SelectPicksGeoAndSkipsUnusedBranch) {
+    const std::string src =
+        "root_rng = rng_from_seed(1)\n"
+        "n = fbm(scale = 2.0, rng = root_rng)\n"
+        "a = box(size = (1, 1, 1))\n"
+        "b = set_position(a, offset = @N * n)\n"
+        "picked = select(true, a, b)\n"
+        "output picked\n";
+    pgg::RunResult r = pgg::run(src);
+    expectNoErrors(r);
+    ASSERT_EQ(r.outputs.size(), 1u);
+    EXPECT_EQ(pgg::asGeo(r.outputs[0].value)->kind, pgg::GeoKind::Mesh);
+    EXPECT_EQ(pgg::asGeo(r.outputs[0].value)->pointCount(), 8u);
+    EXPECT_EQ(fieldEvals(r, "n"), 0u);
+}
+
+TEST(Eval, TernaryGeoHintPointsToSelect) {
+    pgg::RunResult r = pgg::run(
+        "a = box(size = (1, 1, 1))\n"
+        "b = box(size = (2, 2, 2))\n"
+        "m = true ? a : b\n"
+        "output m\n");
+    EXPECT_TRUE(r.hasErrors());
+    bool hinted = false;
+    for (const pgg::Diagnostic& d : r.diagnostics)
+        hinted = hinted || (d.code == "E204" &&
+                            (d.hint.find("select") != std::string::npos ||
+                             d.message.find("select") != std::string::npos));
+    EXPECT_TRUE(hinted);
+}
+
 TEST(Eval, DeterminismAcrossRuns) {
     pgg::RunResult a = pgg::runFile(kCorpus);
     pgg::RunResult b = pgg::runFile(kCorpus);

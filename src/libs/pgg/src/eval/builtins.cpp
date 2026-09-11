@@ -104,6 +104,10 @@ const std::vector<BuiltinSig>& registry() {
                         {val("count", ScalarType::Int, true), val("length", ScalarType::F32, true),
                          valDef("dir", ScalarType::Vec3, Value(glm::vec3(0, 0, 1)))},
                         Type{ScalarType::Geo, false, GeoKind::Points}));
+        r.push_back(sig(BuiltinId::EmptyMesh, "empty_mesh", {},
+                        Type{ScalarType::Geo, false, GeoKind::Mesh}));
+        r.push_back(sig(BuiltinId::EmptyPoints, "empty_points", {},
+                        Type{ScalarType::Geo, false, GeoKind::Points}));
         r.push_back(sig(BuiltinId::PointCloud, "point_cloud",
                         {val("count", ScalarType::Int, true), val("bounds", ScalarType::Vec3, true),
                          val("rng", ScalarType::Rng, true)},
@@ -335,6 +339,14 @@ const std::vector<BuiltinSig>& registry() {
             BuiltinSig s = sig(BuiltinId::Merge, "merge", {geoArg("a"), geoArg("b")}, geoResult());
             s.resultGeoKindOfFirstArg = true;
             s.variadic = true;
+            r.push_back(s);
+        }
+        {
+            // Geo picker by a value-level bool (constant/param). A constant
+            // cond compiles only the taken branch (field.cpp).
+            BuiltinSig s = sig(BuiltinId::Select, "select",
+                               {val("cond", ScalarType::Bool, true), geoArg("a"), geoArg("b")},
+                               geoResult());
             r.push_back(s);
         }
         {
@@ -647,8 +659,14 @@ Value evalBuiltinCall(const BoundCall& bound, RunContext& run) {
             return Value(genGrid(asVec2(v[0]), asVec2(v[1])));
         case BuiltinId::MeshLine:
             return Value(genMeshLine(static_cast<int>(asInt(v[0])), asF32(v[1]), asVec3(v[2])));
+        case BuiltinId::EmptyMesh:
+            return Value(genEmptyMesh());
+        case BuiltinId::EmptyPoints:
+            return Value(genEmptyPoints());
         case BuiltinId::PointCloud:
             return Value(genPointCloud(static_cast<int>(asInt(v[0])), asVec3(v[1]), asRng(v[2])));
+        case BuiltinId::Select:
+            return asBool(v[0]) ? v[1] : v[2];
         case BuiltinId::RngFromSeed:
             return Value(rngFromSeed(asInt(v[0])));
         case BuiltinId::SplitRng: {

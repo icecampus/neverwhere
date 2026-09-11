@@ -614,6 +614,16 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
     std::vector<const CallArg*> variadicArgs;
     bindCallArgs(*sig, *c, byParam, variadicArgs, *run.diagnostics);
 
+    // select(cond, a, b): a constant/param bool compiles only the taken
+    // branch so the other geo is never built (art-session D1).
+    if (sig->id == BuiltinId::Select && byParam.size() >= 3 && byParam[0] && byParam[1] && byParam[2]) {
+        TypedValue cond = compileExprImpl(byParam[0]->value, run, resolve);
+        if (cond && !cond.field && valueBase(cond.value) == ScalarType::Bool) {
+            const CallArg* taken = asBool(cond.value) ? byParam[1] : byParam[2];
+            return compileExprImpl(taken->value, run, resolve);
+        }
+    }
+
     const size_t np = sig->params.size();
     std::vector<TypedValue> argTV(np);
     std::vector<Value> enumValues(np);
@@ -820,6 +830,8 @@ TypedValue compileCall(const Call* c, RunContext& run, const IdentResolver& reso
         tv.type.isField = false;
         if (sig->resultGeoKindOfFirstArg && !sig->params.empty() && argTV[0])
             tv.type.geoKind = argTV[0].type.geoKind;
+        if (sig->id == BuiltinId::Select && argTV.size() > 1 && argTV[1])
+            tv.type.geoKind = argTV[1].type.geoKind;
         // value(field, on) is typed by its payload (the field's own type, §8.10).
         if (sig->id == BuiltinId::ValueOf && valueBase(v) != ScalarType::None) tv.type.base = valueBase(v);
     }

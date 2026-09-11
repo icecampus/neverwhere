@@ -2,6 +2,8 @@
 # карнизы, дентикулы, ступенчатый корбель, восьмигранные тела, люкарны шпиля и решётки.
 import lib.parts
 import lib.blockwork
+import lib.shapes as shapes
+import lib.masonry as masonry
 
 def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     """Переметить грани из группы src в dst (ingroup-маска, затем снять src)."""
@@ -9,95 +11,33 @@ def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
 }
 
 def brick_prism(w: f32, d: f32, h: f32, y0: f32) -> (out: geo<mesh>) {
-    """Прямой объём w×d высотой h, низ на y0. Без фаски: `piece`/`cbox`
-    скос считает от min(размера), и на этаже это ~0.12·h ≈ 40 см — грани
-    визуально загибаются внутрь у карниза и цоколя. Сердцевина под облицовкой
-    brick_rows — группа mortar (раствор в швах между кирпичами)."""
-    body = compute_normals(box(size = vec3(w, h, d)), mode = flat)
-    out = mark(transform(body, translate = vec3(0, y0 + h * 0.5, 0)), "mortar", where = true, domain = faces)
+    """Прямой объём w×d высотой h, низ на y0 — обёртка blockwork.core_prism."""
+    out = blockwork.core_prism(w = w, d = d, h = h, y0 = y0, grp = "mortar")
 }
 
 def brick_rows(len: f32, h: f32) -> (out: geo<points>) {
-    """Якоря мелкой кирпичной кладки вразбежку: ложок L=0.17, ряд 0.12
-    (квойн 0.62×~0.46 — в 3.5–4 раза крупнее). Локально: x вдоль, низ y=0,
-    лицо +Z, вынос z=0.03. Проёмы не дырявят якоря: сплошной ряд, затем
-    clip_arch_hole / clip_circle_hole подрезает кирпичи по контуру."""
-    L = 0.17
-    ch = 0.12
-    n_rows = int(h / ch)
-    out = blockwork.coursed_wall_anchors(S = len, n_rows = n_rows, course_h = ch, y0 = 0.0, z = 0.03, L = L, g0 = 0.008)
+    """Якоря мелкой кирпичной кладки — обёртка blockwork.brick_veneer_rows."""
+    out = blockwork.brick_veneer_rows(len = len, h = h, L = 0.17, ch = 0.12, g0 = 0.008, z = 0.03)
 }
 
 def brick_from_rows(rows: geo<points>, rng: rng) -> (out: geo<mesh>) {
-    """Мелкие кирпичи по якорям brick_rows: ¼/½/¾/полный ложок, лёгкий @tint
-    и джиттер, группа brick. Фаска k=0.14 — светлая кромка edge."""
-    L = 0.17
-    bh = 0.104
-    t = 0.046
-    a0 = parts.cbox(size = vec3(L * 0.25, bh, t), k = 0.14)
-    a1 = parts.cbox(size = vec3(L * 0.5, bh, t), k = 0.14)
-    a2 = parts.cbox(size = vec3(L * 0.75, bh, t), k = 0.14)
-    a3 = parts.cbox(size = vec3(L, bh, t), k = 0.14)
-    shade = random(lo = 0.84, hi = 1.16, rng = split_rng(rng, key = "tint"))
-    p1 = set(rows, "tint", vec3(shade * 1.06, shade * 0.98, shade * 0.92))
-    p2 = set_position(p1, offset = random_vec(lo = vec3(-0.003, -0.002, -0.003), hi = vec3(0.003, 0.002, 0.006), rng = split_rng(rng, key = "jit")))
-    out = mark(realize(instance_on_points(p2, source = a3, variants = [a0, a1, a2, a3])), "brick", where = true, domain = faces)
+    """Мелкие кирпичи по якорям brick_rows — обёртка blockwork.brick_veneer."""
+    out = blockwork.brick_veneer(rows = rows, rng = rng, L = 0.17, bh = 0.104, t = 0.046, k = 0.14, grp = "brick")
 }
 
 def clip_wedge_out(g: geo<mesh>, cx: f32, cy: f32, R: f32, deg0: f32, deg1: f32) -> (out: geo<mesh>) {
-    """Сектор [deg0, deg1] снаружи окружности (cx, cy, R): между лучами и за
-    касательной на биссектрисе. Крышка среза — brick (торец подрезанного ложка)."""
-    th0 = radians(deg0)
-    th1 = radians(deg1)
-    c0 = cos(th0)
-    s0 = sin(th0)
-    c1 = cos(th1)
-    s1 = sin(th1)
-    g1 = clip(g, origin = vec3(cx, cy, 0), normal = vec3(0.0 - s0, c0, 0))
-    g2 = clip(g1, origin = vec3(cx, cy, 0), normal = vec3(s1, 0.0 - c1, 0))
-    thm = (th0 + th1) * 0.5
-    nmx = cos(thm)
-    nmy = sin(thm)
-    out = clip(g2, origin = vec3(cx + R * nmx, cy + R * nmy, 0), normal = vec3(nmx, nmy, 0), cap_group = "brick")
+    """Сектор снаружи окружности — обёртка masonry.clip_wedge_out."""
+    out = masonry.clip_wedge_out(g = g, cx = cx, cy = cy, R = R, deg0 = deg0, deg1 = deg1)
 }
 
 def clip_arch_hole(g: geo<mesh>, cx: f32, y_bot: f32, win_w: f32, win_h: f32, bar: f32, gap: f32) -> (out: geo<mesh>) {
-    """Вырезать из кладки (локально: x вдоль, y вверх) стадион окна: прямоугольник
-    косяков + верхняя полуокружность. Контур = наружный силуэт arch_frame
-    (полуширина r+bar) плюс зазор gap. Кирпичи снаружи целые, на контуре
-    подрезаны; внутри проёма удалены."""
-    r = win_w * 0.5
-    R = r + bar + gap
-    straight = win_h - r
-    cy = y_bot + straight
-    y_sill = y_bot - gap
-    y_top = cy + R + 0.10
-    left = clip(g, origin = vec3(cx - R, 0, 0), normal = vec3(-1, 0, 0), cap_group = "brick")
-    right = clip(g, origin = vec3(cx + R, 0, 0), normal = vec3(1, 0, 0), cap_group = "brick")
-    m0 = clip(g, origin = vec3(cx - R, 0, 0), normal = vec3(1, 0, 0))
-    mid = clip(m0, origin = vec3(cx + R, 0, 0), normal = vec3(-1, 0, 0))
-    bot = clip(mid, origin = vec3(0, y_sill, 0), normal = vec3(0, -1, 0), cap_group = "brick")
-    top = clip(mid, origin = vec3(0, y_top, 0), normal = vec3(0, 1, 0), cap_group = "brick")
-    ah0 = clip(mid, origin = vec3(0, cy, 0), normal = vec3(0, 1, 0))
-    ah = clip(ah0, origin = vec3(0, y_top, 0), normal = vec3(0, -1, 0))
-    w0 = clip_wedge_out(ah, cx = cx, cy = cy, R = R, deg0 = 0.0, deg1 = 15.0)
-    wedges = repeat (w0, iterations = 11) |acc| {
-        i = f32(@iteration) + 1.0
-        d0 = i * 15.0
-        acc = merge(acc, clip_wedge_out(ah, cx = cx, cy = cy, R = R, deg0 = d0, deg1 = d0 + 15.0))
-    }
-    out = compute_normals(merge(left, right, bot, top, wedges), mode = flat)
+    """Арочный проём в кладке — обёртка masonry.clip_arch_hole (12 сегментов)."""
+    out = masonry.clip_arch_hole(g = g, cx = cx, y_bot = y_bot, win_w = win_w, win_h = win_h, bar = bar, gap = gap, segments = 12)
 }
 
 def clip_circle_hole(g: geo<mesh>, cx: f32, cy: f32, R: f32) -> (out: geo<mesh>) {
-    """Вырезать диск (cx, cy, R) из кладки: 12 секторов по 30° снаружи окружности."""
-    w0 = clip_wedge_out(g, cx = cx, cy = cy, R = R, deg0 = 0.0, deg1 = 30.0)
-    wedges = repeat (w0, iterations = 11) |acc| {
-        i = f32(@iteration) + 1.0
-        d0 = i * 30.0
-        acc = merge(acc, clip_wedge_out(g, cx = cx, cy = cy, R = R, deg0 = d0, deg1 = d0 + 30.0))
-    }
-    out = compute_normals(wedges, mode = flat)
+    """Круглый вырез в кладке — обёртка masonry.clip_circle_hole (12 сегментов)."""
+    out = masonry.clip_circle_hole(g = g, cx = cx, cy = cy, R = R, segments = 12)
 }
 
 def brick_box_veneer(w: f32, d: f32, h: f32, y0: f32, wing_x: f32, wing_z: f32, door_x: f32, has_door: int, rng: rng) -> (out: geo<mesh>) {
@@ -142,24 +82,23 @@ def brick_box_veneer(w: f32, d: f32, h: f32, y0: f32, wing_x: f32, wing_z: f32, 
     out = merge(wall_f, wall_b, wall_r, wall_l)
 }
 
-def hexa_brick_face(h: f32, r_in: f32, r_out: f32, y_bot: f32, win_w: f32, win_h: f32, rng: rng) -> (out: geo<mesh>) {
-    """Кладка одной грани шестигранника (лицо +Z, низ y=0): пролёт r_out − 0.16
-    (отступ от колоннетт). Сплошной ряд, проём — clip_arch_hole по окну
-    win_w×win_h (bar=0.11, зазор 3 см)."""
+def hexa_brick_face(h: f32, r_in: f32, y_bot: f32, win_w: f32, win_h: f32, rng: rng, clock: bool = false, circ_r: f32 = 0.52, cy: f32 = 0.0) -> (out: geo<mesh>) {
+    """Кладка одной грани шестигранника (лицо +Z, низ y=0): пролёт circumradius − 0.16
+    (отступ от колоннетт). clock=false — clip_arch_hole по окну; clock=true —
+    clip_circle_hole под циферблат (select пропускает невзятую ветку)."""
+    r_out = shapes.ngon_circumradius(r_in, 6)
     span = r_out - 0.16
     rows = brick_rows(len = span, h = h)
     raw = brick_from_rows(rows, rng = rng)
-    punched = clip_arch_hole(raw, cx = 0.0, y_bot = y_bot, win_w = win_w, win_h = win_h, bar = 0.11, gap = 0.03)
+    arch = clip_arch_hole(raw, cx = 0.0, y_bot = y_bot, win_w = win_w, win_h = win_h, bar = 0.11, gap = 0.03)
+    disc = clip_circle_hole(raw, cx = 0.0, cy = cy, R = circ_r + 0.03)
+    punched = select(clock, disc, arch)
     out = transform(punched, translate = vec3(0, 0, r_in))
 }
 
-def hexa_brick_clock_face(h: f32, r_in: f32, r_out: f32, cy: f32, circ_r: f32, rng: rng) -> (out: geo<mesh>) {
-    """Кладка грани с круглым вырезом под циферблат (радиус circ_r + 3 см)."""
-    span = r_out - 0.16
-    rows = brick_rows(len = span, h = h)
-    raw = brick_from_rows(rows, rng = rng)
-    punched = clip_circle_hole(raw, cx = 0.0, cy = cy, R = circ_r + 0.03)
-    out = transform(punched, translate = vec3(0, 0, r_in))
+def hexa_brick_clock_face(h: f32, r_in: f32, cy: f32, circ_r: f32, rng: rng) -> (out: geo<mesh>) {
+    """Кладка грани с круглым вырезом под циферблат — select(clock) в hexa_brick_face."""
+    out = hexa_brick_face(h = h, r_in = r_in, y_bot = 0.0, win_w = 0.55, win_h = 2.15, rng = rng, clock = true, circ_r = circ_r, cy = cy)
 }
 
 def belt(w: f32, d: f32, h: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
@@ -209,34 +148,13 @@ def corbel(w: f32, d: f32, h: f32, steps: int = 5) -> (out: geo<mesh>) {
 }
 
 def octa_frustum(y0: f32, y1: f32, r0: f32, r1: f32, grp: string) -> (out: geo<mesh>) {
-    """Правильная восьмигранная усечённая пирамида (frustum) от y0 до y1."""
-    h = y1 - y0
-    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
-    path = set(path0, "profile_scale", @index == 0 ? vec2(r0, r0) : vec2(r1, r1))
-    prof = transform(circle(sides = 8, radius = 1.0), rotate = vec3(0, 0, 22.5))
-    sw = sweep(path, profile = prof)
-    sw_y = transform(sw, translate = vec3(0, y0, 0))
-    out = mark(compute_normals(sw_y, mode = flat), grp, where = true, domain = faces)
+    """Правильная восьмигранная усечённая пирамида: r0/r1 — апофемы."""
+    out = shapes.ngon_frustum(y0 = y0, y1 = y1, r0 = r0, r1 = r1, sides = 8, grp = grp)
 }
 
 def hexa_frustum(y0: f32, y1: f32, r0: f32, r1: f32, grp: string) -> (out: geo<mesh>) {
-    """Правильная шестигранная усечённая призма/пирамида от y0 до y1 (грань на +Z)."""
-    h = y1 - y0
-    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
-    path = set(path0, "profile_scale", @index == 0 ? vec2(r0, r0) : vec2(r1, r1))
-    prof = transform(circle(sides = 6, radius = 1.0), rotate = vec3(0, 0, 30.0))
-    sw = sweep(path, profile = prof)
-    sw_y = transform(sw, translate = vec3(0, y0, 0))
-    out = mark(compute_normals(sw_y, mode = flat), grp, where = true, domain = faces)
-}
-
-def hexa_ring(y: f32, r: f32) -> (out: geo<mesh>) {
-    """Тонкое шестигранное профилированное кольцо-поясок вокруг шпиля."""
-    prof = transform(circle(sides = 6, radius = r), rotate = vec3(0, 0, 30.0))
-    path = mesh_line(count = 2, length = 0.06, dir = (0, 1, 0))
-    sw = sweep(path, profile = prof)
-    sw_y = transform(sw, translate = vec3(0, y, 0))
-    out = mark(compute_normals(sw_y, mode = flat), "stone", where = true, domain = faces)
+    """Правильная шестигранная усечённая призма/пирамида (грань на +Z). r0/r1 — апофемы."""
+    out = shapes.ngon_frustum(y0 = y0, y1 = y1, r0 = r0, r1 = r1, sides = 6, grp = grp)
 }
 
 def hexa_corbel(y_top: f32, h: f32, r_top: f32, steps: int = 3) -> (out: geo<mesh>) {
@@ -257,25 +175,18 @@ def hexa_corbel(y_top: f32, h: f32, r_top: f32, steps: int = 3) -> (out: geo<mes
 }
 
 def hexa_belt(y: f32, h: f32, r: f32, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
-    """Шестигранный двухступенчатый карниз: тот же разрез, что у belt (низ 0.58·h /
-    вынос over_lo, верх 0.42·h / over_hi). r — описанный радиус грани корпуса
-    (hexa_frustum); over_* — вынос от грани на сторону, в описанный радиус через 2/√3.
-    Фаска как у belt/cbox: ширина k=0.12 от высоты полки, грани в группе edge."""
-    k = 1.1547
-    lo_h = h * 0.58
-    hi_h = h * 0.42
-    lo = hexa_frustum(y0 = y, y1 = y + lo_h, r0 = r + over_lo * k, r1 = r + over_lo * k, grp = "stone")
-    hi = hexa_frustum(y0 = y + lo_h, y1 = y + h, r0 = r + over_hi * k, r1 = r + over_hi * k, grp = "stone")
-    lo_b = compute_normals(mark(bevel(lo, width = 0.12 * lo_h, bevel_group = "edge"), "stone", where = true, domain = faces), mode = flat)
-    hi_b = compute_normals(mark(bevel(hi, width = 0.12 * hi_h, bevel_group = "edge"), "stone", where = true, domain = faces), mode = flat)
-    out = merge(lo_b, hi_b)
+    """Шестигранный двухступенчатый карниз. r — апофема грани корпуса; over_* —
+    вынос от грани на сторону (по нормали)."""
+    out = shapes.ngon_belt(y = y, h = h, r = r, sides = 6, over_lo = over_lo, over_hi = over_hi)
 }
 
 def hexa_crown(y: f32, h: f32, r: f32) -> (out: geo<mesh>) {
-    """Шестигранный венчающий профилированный карниз из 3 ступеней."""
-    s1 = hexa_frustum(y0 = y, y1 = y + h * 0.35, r0 = r + 0.05, r1 = r + 0.07, grp = "stone")
-    s2 = hexa_frustum(y0 = y + h * 0.35, y1 = y + h * 0.70, r0 = r + 0.12, r1 = r + 0.14, grp = "stone")
-    s3 = hexa_frustum(y0 = y + h * 0.70, y1 = y + h, r0 = r + 0.20, r1 = r + 0.20, grp = "stone")
+    """Шестигранный венчающий профилированный карниз из 3 ступеней. r — апофема;
+    выносы 0.05/0.07/… заданы в описанном радиусе и переводятся через cos(π/6)."""
+    k = 0.86602540378
+    s1 = hexa_frustum(y0 = y, y1 = y + h * 0.35, r0 = r + 0.05 * k, r1 = r + 0.07 * k, grp = "stone")
+    s2 = hexa_frustum(y0 = y + h * 0.35, y1 = y + h * 0.70, r0 = r + 0.12 * k, r1 = r + 0.14 * k, grp = "stone")
+    s3 = hexa_frustum(y0 = y + h * 0.70, y1 = y + h, r0 = r + 0.20 * k, r1 = r + 0.20 * k, grp = "stone")
     out = merge(s1, s2, s3)
 }
 
@@ -287,30 +198,6 @@ def hexa_dentils(y: f32, r_in: f32) -> (out: geo<mesh>) {
     d3 = parts.piece(size = vec3(0.08, 0.07, 0.08), pos = vec3(0.36, y, r_in + 0.03), grp = "stone")
     face_d = merge(d0, d1, d2, d3)
     out = merge(face_d, transform(face_d, rotate = vec3(0, 60, 0)), transform(face_d, rotate = vec3(0, 120, 0)), transform(face_d, rotate = vec3(0, 180, 0)), transform(face_d, rotate = vec3(0, 240, 0)), transform(face_d, rotate = vec3(0, 300, 0)))
-}
-
-def octa_ring(y: f32, r: f32) -> (out: geo<mesh>) {
-    """Тонкое восьмигранное профилированное кольцо-поясок вокруг шпиля."""
-    prof = circle(sides = 8, radius = r)
-    path = mesh_line(count = 2, length = 0.06, dir = (0, 1, 0))
-    sw = sweep(path, profile = prof)
-    sw_y = transform(sw, translate = vec3(0, y, 0))
-    out = mark(compute_normals(sw_y, mode = flat), "stone", where = true, domain = faces)
-}
-
-def cone_r(y: f32, r0: f32, h: f32) -> (out: f32) {
-    """Радиус описанной окружности конуса шпиля на высоте y (линейный спад от r0 до 0.05)."""
-    t = y / h
-    out = r0 * (1.0 - t) + 0.05 * t
-}
-
-def spire_lucarne(w: f32, h: f32, d: f32) -> (out: geo<mesh>) {
-    """Маленькая слуховая люкарна шпиля: фасад смотрит на +Z, глубина d уходит внутрь шпиля в -Z."""
-    box_w = parts.piece(size = vec3(w, h * 0.7, d), pos = vec3(0, h * 0.35, 0.0 - d * 0.5), grp = "stone")
-    win = parts.piece(size = vec3(w * 0.55, h * 0.5, 0.04), pos = vec3(0, h * 0.4, 0.02), grp = "glass")
-    arch = parts.piece(size = vec3(w * 0.65, h * 0.22, 0.06), pos = vec3(0, h * 0.72, 0.03), grp = "stone")
-    roof_w = parts.piece(size = vec3(w + 0.08, 0.08, d + 0.06), pos = vec3(0, h * 0.88, 0.0 - d * 0.5), grp = "roof")
-    out = merge(box_w, win, arch, roof_w)
 }
 
 def rail_run(len: f32, h: f32) -> (out: geo<mesh>) {

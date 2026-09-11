@@ -39,6 +39,7 @@ import spire_house.door as door
 import spire_house.roof as roof
 import spire_house.tower as tower
 import spire_house.assemble as assemble
+import lib.shapes as shapes
 
 root_rng = rng_from_seed(seed)
 
@@ -62,7 +63,7 @@ f2_y = b1_top + 0.35
 # (колоннетта на 90° — правый край 60° грани) и внутренним краем квойнов
 # (quoin_stack bricks=1.5: лицо 0.94, выпуск p = 0.2 → 0.74 от торца стены).
 quoin_in = 0.74
-tower_half = tower_w * 0.5 * 1.1547 + 0.065
+tower_half = shapes.ngon_circumradius(tower_w * 0.5, 6) + 0.065
 wing_x = (tower_half + width * 0.5 - quoin_in) * 0.5
 door_x = wing_x
 

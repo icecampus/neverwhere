@@ -27,6 +27,9 @@ struct BuiltinDoc {
 // nullptr when the name is not a documented builtin.
 const BuiltinDoc* findBuiltinDoc(const std::string& name);
 
+// Nearest builtin names for a miss (prefix, then substring); at most `cap`.
+std::vector<std::string> suggestBuiltinNames(const std::string& name, size_t cap = 5);
+
 // Every documented builtin, in registry order.
 const std::vector<BuiltinDoc>& allBuiltinDocs();
 

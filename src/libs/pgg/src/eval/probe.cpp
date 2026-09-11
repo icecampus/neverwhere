@@ -247,7 +247,19 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
                     looksLikeParams = false;
                     return;
                 }
-                pairs.push_back({pair.substr(0, eq), pair.substr(eq + 1)});
+                auto trim = [](const std::string& s) {
+                    const size_t a = s.find_first_not_of(" \t");
+                    if (a == std::string::npos) return std::string{};
+                    const size_t b = s.find_last_not_of(" \t");
+                    return s.substr(a, b - a + 1);
+                };
+                const std::string name = trim(pair.substr(0, eq));
+                const std::string value = trim(pair.substr(eq + 1));
+                if (name.empty()) {
+                    looksLikeParams = false;
+                    return;
+                }
+                pairs.push_back({name, value});
             };
             for (size_t i = 0; i < content.size() && looksLikeParams; ++i) {
                 const char c = content[i];
@@ -290,8 +302,9 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
     if (!out.inspector.empty() && out.inspector != "schema" && out.inspector != "stats" &&
         out.inspector != "coverage" && out.inspector != "table" && out.inspector != "sample" &&
         out.inspector != "slice" && out.inspector != "check" && out.inspector != "lattice" &&
-        out.inspector != "find") {
-        err = "unknown inspector '" + out.inspector + "' (schema|stats|coverage|table|sample|slice|check|lattice|find)";
+        out.inspector != "find" && out.inspector != "bbox" && out.inspector != "gap") {
+        err = "unknown inspector '" + out.inspector +
+              "' (schema|stats|coverage|table|sample|slice|check|lattice|find|bbox|gap)";
         return false;
     }
     // Param names: limit/aggregate are generic typed fields; every other name
@@ -340,6 +353,12 @@ bool parseProbeSpec(const std::string& text, ProbeSpec& out, std::string& err) {
         } else if (out.inspector == "find") {
             validForInspector = "where";
             known = name == "where";
+        } else if (out.inspector == "bbox") {
+            validForInspector = "group";
+            known = name == "group";
+        } else if (out.inspector == "gap") {
+            validForInspector = "a|b|axis";
+            known = name == "a" || name == "b" || name == "axis";
         }
         if (!known) {
             err = "unknown probe parameter '" + name + "' (" + validForInspector + ")";
@@ -1435,6 +1454,141 @@ bool probeLattice(const SdfNode& sdf, const std::vector<std::pair<std::string, s
                " instance anchor(s) skipped (non-axis-aligned rotation)";
     for (const std::string& s : warns) out += "\n" + s;
     out += "\nwarns " + std::to_string(warns.size());
+    return true;
+}
+
+namespace {
+
+bool matchGroupKey(const std::string& want, const std::string& key) {
+    if (want == key) return true;
+    const size_t colon = key.find(':');
+    const std::string bare = colon == std::string::npos ? key : key.substr(colon + 1);
+    return want == bare;
+}
+
+std::string stripGroupPrefix(const std::string& spec) {
+    if (spec.rfind("group:", 0) == 0) return spec.substr(6);
+    return spec;
+}
+
+bool bboxOfGroupKey(const Geo& g, const std::string& key, glm::vec3& mn, glm::vec3& mx) {
+    if (!g.positions || g.positions->empty()) return false;
+    const std::vector<glm::vec3>& P = *g.positions;
+    mn = glm::vec3(std::numeric_limits<float>::max());
+    mx = glm::vec3(-std::numeric_limits<float>::max());
+    bool any = false;
+    auto extend = [&](const glm::vec3& p) {
+        mn = glm::min(mn, p);
+        mx = glm::max(mx, p);
+        any = true;
+    };
+    const size_t colon = key.find(':');
+    const std::string domain = colon == std::string::npos ? std::string{} : key.substr(0, colon);
+    const std::string name = colon == std::string::npos ? key : key.substr(colon + 1);
+    if (domain.empty() || domain == "points") {
+        if (const GroupSet* set = g.groups(Domain::Points)) {
+            if (const auto it = set->columns.find(name); it != set->columns.end() && it->second) {
+                const size_t n = std::min(it->second->size(), P.size());
+                for (size_t i = 0; i < n; ++i)
+                    if ((*it->second)[i]) extend(P[i]);
+            }
+        }
+    }
+    if (!any && (domain.empty() || domain == "faces") && g.cornerVerts && g.faceOffsets) {
+        if (const GroupSet* set = g.groups(Domain::Faces)) {
+            if (const auto it = set->columns.find(name); it != set->columns.end() && it->second) {
+                const std::vector<int32_t>& CV = *g.cornerVerts;
+                const std::vector<int32_t>& FO = *g.faceOffsets;
+                const size_t nf = std::min(it->second->size(), g.faceCount());
+                for (size_t f = 0; f < nf; ++f) {
+                    if (!(*it->second)[f]) continue;
+                    for (int32_t c = FO[f]; c < FO[f + 1]; ++c)
+                        extend(P[static_cast<size_t>(CV[static_cast<size_t>(c)])]);
+                }
+            }
+        }
+    }
+    return any;
+}
+
+std::string formatBBoxRecord(const glm::vec3& mn, const glm::vec3& mx) {
+    const glm::vec3 center = (mn + mx) * 0.5f;
+    const glm::vec3 size = mx - mn;
+    return "bbox min=" + fmtVec3(mn) + " max=" + fmtVec3(mx) + " center=" + fmtVec3(center) +
+           " size=" + fmtVec3(size);
+}
+
+}  // namespace
+
+bool geoGroupBBox(const Geo& g, const std::string& group, glm::vec3& outMin, glm::vec3& outMax,
+                  std::string& err) {
+    if (group.empty()) {
+        if (!g.positions || g.positions->empty()) {
+            err = "empty geometry (no points)";
+            return false;
+        }
+        geoBBox(g, outMin, outMax);
+        return true;
+    }
+    std::string matched;
+    for (Domain d : {Domain::Points, Domain::Corners, Domain::Faces, Domain::Detail}) {
+        const GroupSet* set = g.groups(d);
+        if (!set) continue;
+        for (const auto& [name, col] : set->columns) {
+            (void)col;
+            const std::string key = std::string(domainName(d)) + ":" + name;
+            if (matchGroupKey(group, key) && matched.empty()) matched = key;
+        }
+    }
+    if (matched.empty()) {
+        err = "group '" + group + "' is not on the geometry";
+        return false;
+    }
+    if (!bboxOfGroupKey(g, matched, outMin, outMax)) {
+        err = "group '" + group + "' has no elements";
+        return false;
+    }
+    return true;
+}
+
+bool probeGeoBBox(const Geo& g, const std::string& group, std::string& out, std::string& err) {
+    glm::vec3 mn, mx;
+    if (!geoGroupBBox(g, group, mn, mx, err)) return false;
+    out = formatBBoxRecord(mn, mx);
+    return true;
+}
+
+bool probeGeoGap(const Geo& g, const std::vector<std::pair<std::string, std::string>>& params,
+                 std::string& out, std::string& err) {
+    const std::string* aSpec = findProbeParam(params, "a");
+    const std::string* bSpec = findProbeParam(params, "b");
+    const std::string* axisSpec = findProbeParam(params, "axis");
+    if (!aSpec || !bSpec) {
+        err = "gap needs a= and b= (group:<name> or a bare group name)";
+        return false;
+    }
+    std::string axis = axisSpec ? *axisSpec : "x";
+    int ax = 0;
+    if (axis == "x")
+        ax = 0;
+    else if (axis == "y")
+        ax = 1;
+    else if (axis == "z")
+        ax = 2;
+    else {
+        err = "gap axis must be x|y|z, got '" + axis + "'";
+        return false;
+    }
+    glm::vec3 aMn, aMx, bMn, bMx;
+    if (!geoGroupBBox(g, stripGroupPrefix(*aSpec), aMn, aMx, err)) return false;
+    std::string errB;
+    if (!geoGroupBBox(g, stripGroupPrefix(*bSpec), bMn, bMx, errB)) {
+        err = errB;
+        return false;
+    }
+    const float gap = bMn[ax] - aMx[ax];
+    out = "gap axis=" + axis + " value=" + fmtG(gap) + " a=" + fmtVec3(aMn) + ".." + fmtVec3(aMx) +
+          " b=" + fmtVec3(bMn) + ".." + fmtVec3(bMx);
     return true;
 }
 

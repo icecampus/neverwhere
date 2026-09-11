@@ -5,7 +5,7 @@
 # обе маски считаются в плане (точка внутри скругления / внутри угловой четверти),
 # поэтому мостовая и площадка стыкуются без зазора и наложения.
 import lib.parts
-import inn_hotel.common as common
+import lib.plan as plan
 
 def inside_plan(w: f32, d: f32, r: f32, cx: f32, cz: f32) -> (out: field<bool>) {
     """Маска «точка плана внутри контура со скруглённым углом (+X, +Z)»: прямоугольник
@@ -19,7 +19,7 @@ def inside_plan(w: f32, d: f32, r: f32, cx: f32, cz: f32) -> (out: field<bool>) 
 
 def terrace(bw: f32, bd: f32, cr: f32, ext: f32, y0: f32, y1: f32) -> (out: geo<mesh>) {
     """Каменная плита-терраса вокруг дома: контур плана, раздутый на ext."""
-    out = common.plan_prism(w = bw + 2.0 * ext, d = bd + 2.0 * ext, r = cr + ext, y0 = y0, y1 = y1, grp = "stone")
+    out = plan.plan_prism(w = bw + 2.0 * ext, d = bd + 2.0 * ext, r = cr + ext, y0 = y0, y1 = y1, grp = "stone")
 }
 
 def curb(bw: f32, bd: f32, cr: f32, ext: f32, y: f32, h: f32, t: f32 = 0.36) -> (out: geo<mesh>) {
@@ -30,7 +30,7 @@ def curb(bw: f32, bd: f32, cr: f32, ext: f32, y: f32, h: f32, t: f32 = 0.36) -> 
     zs = bd * 0.5 + ext
     cx = bw * 0.5 - cr
     cz = bd * 0.5 - cr
-    arc = common.arc_shell(cx = cx, cz = cz, r_in = cr + ext - t, r_out = cr + ext, a0 = 0.0, a1 = 90.0, y0 = y, y1 = y + h, grp = "trim", n = 17)
+    arc = plan.arc_shell(cx = cx, cz = cz, r_in = cr + ext - t, r_out = cr + ext, a0 = 0.0, a1 = 90.0, y0 = y, y1 = y + h, grp = "trim", n = 17)
     yc = y + h * 0.5
     e_x = parts.piece(size = vec3(t, h, cz + zs), pos = vec3(xs - t * 0.5, yc, (cz - zs) * 0.5), grp = "trim")
     e_z = parts.piece(size = vec3(cx + xs, h, t), pos = vec3((cx - xs) * 0.5, yc, zs - t * 0.5), grp = "trim")
@@ -49,7 +49,7 @@ def cobbles(bw: f32, bd: f32, cr: f32, ext: f32, y: f32, pitch: f32, apron_r: f3
     d = bd + 2.0 * ext - 0.60
     nx = int(w / pitch)
     nz = int(d / pitch)
-    g2 = common.point_grid(nx = nx, nz = nz, pitch = pitch, y = y, stagger = 0.5)
+    g2 = plan.point_grid(nx = nx, nz = nz, pitch = pitch, y = y, stagger = 0.5)
     px = dot(@P, (1, 0, 0))
     pz = dot(@P, (0, 0, 1))
     under_house = inside_plan(w = bw + 0.62, d = bd + 0.62, r = cr + 0.31, cx = cx, cz = cz)
@@ -78,7 +78,7 @@ def apron(bw: f32, bd: f32, cr: f32, y: f32, r_out: f32, rng: rng) -> (out: geo<
         ra = r_in + k * step_r
         acc = merge(acc, fan_ring(cx = cx, cz = cz, r0 = ra, r1 = ra + step_r * 0.94, y = y, n = n_seg + @iteration + 1, rng = split_rng(rng, key = "r1")))
     }
-    edge = common.arc_shell(cx = cx, cz = cz, r_in = r_out, r_out = r_out + 0.22, a0 = -3.0, a1 = 93.0, y0 = y - 0.10, y1 = y + 0.05, grp = "trim", n = 17)
+    edge = plan.arc_shell(cx = cx, cz = cz, r_in = r_out, r_out = r_out + 0.22, a0 = -3.0, a1 = 93.0, y0 = y - 0.10, y1 = y + 0.05, grp = "trim", n = 17)
     out = merge(ring, edge)
 }
 
@@ -87,8 +87,8 @@ def fan_ring(cx: f32, cz: f32, r0: f32, r1: f32, y: f32, n: int, rng: rng) -> (o
     ширина вставки — хорда сегмента среднего радиуса, свой @tint на плитку."""
     rm = (r0 + r1) * 0.5
     span = 90.0 / f32(n)
-    tile = parts.cbox(size = vec3(common.chord(r = rm, span_deg = span) - 0.035, 0.10, r1 - r0 - 0.035), k = 0.16)
-    pts0 = common.arc_mid_anchors(cx = cx, cz = cz, r = rm, y = y, a0 = 0.0, a1 = 90.0, n = n)
+    tile = parts.cbox(size = vec3(plan.chord(r = rm, span_deg = span) - 0.035, 0.10, r1 - r0 - 0.035), k = 0.16)
+    pts0 = plan.arc_mid_anchors(cx = cx, cz = cz, r = rm, y = y, a0 = 0.0, a1 = 90.0, n = n)
     shade = random(lo = 0.80, hi = 1.18, rng = split_rng(rng, key = "tint"))
     pts = set(pts0, "tint", vec3(shade * 1.05, shade, shade * 0.90))
     out = mark(realize(instance_on_points(pts, source = tile)), "apron", where = true, domain = faces)
@@ -100,8 +100,8 @@ def steps(bw: f32, bd: f32, cr: f32, y_walk: f32, y_base: f32, a_mid: f32) -> (o
     cx = bw * 0.5 - cr
     cz = bd * 0.5 - cr
     dy = (y_base - y_walk) * 0.5
-    s0 = common.arc_shell(cx = cx, cz = cz, r_in = cr + 0.02, r_out = cr + 0.72, a0 = a_mid - 17.0, a1 = a_mid + 17.0, y0 = y_walk, y1 = y_walk + dy, grp = "trim", n = 9)
-    s1 = common.arc_shell(cx = cx, cz = cz, r_in = cr + 0.02, r_out = cr + 0.40, a0 = a_mid - 15.0, a1 = a_mid + 15.0, y0 = y_walk + dy, y1 = y_base, grp = "trim", n = 9)
+    s0 = plan.arc_shell(cx = cx, cz = cz, r_in = cr + 0.02, r_out = cr + 0.72, a0 = a_mid - 17.0, a1 = a_mid + 17.0, y0 = y_walk, y1 = y_walk + dy, grp = "trim", n = 9)
+    s1 = plan.arc_shell(cx = cx, cz = cz, r_in = cr + 0.02, r_out = cr + 0.40, a0 = a_mid - 15.0, a1 = a_mid + 15.0, y0 = y_walk + dy, y1 = y_base, grp = "trim", n = 9)
     out = merge(s0, s1)
 }
 

@@ -1642,7 +1642,11 @@ private:
         }
         const ScalarType r = promoteBase(a.base, b.base);
         if (r == ScalarType::None) {
-            error("E204", t->span, "ternary branches have incompatible types: " + typeName(a) + " and " + typeName(b));
+            const bool geoish = a.base == ScalarType::Geo || b.base == ScalarType::Geo;
+            error("E204", t->span,
+                  "ternary branches have incompatible types: " + typeName(a) + " and " + typeName(b),
+                  geoish ? "use select(cond, a, b) or separate defs — ternary does not pick geo"
+                         : "");
             return {};
         }
         return Type{r, cond.isField || a.isField || b.isField, GeoKind::Any};
@@ -1753,6 +1757,13 @@ private:
                             break;
                         }
             }
+        }
+        if (sig->id == BuiltinId::Select && np > 2 && argTypes[1].base == ScalarType::Geo) {
+            if (argTypes[2].base == ScalarType::Geo && argTypes[1].geoKind != argTypes[2].geoKind &&
+                argTypes[1].geoKind != GeoKind::Any && argTypes[2].geoKind != GeoKind::Any)
+                error("E204", c->span, "select branches have incompatible geo kinds",
+                      "a and b must be the same geo<T>");
+            rt.geoKind = argTypes[1].geoKind;
         }
         if (sig->resultGeoKindOfFirstArg && np > 0 && argTypes[0].base == ScalarType::Geo)
             rt.geoKind = argTypes[0].geoKind;

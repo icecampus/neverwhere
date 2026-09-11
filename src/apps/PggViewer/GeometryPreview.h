@@ -130,6 +130,7 @@ public:
     glm::vec3 center() const { return m_center; }
     float fitRadius() const { return m_radius; }  // radius of the active fit (scene or target)
     float distance() const { return m_distance; }
+    float fitZoom() const { return m_fitZoom; }  // fit-distance multiplier (1 = fit)
     glm::vec3 sceneCenter() const { return m_sceneCenter; }
     float sceneRadius() const { return m_sceneRadius; }
     // Orbit angles in degrees (the F3 frame key — the effective camera state).

@@ -59,7 +59,7 @@
 namespace {
 
 void usage() {
-    std::fprintf(stderr,
+    std::fprintf(stdout,
                  "usage:\n"
                  "  PggTool check <file.pgg> [--json]   parse + lint + static stage (imports,\n"
                  "                                      expansion, typecheck — no graph run),\n"
@@ -109,6 +109,8 @@ void usage() {
                  "                                      (exit 0 identical, 1 different/run errors, 2 usage/io)\n"
                  "  PggTool docs <file.pgg> <symbol> [--lib <dir>]...\n"
                  "                                      print a def's signature + docstring (§7.5)\n"
+                 "  PggTool docs <name>                 builtin card when <name> is in the registry\n"
+                 "                                      (same as docs builtin <name>)\n"
                  "  PggTool docs builtin <name>         print a builtin's card: signature (from the\n"
                  "                                      live registry) + summary + example (§8)\n"
                  "  PggTool docs builtins [--group <g>] list the builtin catalog, one signature\n"
@@ -984,15 +986,7 @@ int cmdDocsBuiltin(const std::string& name) {
     const pgg::BuiltinSig* sig = pgg::findBuiltin(name);
     if (!doc || !sig) {
         // Nearest by prefix (both directions), then by substring; sorted.
-        std::vector<std::string> near;
-        for (const pgg::BuiltinDoc& d : pgg::allBuiltinDocs())
-            if (d.name.rfind(name, 0) == 0 || (name.size() >= 3 && name.rfind(d.name, 0) == 0))
-                near.push_back(d.name);
-        if (near.empty())
-            for (const pgg::BuiltinDoc& d : pgg::allBuiltinDocs())
-                if (d.name.find(name) != std::string::npos) near.push_back(d.name);
-        std::sort(near.begin(), near.end());
-        if (near.size() > 5) near.resize(5);
+        const std::vector<std::string> near = pgg::suggestBuiltinNames(name);
         std::fprintf(stderr, "unknown builtin '%s'", name.c_str());
         if (!near.empty()) {
             std::fprintf(stderr, "; did you mean:");
@@ -1148,6 +1142,8 @@ int main(int argc, char** argv) {
             }
             return cmdDocsBuiltins(group);
         }
+        if (argc == 3 && pgg::findBuiltin(path) && pgg::findBuiltinDoc(path))
+            return cmdDocsBuiltin(path);
         if (argc < 4) {
             usage();
             return 2;

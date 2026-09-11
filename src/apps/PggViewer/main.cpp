@@ -188,11 +188,12 @@ std::vector<std::pair<std::string, std::string>> g_cliParams;  // --param=name=v
 // refits: it is re-applied after every runPreview rebuild, group targets
 // re-resolving against the fresh per-group bboxes of the new geometry.
 struct CameraTargetSpec {
-    enum class Kind { None, Point, Group, Binding };
+    enum class Kind { None, Point, Group, Binding, GroupOnBinding };
     Kind kind = Kind::None;
     glm::vec3 point{0.0f};
-    std::string name;  // group name ("<domain>:<name>" or bare) / binding pull path
-    std::string raw;   // as given (logs)
+    std::string name;     // group name ("<domain>:<name>" or bare) / binding pull path
+    std::string binding;  // GroupOnBinding: the pull path after '@'
+    std::string raw;      // as given (logs)
 };
 CameraTargetSpec g_cameraTarget;  // active target ("" = none); RPC "" clears it
 // Why the last applyCameraTarget() could not resolve the target ("" = resolved
@@ -210,8 +211,20 @@ std::map<std::string, std::pair<glm::vec3, glm::vec3>> g_previewGroupBBoxes;  //
 // binding: target resolution cache: pulling it costs a run (zones are
 // uncached by design), so it is resolved once per load, not per rebuild.
 bool g_bindingTargetResolved = false;
+std::string g_bindingTargetPath;
+PreviewGeometry g_bindingTargetGeo;
 glm::vec3 g_bindingTargetCenter{0.0f};
 float g_bindingTargetRadius = 1.0f;
+bool g_cameraTargetHasBBox = false;
+glm::vec3 g_cameraTargetBMin{0.0f};
+glm::vec3 g_cameraTargetBMax{0.0f};
+bool g_rpcChromeOff = false;  // last RPC chrome (C5 echo); not the per-frame consume flag
+
+struct NamedView {
+    std::string name;
+    nlohmann::json fields;
+};
+std::vector<NamedView> g_namedViews;
 
 // --- CLI ----------------------------------------------------------------------------
 
@@ -267,6 +280,10 @@ struct PendingRender {
     // F3 compare=prev: the reply gains diff metrics against the stored frame
     // of the same view key (built at phase 1 from the effective state).
     bool comparePrev = false;
+    bool compareBaseline = false;
+    bool saveBaseline = false;
+    bool writePng = true;
+    nlohmann::json renderState;
     std::string frameKey;
     // F3 reference command: same two-phase pipeline, but the capture stays in
     // memory (no model-only PNG) and the reply carries the side-by-side PNG +
@@ -287,6 +304,12 @@ int g_lastFrameW = 0, g_lastFrameH = 0;
 std::vector<std::uint8_t> g_lastFramePixels;
 uint64_t g_diffCounter = 0;  // diff_N.png numbering (compare=prev)
 uint64_t g_refCounter = 0;   // ref_N.png numbering (reference)
+
+struct BaselineFrame {
+    int w = 0, h = 0;
+    std::vector<std::uint8_t> pixels;
+};
+std::map<std::string, BaselineFrame> g_baselineFrames;
 
 // RPC diff (agent_tooling_plan C2, the server half): the snapshot of the
 // outputs' structural fingerprints the diff command compares against.
@@ -322,6 +345,35 @@ std::string literalText(const pgg::Expr* e) {
             return static_cast<const pgg::BoolLit*>(e)->value ? "true" : "false";
         default: return {};
     }
+}
+
+void loadNamedViews(const std::string& pggPath) {
+    g_namedViews.clear();
+    const std::filesystem::path p(pggPath);
+    const std::filesystem::path viewsPath = p.parent_path() / (p.stem().string() + ".views.json");
+    std::ifstream in(viewsPath, std::ios::binary);
+    if (!in) return;
+    nlohmann::json j;
+    try {
+        in >> j;
+    } catch (const std::exception& e) {
+        spdlog::warn("PggViewer: cannot parse {}: {}", viewsPath.string(), e.what());
+        return;
+    }
+    if (!j.is_array()) {
+        spdlog::warn("PggViewer: {} must be a JSON array of view objects", viewsPath.string());
+        return;
+    }
+    for (const nlohmann::json& item : j) {
+        if (!item.is_object()) continue;
+        const std::string name = item.value("name", std::string{});
+        if (name.empty()) continue;
+        NamedView v;
+        v.name = name;
+        v.fields = item;
+        g_namedViews.push_back(std::move(v));
+    }
+    spdlog::info("PggViewer: loaded {} named view(s) from {}", g_namedViews.size(), viewsPath.string());
 }
 
 bool loadFile(const std::string& path) {
@@ -368,6 +420,10 @@ bool loadFile(const std::string& path) {
     g_previewGroupBBoxes.clear();
     g_previewLastSelected = -2;
     g_bindingTargetResolved = false;  // binding: camera targets re-resolve on the new file
+    g_bindingTargetPath.clear();
+    g_bindingTargetGeo = PreviewGeometry{};
+    g_cameraTargetHasBBox = false;
+    g_namedViews.clear();
     g_dirty = false;
     g_needFitView = true;
     g_paramValues.clear();
@@ -397,6 +453,7 @@ bool loadFile(const std::string& path) {
             for (const pgg::ModuleInfo* m : g_closure->modules)
                 g_fileMtimes[m->canonicalPath] = fileMtimeNs(m->canonicalPath);
     }
+    loadNamedViews(path);
     std::snprintf(g_pathBuf, sizeof(g_pathBuf), "%s", path.c_str());
     spdlog::info("PggViewer: loaded {} ({} nodes, {} instance scopes)", path, g_project.top.nodes.size(),
                  g_project.instanceScopes.size());
@@ -522,15 +579,29 @@ void rebuildPreviewGeometry(bool refit) {
 
 // --- camera targeting (A2) ------------------------------------------------------
 
+std::string slashToDot(std::string path) {
+    for (char& c : path)
+        if (c == '/') c = '.';
+    return path;
+}
+
 CameraTargetSpec parseCameraTargetSpec(const std::string& text) {
     CameraTargetSpec spec;
     spec.raw = text;
     if (text.rfind("group:", 0) == 0) {
-        spec.kind = CameraTargetSpec::Kind::Group;
-        spec.name = text.substr(6);
+        const std::string rest = text.substr(6);
+        const size_t at = rest.find('@');
+        if (at != std::string::npos) {
+            spec.kind = CameraTargetSpec::Kind::GroupOnBinding;
+            spec.name = rest.substr(0, at);
+            spec.binding = slashToDot(rest.substr(at + 1));
+        } else {
+            spec.kind = CameraTargetSpec::Kind::Group;
+            spec.name = rest;
+        }
     } else if (text.rfind("binding:", 0) == 0) {
         spec.kind = CameraTargetSpec::Kind::Binding;
-        spec.name = text.substr(8);
+        spec.name = slashToDot(text.substr(8));
     } else {
         float x = 0.0f, y = 0.0f, z = 0.0f;
         if (std::sscanf(text.c_str(), "%f,%f,%f", &x, &y, &z) == 3) {
@@ -538,7 +609,11 @@ CameraTargetSpec parseCameraTargetSpec(const std::string& text) {
             spec.point = glm::vec3(x, y, z);
         }
     }
-    if (spec.kind != CameraTargetSpec::Kind::Point && spec.name.empty())
+    if (spec.kind == CameraTargetSpec::Kind::GroupOnBinding &&
+        (spec.name.empty() || spec.binding.empty()))
+        spec.kind = CameraTargetSpec::Kind::None;
+    if (spec.kind != CameraTargetSpec::Kind::Point && spec.kind != CameraTargetSpec::Kind::GroupOnBinding &&
+        spec.name.empty())
         spec.kind = CameraTargetSpec::Kind::None;
     return spec;
 }
@@ -546,83 +621,133 @@ CameraTargetSpec parseCameraTargetSpec(const std::string& text) {
 // Resolves a group target against the last build's per-group bboxes: exact
 // "<domain>:<name>" first, then a bare-name match (an ambiguous bare name
 // takes the first sorted key and logs the ambiguity).
-bool resolveGroupTarget(const std::string& name, glm::vec3& outCenter, float& outRadius) {
-    auto found = g_previewGroupBBoxes.end();
-    if (const auto it = g_previewGroupBBoxes.find(name); it != g_previewGroupBBoxes.end()) {
+bool resolveGroupBBox(const std::map<std::string, std::pair<glm::vec3, glm::vec3>>& boxes,
+                      const std::string& name, glm::vec3& outMin, glm::vec3& outMax) {
+    auto found = boxes.end();
+    if (const auto it = boxes.find(name); it != boxes.end()) {
         found = it;
     } else {
-        for (auto jt = g_previewGroupBBoxes.begin(); jt != g_previewGroupBBoxes.end(); ++jt) {
+        for (auto jt = boxes.begin(); jt != boxes.end(); ++jt) {
             const size_t colon = jt->first.find(':');
             const std::string bare = colon == std::string::npos ? jt->first : jt->first.substr(colon + 1);
             if (bare != name) continue;
-            if (found != g_previewGroupBBoxes.end())
+            if (found != boxes.end())
                 spdlog::warn("PggViewer: target group '{}' is ambiguous (taking '{}', also '{}')", name,
                              found->first, jt->first);
             else
                 found = jt;
         }
     }
-    if (found == g_previewGroupBBoxes.end()) {
+    if (found == boxes.end()) {
         std::string known;
-        for (const auto& [key, bb] : g_previewGroupBBoxes) known += (known.empty() ? "" : ", ") + key;
-        g_cameraTargetError = "group '" + name + "' is not on the previewed geometry (groups: " +
+        for (const auto& [key, bb] : boxes) known += (known.empty() ? "" : ", ") + key;
+        g_cameraTargetError = "group '" + name + "' is not on the geometry (groups: " +
                               (known.empty() ? std::string("none") : known) + ")";
         return false;
     }
-    outCenter = (found->second.first + found->second.second) * 0.5f;
-    outRadius = glm::length(found->second.second - found->second.first) * 0.5f;
+    outMin = found->second.first;
+    outMax = found->second.second;
+    return true;
+}
+
+bool resolveGroupTarget(const std::string& name, glm::vec3& outCenter, float& outRadius) {
+    glm::vec3 mn, mx;
+    if (!resolveGroupBBox(g_previewGroupBBoxes, name, mn, mx)) return false;
+    outCenter = (mn + mx) * 0.5f;
+    outRadius = glm::length(mx - mn) * 0.5f;
+    g_cameraTargetBMin = mn;
+    g_cameraTargetBMax = mx;
+    g_cameraTargetHasBBox = true;
     return true;
 }
 
 // Pulls the binding of a binding: camera target and takes its bbox (sdf is
 // meshed at the default preview voxel). Resolved once per load — zones are
 // uncached by design, so re-pulling on every rebuild would repeat the cost.
-bool resolveBindingTarget(const std::string& path, glm::vec3& outCenter, float& outRadius) {
-    if (!g_bindingTargetResolved) {
-        pgg::RunParams rp;
-        for (const auto& [name, text] : g_paramValues)
-            if (!text.empty()) rp.values.push_back({name, parseCliValue(text)});
-        rp.importRoots = g_rpcImportRoots;
-        rp.cache = g_memoryCache.get();
-        rp.profile = true;
-        rp.pulls = {path};
-        pgg::RunResult r = pgg::runFile(g_filePath, rp);
-        g_lastProfile = r.stats.profile;
-        bool found = false;
-        pgg::Value value;
-        for (const pgg::RunOutput& o : r.pulled) {
-            const pgg::ScalarType base = pgg::valueBase(o.value);
-            if (base == pgg::ScalarType::Geo || base == pgg::ScalarType::Sdf) {
-                value = o.value;
-                found = true;
-                break;
-            }
+bool pullBindingPreview(const std::string& path) {
+    if (g_bindingTargetResolved && g_bindingTargetPath == path) return true;
+    g_bindingTargetResolved = false;
+    g_bindingTargetPath = path;
+    pgg::RunParams rp;
+    for (const auto& [name, text] : g_paramValues)
+        if (!text.empty()) rp.values.push_back({name, parseCliValue(text)});
+    rp.importRoots = g_rpcImportRoots;
+    rp.cache = g_memoryCache.get();
+    rp.profile = true;
+    rp.pulls = {path};
+    pgg::RunResult r = pgg::runFile(g_filePath, rp);
+    g_lastProfile = r.stats.profile;
+    bool found = false;
+    pgg::Value value;
+    for (const pgg::RunOutput& o : r.pulled) {
+        const pgg::ScalarType base = pgg::valueBase(o.value);
+        if (base == pgg::ScalarType::Geo || base == pgg::ScalarType::Sdf) {
+            value = o.value;
+            found = true;
+            break;
         }
-        if (!found) {
-            std::string why;
-            for (const pgg::Diagnostic& d : r.diagnostics)
-                if (!d.isWarning && d.code == "E606") why = d.message;
-            g_cameraTargetError = "binding '" + path + "' gave no geometry value" +
-                                  (why.empty() ? std::string(" (a pull names a top-level binding, an instance or "
-                                                             "<instance>.<local>; locals of an inlined def are "
-                                                             "not addressable)")
-                                               : " (" + why + ")");
-            spdlog::warn("PggViewer: preview-target {}", g_cameraTargetError);
-            return false;
-        }
-        const PreviewGeometry pg = buildPreviewGeometry(value, PreviewBuildOptions{});
-        if (!pg.ok) {
-            g_cameraTargetError = "binding '" + path + "' has nothing to bound (" + pg.summary + ")";
-            spdlog::warn("PggViewer: preview-target {}", g_cameraTargetError);
-            return false;
-        }
-        g_bindingTargetCenter = (pg.bmin + pg.bmax) * 0.5f;
-        g_bindingTargetRadius = std::max(1e-3f, glm::length(pg.bmax - pg.bmin) * 0.5f);
-        g_bindingTargetResolved = true;
     }
+    if (!found) {
+        std::string why;
+        for (const pgg::Diagnostic& d : r.diagnostics)
+            if (!d.isWarning && d.code == "E606") why = d.message;
+        g_cameraTargetError = "binding '" + path + "' gave no geometry value" +
+                              (why.empty() ? std::string(" (a pull names a top-level binding, an instance or "
+                                                         "<instance>.<local>; locals of an inlined def are "
+                                                         "not addressable)")
+                                           : " (" + why + ")");
+        spdlog::warn("PggViewer: preview-target {}", g_cameraTargetError);
+        return false;
+    }
+    g_bindingTargetGeo = buildPreviewGeometry(value, PreviewBuildOptions{});
+    if (!g_bindingTargetGeo.ok) {
+        g_cameraTargetError = "binding '" + path + "' has nothing to bound (" + g_bindingTargetGeo.summary + ")";
+        spdlog::warn("PggViewer: preview-target {}", g_cameraTargetError);
+        return false;
+    }
+    g_bindingTargetCenter = (g_bindingTargetGeo.bmin + g_bindingTargetGeo.bmax) * 0.5f;
+    g_bindingTargetRadius = std::max(1e-3f, glm::length(g_bindingTargetGeo.bmax - g_bindingTargetGeo.bmin) * 0.5f);
+    g_bindingTargetResolved = true;
+    return true;
+}
+
+bool resolveBindingTarget(const std::string& path, glm::vec3& outCenter, float& outRadius) {
+    if (!pullBindingPreview(path)) return false;
     outCenter = g_bindingTargetCenter;
     outRadius = g_bindingTargetRadius;
+    g_cameraTargetBMin = g_bindingTargetGeo.bmin;
+    g_cameraTargetBMax = g_bindingTargetGeo.bmax;
+    g_cameraTargetHasBBox = true;
     return true;
+}
+
+bool resolveGroupOnBinding(const std::string& group, const std::string& path, glm::vec3& outCenter,
+                           float& outRadius) {
+    if (!pullBindingPreview(path)) return false;
+    glm::vec3 mn, mx;
+    if (!resolveGroupBBox(g_bindingTargetGeo.groupBBoxes, group, mn, mx)) {
+        g_cameraTargetError = "group '" + group + "' is not on binding '" + path +
+                              "' (groups: " + [&] {
+                                  std::string known;
+                                  for (const auto& [key, bb] : g_bindingTargetGeo.groupBBoxes)
+                                      known += (known.empty() ? "" : ", ") + key;
+                                  return known.empty() ? std::string("none") : known;
+                              }() +
+                              ")";
+        return false;
+    }
+    outCenter = (mn + mx) * 0.5f;
+    outRadius = glm::length(mx - mn) * 0.5f;
+    g_cameraTargetBMin = mn;
+    g_cameraTargetBMax = mx;
+    g_cameraTargetHasBBox = true;
+    return true;
+}
+
+void rememberPointBBox(const glm::vec3& p) {
+    g_cameraTargetBMin = p;
+    g_cameraTargetBMax = p;
+    g_cameraTargetHasBBox = true;
 }
 
 // Re-applies the CLI/RPC camera target after a preview (re)build — the target
@@ -630,6 +755,7 @@ bool resolveBindingTarget(const std::string& path, glm::vec3& outCenter, float& 
 // fit=all with a warning.
 void applyCameraTarget() {
     g_cameraTargetError.clear();
+    g_cameraTargetHasBBox = false;
     if (g_cameraTarget.kind == CameraTargetSpec::Kind::None) return;
     glm::vec3 center{0.0f};
     float radius = 1.0f;
@@ -638,6 +764,7 @@ void applyCameraTarget() {
         case CameraTargetSpec::Kind::Point:
             center = g_cameraTarget.point;
             radius = g_preview.sceneRadius();
+            rememberPointBBox(center);
             ok = true;
             break;
         case CameraTargetSpec::Kind::Group:
@@ -645,6 +772,9 @@ void applyCameraTarget() {
             break;
         case CameraTargetSpec::Kind::Binding:
             ok = resolveBindingTarget(g_cameraTarget.name, center, radius);
+            break;
+        case CameraTargetSpec::Kind::GroupOnBinding:
+            ok = resolveGroupOnBinding(g_cameraTarget.name, g_cameraTarget.binding, center, radius);
             break;
         default:
             break;
@@ -1384,6 +1514,43 @@ nlohmann::json staticCheckJson(const pgg::Document& doc, const std::vector<std::
 
 nlohmann::json vec3Json(const glm::vec3& v) { return nlohmann::json::array({v.x, v.y, v.z}); }
 
+nlohmann::json cameraJson() {
+    nlohmann::json cam = {{"center", vec3Json(g_preview.center())},
+                          {"radius", g_preview.fitRadius()},
+                          {"distance", g_preview.distance()}};
+    if (g_cameraTargetHasBBox) {
+        const glm::vec3 c = (g_cameraTargetBMin + g_cameraTargetBMax) * 0.5f;
+        cam["target_bbox"] = {{"min", vec3Json(g_cameraTargetBMin)},
+                              {"max", vec3Json(g_cameraTargetBMax)},
+                              {"center", vec3Json(c)}};
+    }
+    return cam;
+}
+
+nlohmann::json mergeNamedViewArgs(const nlohmann::json& args, std::string& err) {
+    nlohmann::json out = args;
+    if (!args.contains("view")) return out;
+    const std::string name = args.value("view", std::string{});
+    const NamedView* found = nullptr;
+    for (const NamedView& v : g_namedViews)
+        if (v.name == name) {
+            found = &v;
+            break;
+        }
+    if (!found) {
+        std::string known;
+        for (const NamedView& v : g_namedViews) known += (known.empty() ? "" : ", ") + v.name;
+        err = "unknown view '" + name + "' (views: " + (known.empty() ? std::string("none") : known) + ")";
+        return {};
+    }
+    for (auto it = found->fields.begin(); it != found->fields.end(); ++it) {
+        if (it.key() == "name") continue;
+        if (!args.contains(it.key()) || args[it.key()].is_null()) out[it.key()] = it.value();
+    }
+    out.erase("view");
+    return out;
+}
+
 // F3 frame key (compare=prev): the EFFECTIVE view state — node + frame/chrome
 // + camera + preview options — so an arg-less repeat render of the same view
 // hits the stored frame, while any option that changes the picture misses it.
@@ -1739,44 +1906,41 @@ void frame() {
                 }
             }
         } else {
-            const CaptureResult cap = capturePng(pr.outPath.c_str(), crop);
+            const char* pngPath = pr.writePng && !pr.outPath.empty() ? pr.outPath.c_str() : "";
+            const CaptureResult cap = capturePng(pngPath, crop);
             if (cap.ok) {
-                nlohmann::json data = {{"path", pr.outPath},
-                                       {"width", cap.width},
+                nlohmann::json data = {{"width", cap.width},
                                        {"height", cap.height},
                                        {"node", pr.node},
                                        {"frame", pr.previewOnly ? "preview" : "window"},
                                        {"chrome", pr.chromeOff ? "off" : "on"},
                                        {"stats", pr.stats},
                                        {"diagnostics", pr.diagnostics},
-                                       {"camera",
-                                        {{"center", vec3Json(g_preview.center())},
-                                         {"radius", g_preview.fitRadius()},
-                                         {"distance", g_preview.distance()}}},
+                                       {"camera", cameraJson()},
+                                       {"render_state", pr.renderState.is_null() ? pggViewerRenderStateJson()
+                                                                                 : pr.renderState},
                                        {"cache", {{"hits", pr.cacheHits}, {"misses", pr.cacheMisses}}}};
+                if (pr.writePng && !pr.outPath.empty()) data["path"] = pr.outPath;
                 if (cap.sizeClamped) data["size_clamped"] = true;
                 data["reloaded"] = pr.reloaded;
                 if (pr.reloaded) data["load_diagnostics"] = pr.loadDiagnostics;
-                // F3 compare=prev: diff against the stored frame of the same
-                // view key BEFORE this frame replaces it.
-                if (pr.comparePrev) {
+
+                auto packCompare = [&](const std::vector<std::uint8_t>& prev, int prevW, int prevH,
+                                       const std::string& missing) -> nlohmann::json {
                     nlohmann::json cmp;
-                    if (g_lastFramePixels.empty() || g_lastFrameKey != pr.frameKey) {
-                        cmp = {{"available", false}, {"reason", "no previous frame"}};
-                    } else if (g_lastFrameW != cap.width || g_lastFrameH != cap.height) {
+                    if (prev.empty()) {
+                        cmp = {{"available", false}, {"reason", missing}};
+                    } else if (prevW != cap.width || prevH != cap.height) {
                         cmp = {{"available", false},
-                               {"reason", "size mismatch (prev " + std::to_string(g_lastFrameW) + "x" +
-                                              std::to_string(g_lastFrameH) + ", now " +
+                               {"reason", "size mismatch (prev " + std::to_string(prevW) + "x" +
+                                              std::to_string(prevH) + ", now " +
                                               std::to_string(cap.width) + "x" + std::to_string(cap.height) +
                                               ")"}};
                     } else {
-                        const FrameCompareResult d =
-                            compareFrames(g_lastFramePixels, cap.pixels, cap.width, cap.height);
+                        const FrameCompareResult d = compareFrames(prev, cap.pixels, cap.width, cap.height);
                         cmp = {{"available", true},
                                {"changed_pct", d.changedPct},
                                {"change_bbox_px", {d.changeX0, d.changeY0, d.changeX1, d.changeY1}}};
-                        // The diff PNG is written whenever the comparison ran
-                        // (at 0 changes it is a plain dimmed frame).
                         const std::filesystem::path diffPath =
                             repoRoot() / "tmp" / "pgg_rpc_shots" /
                             ("diff_" + std::to_string(++g_diffCounter) + ".png");
@@ -1788,18 +1952,53 @@ void frame() {
                             cmp["diff_png"] = nullptr;
                         }
                     }
-                    data["compare"] = std::move(cmp);
+                    return cmp;
+                };
+
+                if (pr.comparePrev) {
+                    if (g_lastFrameKey != pr.frameKey)
+                        data["compare"] = packCompare({}, 0, 0, "no previous frame");
+                    else
+                        data["compare"] =
+                            packCompare(g_lastFramePixels, g_lastFrameW, g_lastFrameH, "no previous frame");
                 }
-                // F3: every successful render replaces the single stored frame.
+                if (pr.compareBaseline) {
+                    const auto it = g_baselineFrames.find(pr.frameKey);
+                    if (it == g_baselineFrames.end()) {
+                        data["compare"] = {{"available", false},
+                                           {"reason", "baseline created"},
+                                           {"baseline_created", true}};
+                        BaselineFrame bf;
+                        bf.w = cap.width;
+                        bf.h = cap.height;
+                        bf.pixels = cap.pixels;
+                        g_baselineFrames[pr.frameKey] = std::move(bf);
+                    } else {
+                        data["compare"] = packCompare(it->second.pixels, it->second.w, it->second.h,
+                                                      "no baseline frame");
+                    }
+                }
+                if (pr.saveBaseline) {
+                    BaselineFrame bf;
+                    bf.w = cap.width;
+                    bf.h = cap.height;
+                    bf.pixels = cap.pixels;
+                    g_baselineFrames[pr.frameKey] = std::move(bf);
+                    data["baseline_saved"] = true;
+                }
+
                 g_lastFrameKey = pr.frameKey;
                 g_lastFrameW = cap.width;
                 g_lastFrameH = cap.height;
-                g_lastFramePixels = std::move(cap.pixels);
+                g_lastFramePixels = cap.pixels;
                 if (g_rpc) g_rpc->reply(pr.clientId, data);
-                spdlog::info("PggViewer: RPC render {} -> {}", pr.node, pr.outPath);
+                spdlog::info("PggViewer: RPC render {} -> {}", pr.node,
+                             pr.writePng ? pr.outPath : std::string("(png=false)"));
             } else {
                 if (g_rpc)
-                    g_rpc->replyError(pr.clientId, "capture_failed", "capturePng failed for " + pr.outPath);
+                    g_rpc->replyError(pr.clientId, "capture_failed",
+                                      pr.writePng ? "capturePng failed for " + pr.outPath
+                                                  : "capturePng failed");
                 spdlog::error("PggViewer: RPC render capture failed ({})", pr.outPath);
             }
         }
@@ -1877,6 +2076,133 @@ bool cropShotPixels(const std::vector<std::uint8_t>& src, int srcW, int srcH, in
                     src.data() + (static_cast<std::size_t>(y0 + row) * srcW + x0) * 4,
                     static_cast<std::size_t>(outW) * 4);
     return true;
+}
+
+nlohmann::json pggViewerRenderStateJson() {
+    std::string ortho = "off";
+    switch (g_preview.projection()) {
+        case PreviewProjection::OrthoFront: ortho = "front"; break;
+        case PreviewProjection::OrthoSide: ortho = "side"; break;
+        case PreviewProjection::OrthoTop: ortho = "top"; break;
+        default: break;
+    }
+    return {{"wire", g_preview.wireframe()},
+            {"chrome", g_rpcChromeOff ? "off" : "on"},
+            {"ortho", ortho},
+            {"target", g_cameraTarget.raw},
+            {"zoom", g_preview.fitZoom()},
+            {"fit", g_preview.fitMode() == PreviewFitMode::Target ? "target" : "all"}};
+}
+
+std::string pggViewerApplyRpcRenderArgs(const nlohmann::json& args) {
+    if (!args.contains("wire"))
+        g_preview.setWireframe(false);
+    else
+        g_preview.setWireframe(args.value("wire", false));
+
+    if (!args.contains("ortho")) {
+        g_preview.setProjection(PreviewProjection::Perspective);
+    } else {
+        const std::string o = args.value("ortho", std::string{});
+        if (o == "front") {
+            g_preview.setProjection(PreviewProjection::OrthoFront);
+        } else if (o == "side") {
+            g_preview.setProjection(PreviewProjection::OrthoSide);
+        } else if (o == "top") {
+            g_preview.setProjection(PreviewProjection::OrthoTop);
+        } else if (o == "off" || o == "perspective") {
+            g_preview.setProjection(PreviewProjection::Perspective);
+        } else {
+            return "ortho must be front|side|top|off";
+        }
+    }
+
+    if (!args.contains("highlight"))
+        g_previewOpts.highlightGroup.clear();
+    else
+        g_previewOpts.highlightGroup = args.value("highlight", std::string{});
+
+    if (!args.contains("shading")) {
+        g_previewOpts.shading = PreviewShading::Auto;
+    } else {
+        const std::string v = args.value("shading", std::string{"auto"});
+        if (v == "flat")
+            g_previewOpts.shading = PreviewShading::Flat;
+        else if (v == "smooth")
+            g_previewOpts.shading = PreviewShading::Smooth;
+        else if (v == "auto")
+            g_previewOpts.shading = PreviewShading::Auto;
+        else
+            return "shading must be auto|flat|smooth";
+    }
+
+    if (!args.contains("colors"))
+        g_previewOpts.vertexColors = true;
+    else
+        g_previewOpts.vertexColors = args.value("colors", true);
+
+    if (!args.contains("chrome")) {
+        g_rpcChromeOff = false;
+    } else {
+        const std::string c = args.value("chrome", std::string{});
+        if (c == "off")
+            g_rpcChromeOff = true;
+        else if (c == "on")
+            g_rpcChromeOff = false;
+        else
+            return "chrome must be 'on' or 'off'";
+    }
+
+    g_cameraTargetAutoYaw = !args.contains("orbit");
+    if (args.contains("orbit")) {
+        const nlohmann::json& o = args["orbit"];
+        if (o.is_array() && o.size() >= 2) {
+            const float yaw = o[0].get<float>();
+            const float pitch = o[1].get<float>();
+            const float zoom = o.size() >= 3 ? o[2].get<float>() : g_preview.fitZoom();
+            g_preview.setOrbit(yaw, pitch, zoom);
+        } else {
+            return "orbit must be [yaw, pitch] or [yaw, pitch, zoom]";
+        }
+    }
+
+    const bool hasOrbitZoom =
+        args.contains("orbit") && args["orbit"].is_array() && args["orbit"].size() >= 3;
+    if (args.contains("zoom")) {
+        g_preview.setZoom(args.value("zoom", 1.0f));
+    } else if (!args.contains("distance") && !hasOrbitZoom) {
+        g_preview.setZoom(1.0f);
+    }
+
+    if (!args.contains("target")) {
+        g_cameraTarget = CameraTargetSpec{};
+        g_cameraTargetHasBBox = false;
+        g_preview.setFitMode(PreviewFitMode::All);
+    } else {
+        const std::string t = args.value("target", std::string{});
+        if (t.empty()) {
+            g_cameraTarget = CameraTargetSpec{};
+            g_cameraTargetHasBBox = false;
+            g_preview.setFitMode(PreviewFitMode::All);
+        } else {
+            g_cameraTarget = parseCameraTargetSpec(t);
+            if (g_cameraTarget.kind == CameraTargetSpec::Kind::None)
+                return "unparseable target '" + t +
+                       "' (want x,y,z | group:<name> | group:<name>@<binding> | binding:<path>)";
+            if (!args.contains("fit")) g_preview.setFitMode(PreviewFitMode::Target);
+        }
+    }
+    if (args.contains("fit")) {
+        const std::string f = args.value("fit", std::string{});
+        if (f == "target") {
+            g_preview.setFitMode(PreviewFitMode::Target);
+        } else if (f == "all") {
+            g_preview.setFitMode(PreviewFitMode::All);
+        } else {
+            return "fit must be 'all' or 'target'";
+        }
+    }
+    return {};
 }
 
 // Registers the --serve command handlers (declared in SmokeTest.h so the
@@ -1992,6 +2318,7 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
         // snapshot is dropped; snapshot:true immediately records a fresh one
         // (runs the outputs; a broken file gets no baseline).
         g_diffSnapshot.reset();
+        g_baselineFrames.clear();
         const bool wantSnapshot = args.value("snapshot", false);
         // Static check only (closure -> expand -> typecheck): a broken file is
         // answered in milliseconds, no Engine::run.
@@ -2030,22 +2357,26 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
         return json{{"params", paramsJson()}, {"unknown", unknown}};
     });
 
-    server.on("render", [](uint64_t clientId, const json& args) -> std::optional<json> {
+    server.on("views", [](uint64_t, const json&) -> std::optional<json> {
+        json arr = json::array();
+        for (const NamedView& v : g_namedViews) arr.push_back(v.fields);
+        return json{{"file", g_filePath}, {"views", arr}};
+    });
+
+    server.on("render", [](uint64_t clientId, const json& argsIn) -> std::optional<json> {
         if (!g_state.gfxOk || !g_state.imguiOk)
             ViewerRpcServer::fail("no_frame_loop",
                                   "render needs the frame loop and the preview pane (unavailable with "
                                   "--no-ui or in --smoke)");
         if (g_filePath.empty()) ViewerRpcServer::fail("no_file", "no .pgg file loaded");
-        const std::string node = args.value("node", std::string{});
-        if (node.empty()) ViewerRpcServer::fail("bad_args", "render needs 'node'");
         if (g_pendingRender.active) ViewerRpcServer::fail("busy", "a previous render is still pending");
-        // F4: an on-disk edit of the file or its imports triggers a reload
-        // first; a broken file fails here with run_errors, before any run.
         const AutoReloadResult reload = autoReloadIfChanged();
+        std::string viewErr;
+        const json args = mergeNamedViewArgs(argsIn, viewErr);
+        if (!viewErr.empty()) ViewerRpcServer::fail("bad_args", viewErr);
+        const std::string node = args.value("node", std::string{});
+        if (node.empty()) ViewerRpcServer::fail("bad_args", "render needs 'node' (or a named view that sets it)");
 
-        // F1: frame=window|preview (default preview for RPC — the agent pays
-        // for the pixels, the panel/graph on the shot are noise; CLI --shot
-        // keeps window as its default).
         bool previewOnly = true;
         if (args.contains("frame")) {
             const std::string f = args.value("frame", std::string{});
@@ -2057,134 +2388,45 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
                 ViewerRpcServer::fail("bad_args", "frame must be 'preview' or 'window'");
             }
         }
-        // chrome=off: the captured frame is drawn without the side panel and
-        // the graph — the preview pane spans the whole window (more model
-        // pixels; the window itself is never resized, sokol cannot do that on
-        // every backend).
-        bool chromeOff = false;
-        if (args.contains("chrome")) {
-            const std::string c = args.value("chrome", std::string{});
-            if (c == "off") {
-                chromeOff = true;
-            } else if (c == "on") {
-                chromeOff = false;
-            } else {
-                ViewerRpcServer::fail("bad_args", "chrome must be 'on' or 'off'");
-            }
-        }
 
-        // F3: compare="prev" — the reply gains diff metrics against the stored
-        // previous frame of the same view (applied in frame(), phase 2).
         bool comparePrev = false;
+        bool compareBaseline = false;
         if (args.contains("compare")) {
             const std::string c = args.value("compare", std::string{});
             if (c == "prev") {
                 comparePrev = true;
+            } else if (c == "baseline") {
+                compareBaseline = true;
             } else {
-                ViewerRpcServer::fail("bad_args", "compare must be 'prev'");
+                ViewerRpcServer::fail("bad_args", "compare must be 'prev' or 'baseline'");
             }
         }
+        const bool saveBaseline = args.value("save_baseline", false);
+        const bool writePng = args.value("png", true);
 
-        if (args.contains("highlight"))
-            g_previewOpts.highlightGroup = args.value("highlight", std::string{});
-        if (args.contains("shading")) {
-            const std::string v = args.value("shading", std::string{"auto"});
-            g_previewOpts.shading = v == "flat"     ? PreviewShading::Flat
-                                    : v == "smooth" ? PreviewShading::Smooth
-                                                    : PreviewShading::Auto;
-        }
-        if (args.contains("colors")) g_previewOpts.vertexColors = args.value("colors", true);
-        g_cameraTargetAutoYaw = !args.contains("orbit");
-        if (args.contains("orbit")) {
-            const json& o = args["orbit"];
-            if (o.is_array() && o.size() >= 2) {
-                const float yaw = o[0].get<float>();
-                const float pitch = o[1].get<float>();
-                const float zoom = o.size() >= 3 ? o[2].get<float>() : 1.0f;
-                g_preview.setOrbit(yaw, pitch, zoom);
-            }
-        }
-        // F2: named zoom (alias of orbit's third component — the fit-distance
-        // multiplier: 1 = fit the target, 0.5 = twice closer, 3 = three times
-        // farther). Overrides orbit[2] when both are given. Survives the
-        // runPreview refit via m_fitZoom.
-        if (args.contains("zoom")) g_preview.setZoom(args.value("zoom", 1.0f));
-        // A2 camera targeting: the spec is re-applied by runPreview after the
-        // rebuild. An explicit "" clears a target set by an earlier render;
-        // without a "target" arg the previous one persists (like the other
-        // options) — pair with fit=all to reset the framing.
-        if (args.contains("target")) {
-            const std::string t = args.value("target", std::string{});
-            if (t.empty()) {
-                g_cameraTarget = CameraTargetSpec{};
-            } else {
-                g_cameraTarget = parseCameraTargetSpec(t);
-                if (g_cameraTarget.kind == CameraTargetSpec::Kind::None)
-                    ViewerRpcServer::fail("bad_args",
-                                          "unparseable target '" + t +
-                                              "' (want x,y,z | group:<name> | binding:<path>)");
-                if (!args.contains("fit")) g_preview.setFitMode(PreviewFitMode::Target);
-            }
-        }
-        if (args.contains("fit")) {
-            const std::string f = args.value("fit", std::string{});
-            if (f == "target") {
-                g_preview.setFitMode(PreviewFitMode::Target);
-            } else if (f == "all") {
-                g_preview.setFitMode(PreviewFitMode::All);
-            } else {
-                ViewerRpcServer::fail("bad_args", "fit must be 'all' or 'target'");
-            }
-        }
-        if (args.contains("ortho")) {
-            const std::string o = args.value("ortho", std::string{});
-            if (o == "front") {
-                g_preview.setProjection(PreviewProjection::OrthoFront);
-            } else if (o == "side") {
-                g_preview.setProjection(PreviewProjection::OrthoSide);
-            } else if (o == "top") {
-                g_preview.setProjection(PreviewProjection::OrthoTop);
-            } else if (o == "off" || o == "perspective") {
-                g_preview.setProjection(PreviewProjection::Perspective);
-            } else {
-                ViewerRpcServer::fail("bad_args", "ortho must be front|side|top|off");
-            }
-        }
-        if (args.contains("wire")) g_preview.setWireframe(args.value("wire", false));
+        const std::string applyErr = pggViewerApplyRpcRenderArgs(args);
+        if (!applyErr.empty()) ViewerRpcServer::fail("bad_args", applyErr);
+        const bool chromeOff = g_rpcChromeOff;
+
         ShotCrop crop;
         crop.previewOnly = previewOnly;
         if (args.contains("size")) {
             const json& sz = args["size"];
             if (sz.is_array() && sz.size() >= 2) {
                 if (previewOnly) {
-                    // F1, frame=preview: size is the TARGET CROP SIZE in
-                    // framebuffer pixels, centered on the preview viewport.
-                    // The window is never resized (sokol cannot do that on
-                    // every backend), so a larger request clamps to the
-                    // actual viewport rect and the reply says size_clamped.
                     crop.wantW = std::max(0, static_cast<int>(std::lround(sz[0].get<float>())));
                     crop.wantH = std::max(0, static_cast<int>(std::lround(sz[1].get<float>())));
                 } else {
-                    // frame=window (legacy): size moves the preview splitter
-                    // (pane height in points); it does not resize the window.
                     g_cliPreviewSize = ImVec2(sz[0].get<float>(), sz[1].get<float>());
                 }
             }
         }
 
-        // Phase 1: options applied, synchronous pull (MVP: heavy graphs block
-        // the frame loop, like the interactive Preview button). Phase 2 — the
-        // capture + reply — happens in frame() after the first committed
-        // frame with the new geometry.
         runPreview(node);
         if (!g_previewHasValue)
             ViewerRpcServer::fail("run_failed",
                                   g_lastPreviewError.empty() ? "run failed for '" + node + "'"
                                                              : g_lastPreviewError);
-        // A run that produced a value *and* errors (e.g. E609 from a merge deep
-        // inside the graph — the pull still yields a partial mesh) is a
-        // failure for the agent: a picture of half the scene with ok=true is
-        // worse than no picture. Warnings ride along in the reply instead.
         if (diagsHaveErrors(g_lastRunDiags)) {
             std::string why;
             for (const pgg::Diagnostic& d : g_lastRunDiags) {
@@ -2193,34 +2435,31 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
             }
             ViewerRpcServer::fail("run_errors", why);
         }
-        // An unresolved target is an error, not a silent fit=all picture; the
-        // target is dropped so the next render without one is not stuck on it.
         if (!g_cameraTargetError.empty()) {
             const std::string why = g_cameraTargetError;
             g_cameraTarget = CameraTargetSpec{};
             g_cameraTargetError.clear();
+            g_cameraTargetHasBBox = false;
             g_preview.setFitMode(PreviewFitMode::All);
             ViewerRpcServer::fail("target_unresolved", why);
         }
 
-        // F2: absolute orbit distance in meters from the orbit center.
-        // Applied AFTER runPreview/applyCameraTarget so it is measured from
-        // the resolved target (setTarget would otherwise re-derive the
-        // distance from the new radius); kept across later refits as the
-        // equivalent fit-zoom.
         if (args.contains("distance")) g_preview.setDistance(args.value("distance", 0.0f));
 
         std::filesystem::path out;
-        const std::string outArg = args.value("out", std::string{});
-        if (!outArg.empty()) {
-            out = outArg;
-        } else {
-            out = repoRoot() / "tmp" / "pgg_rpc_shots" / ("shot_" + std::to_string(++g_shotCounter) + ".png");
+        if (writePng) {
+            const std::string outArg = args.value("out", std::string{});
+            if (!outArg.empty()) {
+                out = outArg;
+            } else {
+                out = repoRoot() / "tmp" / "pgg_rpc_shots" /
+                      ("shot_" + std::to_string(++g_shotCounter) + ".png");
+            }
+            std::error_code ec;
+            if (out.has_parent_path()) std::filesystem::create_directories(out.parent_path(), ec);
         }
-        std::error_code ec;
-        if (out.has_parent_path()) std::filesystem::create_directories(out.parent_path(), ec);
 
-        if (chromeOff) g_chromeOffThisFrame = true;  // consumed by this frame's drawing section
+        if (chromeOff) g_chromeOffThisFrame = true;
         g_pendingRender.active = true;
         g_pendingRender.clientId = clientId;
         g_pendingRender.outPath = out.string();
@@ -2235,12 +2474,13 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
         if (reload.reloaded) g_pendingRender.loadDiagnostics = diagnosticsJson(reload.diags);
         g_pendingRender.cacheHits = g_lastCacheHits;
         g_pendingRender.cacheMisses = g_lastCacheMisses;
-        // F3: the key is computed from the effective state, AFTER all camera /
-        // option args and the runPreview refit were applied (also after
-        // `distance`, which is applied last by design).
         g_pendingRender.comparePrev = comparePrev;
+        g_pendingRender.compareBaseline = compareBaseline;
+        g_pendingRender.saveBaseline = saveBaseline;
+        g_pendingRender.writePng = writePng;
+        g_pendingRender.renderState = pggViewerRenderStateJson();
         g_pendingRender.frameKey = currentFrameKey(node, previewOnly, chromeOff);
-        return std::nullopt;  // deferred reply from frame()
+        return std::nullopt;
     });
 
     // F3: model vs reference image, side by side. Same two-phase pipeline as
@@ -2537,35 +2777,48 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server) {
     server.on("docs", [](uint64_t, const json& args) -> std::optional<json> {
         const std::string symbol = args.value("symbol", std::string{});
         if (symbol.empty()) ViewerRpcServer::fail("bad_args", "docs needs 'symbol'");
-        // builtin:<name> — the builtin catalog card (agent_tooling_plan D3):
-        // signature from the live registry + summary/example. File-independent,
-        // so it answers even before any load.
-        if (symbol.rfind("builtin:", 0) == 0) {
-            const std::string name = symbol.substr(8);
+        auto builtinCard = [&](const std::string& name, const std::string& shown) -> json {
             const pgg::BuiltinDoc* bdoc = pgg::findBuiltinDoc(name);
             const pgg::BuiltinSig* bsig = pgg::findBuiltin(name);
-            if (!bdoc || !bsig) ViewerRpcServer::fail("not_found", "builtin not found: " + name);
-            return json{{"symbol", symbol},
+            if (!bdoc || !bsig) return {};
+            return json{{"symbol", shown},
                         {"kind", "builtin"},
                         {"name", name},
                         {"signature", pgg::builtinSignatureText(*bsig)},
                         {"group", bdoc->group},
                         {"summary", bdoc->summary},
                         {"example", bdoc->example}};
+        };
+        auto notFound = [&](const std::string& name, const std::string& msg) {
+            std::string full = msg;
+            const auto near = pgg::suggestBuiltinNames(name);
+            if (!near.empty()) {
+                full += "; did you mean:";
+                for (const std::string& n : near) full += " " + n;
+            }
+            full += " (try builtin:<name> or PggTool docs builtins | rg -i …)";
+            ViewerRpcServer::fail("not_found", full);
+        };
+        if (symbol.rfind("builtin:", 0) == 0) {
+            const std::string name = symbol.substr(8);
+            json card = builtinCard(name, symbol);
+            if (card.empty()) notFound(name, "builtin not found: " + name);
+            return card;
         }
-        if (!g_doc.file) ViewerRpcServer::fail("no_file", "no .pgg file loaded");
-        pgg::DocsLookupResult res = pgg::findDef(*g_doc.file, g_filePath, symbol, g_rpcImportRoots);
-        if (!res.found) {
-            std::string msg = res.error;
-            if (msg.empty())
-                for (const pgg::Diagnostic& d : res.diagnostics)
-                    if (!d.isWarning) msg += (msg.empty() ? "" : "\n") + d.code + " " + d.message;
-            ViewerRpcServer::fail("not_found", msg.empty() ? "def not found: " + symbol : msg);
+        if (g_doc.file) {
+            pgg::DocsLookupResult res = pgg::findDef(*g_doc.file, g_filePath, symbol, g_rpcImportRoots);
+            if (res.found)
+                return json{{"symbol", symbol},
+                            {"kind", "def"},
+                            {"signature", res.signature},
+                            {"docstring", res.hasDoc ? res.docstring : std::string{}}};
         }
-        return json{{"symbol", symbol},
-                    {"kind", "def"},
-                    {"signature", res.signature},
-                    {"docstring", res.hasDoc ? res.docstring : std::string{}}};
+        json card = builtinCard(symbol, symbol);
+        if (!card.empty()) return card;
+        std::string msg = "def not found: " + symbol;
+        if (!g_doc.file) msg = "no .pgg file loaded and not a builtin: " + symbol;
+        notFound(symbol, msg);
+        return {};
     });
 }
 

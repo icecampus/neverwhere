@@ -2,12 +2,15 @@
 # постановка меша (place). Общие для cottage/* и lib/fixtures.pgg; все размеры
 # в метрах, центр детали — в pos.
 
-def cbox(size: vec3, k: f32) -> (out: geo<mesh>) {
+def cbox(size: vec3, k: f32, k_abs: f32 = 0) -> (out: geo<mesh>) {
     """Box с фаской (v1.24): ребро скошено на k · min(размер) (клампится bevel'ом),
     грани фаски — в группе "edge" (краевой износ: в окраске они светлее). Фасеточные
     corner-N: сварной box несёт гладкие point-@N (диагонали углов, §8.1), и в превью
-    большая плоская грань шейдится «подушкой» — поэтому flat."""
-    w = min(min(dot(size, (1, 0, 0)), dot(size, (0, 1, 0))), dot(size, (0, 0, 1))) * k
+    большая плоская грань шейдится «подушкой» — поэтому flat.
+    k_abs > 0 — абсолютная ширина фаски в метрах, перекрывает относительный k
+    (на призме этажа k·min(size) даёт десятки сантиметров и «загибает» грани)."""
+    w_rel = min(min(dot(size, (1, 0, 0)), dot(size, (0, 1, 0))), dot(size, (0, 0, 1))) * k
+    w = k_abs > 0.0 ? k_abs : w_rel
     out = compute_normals(bevel(box(size = size), width = w, bevel_group = "edge"), mode = flat)
 }
 

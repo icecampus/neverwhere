@@ -198,6 +198,35 @@ def coursed_wall(rows: geo<points>, blk: vec3, rng: rng) -> (out: geo<mesh>) {
     out = realize(instance_on_points(p2, source = a3, variants = [a0, a1, a2, a3]))
 }
 
+def brick_veneer_rows(len: f32, h: f32, L: f32 = 0.17, ch: f32 = 0.12, g0: f32 = 0.008, z: f32 = 0.03) -> (out: geo<points>) {
+    """Якоря мелкой кирпичной облицовки вразбежку: ложок L, ряд ch, шов g0.
+    Локально: x вдоль, низ y=0, лицо +Z, вынос z. Проёмы не дырявят якоря —
+    сплошной ряд, затем masonry.clip_*_hole подрезает кирпичи по контуру."""
+    n_rows = int(h / ch)
+    out = coursed_wall_anchors(S = len, n_rows = n_rows, course_h = ch, y0 = 0.0, z = z, L = L, g0 = g0)
+}
+
+def brick_veneer(rows: geo<points>, rng: rng, L: f32 = 0.17, bh: f32 = 0.104, t: f32 = 0.046, k: f32 = 0.14, grp: string = "brick") -> (out: geo<mesh>) {
+    """Мелкие кирпичи по якорям brick_veneer_rows: ¼/½/¾/полный ложок, лёгкий @tint
+    и джиттер, группа grp. Фаска k — светлая кромка edge."""
+    a0 = parts.cbox(size = vec3(L * 0.25, bh, t), k = k)
+    a1 = parts.cbox(size = vec3(L * 0.5, bh, t), k = k)
+    a2 = parts.cbox(size = vec3(L * 0.75, bh, t), k = k)
+    a3 = parts.cbox(size = vec3(L, bh, t), k = k)
+    shade = random(lo = 0.84, hi = 1.16, rng = split_rng(rng, key = "tint"))
+    p1 = set(rows, "tint", vec3(shade * 1.06, shade * 0.98, shade * 0.92))
+    p2 = set_position(p1, offset = random_vec(lo = vec3(-0.003, -0.002, -0.003), hi = vec3(0.003, 0.002, 0.006), rng = split_rng(rng, key = "jit")))
+    out = mark(realize(instance_on_points(p2, source = a3, variants = [a0, a1, a2, a3])), grp, where = true, domain = faces)
+}
+
+def core_prism(w: f32, d: f32, h: f32, y0: f32, grp: string = "mortar") -> (out: geo<mesh>) {
+    """Прямой объём w×d высотой h, низ на y0. Без фаски: cbox/piece скос считает
+    от min(размера), и на этаже это ~0.12·h — грани визуально загибаются.
+    Сердцевина под облицовкой brick_veneer — группа mortar (раствор в швах)."""
+    body = compute_normals(box(size = vec3(w, h, d)), mode = flat)
+    out = mark(transform(body, translate = vec3(0, y0 + h * 0.5, 0)), grp, where = true, domain = faces)
+}
+
 def stone_pier(side: f32, n_rows: int, course_h: f32, rng: rng) -> (out: geo<mesh>) {
     """Отдельно стоящий квадратный столб кладки side×side (центр в 0, низ на y = 0,
     верх на n_rows·course_h): каждый ряд — четыре угловых блока quoin_course с

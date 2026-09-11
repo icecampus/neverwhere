@@ -1,15 +1,7 @@
 # Общий геометрический словарь углового отеля в стиле streamline moderne.
-#
-# Ключевой приём — «план как профиль вертикального sweep» (§8.2): контур
-# `plan_ring` (прямоугольник с одним закруглённым углом) протягивается по
-# вертикальному пути и даёт корпус/поясок/карниз с честным круглым углом, а
-# `arc_ring` (кольцевой сектор) — отдельную гнутую панель над дугой. В плоскости
-# профиля X → мировой X, Y → мировой Z; закруглённый угол смотрит в (+X, +Z).
-#
-# Раскладка по дуге — `arc_anchors`: точки на дуге с `@orient`, повёрнутым так,
-# что лицо инстанса (+Z) глядит наружу по радиусу. Так ставятся стёкла витрины,
-# средники и рёбра козырька.
+# План/дуги/валик — lib.plan; здесь только окраска групп, плитка палубы и ограждения.
 import lib.parts
+import lib.plan as plan
 
 def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     """Переметить грани из группы src в dst (ingroup-маска, затем снять src) —
@@ -17,126 +9,12 @@ def to_group(g: geo<mesh>, src: string, dst: string) -> (out: geo<mesh>) {
     out = unmark(mark(g, dst, where = ingroup(src), domain = faces), src)
 }
 
-def plan_ring(w: f32, d: f32, r: f32, n_arc: int) -> (out: geo<points>) {
-    """Замкнутый контур плана «прямоугольник w×d с закруглённым углом (+X, +Z)
-    радиуса r» в плоскости профиля: n_arc точек дуги от (w/2, d/2−r) до (w/2−r, d/2)
-    плюс три прямых угла. Профиль для вертикального sweep."""
-    expect r > 0.05 & r < min(w, d) * 0.5: "plan_ring: радиус скругления не влезает в план"
-    n = n_arc + 3
-    t = f32(@index) / f32(n_arc - 1)
-    a = radians(90.0 * t)
-    cx = w * 0.5 - r
-    cy = d * 0.5 - r
-    arc = vec3(cx + r * cos(a), cy + r * sin(a), 0)
-    k3 = vec3(0.0 - w * 0.5, d * 0.5, 0)
-    k2 = vec3(0.0 - w * 0.5, 0.0 - d * 0.5, 0)
-    k1 = vec3(w * 0.5, 0.0 - d * 0.5, 0)
-    p = @index < n_arc ? arc : (@index == n_arc ? k3 : (@index == n_arc + 1 ? k2 : k1))
-    out = set_position(mesh_line(count = n, length = 0.0), pos = p)
-}
-
-def plan_prism(w: f32, d: f32, r: f32, y0: f32, y1: f32, grp: string, n_arc: int = 12) -> (out: geo<mesh>) {
-    """Тело по контуру plan_ring от y0 до y1: корпус этажа, поясок, карниз, парапет.
-    Нормали auto/32 — дуга гладкая, четыре прямых ребра жёсткие."""
-    expect y1 > y0: "plan_prism: y1 должен быть выше y0"
-    path0 = mesh_line(count = 2, length = y1 - y0, dir = (0, 1, 0))
-    path = transform(path0, translate = vec3(0, y0, 0))
-    body = sweep(path, profile = plan_ring(w = w, d = d, r = r, n_arc = n_arc))
-    out = mark(compute_normals(body, mode = auto, angle = 32), grp, where = true, domain = faces)
-}
-
-def arc_ring(cx: f32, cz: f32, r_in: f32, r_out: f32, a0: f32, a1: f32, n: int) -> (out: geo<points>) {
-    """Замкнутый контур кольцевого сектора (центр cx/cz, радиусы r_in/r_out, углы
-    a0..a1 в градусах) в плоскости профиля: n точек по внешней дуге вперёд, n точек
-    по внутренней назад. Профиль для вертикального sweep — гнутая панель."""
-    expect r_out > r_in: "arc_ring: внешний радиус должен быть больше внутреннего"
-    fwd = @index < n
-    j = fwd ? @index : @index - n
-    t = f32(j) / f32(n - 1)
-    a = fwd ? radians(a0 + (a1 - a0) * t) : radians(a1 + (a0 - a1) * t)
-    rr = fwd ? r_out : r_in
-    out = set_position(mesh_line(count = 2 * n, length = 0.0), pos = vec3(cx + rr * cos(a), cz + rr * sin(a), 0))
-}
-
-def arc_shell(cx: f32, cz: f32, r_in: f32, r_out: f32, a0: f32, a1: f32, y0: f32, y1: f32, grp: string, n: int = 13) -> (out: geo<mesh>) {
-    """Гнутая панель по контуру arc_ring от y0 до y1: облицовка эркера, гнутая
-    полка козырька, гнутый переплёт витрины."""
-    expect y1 > y0: "arc_shell: y1 должен быть выше y0"
-    path0 = mesh_line(count = 2, length = y1 - y0, dir = (0, 1, 0))
-    path = transform(path0, translate = vec3(0, y0, 0))
-    body = sweep(path, profile = arc_ring(cx = cx, cz = cz, r_in = r_in, r_out = r_out, a0 = a0, a1 = a1, n = n))
-    out = mark(compute_normals(body, mode = auto, angle = 32), grp, where = true, domain = faces)
-}
-
-def arc_anchors(cx: f32, cz: f32, r: f32, y: f32, a0: f32, a1: f32, n: int) -> (out: geo<points>) {
-    """n якорей на дуге радиуса r на высоте y, равномерно по углу от a0 до a1
-    (градусы). `@orient` довёрнут так, что лицо инстанса (+Z) смотрит наружу по
-    радиусу: поворот вокруг Y на (90° − a) переводит +Z в (cos a, 0, sin a)."""
-    expect n >= 1: "arc_anchors: хотя бы один якорь"
-    t = n == 1 ? 0.5 : f32(@index) / f32(n - 1)
-    a = a0 + (a1 - a0) * t
-    ar = radians(a)
-    p0 = set_position(mesh_line(count = n, length = 0.0), pos = vec3(cx + r * cos(ar), y, cz + r * sin(ar)))
-    out = set(p0, "orient", orient_from_euler(vec3(0, 90.0 - a, 0)), domain = points)
-}
-
-def arc_mid_anchors(cx: f32, cz: f32, r: f32, y: f32, a0: f32, a1: f32, n: int) -> (out: geo<points>) {
-    """n якорей в серединах n равных сегментов дуги a0..a1 — под стёкла и рёбра
-    (в отличие от arc_anchors, где точки стоят на границах сегментов)."""
-    expect n >= 1: "arc_mid_anchors: хотя бы один сегмент"
-    step = (a1 - a0) / f32(n)
-    a = a0 + step * (f32(@index) + 0.5)
-    ar = radians(a)
-    p0 = set_position(mesh_line(count = n, length = 0.0), pos = vec3(cx + r * cos(ar), y, cz + r * sin(ar)))
-    out = set(p0, "orient", orient_from_euler(vec3(0, 90.0 - a, 0)), domain = points)
-}
-
-def chord(r: f32, span_deg: f32) -> (out: f32) {
-    """Длина хорды дуги радиуса r с углом раствора span_deg — ширина плоской
-    вставки, точно перекрывающей сегмент дуги."""
-    out = 2.0 * r * sin(radians(span_deg * 0.5))
-}
-
-def roll(w: f32, d: f32, r: f32, y: f32, h: f32, p: f32, grp: string, n: int = 5) -> (out: geo<mesh>) {
-    """Круглый валик по всему периметру плана: n призм plan_prism друг на друге, вынос
-    каждой по синусу высоты, так что сечение — полукруг с максимумом p на середине h.
-    Огибает круглый угол, потому что каждый слой — тот же контур plan_ring.
-
-    Это профиль пояска и карниза стиля streamline moderne: не классическая
-    ступенчатая полка, а полновесная «скоростная линия». Ступенями такой профиль
-    не подменить — референс читается именно круглой тенью на валике."""
-    expect h > 0.05 & p > 0.02: "roll: валик тоньше 5 см или без выноса — не читается"
-    y0 = y
-    q0 = p * sin(3.14159265 * 0.5 / f32(n))
-    s0 = plan_prism(w = w + q0 * 2.0, d = d + q0 * 2.0, r = r + q0, y0 = y0, y1 = y0 + h / f32(n), grp = grp, n_arc = 20)
-    out = repeat (s0, iterations = n - 1) |acc| {
-        k = f32(@iteration) + 1.0
-        q = p * sin(3.14159265 * (k + 0.5) / f32(n))
-        acc = merge(acc, plan_prism(w = w + q * 2.0, d = d + q * 2.0, r = r + q, y0 = y0 + k * h / f32(n), y1 = y0 + (k + 1.0) * h / f32(n), grp = grp, n_arc = 20))
-    }
-}
-
 def band(w: f32, d: f32, r: f32, y: f32, h: f32, grp: string = "trim") -> (out: geo<mesh>) {
     """Межэтажный поясок-«скоростная линия»: круглый валик по всему периметру, низ на y.
     Вынос заметно больше выноса штукатурки эркера (+0.04): поясок должен читаться
     самостоятельной тенеобразующей полкой, а не микроступенью — иначе гнутая
     поверхность рассыпается на «рустованные блоки»."""
-    out = roll(w = w, d = d, r = r, y = y, h = h, p = 0.34, grp = grp, n = 5)
-}
-
-def point_grid(nx: int, nz: int, pitch: f32, y: f32, stagger: f32) -> (out: geo<points>) {
-    """Сетка якорей nx×nz с шагом pitch на высоте y, центр в 0: модель строк — точки-ряды
-    по Z, делегат — foreach по ним (§5.4); нечётные ряды сдвинуты по X на stagger·pitch
-    (перевязка). `grid` даёт geo<mesh>, а инстансам нужны точки — отсюда этот якорник."""
-    expect nx >= 1 & nz >= 1: "point_grid: сетка хотя бы 1×1"
-    lz = f32(nz - 1) * pitch
-    lx = f32(nx - 1) * pitch
-    rows = transform(mesh_line(count = nz, length = lz, dir = (0, 0, 1)), translate = vec3(0, y, 0.0 - lz * 0.5))
-    out = foreach row in rows {
-        odd = f32(@piece_index % 2)
-        r0 = mesh_line(count = nx, length = lx, dir = (1, 0, 0))
-        row = transform(r0, translate = vec3(0.0 - lx * 0.5 + odd * stagger * pitch, y, dot(value(@P, on = row), (0, 0, 1))))
-    }
+    out = plan.roll(w = w, d = d, r = r, y = y, h = h, p = 0.34, grp = grp, n = 5)
 }
 
 def tile_deck(w: f32, d: f32, r: f32, y: f32, pitch: f32, rng: rng) -> (out: geo<mesh>) {
@@ -144,7 +22,7 @@ def tile_deck(w: f32, d: f32, r: f32, y: f32, pitch: f32, rng: rng) -> (out: geo
     плана (кладём только плитки, чей центр внутри скругления), свой @tint на плитку."""
     nx = int(w / pitch)
     nz = int(d / pitch)
-    anchors = point_grid(nx = nx, nz = nz, pitch = pitch, y = y, stagger = 0.0)
+    anchors = plan.point_grid(nx = nx, nz = nz, pitch = pitch, y = y, stagger = 0.0)
     # Обрезка по скруглению: снаружи угловой четверти оставляем только то, что в радиусе.
     px = dot(@P, (1, 0, 0))
     pz = dot(@P, (0, 0, 1))
@@ -161,10 +39,10 @@ def tile_deck(w: f32, d: f32, r: f32, y: f32, pitch: f32, rng: rng) -> (out: geo
 def rail_arc(cx: f32, cz: f32, r: f32, y: f32, h: f32, a0: f32, a1: f32, n: int) -> (out: geo<mesh>) {
     """Кованое ограждение по дуге: гнутые верхний и нижний прогоны (arc_shell) и
     вертикальные балясины на якорях дуги."""
-    top_r = arc_shell(cx = cx, cz = cz, r_in = r - 0.025, r_out = r + 0.025, a0 = a0, a1 = a1, y0 = y + h - 0.05, y1 = y + h, grp = "iron", n = n + 4)
-    bot_r = arc_shell(cx = cx, cz = cz, r_in = r - 0.02, r_out = r + 0.02, a0 = a0, a1 = a1, y0 = y + 0.06, y1 = y + 0.10, grp = "iron", n = n + 4)
+    top_r = plan.arc_shell(cx = cx, cz = cz, r_in = r - 0.025, r_out = r + 0.025, a0 = a0, a1 = a1, y0 = y + h - 0.05, y1 = y + h, grp = "iron", n = n + 4)
+    bot_r = plan.arc_shell(cx = cx, cz = cz, r_in = r - 0.02, r_out = r + 0.02, a0 = a0, a1 = a1, y0 = y + 0.06, y1 = y + 0.10, grp = "iron", n = n + 4)
     pk = parts.cbox(size = vec3(0.05, h - 0.06, 0.05), k = 0.2)
-    pts = arc_mid_anchors(cx = cx, cz = cz, r = r, y = y + (h + 0.06) * 0.5, a0 = a0, a1 = a1, n = n)
+    pts = plan.arc_mid_anchors(cx = cx, cz = cz, r = r, y = y + (h + 0.06) * 0.5, a0 = a0, a1 = a1, n = n)
     pickets = mark(realize(instance_on_points(pts, source = pk)), "iron", where = true, domain = faces)
     out = merge(top_r, bot_r, pickets)
 }

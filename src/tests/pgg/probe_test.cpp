@@ -920,4 +920,46 @@ TEST(Probe, WhereE606) {
     EXPECT_TRUE(hasMessage(runProbe(kWhere, "m:check[where=@ord > 0]"), "E606", "unknown probe parameter 'where'"));
 }
 
+// --- bbox / gap (art-session C3) --------------------------------------------
+
+const std::string kTwoBoxes =
+    "a0 = mark(box(size = (1, 1, 1)), \"stone\", where = true, domain = faces)\n"
+    "a = transform(a0, translate = (-2, 0, 0))\n"
+    "b0 = mark(box(size = (1, 1, 1)), \"brick\", where = true, domain = faces)\n"
+    "b = transform(b0, translate = (2, 0, 0))\n"
+    "m = merge(a, b)\n"
+    "output m\n";
+
+TEST(Probe, BBoxGroupAndWhole) {
+    pgg::RunResult whole = runProbe(kTwoBoxes, "m:bbox");
+    pggtest::expectNoErrors(whole);
+    const pgg::ProbeRecord* rec = findRecord(whole, "probe", "m", "bbox");
+    ASSERT_TRUE(rec);
+    EXPECT_NE(rec->text.find("bbox min="), std::string::npos);
+    EXPECT_NE(rec->text.find("center="), std::string::npos);
+    EXPECT_NE(rec->text.find("size="), std::string::npos);
+
+    pgg::RunResult stone = runProbe(kTwoBoxes, "m:bbox[group=stone]");
+    pggtest::expectNoErrors(stone);
+    rec = findRecord(stone, "probe", "m", "bbox");
+    ASSERT_TRUE(rec);
+    EXPECT_NE(rec->text.find("min=(-2.5, -0.5, -0.5)"), std::string::npos);
+    EXPECT_NE(rec->text.find("max=(-1.5, 0.5, 0.5)"), std::string::npos);
+
+    EXPECT_TRUE(hasMessage(runProbe(kTwoBoxes, "m:bbox[group=missing]"), "E606",
+                           "group 'missing' is not on the geometry"));
+    EXPECT_TRUE(hasMessage(runProbe("m = empty_mesh()\noutput m\n", "m:bbox"), "E606",
+                           "empty geometry"));
+}
+
+TEST(Probe, GapBetweenGroups) {
+    pgg::RunResult r = runProbe(kTwoBoxes, "m:gap[a=group:stone, b=group:brick, axis=x]");
+    pggtest::expectNoErrors(r);
+    const pgg::ProbeRecord* rec = findRecord(r, "probe", "m", "gap");
+    ASSERT_TRUE(rec);
+    EXPECT_NE(rec->text.find("gap axis=x value=3"), std::string::npos);
+    EXPECT_TRUE(hasMessage(runProbe(kTwoBoxes, "m:gap[a=group:stone, b=group:brick, axis=q]"),
+                           "E606", "gap axis must be x|y|z"));
+}
+
 }  // namespace

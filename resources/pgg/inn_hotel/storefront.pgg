@@ -9,25 +9,25 @@
 # глубина под зал.
 import lib.parts
 import lib.fixtures
-import inn_hotel.common as common
+import lib.plan as plan
 import inn_hotel.shell as shell
 import inn_hotel.windows as windows
 
 def base_course(bw: f32, bd: f32, cr: f32, y0: f32, y1: f32) -> (out: geo<mesh>) {
     """Светлый каменный цокольный поясок по всему периметру — подошва фасада.
     Заодно закрывает круглый угол ниже витрины."""
-    lo = common.plan_prism(w = bw + 0.34, d = bd + 0.34, r = cr + 0.17, y0 = y0, y1 = y1 - 0.10, grp = "trim")
-    cap = common.plan_prism(w = bw + 0.46, d = bd + 0.46, r = cr + 0.23, y0 = y1 - 0.10, y1 = y1, grp = "trim")
+    lo = plan.plan_prism(w = bw + 0.34, d = bd + 0.34, r = cr + 0.17, y0 = y0, y1 = y1 - 0.10, grp = "trim")
+    cap = plan.plan_prism(w = bw + 0.46, d = bd + 0.46, r = cr + 0.23, y0 = y1 - 0.10, y1 = y1, grp = "trim")
     out = merge(lo, cap)
 }
 
 def wainscot(cx: f32, cz: f32, cr: f32, y0: f32, y1: f32, a0: f32, a1: f32) -> (out: geo<mesh>) {
     """Деревянная панель-подзор под витриной: гнутая раковина по дуге, полка-отлив
     сверху и частые вертикальные накладные рейки (филёнчатый ритм референса)."""
-    shell_w = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.10, r_out = cr + 0.13, a0 = a0, a1 = a1, y0 = y0, y1 = y1, grp = "wood", n = 17)
-    cap = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.12, r_out = cr + 0.19, a0 = a0, a1 = a1, y0 = y1, y1 = y1 + 0.08, grp = "wood", n = 17)
+    shell_w = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.10, r_out = cr + 0.13, a0 = a0, a1 = a1, y0 = y0, y1 = y1, grp = "wood", n = 17)
+    cap = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.12, r_out = cr + 0.19, a0 = a0, a1 = a1, y0 = y1, y1 = y1 + 0.08, grp = "wood", n = 17)
     rib = parts.piece(size = vec3(0.05, y1 - y0 - 0.12, 0.06), pos = (0, 0, 0), grp = "wood")
-    ribs = mark(realize(instance_on_points(common.arc_mid_anchors(cx = cx, cz = cz, r = cr + 0.14, y = (y0 + y1) * 0.5 - 0.02, a0 = a0, a1 = a1, n = 13), source = rib)), "wood", where = true, domain = faces)
+    ribs = mark(realize(instance_on_points(plan.arc_mid_anchors(cx = cx, cz = cz, r = cr + 0.14, y = (y0 + y1) * 0.5 - 0.02, a0 = a0, a1 = a1, n = 13), source = rib)), "wood", where = true, domain = faces)
     out = merge(shell_w, cap, ribs)
 }
 
@@ -35,11 +35,11 @@ def tavern(cx: f32, cz: f32, cr: f32, y0: f32, y1: f32, n_seg: int, rng: rng) ->
     """Зал таверны за витриной: тёплая задняя стенка на глубине 1.5, светящийся
     потолок-подсвет и силуэты мебели по сегментам дуги — источник референсного
     тёплого свечения проёма."""
-    back = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.92, r_out = cr - 0.84, a0 = -6.0, a1 = 96.0, y0 = y0 - 0.2, y1 = y1 + 0.2, grp = "warm", n = 15)
-    ceil = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.86, r_out = cr - 0.12, a0 = -6.0, a1 = 96.0, y0 = y1 - 0.12, y1 = y1, grp = "warm", n = 15)
+    back = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.92, r_out = cr - 0.84, a0 = -6.0, a1 = 96.0, y0 = y0 - 0.2, y1 = y1 + 0.2, grp = "warm", n = 15)
+    ceil = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.86, r_out = cr - 0.12, a0 = -6.0, a1 = 96.0, y0 = y1 - 0.12, y1 = y1, grp = "warm", n = 15)
     span = (96.0 + 6.0) / f32(n_seg)
-    blk = parts.piece(size = vec3(common.chord(r = cr, span_deg = span) * 0.60, 0.66, 0.34), pos = (0, 0, 0), grp = "furn")
-    pts0 = common.arc_mid_anchors(cx = cx, cz = cz, r = cr - 0.52, y = y0 + 0.44, a0 = -6.0, a1 = 96.0, n = n_seg)
+    blk = parts.piece(size = vec3(plan.chord(r = cr, span_deg = span) * 0.60, 0.66, 0.34), pos = (0, 0, 0), grp = "furn")
+    pts0 = plan.arc_mid_anchors(cx = cx, cz = cz, r = cr - 0.52, y = y0 + 0.44, a0 = -6.0, a1 = 96.0, n = n_seg)
     shade = random(lo = 0.82, hi = 1.18, rng = split_rng(rng, key = "furn"))
     pts = set(pts0, "tint", vec3(shade, shade * 0.95, shade * 0.88))
     furn = mark(realize(instance_on_points(pts, source = blk)), "furn", where = true, domain = faces)
@@ -51,22 +51,22 @@ def glazing(cx: f32, cz: f32, cr: f32, y0: f32, y1: f32, a0: f32, a1: f32, n_seg
     на границах и верхняя обвязка-импост. Радиусы от cr — линии стекла."""
     expect n_seg >= 2: "glazing: минимум два сегмента"
     span = (a1 - a0) / f32(n_seg)
-    seg_w = common.chord(r = cr, span_deg = span)
+    seg_w = plan.chord(r = cr, span_deg = span)
     yc = (y0 + y1) * 0.5
     # Сплошного полотна стекла нет намеренно: непрозрачная плита закрыла бы зал.
     # Витраж читается переплётом — импост по каждому сегменту и средники.
     trans = parts.piece(size = vec3(seg_w - 0.05, 0.10, 0.15), pos = vec3(0, (y1 - y0) * 0.28, 0.0), grp = "frame")
-    leaves = realize(instance_on_points(common.arc_mid_anchors(cx = cx, cz = cz, r = cr, y = yc, a0 = a0, a1 = a1, n = n_seg), source = trans))
+    leaves = realize(instance_on_points(plan.arc_mid_anchors(cx = cx, cz = cz, r = cr, y = yc, a0 = a0, a1 = a1, n = n_seg), source = trans))
     mull = parts.piece(size = vec3(0.11, y1 - y0, 0.24), pos = (0, 0, 0), grp = "frame")
-    mulls = mark(realize(instance_on_points(common.arc_anchors(cx = cx, cz = cz, r = cr + 0.04, y = yc, a0 = a0, a1 = a1, n = n_seg + 1), source = mull)), "frame", where = true, domain = faces)
-    head = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.18, r_out = cr + 0.18, a0 = a0 - 1.5, a1 = a1 + 1.5, y0 = y1, y1 = y1 + 0.16, grp = "frame", n = 17)
+    mulls = mark(realize(instance_on_points(plan.arc_anchors(cx = cx, cz = cz, r = cr + 0.04, y = yc, a0 = a0, a1 = a1, n = n_seg + 1), source = mull)), "frame", where = true, domain = faces)
+    head = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.18, r_out = cr + 0.18, a0 = a0 - 1.5, a1 = a1 + 1.5, y0 = y1, y1 = y1 + 0.16, grp = "frame", n = 17)
     out = merge(leaves, mulls, head)
 }
 
 def door_pier(cx: f32, cz: f32, cr: f32, y0: f32, y1: f32, a0: f32, a1: f32) -> (out: geo<mesh>) {
     """Светлый пилон входа: гнутая каменная стенка на дуге от a0 до a1 во всю высоту
     первого этажа — в неё врезана дверь."""
-    out = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.14, r_out = cr + 0.12, a0 = a0, a1 = a1, y0 = y0, y1 = y1, grp = "trim", n = 9)
+    out = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.14, r_out = cr + 0.12, a0 = a0, a1 = a1, y0 = y0, y1 = y1, grp = "trim", n = 9)
 }
 
 def entrance(cx: f32, cz: f32, cr: f32, y0: f32, a_mid: f32, rng: rng) -> (out: geo<mesh>) {
@@ -97,17 +97,17 @@ def canopy(bw: f32, bd: f32, cr: f32, cx: f32, cz: f32, y: f32, out_r: f32 = 1.6
     прямых фасада."""
     a0 = -8.0
     a1 = 98.0
-    glass = common.arc_shell(cx = cx, cz = cz, r_in = cr + 0.06, r_out = cr + out_r, a0 = a0, a1 = a1, y0 = y, y1 = y + 0.05, grp = "canopy", n = 19)
-    rim_out = common.arc_shell(cx = cx, cz = cz, r_in = cr + out_r - 0.11, r_out = cr + out_r + 0.05, a0 = a0, a1 = a1, y0 = y - 0.15, y1 = y + 0.11, grp = "iron", n = 19)
-    rim_in = common.arc_shell(cx = cx, cz = cz, r_in = cr + 0.03, r_out = cr + 0.16, a0 = a0, a1 = a1, y0 = y - 0.05, y1 = y + 0.11, grp = "iron", n = 19)
+    glass = plan.arc_shell(cx = cx, cz = cz, r_in = cr + 0.06, r_out = cr + out_r, a0 = a0, a1 = a1, y0 = y, y1 = y + 0.05, grp = "canopy", n = 19)
+    rim_out = plan.arc_shell(cx = cx, cz = cz, r_in = cr + out_r - 0.11, r_out = cr + out_r + 0.05, a0 = a0, a1 = a1, y0 = y - 0.15, y1 = y + 0.11, grp = "iron", n = 19)
+    rim_in = plan.arc_shell(cx = cx, cz = cz, r_in = cr + 0.03, r_out = cr + 0.16, a0 = a0, a1 = a1, y0 = y - 0.05, y1 = y + 0.11, grp = "iron", n = 19)
     rib = parts.piece(size = vec3(0.08, 0.08, out_r - 0.02), pos = vec3(0, 0, (out_r + 0.06) * 0.5), grp = "iron")
-    ribs = mark(realize(instance_on_points(common.arc_anchors(cx = cx, cz = cz, r = cr + 0.05, y = y + 0.02, a0 = a0, a1 = a1, n = 8), source = rib)), "iron", where = true, domain = faces)
+    ribs = mark(realize(instance_on_points(plan.arc_anchors(cx = cx, cz = cz, r = cr + 0.05, y = y + 0.02, a0 = a0, a1 = a1, n = 8), source = rib)), "iron", where = true, domain = faces)
     # Тяги: прут от стены выше козырька к его наружной кромке (наклон в локальной
     # плоскости YZ инстанса — поворот вокруг локального X).
     rise = 0.92
     tie_len = sqrt(out_r * out_r + rise * rise)
     tie = transform(parts.piece(size = vec3(0.05, tie_len, 0.05), pos = (0, 0, 0), grp = "iron"), rotate = vec3(degrees(atan2(out_r, rise)), 0, 0))
-    ties = mark(realize(instance_on_points(common.arc_anchors(cx = cx, cz = cz, r = cr + out_r * 0.5, y = y + rise * 0.5, a0 = 8.0, a1 = 82.0, n = 4), source = tie)), "iron", where = true, domain = faces)
+    ties = mark(realize(instance_on_points(plan.arc_anchors(cx = cx, cz = cz, r = cr + out_r * 0.5, y = y + rise * 0.5, a0 = 8.0, a1 = 82.0, n = 4), source = tie)), "iron", where = true, domain = faces)
     # Плоские продолжения на фасады +X (полоса по Z) и +Z (по X).
     ext = 1.62
     gx = parts.piece(size = vec3(out_r, 0.05, ext), pos = vec3(bw * 0.5 + out_r * 0.5, y + 0.025, cz - ext * 0.5), grp = "canopy")
@@ -145,7 +145,7 @@ def ground_floor(bw: f32, bd: f32, cr: f32, walk_top: f32, base_top: f32, g_top:
     wain = wainscot(cx = cx, cz = cz, cr = cr, y0 = base_top, y1 = wain_top, a0 = a_glz, a1 = 92.0)
     glaz = glazing(cx = cx, cz = cz, cr = cr, y0 = wain_top + 0.08, y1 = head_y, a0 = a_glz, a1 = 92.0, n_seg = 5)
     # Фриз между импостом витрины и верхом первого этажа — закрывает дугу.
-    frieze = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.14, r_out = cr + 0.10, a0 = -11.0, a1 = 93.0, y0 = head_y + 0.16, y1 = g_top, grp = "trim", n = 17)
+    frieze = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.14, r_out = cr + 0.10, a0 = -11.0, a1 = 93.0, y0 = head_y + 0.16, y1 = g_top, grp = "trim", n = 17)
     door = entrance(cx = cx, cz = cz, cr = cr, y0 = base_top, a_mid = door_a, rng = split_rng(rng, key = "door"))
     can = canopy(bw = bw, bd = bd, cr = cr, cx = cx, cz = cz, y = g_top - 0.30)
 

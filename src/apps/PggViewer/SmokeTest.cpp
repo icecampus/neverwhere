@@ -519,6 +519,27 @@ bool runPggViewerSmokeTest(const std::string& serveAddress) {
               "composeSideBySide: rejects bad inputs");
     }
 
+    // C5: RPC render args are stateless except orbit/distance. Headless
+    // helpers (no frame loop) apply the same defaults the render handler uses.
+    {
+        check(pggViewerApplyRpcRenderArgs({{"wire", true}}).empty(), "C5 apply wire=true");
+        check(pggViewerRenderStateJson().value("wire", false), "C5 render_state.wire after wire=true");
+        check(pggViewerApplyRpcRenderArgs(nlohmann::json::object()).empty(), "C5 apply empty args");
+        check(!pggViewerRenderStateJson().value("wire", true),
+              "C5 omitted wire resets to false (not sticky)");
+        check(pggViewerApplyRpcRenderArgs({{"ortho", "front"}}).empty(), "C5 apply ortho=front");
+        check(pggViewerRenderStateJson().value("ortho", std::string{}) == "front",
+              "C5 render_state.ortho after ortho=front");
+        check(pggViewerApplyRpcRenderArgs(nlohmann::json::object()).empty(), "C5 apply empty after ortho");
+        check(pggViewerRenderStateJson().value("ortho", std::string{}) == "off",
+              "C5 omitted ortho resets to perspective/off");
+        check(pggViewerRenderStateJson().contains("chrome") &&
+                  pggViewerRenderStateJson().contains("target") &&
+                  pggViewerRenderStateJson().contains("zoom") &&
+                  pggViewerRenderStateJson().contains("fit"),
+              "C5 render_state echoes chrome/target/zoom/fit");
+    }
+
     // 12. --serve RPC: a real server plus an in-process socket client, driven
     //    by a manual poll() loop (headless: no sokol, no frame loop — render
     //    must fail with no_frame_loop).
@@ -659,9 +680,27 @@ bool runPggViewerSmokeTest(const std::string& serveAddress) {
 
             const nlohmann::json render =
                 call({{"op", "render"}, {"args", {{"node", "base"}}}});
-            check(!render.value("ok", true) && render["error"].value("kind", std::string{}) ==
-                      "no_frame_loop",
+            check(!render.value("ok", true) &&
+                      render["error"].value("kind", std::string{}) == "no_frame_loop",
                   "rpc render fails headless with no_frame_loop");
+
+            const nlohmann::json spire =
+                call({{"op", "load"},
+                      {"args", {{"path", findRepoRoot() + "/resources/pgg/spire_house.pgg"}}}});
+            check(spire.value("ok", false) && !spire["data"].value("has_errors", true),
+                  "rpc load of spire_house.pgg");
+            const nlohmann::json views = call({{"op", "views"}, {"args", nlohmann::json::object()}});
+            bool viewsOk = views.value("ok", false) && views["data"].contains("views") &&
+                           views["data"]["views"].is_array() && views["data"]["views"].size() >= 3;
+            if (viewsOk) {
+                bool hasFront = false;
+                for (const nlohmann::json& v : views["data"]["views"])
+                    hasFront = hasFront || v.value("name", std::string{}) == "front";
+                viewsOk = hasFront;
+            }
+            check(viewsOk, "rpc views lists named views from spire_house.views.json");
+            // Restore the corpus file so later probe/render checks still see `base`.
+            call({{"op", "load"}, {"args", {{"path", corpus + "/e1_rock.pgg"}}}});
 
             // D3: builtin docs — file-independent registry card.
             const nlohmann::json bdoc =
@@ -680,6 +719,11 @@ bool runPggViewerSmokeTest(const std::string& serveAddress) {
                   "rpc docs builtin:nope -> not_found");
             // The def path still answers over the loaded file (kind = "def"
             // since D3); a binding name is not a def.
+            const nlohmann::json clipBare = call({{"op", "docs"}, {"args", {{"symbol", "clip"}}}});
+            check(clipBare.value("ok", false) &&
+                      clipBare["data"].value("kind", std::string{}) == "builtin" &&
+                      clipBare["data"].value("name", std::string{}) == "clip",
+                  "rpc docs clip without builtin: prefix falls back to the registry");
             const nlohmann::json ddoc =
                 call({{"op", "docs"}, {"args", {{"symbol", "base"}}}});
             check(!ddoc.value("ok", true) &&

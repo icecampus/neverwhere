@@ -89,3 +89,78 @@ def stone_from_field(f: sdf, size: f32, rng: rng) -> (out: geo<mesh>) {
     shaped = compute_normals(raw)
     out = mark(shaped, "moss", where = (dot(@N, (0, 1, 0)) > 0.75) & (fbm(scale = 2.5 / size, rng = rng) > 0.2), domain = faces)
 }
+
+def clip_wedge_out(g: geo<mesh>, cx: f32, cy: f32, R: f32, deg0: f32, deg1: f32) -> (out: geo<mesh>) {
+    """Сектор [deg0, deg1] снаружи окружности (cx, cy, R): между лучами и за
+    касательной на биссектрисе. Крышка среза — brick (торец подрезанного ложка)."""
+    th0 = radians(deg0)
+    th1 = radians(deg1)
+    c0 = cos(th0)
+    s0 = sin(th0)
+    c1 = cos(th1)
+    s1 = sin(th1)
+    g1 = clip(g, origin = vec3(cx, cy, 0), normal = vec3(0.0 - s0, c0, 0))
+    g2 = clip(g1, origin = vec3(cx, cy, 0), normal = vec3(s1, 0.0 - c1, 0))
+    thm = (th0 + th1) * 0.5
+    nmx = cos(thm)
+    nmy = sin(thm)
+    out = clip(g2, origin = vec3(cx + R * nmx, cy + R * nmy, 0), normal = vec3(nmx, nmy, 0), cap_group = "brick")
+}
+
+def clip_arch_hole(g: geo<mesh>, cx: f32, y_bot: f32, win_w: f32, win_h: f32, bar: f32, gap: f32, segments: int = 12) -> (out: geo<mesh>) {
+    """Вырезать из кладки (локально: x вдоль, y вверх) стадион окна: прямоугольник
+    косяков + верхняя полуокружность. Контур = наружный силуэт арки (полуширина
+    r+bar) плюс зазор gap. Кирпичи снаружи целые, на контуре подрезаны.
+    segments — число клиньев на полуокружность (по умолчанию 12 × 15°)."""
+    expect segments >= 3: "clip_arch_hole: segments >= 3"
+    r = win_w * 0.5
+    R = r + bar + gap
+    straight = win_h - r
+    cy = y_bot + straight
+    y_sill = y_bot - gap
+    y_top = cy + R + 0.10
+    left = clip(g, origin = vec3(cx - R, 0, 0), normal = vec3(-1, 0, 0), cap_group = "brick")
+    right = clip(g, origin = vec3(cx + R, 0, 0), normal = vec3(1, 0, 0), cap_group = "brick")
+    m0 = clip(g, origin = vec3(cx - R, 0, 0), normal = vec3(1, 0, 0))
+    mid = clip(m0, origin = vec3(cx + R, 0, 0), normal = vec3(-1, 0, 0))
+    bot = clip(mid, origin = vec3(0, y_sill, 0), normal = vec3(0, -1, 0), cap_group = "brick")
+    top = clip(mid, origin = vec3(0, y_top, 0), normal = vec3(0, 1, 0), cap_group = "brick")
+    ah0 = clip(mid, origin = vec3(0, cy, 0), normal = vec3(0, 1, 0))
+    ah = clip(ah0, origin = vec3(0, y_top, 0), normal = vec3(0, -1, 0))
+    seg = 180.0 / f32(segments)
+    w0 = clip_wedge_out(ah, cx = cx, cy = cy, R = R, deg0 = 0.0, deg1 = seg)
+    wedges = repeat (w0, iterations = segments - 1) |acc| {
+        i = f32(@iteration) + 1.0
+        d0 = i * seg
+        acc = merge(acc, clip_wedge_out(ah, cx = cx, cy = cy, R = R, deg0 = d0, deg1 = d0 + seg))
+    }
+    out = compute_normals(merge(left, right, bot, top, wedges), mode = flat)
+}
+
+def clip_circle_hole(g: geo<mesh>, cx: f32, cy: f32, R: f32, segments: int = 12) -> (out: geo<mesh>) {
+    """Вырезать диск (cx, cy, R) из кладки: segments секторов на полный круг."""
+    expect segments >= 3: "clip_circle_hole: segments >= 3"
+    seg = 360.0 / f32(segments)
+    w0 = clip_wedge_out(g, cx = cx, cy = cy, R = R, deg0 = 0.0, deg1 = seg)
+    wedges = repeat (w0, iterations = segments - 1) |acc| {
+        i = f32(@iteration) + 1.0
+        d0 = i * seg
+        acc = merge(acc, clip_wedge_out(g, cx = cx, cy = cy, R = R, deg0 = d0, deg1 = d0 + seg))
+    }
+    out = compute_normals(wedges, mode = flat)
+}
+
+def clip_rect_hole(g: geo<mesh>, cx: f32, y0: f32, w: f32, h: f32, gap: f32 = 0.03) -> (out: geo<mesh>) {
+    """Прямоугольный проём в кладке (дверь/ниша без арки): полуширина w/2+gap,
+    низ y0−gap, верх y0+h+gap. Крышки срезов — brick."""
+    hw = w * 0.5 + gap
+    y_sill = y0 - gap
+    y_top = y0 + h + gap
+    left = clip(g, origin = vec3(cx - hw, 0, 0), normal = vec3(-1, 0, 0), cap_group = "brick")
+    right = clip(g, origin = vec3(cx + hw, 0, 0), normal = vec3(1, 0, 0), cap_group = "brick")
+    m0 = clip(g, origin = vec3(cx - hw, 0, 0), normal = vec3(1, 0, 0))
+    mid = clip(m0, origin = vec3(cx + hw, 0, 0), normal = vec3(-1, 0, 0))
+    bot = clip(mid, origin = vec3(0, y_sill, 0), normal = vec3(0, -1, 0), cap_group = "brick")
+    top = clip(mid, origin = vec3(0, y_top, 0), normal = vec3(0, 1, 0), cap_group = "brick")
+    out = compute_normals(merge(left, right, bot, top), mode = flat)
+}

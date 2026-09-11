@@ -59,3 +59,60 @@ def arch_sdf(w: f32, straight: f32, r: f32, t: f32) -> (out: sdf) {
     disc = sdf_intersect(slab, ball)
     out = sdf_union(body, disc)
 }
+
+def ngon_circumradius(apothem: f32, sides: int) -> (out: f32) {
+    """Описанный радиус правильного n-угольника по апофеме (расстояние до грани)."""
+    expect sides >= 3: "ngon_circumradius: sides >= 3"
+    out = apothem / cos(3.14159265 / f32(sides))
+}
+
+def polar_array(g: geo<mesh>, n: int, step_deg: f32 = 0) -> (out: geo<mesh>) {
+    """n копий меша вокруг +Y: нулевая копия — g как есть, дальше шаг step_deg.
+    step_deg = 0 → 360/n. n = 1 возвращает g (repeat iterations = 0)."""
+    expect n >= 1: "polar_array: n >= 1"
+    step = abs(step_deg) < 0.0001 ? 360.0 / f32(n) : step_deg
+    out = repeat (g, iterations = n - 1) |acc| {
+        piece = transform(g, rotate = vec3(0, step * (f32(@iteration) + 1.0), 0))
+        acc = merge(acc, piece)
+    }
+}
+
+def around_box(g_front: geo<mesh>, w: f32, d: f32) -> (out: geo<mesh>) {
+    """Одна «фасадная» деталь (лицо +Z, центр в 0) на четыре стены прямоугольника w×d:
+    +Z, −Z, +X, −X. Низ детали остаётся на её локальном y."""
+    f = transform(g_front, translate = vec3(0, 0, d * 0.5))
+    b = transform(transform(g_front, rotate = vec3(0, 180, 0)), translate = vec3(0, 0, 0.0 - d * 0.5))
+    r = transform(transform(g_front, rotate = vec3(0, 90, 0)), translate = vec3(w * 0.5, 0, 0))
+    l = transform(transform(g_front, rotate = vec3(0, 270, 0)), translate = vec3(0.0 - w * 0.5, 0, 0))
+    out = merge(f, b, r, l)
+}
+
+def ngon_frustum(y0: f32, y1: f32, r0: f32, r1: f32, sides: int, grp: string) -> (out: geo<mesh>) {
+    """Правильная n-гранная усечённая пирамида от y0 до y1. r0/r1 — апофемы
+    (расстояние от оси до грани), внутри пересчёт в описанный. Профиль повёрнут
+    на 180/sides, чтобы плоская грань смотрела в +Z (у шестигранника — 30°)."""
+    expect sides >= 3: "ngon_frustum: sides >= 3"
+    c0 = r0 / cos(3.14159265 / f32(sides))
+    c1 = r1 / cos(3.14159265 / f32(sides))
+    h = y1 - y0
+    path0 = mesh_line(count = 2, length = h, dir = (0, 1, 0))
+    path = set(path0, "profile_scale", @index == 0 ? vec2(c0, c0) : vec2(c1, c1))
+    spin = 180.0 / f32(sides)
+    prof = transform(circle(sides = sides, radius = 1.0), rotate = vec3(0, 0, spin))
+    sw = sweep(path, profile = prof)
+    sw_y = transform(sw, translate = vec3(0, y0, 0))
+    out = mark(compute_normals(sw_y, mode = flat), grp, where = true, domain = faces)
+}
+
+def ngon_belt(y: f32, h: f32, r: f32, sides: int, over_lo: f32 = 0.22, over_hi: f32 = 0.30) -> (out: geo<mesh>) {
+    """n-гранный двухступенчатый карниз: низ 0.58·h / вынос over_lo, верх 0.42·h /
+    over_hi. r — апофема корпуса; over_* — вынос от грани (по нормали). Фаска
+    шириной 0.12·высота полки, группа edge."""
+    lo_h = h * 0.58
+    hi_h = h * 0.42
+    lo = ngon_frustum(y0 = y, y1 = y + lo_h, r0 = r + over_lo, r1 = r + over_lo, sides = sides, grp = "stone")
+    hi = ngon_frustum(y0 = y + lo_h, y1 = y + h, r0 = r + over_hi, r1 = r + over_hi, sides = sides, grp = "stone")
+    lo_b = compute_normals(mark(bevel(lo, width = 0.12 * lo_h, bevel_group = "edge"), "stone", where = true, domain = faces), mode = flat)
+    hi_b = compute_normals(mark(bevel(hi, width = 0.12 * hi_h, bevel_group = "edge"), "stone", where = true, domain = faces), mode = flat)
+    out = merge(lo_b, hi_b)
+}

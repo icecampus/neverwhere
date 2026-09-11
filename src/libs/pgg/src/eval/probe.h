@@ -221,6 +221,22 @@ bool probeGeoCheck(const Geo& g, const std::vector<std::pair<std::string, std::s
 bool probeLattice(const SdfNode& sdf, const std::vector<std::pair<std::string, std::string>>& params,
                   std::string& out, std::string& err);
 
+// --- bbox / gap (art-session C3) ------------------------------------------------
+
+// Axis-aligned bbox of a geo, optionally filtered to a group (bare name or
+// "domain:name"; empty group = whole geo). Text:
+// `bbox min=(..) max=(..) center=(..) size=(..)`. Empty geo / unknown group
+// is an error.
+bool probeGeoBBox(const Geo& g, const std::string& group, std::string& out, std::string& err);
+bool geoGroupBBox(const Geo& g, const std::string& group, glm::vec3& outMin, glm::vec3& outMax,
+                  std::string& err);
+
+// Gap between two bboxes along axis x|y|z (signed: overlap is negative).
+// `a`/`b` are `group:<name>` (or a bare group name) on the same geo.
+// Text: `gap axis=<a> value=<v> a=(min)..(max) b=(min)..(max)`.
+bool probeGeoGap(const Geo& g, const std::vector<std::pair<std::string, std::string>>& params,
+                 std::string& out, std::string& err);
+
 // --- aggregate=stats (§9.4) -----------------------------------------------------
 
 // Per-instance entries merged into `<label>: mean M ± S across K instances`

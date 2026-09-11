@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 class ViewerRpcServer;
 
 // Registers the --serve RPC command handlers (implemented in main.cpp) on
@@ -16,6 +18,13 @@ void registerPggViewerRpcHandlers(ViewerRpcServer& server);
 // Declared here so the smoke test can drive it on a synthetic buffer.
 bool cropShotPixels(const std::vector<std::uint8_t>& src, int srcW, int srcH, int x, int y, int w, int h,
                     std::vector<std::uint8_t>& out, int& outW, int& outH);
+
+// C5: apply RPC render defaults + explicit args that do not need a frame
+// (wire/ortho/target/highlight/shading/colors/chrome/orbit/zoom). Empty return
+// is success; otherwise a bad_args message. Orbit yaw/pitch and an explicit
+// distance are sticky; everything else resets when omitted.
+std::string pggViewerApplyRpcRenderArgs(const nlohmann::json& args);
+nlohmann::json pggViewerRenderStateJson();
 
 // CPU smoke test of the viewer (--smoke), run before any sokol init: graph
 // derivation on the pgg corpus (tower instances + dive targets, foreach zone

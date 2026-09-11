@@ -216,6 +216,10 @@ GeoPtr genMeshLine(int count, float length, glm::vec3 dir) {
     return makePoints(std::move(pos));
 }
 
+GeoPtr genEmptyMesh() { return makeMesh({}, {}, {0}); }
+
+GeoPtr genEmptyPoints() { return makePoints({}); }
+
 GeoPtr genPointCloud(int count, glm::vec3 bounds, Rng rng) {
     count = std::max(count, 0);
     std::vector<glm::vec3> pos(static_cast<size_t>(count));

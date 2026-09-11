@@ -7,6 +7,7 @@
 # из inn_hotel/windows.pgg — только так за стеклом остаётся глубина под
 # освещённый интерьер, а не сплошная кладка вплотную к стеклу.
 import lib.parts
+import lib.plan as plan
 import inn_hotel.common as common
 
 def straight_walls(bw: f32, bd: f32, cr: f32, y0: f32, y1: f32, grp: string, t: f32 = 0.44) -> (out: geo<mesh>) {
@@ -39,23 +40,8 @@ def brick_skin(w: f32, h: f32, cell: f32, rng: rng) -> (out: geo<mesh>) {
 }
 
 def brick_courses(w: f32, h: f32, ch: f32, rng: rng) -> (out: geo<mesh>) {
-    """Ряды кладки поверх плиты brick_skin в той же локальной системе (лицо +Z,
-    центр в 0): по одной плашке на ряд высотой ch − шов, выпущенной на 3.5 см.
-    Зазоры между плашками — растворные швы, сквозь них видно плиту позади, так
-    что горизонтальная разрезовка получается настоящей геометрией.
-
-    Так дешевле честной кладки боксами (сотни тысяч треугольников на стену 12 м) и
-    честнее прежнего fbm-рельефа по нормали: тот давал не ряды, а мягкие пятна,
-    и кирпич читался камуфляжем."""
-    expect ch > 0.08: "brick_courses: ряд ниже 8 см — швы сольются"
-    n = int(h / ch)
-    joint = 0.028
-    y0 = ch * 0.5 - h * 0.5
-    c0 = parts.piece(size = vec3(w, ch - joint, 0.035), pos = vec3(0, y0, 0.018), grp = "brick")
-    out = repeat (c0, iterations = n - 1) |acc| {
-        k = f32(@iteration) + 1.0
-        acc = merge(acc, parts.piece(size = vec3(w, ch - joint, 0.035), pos = vec3(0, y0 + k * ch, 0.018), grp = "brick"))
-    }
+    """Ряды кладки поверх плиты brick_skin — обёртка plan.brick_courses."""
+    out = plan.brick_courses(w = w, h = h, ch = ch, rng = rng, protrude = 0.018)
 }
 
 def brick_skins(bw: f32, bd: f32, cr: f32, y0: f32, y1: f32, rng: rng) -> (out: geo<mesh>) {

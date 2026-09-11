@@ -21,7 +21,7 @@ namespace pgg {
 enum class BuiltinId {
     None,
     // §8.1 sources
-    IcoSphere, Box, Grid, MeshLine, PointCloud,
+    IcoSphere, Box, Grid, MeshLine, PointCloud, EmptyMesh, EmptyPoints,
     // §8.2 transforms
     Transform, SetPosition, Smooth, ComputeNormals,
     // §8.5 rng
@@ -37,7 +37,7 @@ enum class BuiltinId {
     // §8.7 attributes
     SetAttr, RemoveAttr, RenameAttr, Promote,
     // §8.3 topology (E2 subset + delete + clip)
-    Merge, Delete, Clip,
+    Merge, Delete, Clip, Select,
     // §8.3 second wave (v1.21)
     Extrude, Inset, Bevel, Separate, Triangulate, Subdivide, MergeByDistance, Mirror, Circle, Sweep, BezierPoints, ResamplePoints, BakeAo,
     // §8.8 scatter and instancing
@@ -101,6 +101,8 @@ GeoPtr genBox(glm::vec3 size, int res);
 GeoPtr genGrid(glm::vec2 size, glm::vec2 res);
 GeoPtr genMeshLine(int count, float length, glm::vec3 dir);
 GeoPtr genPointCloud(int count, glm::vec3 bounds, Rng rng);
+GeoPtr genEmptyMesh();
+GeoPtr genEmptyPoints();
 
 // One call with arguments bound to the signature (produced by the compiler
 // after bindCallArgs; diagnostics come from the static typecheck pass).

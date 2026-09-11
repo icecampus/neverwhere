@@ -7,6 +7,7 @@
 # - Венчающий карниз на f2_top: тот же разрез и фаски, что crown дома (один пояс).
 import lib.ironwork
 import lib.architecture
+import lib.shapes as shapes
 import spire_house.common as common
 import spire_house.windows as windows
 
@@ -14,23 +15,23 @@ def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, 
     """Шестигранный эркер второго этажа (основание башни):
     башня заканчивается на втором этаже и опирается на шестигранный консольный сход."""
     r_in = tower_w * 0.5
-    r_out = r_in * 1.1547
+    r_circ = shapes.ngon_circumradius(r_in, 6)
     belt_h = b1_top - f1_top
     # 1. Консоль под эркером: верх на низе межэтажного карниза, кирпич 2-го этажа выше пояса
-    corb0 = common.hexa_corbel(y_top = f1_top, h = 0.85, r_top = r_out)
+    corb0 = common.hexa_corbel(y_top = f1_top, h = 0.85, r_top = r_in)
     tower_corbel = transform(corb0, translate = vec3(0, 0, tower_z))
     # 2. Нижний пояс башни — тот же разрез, что belt дома (0.22 / 0.30 от грани)
-    bay_belt0 = common.hexa_belt(y = f1_top, h = belt_h, r = r_out)
+    bay_belt0 = common.hexa_belt(y = f1_top, h = belt_h, r = r_in)
     bay_belt = transform(bay_belt0, translate = vec3(0, 0, tower_z))
     # 3. Шестигранный кирпичный корпус 2-го этажа (y: b1_top -> f2_top)
-    body2 = common.hexa_frustum(y0 = b1_top, y1 = f2_top, r0 = r_out, r1 = r_out, grp = "mortar")
+    body2 = common.hexa_frustum(y0 = b1_top, y1 = f2_top, r0 = r_in, r1 = r_in, grp = "mortar")
     f2_body = transform(body2, translate = vec3(0, 0, tower_z))
     # 3b. Мелкая кирпичная облицовка трёх выступающих граней
     bay_h = f2_top - b1_top
     sill = f2_y - b1_top
-    bf0 = common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf0"))
-    bf60 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf60")), rotate = vec3(0, 60, 0))
-    bf300 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, r_out = r_out, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf300")), rotate = vec3(0, 300, 0))
+    bf0 = common.hexa_brick_face(h = bay_h, r_in = r_in, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf0"))
+    bf60 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf60")), rotate = vec3(0, 60, 0))
+    bf300 = transform(common.hexa_brick_face(h = bay_h, r_in = r_in, y_bot = sill, win_w = 0.46, win_h = 2.15, rng = split_rng(rng, key = "bf300")), rotate = vec3(0, 300, 0))
     bay_bricks = transform(merge(bf0, bf60, bf300), translate = vec3(0, b1_top, tower_z))
     # 4. Арочные окна 2-го этажа: по одному в центре каждой из трёх выступающих граней
     win2 = windows.stone_arch_window(w = 0.46, h = 2.15)
@@ -41,7 +42,7 @@ def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, 
     f2_wins = merge(w2_f, w2_r, w2_l)
     # 5. Угловые каменные колоннетты на видимых рёбрах шестигранника 2-го этажа
     shaft2 = architecture.regroup(ironwork.spool(p0 = vec3(0, b1_top, 0), p1 = vec3(0, f2_top - 0.05, 0), r0 = 0.065, r1 = 0.055, sides = 8), grp = "stone")
-    sh2_base = transform(shaft2, translate = vec3(0, 0, r_out))
+    sh2_base = transform(shaft2, translate = vec3(0, 0, r_circ))
     sh2_r = transform(sh2_base, rotate = vec3(0, 30, 0))
     sh2_l = transform(sh2_base, rotate = vec3(0, 330, 0))
     sh2_wr = transform(sh2_base, rotate = vec3(0, 90, 0))
@@ -50,7 +51,7 @@ def bay_window(facade_z: f32, f1_top: f32, b1_top: f32, f2_top: f32, f2_y: f32, 
     # 6. Венчающий карниз башни — тот же разрез, вынос и фаски, что crown дома
     # (over_lo=0.26 / over_hi=0.36, h=crown_h), низ на f2_top. Сухарики на той же
     # отметке, что у дома (f2_top − 0.12), чтобы пояс читался одним элементом.
-    top_belt0 = common.hexa_belt(y = f2_top, h = crown_h, r = r_out, over_lo = 0.26, over_hi = 0.36)
+    top_belt0 = common.hexa_belt(y = f2_top, h = crown_h, r = r_in, over_lo = 0.26, over_hi = 0.36)
     bay_top_belt = transform(top_belt0, translate = vec3(0, 0, tower_z))
     bay_crown_dt = transform(common.hexa_dentils(y = f2_top - 0.12, r_in = r_in), translate = vec3(0, 0, tower_z))
     out = merge(tower_corbel, bay_belt, f2_body, bay_bricks, f2_wins, shafts_2, bay_top_belt, bay_crown_dt)

@@ -82,6 +82,13 @@ const std::vector<BuiltinDoc>& docs() {
          "skeleton for instance chains. count = 1 — one point at the origin; "
          "count <= 0 — a legal empty geometry.",
          "pts = mesh_line(count = 5, length = 2.0, dir = (1, 0, 0))"},
+        {"empty_mesh", "sources",
+         "Explicit empty geo<mesh> — the identity of merge/repeat over meshes "
+         "(mesh_line(count = 0) is the points equivalent).",
+         "acc = empty_mesh()"},
+        {"empty_points", "sources",
+         "Explicit empty geo<points> — the identity of merge/repeat over points.",
+         "acc = empty_points()"},
         {"point_cloud", "sources",
          "Random point cloud inside bounds, addressed by (point_index, xyz_lane) "
          "of the given rng.",
@@ -269,6 +276,11 @@ const std::vector<BuiltinDoc>& docs() {
          "variadic left fold. Columns/groups union by name with neutral fill; a "
          "name on different domains/typeinfo across operands is E609.",
          "m = merge(walls, roof, porch)"},
+        {"select", "topology",
+         "Picks one of two geometries by a value-level bool (a constant or a "
+         "@param). A constant cond evaluates only the taken branch. Ternary "
+         "? : does not accept geo — use select or separate defs.",
+         "face = select(clock, a = hexa_clock, b = hexa_plain)"},
         {"delete", "topology",
          "Removes elements under a mask; the deletion cascades to incident "
          "higher-domain elements (point -> its faces and corners).",
@@ -341,7 +353,9 @@ const std::vector<BuiltinDoc>& docs() {
          "path: tubes/beams/rails, and ribbons/leaves with profile_closed = "
          "false. The parallel-transport frame does not accumulate twist; the "
          "path's @scale/@profile_scale/@twist shape the profile per ring; ring "
-         "points inherit the path's other columns and get @uv.",
+         "points inherit the path's other columns and get @uv. A vertical path "
+         "(along +Y) maps profile X to world Z (depth) and profile Y to world X "
+         "(width), so profile_scale = (depth, width) not (width, depth).",
          "tube = sweep(path, profile = circle(8, radius = 0.05))"},
         {"islands", "topology",
          "Marks connected components; writes @island_id (int, faces).",
@@ -456,6 +470,20 @@ const BuiltinDoc* findBuiltinDoc(const std::string& name) {
     for (const BuiltinDoc& d : docs())
         if (d.name == name) return &d;
     return nullptr;
+}
+
+std::vector<std::string> suggestBuiltinNames(const std::string& name, size_t cap) {
+    std::vector<std::string> near;
+    if (name.empty() || cap == 0) return near;
+    for (const BuiltinDoc& d : docs())
+        if (d.name.rfind(name, 0) == 0 || (name.size() >= 3 && name.rfind(d.name, 0) == 0))
+            near.push_back(d.name);
+    if (near.empty())
+        for (const BuiltinDoc& d : docs())
+            if (d.name.find(name) != std::string::npos) near.push_back(d.name);
+    std::sort(near.begin(), near.end());
+    if (near.size() > cap) near.resize(cap);
+    return near;
 }
 
 const std::vector<BuiltinDoc>& allBuiltinDocs() { return docs(); }

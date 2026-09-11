@@ -740,6 +740,39 @@ private:
             return;
         }
 
+        if (rp.inspector == "bbox" || rp.inspector == "gap") {
+            for (const Pulled& p : pulled) {
+                if (!p.target->terminal.empty()) {
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath + "': " + rp.inspector +
+                                    " does not take attr terminals (probe the binding itself)");
+                    continue;
+                }
+                if (valueBase(p.value) != ScalarType::Geo) {
+                    run_.report("E606", Span{},
+                                "probe target '" + p.target->recordPath + "': " + rp.inspector +
+                                    " needs a geo value");
+                    continue;
+                }
+                std::string text, err;
+                const bool ok = rp.inspector == "bbox"
+                                    ? probeGeoBBox(*asGeo(p.value),
+                                                   [&] {
+                                                       for (const auto& [n, v] : rp.params)
+                                                           if (n == "group") return v;
+                                                       return std::string{};
+                                                   }(),
+                                                   text, err)
+                                    : probeGeoGap(*asGeo(p.value), rp.params, text, err);
+                if (!ok) {
+                    run_.report("E606", Span{}, "probe target '" + p.target->recordPath + "': " + err);
+                    continue;
+                }
+                result_.probes.push_back({rp.origin, p.target->recordPath, rp.inspector, std::move(text)});
+            }
+            return;
+        }
+
         if (rp.inspector == "check") {
             for (const Pulled& p : pulled) {
                 if (!p.target->terminal.empty()) {

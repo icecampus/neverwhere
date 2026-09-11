@@ -7,7 +7,7 @@
 # занавеси на реальной глубине. Плоская вставка точно перекрывает сегмент дуги,
 # если её ширина равна хорде сегмента.
 import lib.parts
-import inn_hotel.common as common
+import lib.plan as plan
 
 def curtain_panel(w: f32, h: f32) -> (out: geo<mesh>) {
     """Занавесь: одна светлая панель с двумя утолщёнными складками по краям. Именно
@@ -23,10 +23,10 @@ def bay_room(cx: f32, cz: f32, cr: f32, y0: f32, y1: f32, n_seg: int, rng: rng) 
     """Интерьер номера за гнутым окном: тёплая задняя стенка и занавеси по сегментам
     дуги — референсное «свечение изнутри с силуэтами штор». Занавесь чуть уже
     сегмента, поэтому тёплый свет обводит её по краям."""
-    back = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.34, r_out = cr - 0.26, a0 = -2.0, a1 = 92.0, y0 = y0 - 0.06, y1 = y1 + 0.06, grp = "warm", n = 23)
+    back = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.34, r_out = cr - 0.26, a0 = -2.0, a1 = 92.0, y0 = y0 - 0.06, y1 = y1 + 0.06, grp = "warm", n = 23)
     span = 90.0 / f32(n_seg)
-    curt = curtain_panel(w = common.chord(r = cr, span_deg = span) * 0.66, h = y1 - y0 - 0.04)
-    pts0 = common.arc_mid_anchors(cx = cx, cz = cz, r = cr - 0.19, y = (y0 + y1) * 0.5, a0 = 0.0, a1 = 90.0, n = n_seg)
+    curt = curtain_panel(w = plan.chord(r = cr, span_deg = span) * 0.66, h = y1 - y0 - 0.04)
+    pts0 = plan.arc_mid_anchors(cx = cx, cz = cz, r = cr - 0.19, y = (y0 + y1) * 0.5, a0 = 0.0, a1 = 90.0, n = n_seg)
     shade = random(lo = 0.88, hi = 1.10, rng = split_rng(rng, key = "curt"))
     pts = set(pts0, "tint", vec3(shade, shade * 0.98, shade * 0.94))
     curtains = realize(instance_on_points(pts, source = curt))
@@ -39,19 +39,19 @@ def bay_window_band(cx: f32, cz: f32, cr: f32, y: f32, h: f32, n_seg: int, rng: 
     Радиусы отсчитываются от cr — линии стекла."""
     expect n_seg >= 2: "bay_window_band: минимум два сегмента"
     span = 90.0 / f32(n_seg)
-    seg_w = common.chord(r = cr, span_deg = span)
+    seg_w = plan.chord(r = cr, span_deg = span)
     yc = y + h * 0.5
 
-    rail_lo = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.15, r_out = cr + 0.11, a0 = -2.5, a1 = 92.5, y0 = y - 0.10, y1 = y, grp = "frame", n = 23)
-    rail_hi = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.15, r_out = cr + 0.11, a0 = -2.5, a1 = 92.5, y0 = y + h, y1 = y + h + 0.10, grp = "frame", n = 23)
+    rail_lo = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.15, r_out = cr + 0.11, a0 = -2.5, a1 = 92.5, y0 = y - 0.10, y1 = y, grp = "frame", n = 23)
+    rail_hi = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.15, r_out = cr + 0.11, a0 = -2.5, a1 = 92.5, y0 = y + h, y1 = y + h + 0.10, grp = "frame", n = 23)
 
     # Сплошного полотна стекла нет намеренно: непрозрачная плита закрыла бы тёплый
     # интерьер за ней. Проём читается переплётом — поперечный шпрос и средники.
     sash = parts.piece(size = vec3(seg_w - 0.06, 0.08, 0.12), pos = vec3(0, 0.0 - h * 0.22, 0.0), grp = "frame")
-    leaves = realize(instance_on_points(common.arc_mid_anchors(cx = cx, cz = cz, r = cr, y = yc, a0 = 0.0, a1 = 90.0, n = n_seg), source = sash))
+    leaves = realize(instance_on_points(plan.arc_mid_anchors(cx = cx, cz = cz, r = cr, y = yc, a0 = 0.0, a1 = 90.0, n = n_seg), source = sash))
 
     mull = parts.piece(size = vec3(0.10, h + 0.04, 0.18), pos = (0, 0, 0), grp = "frame")
-    mulls = mark(realize(instance_on_points(common.arc_anchors(cx = cx, cz = cz, r = cr + 0.02, y = yc, a0 = 0.0, a1 = 90.0, n = n_seg + 1), source = mull)), "frame", where = true, domain = faces)
+    mulls = mark(realize(instance_on_points(plan.arc_anchors(cx = cx, cz = cz, r = cr + 0.02, y = yc, a0 = 0.0, a1 = 90.0, n = n_seg + 1), source = mull)), "frame", where = true, domain = faces)
 
     out = merge(rail_lo, rail_hi, leaves, mulls, bay_room(cx = cx, cz = cz, cr = cr, y0 = y, y1 = y + h, n_seg = n_seg, rng = rng))
 }
@@ -59,8 +59,8 @@ def bay_window_band(cx: f32, cz: f32, cr: f32, y: f32, h: f32, n_seg: int, rng: 
 def bay_spandrels(cx: f32, cz: f32, cr: f32, fy0: f32, fy1: f32, wy0: f32, wy1: f32) -> (out: geo<mesh>) {
     """Штукатурные простенки эркера, закрывающие дугу под проёмом (fy0..wy0) и над
     ним (wy1..fy1) — светлое поле между оконными лентами."""
-    lo = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.10, r_out = cr + 0.04, a0 = -1.5, a1 = 91.5, y0 = fy0, y1 = wy0 + 0.04, grp = "stucco", n = 23)
-    hi = common.arc_shell(cx = cx, cz = cz, r_in = cr - 0.10, r_out = cr + 0.04, a0 = -1.5, a1 = 91.5, y0 = wy1 - 0.04, y1 = fy1, grp = "stucco", n = 23)
+    lo = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.10, r_out = cr + 0.04, a0 = -1.5, a1 = 91.5, y0 = fy0, y1 = wy0 + 0.04, grp = "stucco", n = 23)
+    hi = plan.arc_shell(cx = cx, cz = cz, r_in = cr - 0.10, r_out = cr + 0.04, a0 = -1.5, a1 = 91.5, y0 = wy1 - 0.04, y1 = fy1, grp = "stucco", n = 23)
     out = merge(lo, hi)
 }
 

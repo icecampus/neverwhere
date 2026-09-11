@@ -123,6 +123,8 @@ PggViewer поднимает похожий TCP RPC на `127.0.0.1:9878` (`--se
 - Спецификация языка — `docs/pgg/geometry_generation_language.md` (ТЗ: текст-first нодовый граф для LLM-агентов + нодовая проекция; этапы и критерии — §15, история — §19).
 - Заметки по реализации (этапы E0–E8 по файлам, грабли ANTLR/ядра, PggTool/PggViewer CLI, корпус и сьюты тестов) — `docs/pgg/implementation.md`. **Правя `src/libs/pgg`, `src/apps/PggTool`, `src/apps/PggViewer` или корпус, обновляй его, а не этот файл.**
 - Коротко: `src/libs/pgg` (desktop-only, ANTLR4 4.13.2; сгенерированный парсер коммитится в `parser_gen/`, после правок `grammar/Pgg.g4` — `tools/pgg/regen_parser.sh`), ядро исполнения `src/libs/pgg/src/eval/`, тесты `src/tests/pgg/*_test.cpp` + тестовый корпус `src/tests/pgg/corpus/` (продуктовые/арт-примеры — `resources/pgg/`), CLI `PggTool` (`check`/`fmt`/`ast`/`run`/`docs`), вьювер `PggViewer` (нодовая проекция + превью геометрии, `--smoke`).
+- Перед grep по спеке и ядру: `pgg_docs("<name>")` / `PggTool docs builtins` / `docs/pgg/cheatsheet.md` (идиомы и грабли).
+- Арт-итерации (E1–E10): правка общего def → рендер **всех** потребителей (grep имени в `resources/pgg`); сравнение «как у дома» — один кадр, где обе детали рядом; числа (`pgg_measure` / `bbox`) до картинки; новые грабли — сразу в cheatsheet §«Грабли»; виды — в `<stem>.views.json`, не в чат; коммит-единица — один визуальный эффект. С нуля по референсу: масса (`pgg_reference`) раньше деталей; возможности рендерера — до проектирования (прозрачности нет); форма раньше палитры/эмиссии; «вижу не то» — сначала `render_state` / явные args, потом модель.
 
 ## Где что искать
 

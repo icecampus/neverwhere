@@ -1,0 +1,6 @@
+[
+  {"name": "front", "node": "hotel", "orbit": [45, 30], "zoom": 1.2, "chrome": "off"},
+  {"name": "side", "node": "hotel", "orbit": [90, 18], "zoom": 1.15, "ortho": "side", "chrome": "off"},
+  {"name": "bay", "node": "hotel", "target": "2.4, 4.5, 2.2", "orbit": [42, 18], "zoom": 0.45, "chrome": "off"},
+  {"name": "entrance", "node": "hotel", "target": "4.0, 2.2, 0.4", "orbit": [70, 12], "zoom": 0.4, "chrome": "off"}
+]
