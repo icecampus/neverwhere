@@ -7,8 +7,7 @@
 #
 # Patches:
 # - macos-framebuffer-readback.patch: CAMetalLayer.framebufferOnly = false on
-#   macOS so a Sokol app can blit-read the drawable texture (used by PGG
-#   PggViewer; kept here because the overlay is shared).
+#   macOS so a Sokol app can blit-read the drawable texture (playground --shot).
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH

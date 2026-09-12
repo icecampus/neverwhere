@@ -46,3 +46,6 @@ tools/shadertoy/.chrome-profile/
 
 # Scratch space for local experiments (asset downloads, one-off venvs)
 tmp/
+
+# Bundled JRE leftover from ANTLR parser regen (PGG). Do not commit.
+toolchain/jre/

@@ -22,7 +22,7 @@
 - Ландшафтные генераторы — no-Qt/no-GPU либы по паттерну `Grid + Params -> generate() -> Mesh`: `src/libs/highground_core` (поднятая земля, cliff/tech/mask-поля, surface nets), `src/libs/landscape_mesh` (клеточная маска → plateau-полоса, стили стен), `src/libs/stone_gen` (voronoi-камни, бейк), `src/libs/fence_core` (модель забора + инстансинг печёных мешей). Рендер, общий для редактора и клиента, — `src/libs/render_core`.
 - Типы ландшафтных ассетов редактора (`shape3d`/`cliff3d`/`stone3d`/`cyclopean3d`/`tech3d`/`mask3d`/`texture2d`/`fence3d`), шаблон интеграции нового типа (данные → слой → рендерер → кисть → RPC → тесты → бандл) и их грабли — `docs/landscape_assets.md`. Безатласным типам обязателен `thumbnail` в `index.json`, иначе ячейка палитры пустая.
 - Единая модель глубины (уровень фрагмента = мировая высота; вода/сетка = 0, верх хайграунда = +1, подводное < 0), порядок мировых проходов и sokol-грабли (альфа в бленде, depth-сэмплинг, юниформы) — `docs/render_depth_model.md`. Все новые проходы пекут z по формуле из `render_core/depth_levels.h`.
-- Язык процедурной генерации геометрии PGG вынесен в отдельный репозиторий: https://github.com/rezzeted/pgg
+- Язык процедурной генерации геометрии PGG вынесен в отдельный репозиторий: https://github.com/rezzeted/pgg (заметка — `docs/pgg.md`). Не возвращать lib/CLI/вьюер сюда и не подключать submodule без отдельного решения по интеграции.
 - Плейграунды и их хроники — `docs/playgrounds/README.md`.
 - QML и C++-логику держать разделёнными; связывать через Qt properties/signals/slots.
 - Чистые сериализуемые данные — в `game_data` (без Qt); `QObject`-обёртки — только для view-логики в редакторе.
@@ -123,6 +123,7 @@ EpicMapEditor поднимает TCP RPC-сервер на `127.0.0.1:9877` (п�
 - `docs/BUILD.md` — платформенные особенности сборки, vcpkg/binary cache (`docs/VCPKG_CACHE.md`), индексация для clangd.
 - `docs/landscape_assets.md` — типы ландшафтных ассетов редактора и генераторы геометрии; `docs/render_depth_model.md` — модель глубины и порядок проходов.
 - `docs/playgrounds/README.md` — индекс плейграундов (SDF-стенды и стыковка с землёй, B-rep, StoneGenerator, StoneCube, FencePath, ShapeML, Shadertoy).
+- `docs/pgg.md` — PGG живёт в https://github.com/rezzeted/pgg, в этом репо его нет.
 - `docs/debugging.md` — отладка через debug-MCP; `docs/editor_rpc.md` — RPC редактора; `docs/mcp_servers.md` — все MCP-серверы.
 - `docs/SDF_TO_MESH_PLAYBOOK.md` — рецепт переноса shadertoy SDF-демки в меш-генератор.
 - `docs/reference/` — бумаги и порты по процедурному рельефу.
