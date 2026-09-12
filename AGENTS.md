@@ -22,7 +22,7 @@
 - Ландшафтные генераторы — no-Qt/no-GPU либы по паттерну `Grid + Params -> generate() -> Mesh`: `src/libs/highground_core` (поднятая земля, cliff/tech/mask-поля, surface nets), `src/libs/landscape_mesh` (клеточная маска → plateau-полоса, стили стен), `src/libs/stone_gen` (voronoi-камни, бейк), `src/libs/fence_core` (модель забора + инстансинг печёных мешей). Рендер, общий для редактора и клиента, — `src/libs/render_core`.
 - Типы ландшафтных ассетов редактора (`shape3d`/`cliff3d`/`stone3d`/`cyclopean3d`/`tech3d`/`mask3d`/`texture2d`/`fence3d`), шаблон интеграции нового типа (данные → слой → рендерер → кисть → RPC → тесты → бандл) и их грабли — `docs/landscape_assets.md`. Безатласным типам обязателен `thumbnail` в `index.json`, иначе ячейка палитры пустая.
 - Единая модель глубины (уровень фрагмента = мировая высота; вода/сетка = 0, верх хайграунда = +1, подводное < 0), порядок мировых проходов и sokol-грабли (альфа в бленде, depth-сэмплинг, юниформы) — `docs/render_depth_model.md`. Все новые проходы пекут z по формуле из `render_core/depth_levels.h`.
-- Язык процедурной генерации геометрии PGG: спецификация — `docs/pgg/geometry_generation_language.md`, реализация (`src/libs/pgg`, PggTool, PggViewer, корпус, грабли) — `docs/pgg/implementation.md`.
+- Язык процедурной генерации геометрии PGG вынесен в отдельный репозиторий: https://github.com/rezzeted/pgg
 - Плейграунды и их хроники — `docs/playgrounds/README.md`.
 - QML и C++-логику держать разделёнными; связывать через Qt properties/signals/slots.
 - Чистые сериализуемые данные — в `game_data` (без Qt); `QObject`-обёртки — только для view-логики в редакторе.
@@ -116,16 +116,6 @@ Linux-флоу — Ninja (single-config) + CMake Presets, триплет `x64-li
 
 EpicMapEditor поднимает TCP RPC-сервер на `127.0.0.1:9877` (построчный JSON, команды на GUI-потоке; `src/apps/EpicMapEditor/src/editor_rpc_server.cpp`), MCP-обёртка — `neverwhere-editor`/`neverwhere-editor-win` (`tools/editor_mcp/`, инструменты `editor_*`). Авторинг — в координатах клеток через `MapAuthoring`, идемпотентно и независимо от камеры. Типовой цикл «карта по описанию»: `create_chapter`/`load_chapter` → `list_assets` → `set_landscape` / `fence_stroke` → `fill_rect`/`set_tile` → `set_camera` + `screenshot` → `get_map` → `save` → `play`. Полный список операций, имена слоёв, соответствие типов ассетов слоям и грабли камеры/скриншотов — `docs/editor_rpc.md`.
 
-PggViewer поднимает похожий TCP RPC на `127.0.0.1:9878` (`--serve`; `src/apps/PggViewer/ViewerRpcServer.cpp`), MCP-обёртка — `neverwhere-pgg`/`neverwhere-pgg-win` (`tools/pgg_mcp/`, инструменты `pgg_*`; viewer поднимается автоматически, если порт не отвечает). Контракт команд и грабли — `docs/pgg/viewer_rpc.md`.
-
-### PGG (язык процедурной генерации геометрии)
-
-- Спецификация языка — `docs/pgg/geometry_generation_language.md` (ТЗ: текст-first нодовый граф для LLM-агентов + нодовая проекция; этапы и критерии — §15, история — §19).
-- Заметки по реализации (этапы E0–E8 по файлам, грабли ANTLR/ядра, PggTool/PggViewer CLI, корпус и сьюты тестов) — `docs/pgg/implementation.md`. **Правя `src/libs/pgg`, `src/apps/PggTool`, `src/apps/PggViewer` или корпус, обновляй его, а не этот файл.**
-- Коротко: `src/libs/pgg` (desktop-only, ANTLR4 4.13.2; сгенерированный парсер коммитится в `parser_gen/`, после правок `grammar/Pgg.g4` — `tools/pgg/regen_parser.sh`), ядро исполнения `src/libs/pgg/src/eval/`, тесты `src/tests/pgg/*_test.cpp` + тестовый корпус `src/tests/pgg/corpus/` (продуктовые/арт-примеры — `resources/pgg/`), CLI `PggTool` (`check`/`fmt`/`ast`/`run`/`docs`), вьювер `PggViewer` (нодовая проекция + превью геометрии, `--smoke`).
-- Перед grep по спеке и ядру: `pgg_docs("<name>")` / `PggTool docs builtins` / `docs/pgg/cheatsheet.md` (идиомы и грабли).
-- Арт-итерации (E1–E10): правка общего def → рендер **всех** потребителей (grep имени в `resources/pgg`); сравнение «как у дома» — один кадр, где обе детали рядом; числа (`pgg_measure` / `bbox`) до картинки; новые грабли — сразу в cheatsheet §«Грабли»; виды — в `<stem>.views.json`, не в чат; коммит-единица — один визуальный эффект. С нуля по референсу: масса (`pgg_reference`) раньше деталей; возможности рендерера — до проектирования (прозрачности нет); форма раньше палитры/эмиссии; «вижу не то» — сначала `render_state` / явные args, потом модель.
-
 ## Где что искать
 
 - `README.md` — что это за проект, высокоуровневая архитектура.
@@ -133,7 +123,6 @@ PggViewer поднимает похожий TCP RPC на `127.0.0.1:9878` (`--se
 - `docs/BUILD.md` — платформенные особенности сборки, vcpkg/binary cache (`docs/VCPKG_CACHE.md`), индексация для clangd.
 - `docs/landscape_assets.md` — типы ландшафтных ассетов редактора и генераторы геометрии; `docs/render_depth_model.md` — модель глубины и порядок проходов.
 - `docs/playgrounds/README.md` — индекс плейграундов (SDF-стенды и стыковка с землёй, B-rep, StoneGenerator, StoneCube, FencePath, ShapeML, Shadertoy).
-- `docs/pgg/` — всё по языку PGG (`README.md` — индекс): `geometry_generation_language.md` — спецификация, `implementation.md` — заметки по реализации.
 - `docs/debugging.md` — отладка через debug-MCP; `docs/editor_rpc.md` — RPC редактора; `docs/mcp_servers.md` — все MCP-серверы.
 - `docs/SDF_TO_MESH_PLAYBOOK.md` — рецепт переноса shadertoy SDF-демки в меш-генератор.
 - `docs/reference/` — бумаги и порты по процедурному рельефу.

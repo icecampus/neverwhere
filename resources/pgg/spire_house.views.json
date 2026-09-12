@@ -1,9 +1,0 @@
-[
-  {"name": "front", "node": "house", "orbit": [0, 12], "zoom": 1.15, "ortho": "front", "chrome": "off"},
-  {"name": "front_right_wing", "node": "house", "target": "1.9, 4.2, 2.6", "orbit": [28, 14], "zoom": 0.55, "chrome": "off"},
-  {"name": "bay_close", "node": "house", "target": "binding:bay_unit", "orbit": [8, 10], "zoom": 0.45, "chrome": "off"},
-  {"name": "belt_junction", "node": "house", "target": "0, 4.15, 2.6", "orbit": [22, 8], "zoom": 0.4, "chrome": "off"},
-  {"name": "roof_hip", "node": "house", "target": "binding:roof_all", "orbit": [40, 28], "zoom": 0.55, "chrome": "off"},
-  {"name": "spire_top", "node": "house", "target": "binding:tower_all", "orbit": [18, 22], "zoom": 0.35, "chrome": "off"},
-  {"name": "wall_joints", "node": "house", "target": "group:brick", "orbit": [90, 8], "zoom": 0.7, "ortho": "side", "chrome": "off"}
-]

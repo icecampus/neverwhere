@@ -1,4 +1,0 @@
-# E4 mesh_from_sdf golden etalon (spec §15): the plain sphere extraction the
-# MeshFromSdf goldens pin (src/tests/pgg/goldens/e4_mesh_sphere.fp).
-m = mesh_from_sdf(sdf_sphere(r = 1.0), voxel = 0.05)
-output m

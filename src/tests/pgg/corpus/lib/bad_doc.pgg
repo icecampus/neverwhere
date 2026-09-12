@@ -1,3 +1,0 @@
-def undocumented(x: geo) -> (out: geo) {
-    out = x
-}

@@ -21,10 +21,5 @@
       ],
       "enabled": true
     },
-    "neverwhere-pgg": {
-      "type": "local",
-      "command": ["/bin/sh", "tools/run_pgg_mcp_server.sh"],
-      "enabled": true
-    }
   }
 }

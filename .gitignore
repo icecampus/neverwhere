@@ -44,12 +44,5 @@ tools/blender_mcp/.venv/
 tools/shadertoy/.venv/
 tools/shadertoy/.chrome-profile/
 
-# PGG MCP server venv (macOS)
-tools/pgg_mcp/.venv/
-
 # Scratch space for local experiments (asset downloads, one-off venvs)
 tmp/
-
-# PGG tooling: pinned ANTLR jar + bootstrapped JRE (tools/pgg/regen_parser.sh)
-tools/pgg/*.jar
-toolchain/jre/
